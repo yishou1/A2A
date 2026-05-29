@@ -2,6 +2,16 @@
 
 本项目是一个基于多智能体（Multi-Agent）架构的模拟抢滩登陆作战系统。系统采用标准化的 **A2A (Agent-to-Agent) 通信协议** 实现各作战单位（Agent）之间的协同交互，并引入 **Nacos** 作为服务注册中心，支持作战任务的动态分发、战果评估以及动态重规划机制。
 
+当前版本已经补齐了工作流持久化、恢复接管、附件引用、心跳检测和 failover 演示等能力，整体上不再只是一次性流程演示，而是更接近一个可以恢复和接管的工作流控制面。
+
+## ✨ 当前版本能力
+
+- 工作流状态支持落盘保存，并可通过 `workflow_id` 恢复。
+- 恢复 API 支持在新进程、新端口上继续接管同一个 workflow。
+- 附件统一使用对象存储引用，避免把大文件直接塞进消息体。
+- Agent 注册后会发送 5 秒心跳，并按心跳时间过滤失联实例。
+- 已补充进程重启恢复、Commander failover/resume 演示脚本和回归测试。
+
 ## 🎯 业务场景 (抢滩登陆)
 
 在一场抢滩登陆战役中，面临复杂的敌防信息、火力配属和登陆时机等挑战。整个作战流程被分解给多个不同专长的智能体：
@@ -19,6 +29,7 @@
 系统所有的 Agent 都在启动时将自身能力、基础画像注入并注册到 Nacos 注册中心。
 * **服务注册**：Agent 启动完成后，注册自身的服务名、IP与端口。
 * **能力标签**：除了网络信息外，还会注册专长标签（例如：`role=recon`, `firepower=heavy` 等），用于动态发现。
+* **心跳与健康过滤**：Agent 会按固定间隔发送心跳，Commander 在发现服务时会过滤掉过期实例，避免拿到已经失联的节点。
 
 ### 2. A2A (Agent-to-Agent) 通信协议
 参考标准的 A2A 技术协议，Agent 之间的交互完全遵循以下四大步骤：
@@ -48,25 +59,46 @@
 
 ---
 
-## 📂 项目结构规划 (待建)
+## 📂 项目结构
 
 ```text
 A2A/
-├── README.md               # 项目说明文档
-├── registry/               # Nacos 相关配置与客户端封装
-├── a2a_protocol/           # A2A 通信协议标准实现库 (Discovery, Auth, sendMessage)
-├── commander_agent/        # 决策大脑中心
-├── recon_agent/            # 侦察兵 Agent
-├── artillery_agent/        # 火力打击 Agent
-├── assault_agent/          # 登陆突击 Agent
-├── evaluator_agent/        # 战果评估 & 策略重算 Agent
-└── docker-compose.yml      # 环境部署文件 (启动 Nacos, Auth Server等)
+├── README.md                # 项目说明文档
+├── WORKFLOW_DESIGN.md       # 工作流设计说明
+├── a2a_protocol/            # A2A 通信协议标准实现库
+├── commander_agent/         # 决策大脑中心
+├── recon_agent/             # 侦察兵 Agent
+├── artillery_agent/         # 火力打击 Agent
+├── assault_agent/           # 登陆突击 Agent
+├── evaluator_agent/         # 战果评估 & 策略重算 Agent
+├── registry/                # Nacos 相关配置与客户端封装
+├── docs/                    # 详细说明、流程图、周报和合并规范
+├── scripts/                 # 恢复 / failover 演示脚本
+├── tests/                   # 回归测试
+├── attachment_uploader.py   # 本地文件上传成附件引用
+├── local_runtime.py         # 本地模拟运行时
+├── workflow_payloads.py     # 附件与任务信封规范
+├── workflow_state_store.py  # 工作流 checkpoint 存储
+├── timing_probe.py          # 阶段耗时测试工具
+└── docker-compose.yml       # 环境部署文件
 ```
 
-## 🚀 下一步开发计划
-1. 初始化 Nacos 服务环境并构建基础的 Agent 服务注册与心跳接口。
-2. 封装 `a2a_protocol` 标准库，提供 `agent-card` 暴露能力及 HTTP 通信流解析能力。
-3. 实现各个业务 Agent 的具体控制逻辑。
+## 🔄 工作流恢复与接管
+
+这一版的核心变化，是把 Commander 从“只在内存里推进流程”升级成“可以落盘、可以恢复、可以接管”的工作流控制器。
+
+- `workflow_id`：整条工作流的唯一标识，用来定位 checkpoint。
+- `task_id`：单个任务步骤的唯一标识，用来做幂等和追踪。
+- `workflow_state_store.py`：负责把工作流状态保存到 `.a2a_state/workflows/`。
+- `commander_agent/recovery_api.py`：提供 `/health`、`/workflows/{workflow_id}`、`/resume`、`/takeover` 等恢复接口。
+- `workflow_payloads.py`：规定附件必须是对象存储引用，避免内联大文件。
+- `attachment_uploader.py`：把本地文件上传后转换成标准附件引用。
+
+如果你想看恢复链路的完整说明，可以直接阅读：
+
+- `docs/最近改动详细说明.md`
+- `docs/工作流恢复与附件流程图.md`
+- `docs/图片上传到读取流程.md`
 
 ## 🧪 Local 模式
 
@@ -83,6 +115,17 @@ cd /home/yl/yl/jzz/A2A
 
 详细说明见 `docs/Local模式说明.md`。
 
+恢复和 failover 演示脚本：
+
+```bash
+cd /home/yl/yl/jzz/A2A
+./venv/bin/python scripts/demo_resume_after_restart.py --reset
+./venv/bin/python scripts/demo_commander_failover_resume.py --reset
+```
+
+- `demo_resume_after_restart.py` 用于演示同一个 workflow 在进程重启后继续执行。
+- `demo_commander_failover_resume.py` 用于演示主 Commander 宕机后，在新端口启动备用 Commander 并 resume。
+
 ## 🤝 团队协作与合并
 
 如果你打算把这个仓库作为小组代码合并的基础，建议先统一接口、状态和测试口径。详细的合并接入规范见 `docs/小组代码合并规范.md`，里面整理了：
@@ -91,6 +134,14 @@ cd /home/yl/yl/jzz/A2A
 - 哪些协议字段必须稳定；
 - 如何减少多人并行开发时的冲突；
 - 合并前应该跑哪些测试和脚本。
+
+## 📚 文档索引
+
+- `docs/最近改动详细说明.md`：最近一轮改动的完整说明。
+- `docs/工作流恢复与附件流程图.md`：恢复与附件传递的流程图。
+- `docs/图片上传到读取流程.md`：图片从上传到读取的完整链路。
+- `docs/小组代码合并规范.md`：团队代码合并基础规范。
+- `docs/26.5.22-周报.md`、`docs/5-29 荆振洲 周报.md`：阶段性周报。
 
 ## ⏱️ 阶段耗时测试
 
