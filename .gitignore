@@ -6,6 +6,7 @@ venv/
 .a2a_state/
 logs/
 .pytest_cache/
+docs/
 __pycache__/
 *.py[cod]
 *.log
