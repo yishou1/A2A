@@ -1,0 +1,21 @@
+version: '3.8'
+services:
+  nacos:
+    image: nacos/nacos-server:v2.2.3
+    container_name: a2a-nacos-standalone
+    environment:
+      - PREFER_HOST_MODE=hostname
+      - MODE=standalone
+      - SPRING_DATASOURCE_PLATFORM=empty
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+      - "9849:9849"
+    restart: always
+
+  auth-server:
+    image: kennethreitz/httpbin
+    container_name: a2a-auth-mock
+    ports:
+      - "8080:80"
+    # Note: Using httpbin to mock the auth server /post endpoint for JWT generation simply

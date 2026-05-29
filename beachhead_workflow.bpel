@@ -1,0 +1,56 @@
+<process name="BeachheadAssaultWorkflow" targetNamespace="http://a2a.military.simulation/workflow">
+    
+    <!-- 变量定义，用于在各个 Agent / 步骤之间传递数据 -->
+    <variables>
+        <variable name="ReconReport" type="String"/>
+        <variable name="StrikeCoordinates" type="String"/>
+        <variable name="StrikeResult" type="String"/>
+        <variable name="EvalScore" type="Integer"/>
+        <variable name="CommanderDecision" type="String"/>
+    </variables>
+
+    <!-- 流程主体序列 -->
+    <sequence>
+        
+        <!-- 阶段 1：侦察阶段 -->
+        <!-- Invoke: 等同于指挥官去 Nacos 发现并调用 Recon Agent -->
+        <invoke partnerLink="ReconAgent" operation="scanBeachDefenses" 
+                inputVariable="Sector_A" outputVariable="ReconReport"/>
+
+        <!-- 阶段 2：火力打击阶段 -->
+        <!-- Async/Stream Invoke: 调用炮兵单位，携带侦察目标的坐标 -->
+        <assign>
+            <copy>
+                <from>120.5E, 35.1N</from>
+                <to variable="StrikeCoordinates"/>
+            </copy>
+        </assign>
+        <invoke partnerLink="ArtilleryAgent" operation="suppressBeachSector" 
+                inputVariable="StrikeCoordinates" outputVariable="StrikeResult"/>
+        
+        <!-- 阶段 3：战果评估阶段 -->
+        <invoke partnerLink="EvaluatorAgent" operation="evaluateStrike" 
+                inputVariable="StrikeCoordinates" outputVariable="EvalScore"/>
+
+        <!-- 阶段 4：大模型决策分支 (早期的 Switch / Case 业务处理节点) -->
+        <switch>
+            <!-- 条件：如果毁伤率低于预期 (例如低于 60%) -->
+            <case condition="bpws:getVariableData('EvalScore') &lt; 60">
+                <sequence>
+                    <invoke partnerLink="LLMCommanderAgent" operation="analyzeAndReplanning" 
+                            inputVariable="ReconReport + StrikeResult" outputVariable="CommanderDecision"/>
+                    
+                    <!-- 中止当前突击流程，抛出重规划事件或进行异常打断 -->
+                    <throw faultName="InsufficientSuppressionFault"/>
+                </sequence>
+            </case>
+            
+            <!-- 默认分支：毁伤率达标，继续突击 -->
+            <otherwise>
+                <invoke partnerLink="AssaultAgent" operation="captureBeachhead" 
+                        inputVariable="StrikeCoordinates"/>
+            </otherwise>
+        </switch>
+        
+    </sequence>
+</process>
