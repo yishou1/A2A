@@ -3,12 +3,16 @@ import os
 import time
 import re
 import argparse
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from copy import deepcopy
 
 # Ensure imports work from project root
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from registry.nacos_manager import NacosRegistry
 from a2a_protocol.client import A2AClient
+from bpel_workflow import BPELActivatity, BPELWorkflowCatalog
 from local_runtime import LocalAgentRuntime
 from workflow_state_store import WorkflowStateStore, new_workflow_id, utc_now_iso
 from workflow_payloads import attachment_snapshot, merge_attachments, normalize_attachments
@@ -37,11 +41,13 @@ class CommanderAgent:
         self,
         mode: str = None,
         workflow: str = "dynamic",
+        workflow_file: str = None,
         workflow_id: str = None,
         state_dir: str = None,
         resume: bool = False,
         mock_eval_score: int = None,
         mock_decision: str = None,
+        max_workers: int = 4,
     ):
         load_env_file()
         self.mode = (mode or os.environ.get("A2A_COMMANDER_MODE", "remote")).lower()
@@ -49,7 +55,15 @@ class CommanderAgent:
             raise ValueError("mode must be either 'remote' or 'local'")
 
         self.workflow = workflow
+        self.workflow_file = workflow_file
         self.workflow_id = workflow_id or os.environ.get("A2A_WORKFLOW_ID") or new_workflow_id()
+        self.max_workers = max(1, int(max_workers))
+        self._checkpoint_lock = threading.RLock()
+        self.workflow_catalog = BPELWorkflowCatalog(PROJECT_ROOT)
+        self.bpel_definition = None
+        if self.workflow == "bpel" or self.workflow_file:
+            self.bpel_definition = self.workflow_catalog.load(self.workflow_file)
+            self.workflow = "bpel"
         default_state_dir = os.path.join(PROJECT_ROOT, ".a2a_state", "workflows")
         self.state_store = WorkflowStateStore(
             state_dir or os.environ.get("A2A_STATE_DIR", default_state_dir)
@@ -67,6 +81,9 @@ class CommanderAgent:
         print("Commander Agent online. Global Orchestration initiated.")
         print(f"Execution mode: {self.mode}")
         print(f"Workflow: {self.workflow} ({self.workflow_id})")
+        if self.bpel_definition:
+            print(f"BPEL definition: {self.bpel_definition.source_path}")
+            print(f"Parallel workers: {self.max_workers}")
         print(f"Workflow state: {self.state_store.state_path(self.workflow_id)}")
         print(f"LLM model: {self.model}")
         if self.api_base:
@@ -88,32 +105,88 @@ class CommanderAgent:
             ip = target.get("ip")
             port = target.get("port")
             print(f"[FOUND] Candidate {index}/{len(instances)} for {role_needed} at {ip}:{port}")
-
-            # 2. A2A Communication
-            client = A2AClient(ip, port)
-            try:
-                card = client.discover()
-                print(f"[DISCOVERY] Retrieved Agent Card from '{card.get('name')}'")
-
-                token = client.authenticate()
-                print(f"[AUTH] Obtained JWT Token: {token[:10]}...")
-
-                if stream:
-                    print(f"[STREAM] Receiving task updates from '{role_needed}':")
-                    for event_data in client.send_message_stream(task_payload):
-                        data = json.loads(event_data)
-                        print(f"   -> [{data.get('status')}] {data.get('progress', '')} {data.get('message', '')}")
-                    return True
-
-                res = client.send_message(task_payload)
-                print(f"[SEND] Task Response: {res}")
+            success, error = self._delegate_remote_candidate(
+                role_needed,
+                target,
+                task_payload,
+                stream=stream,
+            )
+            if success:
                 return True
-            except Exception as e:
-                last_error = e
-                print(f"[WARN] Candidate {ip}:{port} failed: {e}")
+            last_error = error
+            print(f"[WARN] Candidate {ip}:{port} failed: {error}")
 
         print(f"[ERROR] A2A communication failed after trying {len(instances)} candidates: {last_error}")
         return False
+
+    def delegate_parallel_task(self, role_needed: str, task_payload: dict, stream: bool = False):
+        print(f"\n--- PARALLEL STEP: Resolving all units for role: {role_needed} ---")
+        if self.mode == "local":
+            return self.delegate_local_task(role_needed, task_payload, stream=stream)
+
+        instances = self.registry.discover_service("A2A-Agent", {"role": role_needed, "status": "idle"})
+        if not instances:
+            print(f"[ERROR] No available agents found for parallel role {role_needed}.")
+            return False
+
+        print(f"[PARALLEL] Dispatching {len(instances)} {role_needed} instance(s).")
+        with ThreadPoolExecutor(
+            max_workers=min(self.max_workers, len(instances)),
+            thread_name_prefix=f"a2a-{role_needed}",
+        ) as executor:
+            futures = {
+                executor.submit(
+                    self._delegate_remote_candidate,
+                    role_needed,
+                    target,
+                    task_payload,
+                    stream,
+                ): target
+                for target in instances
+            }
+            results = []
+            for future in as_completed(futures):
+                target = futures[future]
+                success, error = future.result()
+                results.append(success)
+                if not success:
+                    print(f"[WARN] Parallel candidate {target.get('ip')}:{target.get('port')} failed: {error}")
+
+        success_count = sum(results)
+        print(f"[PARALLEL] Completed {success_count}/{len(instances)} {role_needed} assignment(s).")
+        return bool(results) and all(results)
+
+    @staticmethod
+    def _candidate_label(target: dict):
+        return f"{target.get('ip')}:{target.get('port')}"
+
+    def _delegate_remote_candidate(self, role_needed: str, target: dict, task_payload: dict, stream: bool = False):
+        ip = target.get("ip")
+        port = target.get("port")
+        label = self._candidate_label(target)
+        client = A2AClient(ip, port)
+        try:
+            card = client.discover()
+            print(f"[DISCOVERY] {label} Agent Card from '{card.get('name')}'")
+
+            token = client.authenticate()
+            print(f"[AUTH] {label} JWT Token: {token[:10]}...")
+
+            if stream:
+                print(f"[STREAM] {label} receiving '{role_needed}' updates:")
+                for event_data in client.send_message_stream(task_payload):
+                    data = json.loads(event_data)
+                    print(
+                        f"   -> [{label}] [{data.get('status')}] "
+                        f"{data.get('progress', '')} {data.get('message', '')}"
+                    )
+                return True, None
+
+            res = client.send_message(task_payload)
+            print(f"[SEND] {label} Task Response: {res}")
+            return True, None
+        except Exception as exc:
+            return False, exc
 
     def delegate_local_task(self, role_needed: str, task_payload: dict, stream: bool = False):
         try:
@@ -192,9 +265,10 @@ class CommanderAgent:
             "workflow_mode": self.mode,
             "workflow_name": self.workflow,
             "workflow_status": "running",
-            "workflow_step": 0,
-            "current_step": None,
-            "last_task_id": None,
+            "workflow_activatity": 0,
+            "current_activatity": None,
+            "active_activatities": [],
+            "last_work_item": None,
             "last_role": None,
             "last_error": None,
             "sector": "Sector_A",
@@ -208,21 +282,60 @@ class CommanderAgent:
             "battle_log": [],
             "completed_roles": [],
             "attachments": [],
+            "work_list": self._initial_work_list(),
         }
+
+    def _initial_work_list(self):
+        if not self.bpel_definition:
+            return []
+        return self.bpel_definition.initial_work_list(self.workflow_id)
+
+    @staticmethod
+    def _migrate_legacy_context(context: dict):
+        migrated = dict(context or {})
+        legacy_map = {
+            "workflow_step": "workflow_activatity",
+            "current_step": "current_activatity",
+            "last_task_id": "last_work_item",
+        }
+        for legacy_key, new_key in legacy_map.items():
+            if new_key not in migrated and legacy_key in migrated:
+                migrated[new_key] = migrated[legacy_key]
+            migrated.pop(legacy_key, None)
+
+        current_activatity = migrated.get("current_activatity")
+        if isinstance(current_activatity, dict):
+            current_activatity = dict(current_activatity)
+            if "index" in current_activatity and "activatity_index" not in current_activatity:
+                current_activatity["activatity_index"] = current_activatity.pop("index")
+            migrated["current_activatity"] = current_activatity
+        return migrated
 
     def _normalize_context(self, context: dict):
         normalized = self.initial_workflow_context()
-        normalized.update(context or {})
+        normalized.update(self._migrate_legacy_context(context))
         normalized["battle_log"] = list(normalized.get("battle_log", []))
         normalized["completed_roles"] = list(normalized.get("completed_roles", []))
         normalized["attachments"] = normalize_attachments(normalized.get("attachments", []))
+        normalized["work_list"] = list(normalized.get("work_list", []))
+        if self.bpel_definition:
+            existing_items = {
+                item.get("activatity_id"): item
+                for item in normalized["work_list"]
+                if item.get("activatity_id")
+            }
+            normalized["work_list"] = [
+                {**item, **existing_items.get(item["activatity_id"], {})}
+                for item in self._initial_work_list()
+            ]
         normalized["workflow_id"] = self.workflow_id
         normalized["workflow_mode"] = self.mode
         normalized["workflow_name"] = self.workflow
         normalized["workflow_status"] = normalized.get("workflow_status", "running")
-        normalized["workflow_step"] = int(normalized.get("workflow_step", 0) or 0)
-        normalized["current_step"] = normalized.get("current_step")
-        normalized["last_task_id"] = normalized.get("last_task_id")
+        normalized["workflow_activatity"] = int(normalized.get("workflow_activatity", 0) or 0)
+        normalized["current_activatity"] = normalized.get("current_activatity")
+        normalized["active_activatities"] = list(normalized.get("active_activatities", []))
+        normalized["last_work_item"] = normalized.get("last_work_item")
         normalized["last_role"] = normalized.get("last_role")
         normalized["last_error"] = normalized.get("last_error")
         return normalized
@@ -236,7 +349,7 @@ class CommanderAgent:
             "status": context["workflow_status"],
             "created_at": utc_now_iso(),
             "updated_at": utc_now_iso(),
-            "current_step": None,
+            "current_activatity": None,
             "last_error": None,
             "context": context,
         }
@@ -249,7 +362,11 @@ class CommanderAgent:
             state["workflow"] = self.workflow
             state["mode"] = self.mode
             state["status"] = state.get("status") or context["workflow_status"]
-            state["current_step"] = state.get("current_step") or context.get("current_step")
+            state["current_activatity"] = (
+                state.get("current_activatity")
+                or state.pop("current_step", None)
+                or context.get("current_activatity")
+            )
             state["last_error"] = state.get("last_error") or context.get("last_error")
             state["context"] = context
             self.state_store.save(self.workflow_id, state)
@@ -264,29 +381,36 @@ class CommanderAgent:
             print(f"[STATE] Started new workflow {self.workflow_id}")
         return state
 
-    def _save_workflow_checkpoint(self, context: dict, status: str = None, current_step: dict = None, last_error: str = None):
-        normalized = self._normalize_context(context)
-        if status is not None:
-            normalized["workflow_status"] = status
-        if current_step is not None:
-            normalized["current_step"] = current_step
-        if last_error is not None:
-            normalized["last_error"] = last_error
+    def _save_workflow_checkpoint(
+        self,
+        context: dict,
+        status: str = None,
+        current_activatity: dict = None,
+        last_error: str = None,
+    ):
+        with self._checkpoint_lock:
+            normalized = self._normalize_context(context)
+            if status is not None:
+                normalized["workflow_status"] = status
+            if current_activatity is not None:
+                normalized["current_activatity"] = current_activatity
+            if last_error is not None:
+                normalized["last_error"] = last_error
 
-        state = {
-            "workflow_id": self.workflow_id,
-            "workflow": self.workflow,
-            "mode": self.mode,
-            "status": normalized["workflow_status"],
-            "created_at": self.workflow_state.get("created_at", utc_now_iso()),
-            "updated_at": utc_now_iso(),
-            "current_step": normalized.get("current_step"),
-            "last_error": normalized.get("last_error"),
-            "context": normalized,
-        }
-        self.workflow_state = state
-        self.workflow_context = normalized
-        self.state_store.save(self.workflow_id, state)
+            state = {
+                "workflow_id": self.workflow_id,
+                "workflow": self.workflow,
+                "mode": self.mode,
+                "status": normalized["workflow_status"],
+                "created_at": self.workflow_state.get("created_at", utc_now_iso()),
+                "updated_at": utc_now_iso(),
+                "current_activatity": normalized.get("current_activatity"),
+                "last_error": normalized.get("last_error"),
+                "context": normalized,
+            }
+            self.workflow_state = state
+            self.workflow_context = normalized
+            self.state_store.save(self.workflow_id, state)
 
     def merge_external_attachments(self, attachments: list[dict] | None):
         if not attachments:
@@ -297,13 +421,13 @@ class CommanderAgent:
         self._save_workflow_checkpoint(
             self.workflow_context,
             status=self.workflow_context.get("workflow_status", "running"),
-            current_step=self.workflow_context.get("current_step"),
+            current_activatity=self.workflow_context.get("current_activatity"),
             last_error=self.workflow_context.get("last_error"),
         )
         return merged
 
-    def _task_id_for_step(self, role: str, step_index: int):
-        return f"{self.workflow_id}:{step_index}:{role}"
+    def _work_item_for_activatity(self, role: str, activatity_index: int):
+        return f"{self.workflow_id}:{activatity_index}:{role}"
 
     @staticmethod
     def _context_snapshot(context: dict):
@@ -312,8 +436,9 @@ class CommanderAgent:
             "workflow_mode": context.get("workflow_mode"),
             "workflow_name": context.get("workflow_name"),
             "workflow_status": context.get("workflow_status"),
-            "workflow_step": context.get("workflow_step"),
-            "current_step": context.get("current_step"),
+            "workflow_activatity": context.get("workflow_activatity"),
+            "current_activatity": context.get("current_activatity"),
+            "active_activatities": list(context.get("active_activatities", [])),
             "sector": context.get("sector"),
             "coordinates": context.get("coordinates"),
             "recon_report": context.get("recon_report"),
@@ -324,14 +449,19 @@ class CommanderAgent:
             "replan_result": context.get("replan_result"),
             "completed_roles": list(context.get("completed_roles", [])),
             "battle_log": list(context.get("battle_log", [])),
-            "last_task_id": context.get("last_task_id"),
+            "last_work_item": context.get("last_work_item"),
             "last_role": context.get("last_role"),
             "last_error": context.get("last_error"),
             "attachments": attachment_snapshot(context.get("attachments", [])),
+            "work_list": deepcopy(context.get("work_list", [])),
         }
 
-    def build_task_payload(self, role: str, context: dict, step_index: int):
-        task_id = self._task_id_for_step(role, step_index)
+    def build_task_payload(self, role: str, context: dict, activatity_index: int = None, **legacy_kwargs):
+        if activatity_index is None:
+            activatity_index = legacy_kwargs.pop("step_index", None)
+        if activatity_index is None:
+            raise ValueError("activatity_index is required")
+        work_item = self._work_item_for_activatity(role, activatity_index)
         context_snapshot = self._context_snapshot(context)
 
         if role == "recon":
@@ -339,16 +469,17 @@ class CommanderAgent:
                 "workflow_id": self.workflow_id,
                 "workflow": self.workflow,
                 "workflow_mode": self.mode,
-                "task_id": task_id,
-                "parent_task_id": context.get("last_task_id"),
-                "step_index": step_index,
-                "step_role": role,
+                "work_item": work_item,
+                "parent_work_item": context.get("last_work_item"),
+                "activatity_index": activatity_index,
+                "activatity_role": role,
                 "command": "scan_beach_defenses",
                 "input": {
                     "sector": context["sector"],
                 },
                 "context": context_snapshot,
                 "attachments": attachment_snapshot(context.get("attachments", [])),
+                "work_list": deepcopy(context.get("work_list", [])),
                 "output_hint": "recon_report",
             }, False
 
@@ -357,10 +488,10 @@ class CommanderAgent:
                 "workflow_id": self.workflow_id,
                 "workflow": self.workflow,
                 "workflow_mode": self.mode,
-                "task_id": task_id,
-                "parent_task_id": context.get("last_task_id"),
-                "step_index": step_index,
-                "step_role": role,
+                "work_item": work_item,
+                "parent_work_item": context.get("last_work_item"),
+                "activatity_index": activatity_index,
+                "activatity_role": role,
                 "command": "suppress_beach_sector_A",
                 "input": {
                     "coordinates": context["coordinates"],
@@ -368,6 +499,7 @@ class CommanderAgent:
                 },
                 "context": context_snapshot,
                 "attachments": attachment_snapshot(context.get("attachments", [])),
+                "work_list": deepcopy(context.get("work_list", [])),
                 "output_hint": "strike_result",
             }, True
 
@@ -376,16 +508,17 @@ class CommanderAgent:
                 "workflow_id": self.workflow_id,
                 "workflow": self.workflow,
                 "workflow_mode": self.mode,
-                "task_id": task_id,
-                "parent_task_id": context.get("last_task_id"),
-                "step_index": step_index,
-                "step_role": role,
+                "work_item": work_item,
+                "parent_work_item": context.get("last_work_item"),
+                "activatity_index": activatity_index,
+                "activatity_role": role,
                 "command": "evaluate_strike",
                 "input": {
                     "target_coordinates": context["coordinates"],
                 },
                 "context": context_snapshot,
                 "attachments": attachment_snapshot(context.get("attachments", [])),
+                "work_list": deepcopy(context.get("work_list", [])),
                 "output_hint": "eval_score",
             }, False
 
@@ -394,16 +527,17 @@ class CommanderAgent:
                 "workflow_id": self.workflow_id,
                 "workflow": self.workflow,
                 "workflow_mode": self.mode,
-                "task_id": task_id,
-                "parent_task_id": context.get("last_task_id"),
-                "step_index": step_index,
-                "step_role": role,
+                "work_item": work_item,
+                "parent_work_item": context.get("last_work_item"),
+                "activatity_index": activatity_index,
+                "activatity_role": role,
                 "command": "capture_beachhead",
                 "input": {
                     "coordinates": context["coordinates"],
                 },
                 "context": context_snapshot,
                 "attachments": attachment_snapshot(context.get("attachments", [])),
+                "work_list": deepcopy(context.get("work_list", [])),
                 "output_hint": "assault_result",
             }, False
 
@@ -510,6 +644,246 @@ class CommanderAgent:
             return "ASSAULT"
         return decision
 
+    def _work_list_item(self, context: dict, activatity_id: str):
+        for item in context.get("work_list", []):
+            if item.get("activatity_id") == activatity_id:
+                return item
+        raise KeyError(f"Unknown activatity: {activatity_id}")
+
+    def _set_activatity_status(
+        self,
+        context: dict,
+        activatity: BPELActivatity,
+        status: str,
+        error: str = None,
+    ):
+        with self._checkpoint_lock:
+            item = self._work_list_item(context, activatity.activatity_id)
+            item["status"] = status
+            item["error"] = error
+            item["updated_at"] = utc_now_iso()
+            if status == "running":
+                item.setdefault("started_at", item["updated_at"])
+                if activatity.activatity_id not in context["active_activatities"]:
+                    context["active_activatities"].append(activatity.activatity_id)
+                context["workflow_activatity"] = int(context.get("workflow_activatity", 0) or 0) + 1
+            elif status in {"completed", "failed", "skipped"}:
+                item["finished_at"] = item["updated_at"]
+                if activatity.activatity_id in context["active_activatities"]:
+                    context["active_activatities"].remove(activatity.activatity_id)
+
+            current_activatity = {
+                "activatity_id": activatity.activatity_id,
+                "activatity_index": item["activatity_index"],
+                "work_item": item["work_item"],
+                "type": activatity.type,
+                "role": activatity.role,
+                "status": status,
+            }
+            context["current_activatity"] = current_activatity
+            if activatity.type == "invoke":
+                context["last_work_item"] = item["work_item"]
+                context["last_role"] = activatity.role
+            self._save_workflow_checkpoint(
+                context,
+                status=context.get("workflow_status", "running"),
+                current_activatity=current_activatity,
+                last_error=error,
+            )
+
+    def _skip_activatity_tree(self, context: dict, activatity: BPELActivatity):
+        item = self._work_list_item(context, activatity.activatity_id)
+        if item.get("status") == "pending":
+            self._set_activatity_status(context, activatity, "skipped")
+        for child in activatity.children:
+            self._skip_activatity_tree(context, child)
+
+    @staticmethod
+    def _context_key_for_bpel_variable(variable_name: str | None):
+        return {
+            "ReconReport": "recon_report",
+            "StrikeCoordinates": "coordinates",
+            "StrikeResult": "strike_result",
+            "EvalScore": "eval_score",
+            "CommanderDecision": "commander_decision",
+            "Sector_A": "sector",
+        }.get(variable_name, variable_name)
+
+    def _build_bpel_task_payload(self, activatity: BPELActivatity, context: dict):
+        with self._checkpoint_lock:
+            item = self._work_list_item(context, activatity.activatity_id)
+            parent_item = (
+                self._work_list_item(context, activatity.parent_activatity)
+                if activatity.parent_activatity
+                else None
+            )
+            input_key = self._context_key_for_bpel_variable(activatity.input_variable)
+            input_payload = {}
+            if input_key:
+                input_payload[input_key] = context.get(input_key, activatity.input_variable)
+
+            return {
+                "workflow_id": self.workflow_id,
+                "workflow": self.workflow,
+                "workflow_mode": self.mode,
+                "work_item": item["work_item"],
+                "parent_work_item": parent_item.get("work_item") if parent_item else None,
+                "activatity_id": activatity.activatity_id,
+                "activatity_index": item["activatity_index"],
+                "activatity_role": activatity.role,
+                "command": activatity.command,
+                "input": input_payload,
+                "context": self._context_snapshot(context),
+                "attachments": attachment_snapshot(context.get("attachments", [])),
+                "work_list": deepcopy(context.get("work_list", [])),
+                "output_hint": self._context_key_for_bpel_variable(activatity.output_variable),
+            }, activatity.role == "artillery"
+
+    def _evaluate_bpel_condition(self, condition: str | None, context: dict):
+        if not condition:
+            return False
+
+        match = re.search(
+            r"getVariableData\(['\"](?P<variable>[^'\"]+)['\"]\)\s*"
+            r"(?P<operator><=|>=|==|!=|<|>)\s*(?P<expected>-?\d+(?:\.\d+)?)",
+            condition,
+        )
+        if not match:
+            raise ValueError(f"Unsupported BPEL condition: {condition}")
+
+        context_key = self._context_key_for_bpel_variable(match.group("variable"))
+        actual = float(context.get(context_key))
+        expected = float(match.group("expected"))
+        return {
+            "<": actual < expected,
+            "<=": actual <= expected,
+            ">": actual > expected,
+            ">=": actual >= expected,
+            "==": actual == expected,
+            "!=": actual != expected,
+        }[match.group("operator")]
+
+    def _execute_bpel_invoke(self, activatity: BPELActivatity, context: dict):
+        if activatity.role == "commander":
+            decision = self.ask_llm(context["battle_log"])
+            with self._checkpoint_lock:
+                context["commander_decision"] = self.parse_commander_decision(decision)
+                context["battle_log"].append(f"[Commander Decision] {decision}")
+            return True
+
+        if not activatity.role:
+            raise ValueError(f"No role mapping for partnerLink={activatity.partner_link}")
+
+        payload, stream = self._build_bpel_task_payload(activatity, context)
+        if activatity.dispatch_mode == "parallel":
+            success = self.delegate_parallel_task(activatity.role, payload, stream=stream)
+        else:
+            success = self.delegate_task(activatity.role, payload, stream=stream)
+        with self._checkpoint_lock:
+            self.apply_agent_result(activatity.role, success, context)
+        return success
+
+    def _execute_bpel_activatity(self, activatity: BPELActivatity, context: dict):
+        item = self._work_list_item(context, activatity.activatity_id)
+        if item.get("status") in {"completed", "skipped"}:
+            return True
+
+        self._set_activatity_status(context, activatity, "running")
+        try:
+            if activatity.type in {"sequence", "case", "otherwise"}:
+                success = all(
+                    self._execute_bpel_activatity(child, context)
+                    for child in activatity.children
+                )
+            elif activatity.type == "flow":
+                child_roles = {
+                    child.role
+                    for child in activatity.children
+                    if child.type == "invoke" and child.role
+                }
+                if len(child_roles) > 1:
+                    raise ValueError(
+                        "BPEL flow may only contain concurrent activatities for the same agent role"
+                    )
+                with ThreadPoolExecutor(
+                    max_workers=min(self.max_workers, max(1, len(activatity.children))),
+                    thread_name_prefix="a2a-workflow",
+                ) as executor:
+                    futures = [
+                        executor.submit(self._execute_bpel_activatity, child, context)
+                        for child in activatity.children
+                    ]
+                    success = all(future.result() for future in as_completed(futures))
+            elif activatity.type == "assign":
+                context_key = self._context_key_for_bpel_variable(activatity.assign_to)
+                with self._checkpoint_lock:
+                    context[context_key] = activatity.assign_from
+                success = True
+            elif activatity.type == "invoke":
+                success = self._execute_bpel_invoke(activatity, context)
+            elif activatity.type == "switch":
+                selected = None
+                for child in activatity.children:
+                    if child.type == "case" and self._evaluate_bpel_condition(child.condition, context):
+                        selected = child
+                        break
+                    if child.type == "otherwise":
+                        selected = child
+                for child in activatity.children:
+                    if child is not selected:
+                        self._skip_activatity_tree(context, child)
+                success = bool(selected) and self._execute_bpel_activatity(selected, context)
+            elif activatity.type == "throw":
+                raise RuntimeError(activatity.fault_name or "BPEL workflow fault")
+            else:
+                raise ValueError(f"Unsupported BPEL activatity type: {activatity.type}")
+        except Exception as exc:
+            with self._checkpoint_lock:
+                context["workflow_status"] = "paused"
+                context["last_error"] = str(exc)
+            self._set_activatity_status(context, activatity, "failed", str(exc))
+            return False
+
+        self._set_activatity_status(
+            context,
+            activatity,
+            "completed" if success else "failed",
+            None if success else f"Activatity failed: {activatity.activatity_id}",
+        )
+        return success
+
+    def run_bpel_workflow(self):
+        if not self.bpel_definition:
+            raise ValueError("No BPEL workflow was loaded")
+
+        context = self.workflow_context
+        if context.get("workflow_status") == "completed":
+            print(f"[WORKFLOW] Workflow {self.workflow_id} already completed. Nothing to resume.")
+            return context
+
+        print(f"\n=== BPEL WORKFLOW: {self.bpel_definition.process_name} ===")
+        print(f"[WORKFLOW] Loaded from {self.bpel_definition.source_path}")
+        print(f"[WORKFLOW] work_list entries={len(context.get('work_list', []))}")
+        with self._checkpoint_lock:
+            context["workflow_status"] = "running"
+            context["last_error"] = None
+            self._save_workflow_checkpoint(context, status="running")
+
+        success = self._execute_bpel_activatity(self.bpel_definition.root_activatity, context)
+        with self._checkpoint_lock:
+            context["workflow_status"] = "completed" if success else "paused"
+            self._save_workflow_checkpoint(
+                context,
+                status=context["workflow_status"],
+                current_activatity=context.get("current_activatity"),
+                last_error=context.get("last_error"),
+            )
+
+        print("\n================= WORKFLOW CONTEXT =================")
+        print(json.dumps(context, ensure_ascii=False, indent=2))
+        print("====================================================")
+        return context
+
     def run_dynamic_battle_scenario(self, max_steps: int = 10):
         context = self.workflow_context
 
@@ -521,34 +895,34 @@ class CommanderAgent:
             return context
 
         print("\n=== DYNAMIC WORKFLOW: RULE STATE MACHINE + LLM FALLBACK ===")
-        print(f"[WORKFLOW] Resuming from workflow_step={context.get('workflow_step', 0)}")
+        print(f"[WORKFLOW] Resuming from workflow_activatity={context.get('workflow_activatity', 0)}")
 
-        start_step = int(context.get("workflow_step", 0) or 0) + 1
-        for step_index in range(start_step, start_step + max_steps):
+        start_activatity = int(context.get("workflow_activatity", 0) or 0) + 1
+        for activatity_index in range(start_activatity, start_activatity + max_steps):
             step = self.get_next_step(context)
-            current_step = {
-                "index": step_index,
+            current_activatity = {
+                "activatity_index": activatity_index,
                 "planner": step.get("planner"),
                 "type": step.get("type"),
                 "role": step.get("role"),
                 "reason": step.get("reason"),
             }
-            context["workflow_step"] = step_index
-            context["current_step"] = current_step
+            context["workflow_activatity"] = activatity_index
+            context["current_activatity"] = current_activatity
             context["workflow_status"] = "running"
-            self._save_workflow_checkpoint(context, status="running", current_step=current_step)
+            self._save_workflow_checkpoint(context, status="running", current_activatity=current_activatity)
 
             print(
-                f"\n=== STEP {step_index}: planner={step.get('planner')} "
+                f"\n=== ACTIVATITY {activatity_index}: planner={step.get('planner')} "
                 f"action={step.get('type')} reason={step.get('reason')} ==="
             )
 
             if step["type"] == "agent":
                 role = step["role"]
-                payload, stream = self.build_task_payload(role, context, step_index)
-                context["last_task_id"] = payload["task_id"]
+                payload, stream = self.build_task_payload(role, context, activatity_index)
+                context["last_work_item"] = payload["work_item"]
                 context["last_role"] = role
-                self._save_workflow_checkpoint(context, status="running", current_step=current_step)
+                self._save_workflow_checkpoint(context, status="running", current_activatity=current_activatity)
 
                 success = self.delegate_task(role, payload, stream=stream)
                 if not success:
@@ -558,7 +932,7 @@ class CommanderAgent:
                     self._save_workflow_checkpoint(
                         context,
                         status="paused",
-                        current_step=current_step,
+                        current_activatity=current_activatity,
                         last_error=error_message,
                     )
                     print("[WORKFLOW] Agent execution failed. Stop current workflow.")
@@ -566,19 +940,19 @@ class CommanderAgent:
 
                 self.apply_agent_result(role, success, context)
                 context["last_error"] = None
-                self._save_workflow_checkpoint(context, status="running", current_step=current_step)
+                self._save_workflow_checkpoint(context, status="running", current_activatity=current_activatity)
                 continue
 
             if step["type"] == "decision":
                 print("[PLANNER] Commander is analyzing workflow context and battle log...")
                 context["last_role"] = "commander"
-                context["last_task_id"] = f"{self.workflow_id}:{step_index}:decision"
-                self._save_workflow_checkpoint(context, status="running", current_step=current_step)
+                context["last_work_item"] = f"{self.workflow_id}:{activatity_index}:decision"
+                self._save_workflow_checkpoint(context, status="running", current_activatity=current_activatity)
 
                 decision = self.ask_llm(context["battle_log"])
                 context["commander_decision"] = self.parse_commander_decision(decision)
                 context["battle_log"].append(f"[Commander Decision] {decision}")
-                self._save_workflow_checkpoint(context, status="running", current_step=current_step)
+                self._save_workflow_checkpoint(context, status="running", current_activatity=current_activatity)
                 print("\n================= COMMANDER ORDER =================")
                 print(decision)
                 print("===================================================")
@@ -588,7 +962,7 @@ class CommanderAgent:
                 reason = (step.get("reason") or "").lower()
                 final_status = "paused" if ("re-plan" in reason or "abort" in reason) else "completed"
                 context["workflow_status"] = final_status
-                self._save_workflow_checkpoint(context, status=final_status, current_step=current_step)
+                self._save_workflow_checkpoint(context, status=final_status, current_activatity=current_activatity)
                 print(f"[WORKFLOW] End: {step.get('reason')}")
                 break
         else:
@@ -647,9 +1021,19 @@ def parse_args():
     )
     parser.add_argument(
         "--workflow",
-        choices=["dynamic", "legacy"],
-        default="dynamic",
-        help="dynamic uses the rule state-machine workflow; legacy runs the older fixed scenario.",
+        choices=["bpel", "dynamic", "legacy"],
+        default="bpel",
+        help="bpel dynamically loads a workflow definition; dynamic uses the rule state-machine; legacy runs the fixed scenario.",
+    )
+    parser.add_argument(
+        "--workflow-file",
+        default=None,
+        help="BPEL file path, filename, stem, or process name. Defaults to the first discovered .bpel workflow.",
+    )
+    parser.add_argument(
+        "--list-workflows",
+        action="store_true",
+        help="List discovered BPEL workflow definitions and exit.",
     )
     parser.add_argument(
         "--workflow-id",
@@ -684,6 +1068,12 @@ def parse_args():
     )
     parser.add_argument("--max-steps", type=int, default=10)
     parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=4,
+        help="Maximum number of concurrently dispatched BPEL flow activatities.",
+    )
+    parser.add_argument(
         "--mock-eval-score",
         type=int,
         default=None,
@@ -701,6 +1091,14 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
 
+    if args.list_workflows:
+        catalog = BPELWorkflowCatalog(PROJECT_ROOT)
+        definitions = [catalog.load(str(path)) for path in catalog.discover()]
+        print("Available BPEL workflows:")
+        for definition in definitions:
+            print(f"- {definition.process_name}: {definition.source_path}")
+        raise SystemExit(0)
+
     if args.serve_recovery_api:
         import uvicorn
 
@@ -717,14 +1115,18 @@ if __name__ == "__main__":
     cmd = CommanderAgent(
         mode=args.mode,
         workflow=args.workflow,
+        workflow_file=args.workflow_file,
         workflow_id=args.workflow_id,
         state_dir=args.state_dir,
         resume=args.resume,
         mock_eval_score=args.mock_eval_score,
         mock_decision=args.mock_decision,
+        max_workers=args.max_workers,
     )
 
     if args.workflow == "legacy":
         cmd.run_battle_scenario()
+    elif args.workflow == "bpel":
+        cmd.run_bpel_workflow()
     else:
         cmd.run_dynamic_battle_scenario(max_steps=args.max_steps)

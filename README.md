@@ -9,6 +9,8 @@
 ## ✨ 当前版本能力
 
 - 工作流状态支持落盘保存，并可通过 `workflow_id` 恢复。
+- Commander 支持动态加载预写 BPEL，并使用线程池把一个 activity 并发派发给多个同类型 Agent 实例。
+- 每次 A2A 调用都会携带当前工作流的 `work_list`，Agent 可查询自己收到的任务列表快照。
 - 恢复 API 支持在新进程、新端口上继续接管同一个 workflow。
 - 附件统一使用对象存储引用，避免把大文件直接塞进消息体。
 - Agent 注册后会发送 5 秒心跳，并按心跳时间过滤失联实例。
@@ -77,6 +79,8 @@ A2A/
 ├── scripts/                 # 恢复 / failover 演示脚本
 ├── tests/                   # 回归测试
 ├── attachment_uploader.py   # 本地文件上传成附件引用
+├── bpel_workflow.py         # BPEL 动态发现、解析与 work_list 生成
+├── beachhead_workflow.bpel  # 可动态加载的抢滩登陆 BPEL
 ├── local_runtime.py         # 本地模拟运行时
 ├── workflow_payloads.py     # 附件与任务信封规范
 ├── workflow_state_store.py  # 工作流 checkpoint 存储
@@ -89,7 +93,8 @@ A2A/
 这一版的核心变化，是把 Commander 从“只在内存里推进流程”升级成“可以落盘、可以恢复、可以接管”的工作流控制器。
 
 - `workflow_id`：整条工作流的唯一标识，用来定位 checkpoint。
-- `task_id`：单个任务步骤的唯一标识，用来做幂等和追踪。
+- `work_item`：单个工作项的唯一标识，用来做幂等和追踪。
+- `activatity`：checkpoint 中统一使用的活动字段命名，例如 `current_activatity`、`workflow_activatity`。
 - `workflow_state_store.py`：负责把工作流状态保存到 `.a2a_state/workflows/`。
 - `commander_agent/recovery_api.py`：提供 `/health`、`/workflows/{workflow_id}`、`/resume`、`/takeover` 等恢复接口。
 - `workflow_payloads.py`：规定附件必须是对象存储引用，避免内联大文件。
@@ -101,12 +106,46 @@ A2A/
 
 ```bash
 cd /home/yl/yl/jzz/A2A
-./venv/bin/python -u commander_agent/main.py --mode local --mock-eval-score 40
-./venv/bin/python -u commander_agent/main.py --mode local --mock-eval-score 75
+./venv/bin/python -u commander_agent/main.py --mode local --workflow bpel --workflow-file beachhead_workflow --mock-eval-score 40
+./venv/bin/python -u commander_agent/main.py --mode local --workflow bpel --workflow-file beachhead_workflow --mock-eval-score 75
 ```
 
 - `40` 会触发 `RE-PLAN` 分支。
 - `75` 会触发 `ASSAULT` 分支。
+
+`beachhead_workflow.bpel` 中不同角色严格按 `recon -> artillery -> evaluator -> assault` 顺序推进。炮兵节点使用 `dispatchMode="parallel"`，Commander 会把同一个火力任务并发派发给多个 `role=artillery` 实例。`--max-workers` 控制最大并发数。
+
+项目中可以提前保存多套 BPEL，并在运行前选择：
+
+```bash
+./venv/bin/python -u commander_agent/main.py --list-workflows
+
+# 基础登陆方案：炮兵同类并发，毁伤率阈值 60
+./venv/bin/python -u commander_agent/main.py \
+  --mode local \
+  --workflow bpel \
+  --workflow-file beachhead_workflow \
+  --mock-eval-score 75
+
+# 强化登陆方案：侦察、炮兵、突击均支持同类并发，毁伤率阈值 80
+./venv/bin/python -u commander_agent/main.py \
+  --mode local \
+  --workflow bpel \
+  --workflow-file reinforced_beachhead_workflow \
+  --mock-eval-score 85
+
+# 简化突击方案：省略评估分支，直接执行侦察、炮击和突击
+./venv/bin/python -u commander_agent/main.py \
+  --mode local \
+  --workflow bpel \
+  --workflow-file quick_strike_workflow
+```
+
+Agent 收到任务后可以查看当前 workflow 的任务列表快照：
+
+```bash
+curl http://127.0.0.1:8012/workflows/<workflow_id>/work-list
+```
 
 恢复和本地模式的更细说明已经合并到上面的流程描述中，直接按脚本运行即可。
 
@@ -114,10 +153,12 @@ cd /home/yl/yl/jzz/A2A
 
 ```bash
 cd /home/yl/yl/jzz/A2A
+./venv/bin/python scripts/demo_bpel_workflows.py
 ./venv/bin/python scripts/demo_resume_after_restart.py --reset
 ./venv/bin/python scripts/demo_commander_failover_resume.py --reset
 ```
 
+- `demo_bpel_workflows.py` 用于展示并运行两套可选择的 BPEL。
 - `demo_resume_after_restart.py` 用于演示同一个 workflow 在进程重启后继续执行。
 - `demo_commander_failover_resume.py` 用于演示主 Commander 宕机后，在新端口启动备用 Commander 并 resume。
 

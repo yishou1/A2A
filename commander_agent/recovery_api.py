@@ -17,9 +17,11 @@ def _default_state_dir() -> str:
 
 class RecoveryRequest(BaseModel):
     mode: Literal["local", "remote"] = "local"
-    workflow: Literal["dynamic"] = "dynamic"
+    workflow: Literal["bpel", "dynamic"] = "bpel"
+    workflow_file: Optional[str] = None
     state_dir: Optional[str] = None
     max_steps: int = Field(default=10, ge=1)
+    max_workers: int = Field(default=4, ge=1)
     resume: bool = True
     strict: bool = True
     mock_eval_score: Optional[int] = None
@@ -46,18 +48,23 @@ def takeover_workflow(workflow_id: str, request: RecoveryRequest) -> Dict[str, A
     commander = CommanderAgent(
         mode=request.mode,
         workflow=request.workflow,
+        workflow_file=request.workflow_file,
         workflow_id=workflow_id,
         state_dir=request.state_dir,
         resume=request.resume,
         mock_eval_score=request.mock_eval_score,
         mock_decision=request.mock_decision,
+        max_workers=request.max_workers,
     )
 
     attachments = normalize_attachments(request.attachments)
     if attachments:
         commander.merge_external_attachments(attachments)
 
-    result_context = commander.run_dynamic_battle_scenario(max_steps=request.max_steps)
+    if request.workflow == "bpel":
+        result_context = commander.run_bpel_workflow()
+    else:
+        result_context = commander.run_dynamic_battle_scenario(max_steps=request.max_steps)
     return {
         "workflow_id": workflow_id,
         "workflow": request.workflow,
@@ -71,7 +78,7 @@ def takeover_workflow(workflow_id: str, request: RecoveryRequest) -> Dict[str, A
 def build_recovery_app(
     *,
     default_mode: str = "local",
-    default_workflow: str = "dynamic",
+    default_workflow: str = "bpel",
     default_state_dir: Optional[str] = None,
 ) -> FastAPI:
     app = FastAPI(title="A2A Commander Recovery API")

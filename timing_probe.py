@@ -151,14 +151,14 @@ class A2ATimingProbe:
             result["timings_ms"]["authentication"] = ms(auth_seconds)
 
             ack_payload = dict(payload)
-            ack_payload["task_id"] = f"timing-{role}-ack"
+            ack_payload["work_item"] = f"timing-{role}-ack"
             ack, ack_seconds = self.timer.measure(lambda: client.send_message(ack_payload))
             result["task_ack"] = ack
             result["timings_ms"]["task_submit_ack"] = ms(ack_seconds)
 
             if stream:
                 stream_payload = dict(payload)
-                stream_payload["task_id"] = f"timing-{role}-stream"
+                stream_payload["work_item"] = f"timing-{role}-stream"
                 stream_started = time.perf_counter()
                 first_event_seconds = None
                 for event_data in client.send_message_stream(stream_payload):

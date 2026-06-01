@@ -4,6 +4,8 @@ import uvicorn
 import asyncio
 import json
 import os
+import threading
+from copy import deepcopy
 from urllib.parse import urljoin
 
 def verify_token(authorization: str = Header(None)):
@@ -19,6 +21,8 @@ class A2ABaseAgent:
         self.port = port
         self._task_response_cache = {}
         self._stream_response_cache = {}
+        self._workflow_work_lists = {}
+        self._state_lock = threading.RLock()
         self.app = FastAPI(title=name)
         self.setup_routes()
 
@@ -37,7 +41,8 @@ class A2ABaseAgent:
                 }
             },
             "sendMessageEndpoint": "/sendMessage",
-            "sendMessageStreamEndpoint": "/sendMessageStream"
+            "sendMessageStreamEndpoint": "/sendMessageStream",
+            "workListEndpoint": "/workflows/{workflow_id}/work-list",
         }
 
     async def execute_stream(self, payload):
@@ -46,16 +51,29 @@ class A2ABaseAgent:
         await asyncio.sleep(1)
         yield f"data: {json.dumps({'status': 'Completed', 'message': 'Done'})}\n\n"
 
-    def _task_id_from_payload(self, payload):
-        return payload.get("task_id", "t-001")
+    def _work_item_from_payload(self, payload):
+        return payload.get("work_item") or payload.get("task_id", "work-item-001")
+
+    def _capture_work_list(self, payload):
+        workflow_id = payload.get("workflow_id")
+        work_list = payload.get("work_list")
+        if workflow_id and isinstance(work_list, list):
+            with self._state_lock:
+                self._workflow_work_lists[workflow_id] = deepcopy(work_list)
+
+    def get_work_list(self, workflow_id):
+        with self._state_lock:
+            return deepcopy(self._workflow_work_lists.get(workflow_id, []))
 
     async def _replay_stream(self, cached_events):
         for event in cached_events:
             yield event
 
     async def _cached_stream(self, payload):
-        task_id = self._task_id_from_payload(payload)
-        cached_events = self._stream_response_cache.get(task_id)
+        self._capture_work_list(payload)
+        work_item = self._work_item_from_payload(payload)
+        with self._state_lock:
+            cached_events = self._stream_response_cache.get(work_item)
         if cached_events is not None:
             async for event in self._replay_stream(cached_events):
                 yield event
@@ -65,25 +83,41 @@ class A2ABaseAgent:
         async for event in self.execute_stream(payload):
             buffered_events.append(event)
             yield event
-        self._stream_response_cache[task_id] = buffered_events
+        with self._state_lock:
+            self._stream_response_cache[work_item] = buffered_events
 
     def setup_routes(self):
         @self.app.get("/.well-known/agent-card")
         async def agent_card():
             return self.get_agent_card()
 
+        @self.app.get("/workflows/{workflow_id}/work-list")
+        async def workflow_work_list(workflow_id: str):
+            return {
+                "workflow_id": workflow_id,
+                "agent": self.name,
+                "role": self.role,
+                "work_list": self.get_work_list(workflow_id),
+            }
+
         @self.app.post("/sendMessage")
         async def send_message(payload: dict, token: str = Depends(verify_token)):
-            task_id = self._task_id_from_payload(payload)
-            if task_id in self._task_response_cache:
-                return self._task_response_cache[task_id]
+            self._capture_work_list(payload)
+            work_item = self._work_item_from_payload(payload)
+            with self._state_lock:
+                cached_response = self._task_response_cache.get(work_item)
+            if cached_response is not None:
+                return cached_response
 
             response = {
-                "task_id": task_id,
+                "work_item": work_item,
+                "workflow_id": payload.get("workflow_id"),
                 "status": "Accepted",
-                "message": f"{self.name} received task {payload.get('command')}"
+                "message": f"{self.name} received work item {payload.get('command')}",
+                "work_list_size": len(self.get_work_list(payload.get("workflow_id"))),
             }
-            self._task_response_cache[task_id] = response
+            with self._state_lock:
+                self._task_response_cache[work_item] = response
             return response
         
         @self.app.post("/sendMessageStream")
@@ -93,4 +127,3 @@ class A2ABaseAgent:
 
     def start(self):
         uvicorn.run(self.app, host="0.0.0.0", port=self.port)
-

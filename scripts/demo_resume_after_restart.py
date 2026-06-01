@@ -56,9 +56,9 @@ def summarize_state(label: str, state: dict) -> None:
         "workflow_id": state.get("workflow_id"),
         "status": state.get("status"),
         "workflow_status": context.get("workflow_status"),
-        "workflow_step": context.get("workflow_step"),
-        "current_step": context.get("current_step"),
-        "last_task_id": context.get("last_task_id"),
+        "workflow_activatity": context.get("workflow_activatity"),
+        "current_activatity": context.get("current_activatity"),
+        "last_work_item": context.get("last_work_item"),
         "completed_roles": context.get("completed_roles"),
         "battle_log_count": len(context.get("battle_log", [])),
     }

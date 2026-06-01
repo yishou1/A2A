@@ -1,5 +1,6 @@
 import json
 import time
+from copy import deepcopy
 from typing import Dict, Iterable, Tuple
 
 
@@ -15,6 +16,7 @@ class LocalAgentRuntime:
     def __init__(self):
         self._task_response_cache = {}
         self._stream_response_cache = {}
+        self._workflow_work_lists = {}
 
     AGENTS = {
         "recon": {
@@ -45,8 +47,17 @@ class LocalAgentRuntime:
         return dict(self.AGENTS[role])
 
     @staticmethod
-    def _task_id_from_payload(payload: dict) -> str:
-        return payload.get("task_id", "t-001")
+    def _work_item_from_payload(payload: dict) -> str:
+        return payload.get("work_item") or payload.get("task_id", "work-item-001")
+
+    def _capture_work_list(self, payload: dict) -> None:
+        workflow_id = payload.get("workflow_id")
+        work_list = payload.get("work_list")
+        if workflow_id and isinstance(work_list, list):
+            self._workflow_work_lists[workflow_id] = deepcopy(work_list)
+
+    def get_work_list(self, workflow_id: str) -> list[dict]:
+        return deepcopy(self._workflow_work_lists.get(workflow_id, []))
 
     def authenticate(self, role: str) -> str:
         self.discover(role)
@@ -54,24 +65,28 @@ class LocalAgentRuntime:
 
     def send_message(self, role: str, payload: dict) -> dict:
         self.discover(role)
-        task_id = self._task_id_from_payload(payload)
-        if task_id in self._task_response_cache:
-            return self._task_response_cache[task_id]
+        self._capture_work_list(payload)
+        work_item = self._work_item_from_payload(payload)
+        if work_item in self._task_response_cache:
+            return self._task_response_cache[work_item]
 
         response = {
-            "task_id": task_id,
+            "work_item": work_item,
+            "workflow_id": payload.get("workflow_id"),
             "status": "Accepted",
             "mode": "local",
             "role": role,
             "message": self._message_for(role, payload),
+            "work_list_size": len(self.get_work_list(payload.get("workflow_id"))),
         }
-        self._task_response_cache[task_id] = response
+        self._task_response_cache[work_item] = response
         return response
 
     def send_message_stream(self, role: str, payload: dict) -> Iterable[dict]:
         self.discover(role)
-        task_id = self._task_id_from_payload(payload)
-        cached_events = self._stream_response_cache.get(task_id)
+        self._capture_work_list(payload)
+        work_item = self._work_item_from_payload(payload)
+        cached_events = self._stream_response_cache.get(work_item)
         if cached_events is not None:
             for event in cached_events:
                 yield event
@@ -83,7 +98,7 @@ class LocalAgentRuntime:
                 "progress": "100%",
                 "message": self._message_for(role, payload),
             }]
-            self._stream_response_cache[task_id] = events
+            self._stream_response_cache[work_item] = events
             yield from events
             return
 
@@ -93,7 +108,7 @@ class LocalAgentRuntime:
             {"status": "Working", "progress": "60%", "message": "Impact confirmed. Adjusting aim."},
             {"status": "Completed", "progress": "100%", "message": "Target suppression complete"},
         ]
-        self._stream_response_cache[task_id] = events
+        self._stream_response_cache[work_item] = events
         for event in events:
             time.sleep(0.1)
             yield event

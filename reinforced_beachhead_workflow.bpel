@@ -1,0 +1,54 @@
+<process name="ReinforcedBeachheadWorkflow" targetNamespace="http://a2a.military.simulation/workflow">
+
+    <!-- 强化登陆方案：各阶段保持严格顺序，但允许同类型 Agent 协同并发 -->
+    <variables>
+        <variable name="ReconReport" type="String"/>
+        <variable name="StrikeCoordinates" type="String"/>
+        <variable name="StrikeResult" type="String"/>
+        <variable name="EvalScore" type="Integer"/>
+        <variable name="CommanderDecision" type="String"/>
+    </variables>
+
+    <sequence>
+
+        <!-- 多个侦察单位同时覆盖目标区域 -->
+        <invoke partnerLink="ReconAgent" operation="scanBeachDefenses"
+                dispatchMode="parallel"
+                inputVariable="Sector_A" outputVariable="ReconReport"/>
+
+        <assign>
+            <copy>
+                <from>121.0E, 35.4N</from>
+                <to variable="StrikeCoordinates"/>
+            </copy>
+        </assign>
+
+        <!-- 多个炮兵单位协同压制 -->
+        <invoke partnerLink="ArtilleryAgent" operation="suppressBeachSector"
+                dispatchMode="parallel"
+                inputVariable="StrikeCoordinates" outputVariable="StrikeResult"/>
+
+        <!-- 汇总火力结果后再进行统一评估 -->
+        <invoke partnerLink="EvaluatorAgent" operation="evaluateStrike"
+                inputVariable="StrikeCoordinates" outputVariable="EvalScore"/>
+
+        <!-- 强化登陆要求更高：毁伤率低于 80% 就进入重规划 -->
+        <switch>
+            <case condition="bpws:getVariableData('EvalScore') &lt; 80">
+                <sequence>
+                    <invoke partnerLink="LLMCommanderAgent" operation="analyzeAndReplanning"
+                            inputVariable="ReconReport + StrikeResult" outputVariable="CommanderDecision"/>
+                    <throw faultName="ReinforcedSuppressionInsufficientFault"/>
+                </sequence>
+            </case>
+
+            <otherwise>
+                <!-- 多个突击单位同时抢占滩头 -->
+                <invoke partnerLink="AssaultAgent" operation="captureBeachhead"
+                        dispatchMode="parallel"
+                        inputVariable="StrikeCoordinates"/>
+            </otherwise>
+        </switch>
+
+    </sequence>
+</process>

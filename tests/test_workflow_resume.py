@@ -7,6 +7,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from attachment_uploader import upload_attachment_file
+from a2a_protocol.server import A2ABaseAgent
 from commander_agent.main import CommanderAgent
 from commander_agent.recovery_api import build_recovery_app
 from local_runtime import LocalAgentRuntime
@@ -26,7 +27,7 @@ class WorkflowResumeTest(unittest.TestCase):
                 "context": {
                     "battle_log": ["[Recon Report] Cached"],
                     "completed_roles": ["recon"],
-                    "workflow_step": 1,
+                    "workflow_activatity": 1,
                 },
             }
 
@@ -50,7 +51,7 @@ class WorkflowResumeTest(unittest.TestCase):
             context["recon_report"] = "Sector_A is heavily fortified."
             context["battle_log"].append("[Recon Report] Sector_A is heavily fortified.")
             context["completed_roles"].append("recon")
-            context["workflow_step"] = 1
+            context["workflow_activatity"] = 1
 
             store = WorkflowStateStore(temp_dir)
             store.save(
@@ -74,10 +75,10 @@ class WorkflowResumeTest(unittest.TestCase):
             )
 
             self.assertEqual(resumed.workflow_context["recon_report"], "Sector_A is heavily fortified.")
-            payload, stream = resumed.build_task_payload("artillery", resumed.workflow_context, step_index=2)
+            payload, stream = resumed.build_task_payload("artillery", resumed.workflow_context, activatity_index=2)
 
             self.assertTrue(stream)
-            self.assertEqual(payload["task_id"], f"{workflow_id}:2:artillery")
+            self.assertEqual(payload["work_item"], f"{workflow_id}:2:artillery")
             self.assertEqual(payload["input"]["coordinates"], "120.5E, 35.1N")
             self.assertIn("attachments", payload)
             self.assertIn("context", payload)
@@ -85,7 +86,7 @@ class WorkflowResumeTest(unittest.TestCase):
 
     def test_local_runtime_replays_cached_results(self):
         runtime = LocalAgentRuntime()
-        payload = {"task_id": "wf-001:1:recon", "command": "scan_beach_defenses"}
+        payload = {"work_item": "wf-001:1:recon", "command": "scan_beach_defenses"}
 
         first_response, first_events = runtime.execute("recon", payload, stream=False)
         second_response, second_events = runtime.execute("recon", payload, stream=False)
@@ -93,7 +94,7 @@ class WorkflowResumeTest(unittest.TestCase):
         self.assertEqual(first_response, second_response)
         self.assertEqual(first_events, second_events)
 
-        stream_payload = {"task_id": "wf-001:2:artillery", "command": "suppress_beach_sector_A"}
+        stream_payload = {"work_item": "wf-001:2:artillery", "command": "suppress_beach_sector_A"}
         first_stream_response, first_stream_events = runtime.execute("artillery", stream_payload, stream=True)
         second_stream_response, second_stream_events = runtime.execute("artillery", stream_payload, stream=True)
 
@@ -136,9 +137,9 @@ class WorkflowResumeTest(unittest.TestCase):
                 "workflow_mode": "local",
                 "workflow_name": "dynamic",
                 "workflow_status": "paused",
-                "workflow_step": 2,
-                "current_step": {"index": 2, "type": "agent", "role": "artillery"},
-                "last_task_id": f"{workflow_id}:2:artillery",
+                "workflow_activatity": 2,
+                "current_activatity": {"activatity_index": 2, "type": "agent", "role": "artillery"},
+                "last_work_item": f"{workflow_id}:2:artillery",
                 "last_role": "artillery",
                 "sector": "Sector_A",
                 "coordinates": "120.5E, 35.1N",
@@ -195,10 +196,77 @@ class WorkflowResumeTest(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             payload = response.json()
             self.assertEqual(payload["workflow_id"], workflow_id)
-            self.assertEqual(payload["context"]["workflow_step"], 3)
+            self.assertEqual(payload["context"]["workflow_activatity"], 3)
             self.assertEqual(payload["context"]["eval_score"], 75)
             self.assertEqual(payload["context"]["attachments"][0]["uri"], "s3://a2a-media/beachhead/recon-01.jpg")
             self.assertEqual(payload["context"]["attachments"][0]["checksum"]["value"], "abc123")
+
+    def test_agent_exposes_received_work_list(self):
+        agent = A2ABaseAgent(
+            name="Test_Agent",
+            description="Test work list visibility.",
+            role="recon",
+            port=9999,
+        )
+        client = TestClient(agent.app)
+        payload = {
+            "workflow_id": "wf-work-list",
+            "work_item": "wf-work-list:activatity-001-recon",
+            "command": "scan_beach_defenses",
+            "work_list": [
+                {
+                    "activatity_id": "activatity-001-recon",
+                    "work_item": "wf-work-list:activatity-001-recon",
+                    "status": "running",
+                }
+            ],
+        }
+
+        response = client.post(
+            "/sendMessage",
+            json=payload,
+            headers={"Authorization": "Bearer test-token"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["work_item"], payload["work_item"])
+        self.assertEqual(response.json()["work_list_size"], 1)
+
+        response = client.get("/workflows/wf-work-list/work-list")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["work_list"], payload["work_list"])
+
+    def test_legacy_checkpoint_fields_are_migrated(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workflow_id = "wf-legacy"
+            store = WorkflowStateStore(temp_dir)
+            store.save(
+                workflow_id,
+                {
+                    "workflow_id": workflow_id,
+                    "workflow": "dynamic",
+                    "mode": "local",
+                    "status": "paused",
+                    "context": {
+                        "workflow_step": 2,
+                        "current_step": {"index": 2, "type": "agent", "role": "artillery"},
+                        "last_task_id": f"{workflow_id}:2:artillery",
+                    },
+                },
+            )
+
+            resumed = CommanderAgent(
+                mode="local",
+                workflow="dynamic",
+                workflow_id=workflow_id,
+                state_dir=temp_dir,
+                resume=True,
+            )
+            context = resumed.workflow_context
+            self.assertEqual(context["workflow_activatity"], 2)
+            self.assertEqual(context["current_activatity"]["activatity_index"], 2)
+            self.assertEqual(context["last_work_item"], f"{workflow_id}:2:artillery")
+            self.assertNotIn("workflow_step", context)
+            self.assertNotIn("last_task_id", context)
 
     def test_upload_attachment_file_http_put_path(self):
         with tempfile.TemporaryDirectory() as temp_dir:

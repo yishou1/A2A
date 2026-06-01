@@ -10,12 +10,46 @@
 
 在这个 XML 描述标准中，我们可以看到早期工作流引擎的核心思想是如何映射到我们今天的 Agent A2A 设计上的：
 
-- **`<process>` & `<sequence>` (执行序列)**：定义了我们主战场的时间线（Phase 1 -> Phase 4），也就是代码中的 `run_battle_scenario` 逻辑流。
+- **`<process>` & `<sequence>` (执行序列)**：定义必须按顺序推进的活动。
+- **同类 Agent 并发**：不同角色保持顺序依赖。需要并发协作时，在单个 `<invoke>` 上使用 `dispatchMode="parallel"`，Commander 会把任务并发派发给多个同类型 Agent 实例。
 - **`<invoke partnerLink="...">` (服务调用)**：对应我们在 Commander (指挥官) 中书写的动态寻址逻辑。早期的 BPEL 会去 UDDI (早年间的服务发现中心) 寻找伙伴；而现在我们去 **Nacos** 找到如 `recon_agent` 或 `artillery_agent`。
 - **`<variables>` (上下文状态机)**：流转于各个 Agent 之间的信息状态。例如侦察兵探明的机枪阵地报告（ReconReport），传递给了火力打击与最后的大模型。
 - **`<switch> ... <case>` (网关与决策分支)**：对应着战果评估后（毁伤率40%）是否终止原定计划的判断分流。如果是现代 Agentic Workflow ，这一步将交给 GPT/LLM （大语言模型）作为决策网关动态判断。
 
-## 2. 现代云原生版的演进表示 (Serverless Workflow 风格)
+当前 Commander 会在启动时扫描项目中的 `.bpel` 文件，并支持按文件路径、文件名、文件 stem 或 `<process name>` 动态加载工作流。加载后会生成 `work_list`，其中每个活动都有稳定的 `activatity_id` 和 `work_item`。这些字段会进入 checkpoint，也会随 A2A 消息发送给 Agent。
+
+当前抢滩登陆工作流中的关键并发结构是：
+
+```xml
+<invoke partnerLink="ArtilleryAgent"
+        operation="suppressBeachSector"
+        dispatchMode="parallel"/>
+```
+
+因此 recon 完成后才会进入 artillery。Commander 会从 Nacos 查询全部 `role=artillery` 且 `status=idle` 的实例，并行下发火力任务；全部炮兵任务完成后才会调用 Evaluator。
+
+## 2. 可选择的预定义 BPEL
+
+项目允许提前维护多套 `.bpel` 工作流，并在 Commander 启动时按需选择：
+
+| BPEL | Process Name | 特点 |
+|---|---|---|
+| `beachhead_workflow.bpel` | `BeachheadAssaultWorkflow` | 基础登陆方案；炮兵同类并发；评估阈值为 60 |
+| `reinforced_beachhead_workflow.bpel` | `ReinforcedBeachheadWorkflow` | 强化登陆方案；侦察、炮兵、突击均支持同类并发；评估阈值为 80 |
+| `quick_strike_workflow.bpel` | `QuickStrikeWorkflow` | 简化突击方案；省略评估与条件分支；炮兵同类并发 |
+
+查看和选择方式：
+
+```bash
+./venv/bin/python commander_agent/main.py --list-workflows
+./venv/bin/python commander_agent/main.py \
+  --mode local \
+  --workflow bpel \
+  --workflow-file ReinforcedBeachheadWorkflow \
+  --mock-eval-score 85
+```
+
+## 3. 现代云原生版的演进表示 (Serverless Workflow 风格)
 
 对于现在和未来的多智能体微服务架构，XML由于冗长往往会被 **YAML/JSON 的极简 DSL (如 CNCF Serverless Workflow)** 替代。以本项目的场景为例，其现代画的工作流描述可以表示为如下 YAML 格式：
 

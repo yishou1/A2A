@@ -13,19 +13,19 @@
     <sequence>
         
         <!-- 阶段 1：侦察阶段 -->
-        <!-- Invoke: 等同于指挥官去 Nacos 发现并调用 Recon Agent -->
-        <invoke partnerLink="ReconAgent" operation="scanBeachDefenses" 
+        <invoke partnerLink="ReconAgent" operation="scanBeachDefenses"
                 inputVariable="Sector_A" outputVariable="ReconReport"/>
 
         <!-- 阶段 2：火力打击阶段 -->
-        <!-- Async/Stream Invoke: 调用炮兵单位，携带侦察目标的坐标 -->
         <assign>
             <copy>
                 <from>120.5E, 35.1N</from>
                 <to variable="StrikeCoordinates"/>
             </copy>
         </assign>
-        <invoke partnerLink="ArtilleryAgent" operation="suppressBeachSector" 
+        <!-- 同一个火力任务可以并发分配给多个 artillery 实例 -->
+        <invoke partnerLink="ArtilleryAgent" operation="suppressBeachSector"
+                dispatchMode="parallel"
                 inputVariable="StrikeCoordinates" outputVariable="StrikeResult"/>
         
         <!-- 阶段 3：战果评估阶段 -->

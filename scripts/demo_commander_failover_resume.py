@@ -156,7 +156,7 @@ def main() -> None:
     print(json.dumps({
         "workflow_id": workflow_id,
         "seed_status": seed_context.get("workflow_status"),
-        "seed_step": seed_context.get("workflow_step"),
+        "seed_activatity": seed_context.get("workflow_activatity"),
         "checkpoint": str(store.state_path(workflow_id)),
     }, ensure_ascii=False, indent=2))
 
