@@ -175,6 +175,85 @@ class NacosRegistry:
         response.raise_for_status()
         print(f"Registered {service_name} at {ip}:{port} via HTTP fallback")
 
+    def update_instance_metadata(
+        self,
+        service_name,
+        instance,
+        metadata_updates=None,
+        remove_keys=None,
+    ):
+        ip = instance.get("ip")
+        port = instance.get("port")
+        cluster_name = instance.get("clusterName") or instance.get("cluster_name")
+        group_name = instance.get("groupName") or instance.get("group_name") or "DEFAULT_GROUP"
+        ephemeral = instance.get("ephemeral", True)
+        metadata = dict(instance.get("metadata", {}) or {})
+        metadata.update(metadata_updates or {})
+        for key in remove_keys or []:
+            metadata.pop(key, None)
+        metadata["heartbeat_ts"] = int(time.time())
+        metadata["heartbeat_at"] = utc_now_iso()
+
+        try:
+            self.client.modify_naming_instance(
+                service_name,
+                ip,
+                port,
+                cluster_name=cluster_name,
+                metadata=metadata,
+                ephemeral=ephemeral,
+                group_name=group_name,
+            )
+        except Exception as sdk_error:
+            print(
+                f"Nacos SDK metadata update failed for {service_name} at "
+                f"{ip}:{port}: {sdk_error}. Trying HTTP fallback."
+            )
+            self._update_instance_metadata_http(
+                service_name,
+                ip,
+                port,
+                metadata,
+                ephemeral=ephemeral,
+                cluster_name=cluster_name,
+                group_name=group_name,
+            )
+
+        instance["metadata"] = metadata
+        self._update_heartbeat_metadata(service_name, ip, port, metadata)
+        return metadata
+
+    def _update_instance_metadata_http(
+        self,
+        service_name,
+        ip,
+        port,
+        metadata,
+        ephemeral=True,
+        cluster_name=None,
+        group_name="DEFAULT_GROUP",
+    ):
+        params = {
+            "serviceName": service_name,
+            "ip": ip,
+            "port": port,
+            "metadata": json.dumps(metadata, separators=(",", ":")),
+            "ephemeral": "true" if ephemeral else "false",
+            "groupName": group_name,
+            **self._namespace_params(),
+        }
+        if cluster_name is not None:
+            params["clusterName"] = cluster_name
+        response = self.http.put(f"{self._base_url()}/instance", params=params, timeout=5)
+        response.raise_for_status()
+
+    def _update_heartbeat_metadata(self, service_name, ip, port, metadata):
+        heartbeat_key = self._heartbeat_key(service_name, ip, port)
+        with self._heartbeat_lock:
+            supervisor = self._heartbeat_supervisors.get(heartbeat_key)
+        if supervisor:
+            supervisor.update_metadata(metadata)
+
     def _send_heartbeat_http(self, service_name, ip, port, cluster_name=None, weight=1.0, metadata=None, ephemeral=True, group_name="DEFAULT_GROUP"):
         beat_data = {
             "serviceName": service_name,
@@ -350,6 +429,11 @@ class AgentHeartbeatSupervisor(threading.Thread):
         self.group_name = group_name
         self.ephemeral = ephemeral
         self._stop_event = threading.Event()
+        self._metadata_lock = threading.Lock()
+
+    def update_metadata(self, metadata):
+        with self._metadata_lock:
+            self.metadata = dict(metadata or {})
 
     def run(self):
         heartbeat_key = f"{self.service_name}#{self.ip}#{self.port}"
@@ -357,7 +441,8 @@ class AgentHeartbeatSupervisor(threading.Thread):
             f"[HEARTBEAT] started for {heartbeat_key} every {self.heartbeat_interval:.1f}s"
         )
         while not self._stop_event.is_set():
-            heartbeat_metadata = dict(self.metadata)
+            with self._metadata_lock:
+                heartbeat_metadata = dict(self.metadata)
             heartbeat_metadata["heartbeat_ts"] = int(time.time())
             heartbeat_metadata["heartbeat_at"] = utc_now_iso()
 

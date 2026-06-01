@@ -9,7 +9,9 @@
 ## ✨ 当前版本能力
 
 - 工作流状态支持落盘保存，并可通过 `workflow_id` 恢复。
+- 常驻 `CommanderWorkflowManager` 使用 Workflow 线程池同时推进多个 BPEL，并通过 `--max-workflows` 限制并发工作流数量。
 - Commander 支持动态加载预写 BPEL，并使用线程池把一个 activity 并发派发给多个同类型 Agent 实例。
+- 远端调度会为 Agent 实例领取租约：开始时标记为 `busy`，完成或失败时恢复为 `idle`，避免多个 Workflow 抢占同一实例。
 - 每次 A2A 调用都会携带当前工作流的 `work_list`，Agent 可查询自己收到的任务列表快照。
 - 恢复 API 支持在新进程、新端口上继续接管同一个 workflow。
 - 附件统一使用对象存储引用，避免把大文件直接塞进消息体。
@@ -71,6 +73,9 @@ A2A/
 ├── WORKFLOW_DESIGN.md       # 工作流设计说明
 ├── a2a_protocol/            # A2A 通信协议标准实现库
 ├── commander_agent/         # 决策大脑中心
+│   ├── workflow_manager.py  # 常驻多 Workflow 调度器
+│   ├── manager_api.py       # 常驻调度器 HTTP API
+│   └── agent_leases.py      # Agent 租约与资源锁
 ├── recon_agent/             # 侦察兵 Agent
 ├── artillery_agent/         # 火力打击 Agent
 ├── assault_agent/           # 登陆突击 Agent
@@ -149,16 +154,74 @@ curl http://127.0.0.1:8012/workflows/<workflow_id>/work-list
 
 恢复和本地模式的更细说明已经合并到上面的流程描述中，直接按脚本运行即可。
 
+## 🧭 常驻 CommanderWorkflowManager
+
+单次运行 `commander_agent/main.py` 只推进一个工作流。需要同时管理多套 BPEL 时，可以启动常驻 Manager：
+
+```bash
+cd /home/yl/yl/jzz/A2A
+
+# 本地模拟，不依赖 Nacos
+./venv/bin/python -u commander_agent/main.py \
+  --mode local \
+  --serve-workflow-manager \
+  --manager-port 8021 \
+  --max-workflows 2
+
+# 远端模式，使用 Nacos 和真实 Agent
+./venv/bin/python -u commander_agent/main.py \
+  --mode remote \
+  --serve-workflow-manager \
+  --manager-port 8021 \
+  --max-workflows 4
+```
+
+提交两套不同 BPEL：
+
+```bash
+curl -X POST http://127.0.0.1:8021/workflows \
+  -H 'Content-Type: application/json' \
+  -d '{"workflow_id":"wf-quick","workflow":"bpel","workflow_file":"quick_strike_workflow"}'
+
+curl -X POST http://127.0.0.1:8021/workflows \
+  -H 'Content-Type: application/json' \
+  -d '{"workflow_id":"wf-reinforced","workflow":"bpel","workflow_file":"reinforced_beachhead_workflow","mock_eval_score":85}'
+```
+
+查询 Manager 状态：
+
+```bash
+curl http://127.0.0.1:8021/health
+curl http://127.0.0.1:8021/workflows
+curl 'http://127.0.0.1:8021/workflows/wf-quick?checkpoint=true'
+curl http://127.0.0.1:8021/leases
+```
+
+- Workflow 线程池控制“同时推进多少套 BPEL”，超过 `--max-workflows` 的任务会处于 `queued`。
+- 每个 Workflow 内部仍按 BPEL 定义推进；同类型 Agent 并发由 activity 的 `dispatchMode="parallel"` 和 `--max-workers` 控制。
+- 每个 `workflow_id` 独立保存到 `.a2a_state/workflows/<workflow_id>.json`。
+- 远端 Agent 租约由常驻 Manager 统一管理，进程内资源锁负责防止重复领取，Nacos metadata 用于同步展示 `busy/idle` 状态。
+
+一键运行 Manager 效果演示：
+
+```bash
+./venv/bin/python -u scripts/demo_workflow_manager.py
+```
+
+该脚本不依赖 Nacos。它会先演示 Agent 租约的 `idle -> busy -> idle` 状态变化和资源锁，再启动本地 Manager HTTP 服务，提交三套 BPEL，验证并发上限、排队状态和独立 checkpoint。
+
 恢复和 failover 演示脚本：
 
 ```bash
 cd /home/yl/yl/jzz/A2A
 ./venv/bin/python scripts/demo_bpel_workflows.py
+./venv/bin/python scripts/demo_workflow_manager.py
 ./venv/bin/python scripts/demo_resume_after_restart.py --reset
 ./venv/bin/python scripts/demo_commander_failover_resume.py --reset
 ```
 
 - `demo_bpel_workflows.py` 用于展示并运行两套可选择的 BPEL。
+- `demo_workflow_manager.py` 用于展示常驻 Manager 的多 Workflow 并发、排队、租约和独立 checkpoint。
 - `demo_resume_after_restart.py` 用于演示同一个 workflow 在进程重启后继续执行。
 - `demo_commander_failover_resume.py` 用于演示主 Commander 宕机后，在新端口启动备用 Commander 并 resume。
 

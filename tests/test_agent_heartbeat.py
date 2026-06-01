@@ -106,6 +106,34 @@ class AgentHeartbeatTest(unittest.TestCase):
         self.assertIn("heartbeat_at", captured["kwargs"]["metadata"])
         self.assertEqual(captured["heartbeat_kwargs"]["heartbeat_interval"], 5.0)
 
+    def test_metadata_update_is_forwarded_to_local_heartbeat_supervisor(self):
+        registry = NacosRegistry(server_addresses="127.0.0.1:8848")
+        captured = {}
+
+        class FakeSupervisor:
+            def update_metadata(self, metadata):
+                captured["heartbeat_metadata"] = metadata
+
+            def stop(self):
+                captured["stopped"] = True
+
+        registry.client.modify_naming_instance = lambda *args, **kwargs: True
+        registry._heartbeat_supervisors["A2A-Agent#10.0.0.1#8012"] = FakeSupervisor()
+        instance = {
+            "ip": "10.0.0.1",
+            "port": 8012,
+            "metadata": {"role": "recon", "status": "idle"},
+        }
+
+        metadata = registry.update_instance_metadata(
+            "A2A-Agent",
+            instance,
+            metadata_updates={"status": "busy", "lease_workflow_id": "wf-1"},
+        )
+
+        self.assertEqual(metadata["status"], "busy")
+        self.assertEqual(captured["heartbeat_metadata"]["lease_workflow_id"], "wf-1")
+
 
 if __name__ == "__main__":
     unittest.main()

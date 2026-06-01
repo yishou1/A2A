@@ -13,6 +13,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from registry.nacos_manager import NacosRegistry
 from a2a_protocol.client import A2AClient
 from bpel_workflow import BPELActivatity, BPELWorkflowCatalog
+from commander_agent.agent_leases import AgentLeaseManager
 from local_runtime import LocalAgentRuntime
 from workflow_state_store import WorkflowStateStore, new_workflow_id, utc_now_iso
 from workflow_payloads import attachment_snapshot, merge_attachments, normalize_attachments
@@ -48,6 +49,8 @@ class CommanderAgent:
         mock_eval_score: int = None,
         mock_decision: str = None,
         max_workers: int = 4,
+        registry=None,
+        lease_manager=None,
     ):
         load_env_file()
         self.mode = (mode or os.environ.get("A2A_COMMANDER_MODE", "remote")).lower()
@@ -69,7 +72,10 @@ class CommanderAgent:
             state_dir or os.environ.get("A2A_STATE_DIR", default_state_dir)
         )
         self.resume = resume
-        self.registry = None if self.mode == "local" else NacosRegistry()
+        self.registry = None if self.mode == "local" else (registry or NacosRegistry())
+        self.lease_manager = lease_manager
+        if self.mode == "remote" and self.lease_manager is None:
+            self.lease_manager = AgentLeaseManager(self.registry)
         self.local_runtime = LocalAgentRuntime() if self.mode == "local" else None
         self.mock_eval_score = mock_eval_score
         self.mock_decision = mock_decision
@@ -94,7 +100,10 @@ class CommanderAgent:
         if self.mode == "local":
             return self.delegate_local_task(role_needed, task_payload, stream=stream)
         
-        # 1. Nacos Service Discovery
+        if self.lease_manager:
+            return self._delegate_task_with_lease(role_needed, task_payload, stream=stream)
+
+        # Compatibility path for registries without lease support.
         instances = self.registry.discover_service("A2A-Agent", {"role": role_needed, "status": "idle"})
         if not instances:
             print(f"[ERROR] No available agents found for role {role_needed}. Replanning needed!")
@@ -123,6 +132,9 @@ class CommanderAgent:
         print(f"\n--- PARALLEL STEP: Resolving all units for role: {role_needed} ---")
         if self.mode == "local":
             return self.delegate_local_task(role_needed, task_payload, stream=stream)
+
+        if self.lease_manager:
+            return self._delegate_parallel_task_with_lease(role_needed, task_payload, stream=stream)
 
         instances = self.registry.discover_service("A2A-Agent", {"role": role_needed, "status": "idle"})
         if not instances:
@@ -155,6 +167,95 @@ class CommanderAgent:
         success_count = sum(results)
         print(f"[PARALLEL] Completed {success_count}/{len(instances)} {role_needed} assignment(s).")
         return bool(results) and all(results)
+
+    def _delegate_task_with_lease(self, role_needed: str, task_payload: dict, stream: bool = False):
+        work_item = task_payload.get("work_item", f"{self.workflow_id}:{role_needed}")
+        attempted_keys = set()
+        last_error = None
+        while True:
+            lease = self.lease_manager.acquire_one(
+                role_needed,
+                self.workflow_id,
+                work_item,
+                exclude_keys=attempted_keys,
+            )
+            if lease is None:
+                if last_error is None:
+                    print(f"[ERROR] No available agents found for role {role_needed}. Replanning needed!")
+                else:
+                    print(f"[ERROR] A2A communication failed after trying {len(attempted_keys)} candidates: {last_error}")
+                return False
+
+            target = lease.target
+            attempted_keys.add(lease.instance_key)
+            label = self._candidate_label(target)
+            print(f"[LEASE] {self.workflow_id} acquired {role_needed} at {label}")
+            try:
+                success, error = self._delegate_remote_candidate(
+                    role_needed,
+                    target,
+                    task_payload,
+                    stream=stream,
+                )
+            finally:
+                self._release_agent_lease(lease)
+
+            if success:
+                return True
+            last_error = error
+            print(f"[WARN] Candidate {label} failed: {error}")
+
+    def _delegate_parallel_task_with_lease(self, role_needed: str, task_payload: dict, stream: bool = False):
+        work_item = task_payload.get("work_item", f"{self.workflow_id}:{role_needed}")
+        leases = self.lease_manager.acquire_all(role_needed, self.workflow_id, work_item)
+        if not leases:
+            print(f"[ERROR] No available agents found for parallel role {role_needed}.")
+            return False
+
+        print(f"[PARALLEL] Dispatching {len(leases)} leased {role_needed} instance(s).")
+        with ThreadPoolExecutor(
+            max_workers=min(self.max_workers, len(leases)),
+            thread_name_prefix=f"a2a-{role_needed}",
+        ) as executor:
+            futures = {
+                executor.submit(
+                    self._delegate_leased_candidate,
+                    lease,
+                    role_needed,
+                    task_payload,
+                    stream,
+                ): lease.target
+                for lease in leases
+            }
+            results = []
+            for future in as_completed(futures):
+                target = futures[future]
+                success, error = future.result()
+                results.append(success)
+                if not success:
+                    print(f"[WARN] Parallel candidate {self._candidate_label(target)} failed: {error}")
+
+        success_count = sum(results)
+        print(f"[PARALLEL] Completed {success_count}/{len(leases)} leased {role_needed} assignment(s).")
+        return bool(results) and all(results)
+
+    def _delegate_leased_candidate(self, lease, role_needed: str, task_payload: dict, stream: bool = False):
+        try:
+            return self._delegate_remote_candidate(
+                role_needed,
+                lease.target,
+                task_payload,
+                stream=stream,
+            )
+        finally:
+            self._release_agent_lease(lease)
+
+    def _release_agent_lease(self, lease):
+        try:
+            self.lease_manager.release(lease)
+            print(f"[LEASE] Released {lease.role} at {lease.instance_key}")
+        except Exception as exc:
+            print(f"[WARN] Failed to mirror lease release for {lease.instance_key}: {exc}")
 
     @staticmethod
     def _candidate_label(target: dict):
@@ -1056,6 +1157,11 @@ def parse_args():
         help="Start the workflow recovery HTTP API instead of executing a workflow immediately.",
     )
     parser.add_argument(
+        "--serve-workflow-manager",
+        action="store_true",
+        help="Start the resident multi-workflow manager HTTP API.",
+    )
+    parser.add_argument(
         "--recovery-host",
         default="127.0.0.1",
         help="Host used by the recovery HTTP API.",
@@ -1065,6 +1171,23 @@ def parse_args():
         type=int,
         default=8020,
         help="Port used by the recovery HTTP API.",
+    )
+    parser.add_argument(
+        "--manager-host",
+        default="127.0.0.1",
+        help="Host used by the resident workflow manager HTTP API.",
+    )
+    parser.add_argument(
+        "--manager-port",
+        type=int,
+        default=8021,
+        help="Port used by the resident workflow manager HTTP API.",
+    )
+    parser.add_argument(
+        "--max-workflows",
+        type=int,
+        default=4,
+        help="Maximum number of workflows executed concurrently by the resident manager.",
     )
     parser.add_argument("--max-steps", type=int, default=10)
     parser.add_argument(
@@ -1110,6 +1233,19 @@ if __name__ == "__main__":
             default_state_dir=args.state_dir,
         )
         uvicorn.run(app, host=args.recovery_host, port=args.recovery_port)
+        raise SystemExit(0)
+
+    if args.serve_workflow_manager:
+        import uvicorn
+
+        from commander_agent.manager_api import build_workflow_manager_app
+
+        app = build_workflow_manager_app(
+            mode=args.mode,
+            state_dir=args.state_dir,
+            max_workflows=args.max_workflows,
+        )
+        uvicorn.run(app, host=args.manager_host, port=args.manager_port)
         raise SystemExit(0)
 
     cmd = CommanderAgent(
