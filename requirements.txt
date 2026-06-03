@@ -1,6 +1,11 @@
-fastapi
+fastapi>=0.110.0,<0.116.0
+starlette>=0.46.2,<0.47.0
 uvicorn
-pydantic
+pydantic>=2.10.6
 requests
 nacos-sdk-python<2.0.0
 sseclient-py
+python-dotenv
+click
+httpx
+pytest

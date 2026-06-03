@@ -1,0 +1,102 @@
+{
+  "request_id": "decision-planning-demo-001",
+  "agent_profile": {
+    "compute_budget": "small",
+    "risk_policy": "balanced"
+  },
+  "tracks": [
+    {
+      "id": "TRK-TGT-A",
+      "source_observations": [
+        "OBS-001",
+        "OBS-002"
+      ],
+      "object_type": "surface_contact",
+      "speed": 2.828,
+      "heading": 45.0,
+      "trend": "slow movement toward northeast",
+      "confidence": 0.84
+    },
+    {
+      "id": "TRK-TGT-B",
+      "source_observations": [
+        "OBS-003",
+        "OBS-004"
+      ],
+      "object_type": "air_track",
+      "speed": 10.817,
+      "heading": 33.7,
+      "trend": "fast movement toward northeast",
+      "confidence": 0.895
+    }
+  ],
+  "risk_assessments": [
+    {
+      "track_id": "TRK-TGT-B",
+      "priority": 1,
+      "risk": "high",
+      "threat_score": 71.09,
+      "probability": 0.853,
+      "rationale": "fast air track inside monitored radius",
+      "triggered_rules": [
+        "type_watch:air_track",
+        "high_speed",
+        "inside_monitored_radius"
+      ]
+    },
+    {
+      "track_id": "TRK-TGT-A",
+      "priority": 2,
+      "risk": "low",
+      "threat_score": 33.37,
+      "probability": 0.2,
+      "rationale": "slow surface contact",
+      "triggered_rules": []
+    }
+  ],
+  "scheduled_tasks": [
+    {
+      "id": "TASK-001",
+      "target_id": "TRK-TGT-B",
+      "priority": 1,
+      "task_type": "monitor",
+      "required_resource_types": [
+        "sensor"
+      ]
+    },
+    {
+      "id": "TASK-002",
+      "target_id": "TRK-TGT-A",
+      "priority": 2,
+      "task_type": "watch",
+      "required_resource_types": [
+        "sensor"
+      ]
+    }
+  ],
+  "resources": [
+    {
+      "id": "RES-001",
+      "type": "sensor",
+      "status": "available",
+      "capacity": 1.0
+    },
+    {
+      "id": "RES-002",
+      "type": "sensor",
+      "status": "available",
+      "capacity": 1.0
+    },
+    {
+      "id": "RES-003",
+      "type": "relay",
+      "status": "busy",
+      "capacity": 0.5
+    }
+  ],
+  "constraints": [
+    "simulation-only",
+    "decision-support outputs only",
+    "compliance check required before downstream handoff"
+  ]
+}

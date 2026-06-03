@@ -77,6 +77,7 @@ class CommanderAgent:
         if self.mode == "remote" and self.lease_manager is None:
             self.lease_manager = AgentLeaseManager(self.registry)
         self.local_runtime = LocalAgentRuntime() if self.mode == "local" else None
+        self._last_agent_responses = {}
         self.mock_eval_score = mock_eval_score
         self.mock_decision = mock_decision
         self.api_key = os.environ.get("OPENAI_API_KEY", "")
@@ -284,6 +285,7 @@ class CommanderAgent:
                 return True, None
 
             res = client.send_message(task_payload)
+            self._record_agent_response(role_needed, res)
             print(f"[SEND] {label} Task Response: {res}")
             return True, None
         except Exception as exc:
@@ -292,6 +294,7 @@ class CommanderAgent:
     def delegate_local_task(self, role_needed: str, task_payload: dict, stream: bool = False):
         try:
             response, events = self.local_runtime.execute(role_needed, task_payload, stream=stream)
+            self._record_agent_response(role_needed, response)
             card = response.get("agent_card", {})
             print(f"[LOCAL DISCOVERY] Using local Agent Card from '{card.get('name')}'")
             print(f"[LOCAL AUTH] Obtained local token: {response.get('token')}")
@@ -306,6 +309,11 @@ class CommanderAgent:
         except Exception as e:
             print(f"[ERROR] Local task execution failed: {e}")
             return False
+
+    def _record_agent_response(self, role: str, response: dict):
+        if isinstance(response, dict):
+            with self._checkpoint_lock:
+                self._last_agent_responses[role] = deepcopy(response)
 
     def ask_llm(self, battle_log: list):
         log_str = "\n".join(battle_log)
@@ -380,6 +388,19 @@ class CommanderAgent:
             "commander_decision": None,
             "assault_result": None,
             "replan_result": None,
+            "observations": [],
+            "tracks": [],
+            "risk_assessments": [],
+            "scheduled_tasks": [],
+            "resources": [],
+            "candidate_plans": [],
+            "constraints": [],
+            "authorization": {},
+            "track_threat_result": None,
+            "decision_planning_result": None,
+            "compliance_authorization_result": None,
+            "compliance_decision": None,
+            "agent_outputs": {},
             "battle_log": [],
             "completed_roles": [],
             "attachments": [],
@@ -419,6 +440,15 @@ class CommanderAgent:
         normalized["completed_roles"] = list(normalized.get("completed_roles", []))
         normalized["attachments"] = normalize_attachments(normalized.get("attachments", []))
         normalized["work_list"] = list(normalized.get("work_list", []))
+        normalized["observations"] = list(normalized.get("observations", []))
+        normalized["tracks"] = list(normalized.get("tracks", []))
+        normalized["risk_assessments"] = list(normalized.get("risk_assessments", []))
+        normalized["scheduled_tasks"] = list(normalized.get("scheduled_tasks", []))
+        normalized["resources"] = list(normalized.get("resources", []))
+        normalized["candidate_plans"] = list(normalized.get("candidate_plans", []))
+        normalized["constraints"] = list(normalized.get("constraints", []))
+        normalized["authorization"] = dict(normalized.get("authorization", {}) or {})
+        normalized["agent_outputs"] = dict(normalized.get("agent_outputs", {}) or {})
         if self.bpel_definition:
             existing_items = {
                 item.get("activatity_id"): item
@@ -548,6 +578,21 @@ class CommanderAgent:
             "commander_decision": context.get("commander_decision"),
             "assault_result": context.get("assault_result"),
             "replan_result": context.get("replan_result"),
+            "observations": deepcopy(context.get("observations", [])),
+            "tracks": deepcopy(context.get("tracks", [])),
+            "risk_assessments": deepcopy(context.get("risk_assessments", [])),
+            "scheduled_tasks": deepcopy(context.get("scheduled_tasks", [])),
+            "resources": deepcopy(context.get("resources", [])),
+            "candidate_plans": deepcopy(context.get("candidate_plans", [])),
+            "constraints": deepcopy(context.get("constraints", [])),
+            "authorization": deepcopy(context.get("authorization", {})),
+            "track_threat_result": deepcopy(context.get("track_threat_result")),
+            "decision_planning_result": deepcopy(context.get("decision_planning_result")),
+            "compliance_authorization_result": deepcopy(
+                context.get("compliance_authorization_result")
+            ),
+            "compliance_decision": context.get("compliance_decision"),
+            "agent_outputs": deepcopy(context.get("agent_outputs", {})),
             "completed_roles": list(context.get("completed_roles", [])),
             "battle_log": list(context.get("battle_log", [])),
             "last_work_item": context.get("last_work_item"),
@@ -663,9 +708,59 @@ class CommanderAgent:
         elif role == "assault":
             context["assault_result"] = "Assault unit captured the beachhead."
             context["battle_log"].append(f"[Assault Report] {context['assault_result']}")
+        elif role in {
+            "track_threat",
+            "decision_planning",
+            "compliance_authorization",
+        }:
+            self._apply_decision_agent_result(role, context)
 
         if role not in context["completed_roles"]:
             context["completed_roles"].append(role)
+
+    def _apply_decision_agent_result(self, role: str, context: dict):
+        raw_response = deepcopy(self._last_agent_responses.get(role, {}))
+        agent_response = raw_response.get("agent_response")
+        if not isinstance(agent_response, dict):
+            agent_response = {
+                "status": raw_response.get("status"),
+                "agent": raw_response.get("agent"),
+                "selected_algorithms": raw_response.get("selected_algorithms", []),
+                "result": raw_response.get("result", {}),
+                "rag_evidence": raw_response.get("rag_evidence", []),
+                "summary": raw_response.get("message", ""),
+                "warnings": raw_response.get("warnings", []),
+            }
+        result = agent_response.get("result") if isinstance(agent_response, dict) else {}
+        if not isinstance(result, dict):
+            result = {}
+
+        context.setdefault("agent_outputs", {})[role] = agent_response
+        summary = agent_response.get("summary") or raw_response.get("message") or "completed"
+
+        if role == "track_threat":
+            context["track_threat_result"] = result
+            context["tracks"] = result.get("tracks", context.get("tracks", []))
+            context["risk_assessments"] = result.get(
+                "risk_assessments",
+                context.get("risk_assessments", []),
+            )
+            context["battle_log"].append(f"[Track Threat Report] {summary}")
+            return
+
+        if role == "decision_planning":
+            context["decision_planning_result"] = result
+            context["candidate_plans"] = result.get(
+                "candidate_plans",
+                context.get("candidate_plans", []),
+            )
+            context["battle_log"].append(f"[Decision Planning Report] {summary}")
+            return
+
+        if role == "compliance_authorization":
+            context["compliance_authorization_result"] = result
+            context["compliance_decision"] = result.get("decision")
+            context["battle_log"].append(f"[Compliance Authorization Report] {summary}")
 
     def rule_next_step(self, context: dict):
         """Fast state-machine planner. Returns an action dict or None when rules are unsure."""
@@ -808,6 +903,17 @@ class CommanderAgent:
             "EvalScore": "eval_score",
             "CommanderDecision": "commander_decision",
             "Sector_A": "sector",
+            "Observations": "observations",
+            "Tracks": "tracks",
+            "RiskAssessments": "risk_assessments",
+            "ScheduledTasks": "scheduled_tasks",
+            "Resources": "resources",
+            "CandidatePlans": "candidate_plans",
+            "Constraints": "constraints",
+            "Authorization": "authorization",
+            "TrackThreatResult": "track_threat_result",
+            "DecisionPlanningResult": "decision_planning_result",
+            "ComplianceAuthorizationResult": "compliance_authorization_result",
         }.get(variable_name, variable_name)
 
     def _build_bpel_task_payload(self, activatity: BPELActivatity, context: dict):

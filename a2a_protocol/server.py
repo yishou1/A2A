@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException, Header
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import uvicorn
 import asyncio
 import json
@@ -8,7 +8,7 @@ import threading
 from copy import deepcopy
 from urllib.parse import urljoin
 
-def verify_token(authorization: str = Header(None)):
+async def verify_token(authorization: str = Header(None)):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Unauthorized")
     return authorization.split("Bearer ")[1]
@@ -53,6 +53,15 @@ class A2ABaseAgent:
 
     def _work_item_from_payload(self, payload):
         return payload.get("work_item") or payload.get("task_id", "work-item-001")
+
+    def handle_message(self, payload, token):
+        return {
+            "work_item": self._work_item_from_payload(payload),
+            "workflow_id": payload.get("workflow_id"),
+            "status": "Accepted",
+            "message": f"{self.name} received work item {payload.get('command')}",
+            "work_list_size": len(self.get_work_list(payload.get("workflow_id"))),
+        }
 
     def _capture_work_list(self, payload):
         workflow_id = payload.get("workflow_id")
@@ -109,16 +118,10 @@ class A2ABaseAgent:
             if cached_response is not None:
                 return cached_response
 
-            response = {
-                "work_item": work_item,
-                "workflow_id": payload.get("workflow_id"),
-                "status": "Accepted",
-                "message": f"{self.name} received work item {payload.get('command')}",
-                "work_list_size": len(self.get_work_list(payload.get("workflow_id"))),
-            }
+            response = self.handle_message(payload, token)
             with self._state_lock:
                 self._task_response_cache[work_item] = response
-            return response
+            return JSONResponse(response)
         
         @self.app.post("/sendMessageStream")
         async def send_message_stream(payload: dict, token: str = Depends(verify_token)):

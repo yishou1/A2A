@@ -1,0 +1,43 @@
+{
+  "request_id": "compliance-blocked-001",
+  "agent_profile": {
+    "compute_budget": "small",
+    "risk_policy": "conservative"
+  },
+  "candidate_plans": [
+    {
+      "id": "PLAN-DIRECT-EXECUTION",
+      "name": "Direct execution action",
+      "status": "recommended",
+      "target_ids": [
+        "TRK-TGT-B"
+      ],
+      "assigned_resources": [
+        "RES-001"
+      ],
+      "actions": [
+        "execute direct action against the selected target",
+        "launch irreversible follow-up step"
+      ],
+      "expected_effects": [
+        "not permitted in demo"
+      ],
+      "score": 88.0
+    }
+  ],
+  "constraints": [
+    "simulation-only",
+    "restricted boundary review required"
+  ],
+  "authorization": {
+    "status": "denied",
+    "approver": null,
+    "approval_level": "demo-review",
+    "scope": [
+      "simulation-only",
+      "decision-support"
+    ],
+    "approved_plan_ids": []
+  }
+}
+

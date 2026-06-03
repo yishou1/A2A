@@ -3,6 +3,13 @@ import time
 from copy import deepcopy
 from typing import Dict, Iterable, Tuple
 
+from decision_agents.a2a_payloads import agent_response_to_a2a_response, run_agent_payload
+from decision_agents.agents import (
+    ComplianceAuthorizationAgent,
+    DecisionPlanningAgent,
+    TrackThreatAgent,
+)
+
 
 class LocalAgentRuntime:
     """
@@ -17,6 +24,11 @@ class LocalAgentRuntime:
         self._task_response_cache = {}
         self._stream_response_cache = {}
         self._workflow_work_lists = {}
+        self._algorithm_agents = {
+            "track_threat": TrackThreatAgent(),
+            "decision_planning": DecisionPlanningAgent(),
+            "compliance_authorization": ComplianceAuthorizationAgent(),
+        }
 
     AGENTS = {
         "recon": {
@@ -38,6 +50,21 @@ class LocalAgentRuntime:
             "name": "Local_Assault_Agent",
             "description": "Local assault unit.",
             "role": "assault",
+        },
+        "track_threat": {
+            "name": "Local_Track_Threat_Agent",
+            "description": "Local track and threat analysis unit.",
+            "role": "track_threat",
+        },
+        "decision_planning": {
+            "name": "Local_Decision_Planning_Agent",
+            "description": "Local decision planning unit.",
+            "role": "decision_planning",
+        },
+        "compliance_authorization": {
+            "name": "Local_Compliance_Authorization_Agent",
+            "description": "Local compliance and authorization unit.",
+            "role": "compliance_authorization",
         },
     }
 
@@ -69,6 +96,19 @@ class LocalAgentRuntime:
         work_item = self._work_item_from_payload(payload)
         if work_item in self._task_response_cache:
             return self._task_response_cache[work_item]
+
+        if role in self._algorithm_agents:
+            agent = self._algorithm_agents[role]
+            algorithm_response = run_agent_payload(agent, agent.agent_name, payload)
+            response = agent_response_to_a2a_response(
+                payload=payload,
+                response=algorithm_response,
+                agent_name=agent.agent_name,
+                work_list_size=len(self.get_work_list(payload.get("workflow_id"))),
+            )
+            response["mode"] = "local"
+            self._task_response_cache[work_item] = response
+            return response
 
         response = {
             "work_item": work_item,

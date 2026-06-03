@@ -4,7 +4,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from fastapi.testclient import TestClient
+import anyio
+import httpx
 
 from attachment_uploader import upload_attachment_file
 from a2a_protocol.server import A2ABaseAgent
@@ -168,30 +169,39 @@ class WorkflowResumeTest(unittest.TestCase):
             )
 
             app = build_recovery_app(default_mode="local", default_state_dir=temp_dir)
-            client = TestClient(app)
-            response = client.post(
-                f"/workflows/{workflow_id}/resume",
-                json={
-                    "mode": "local",
-                    "workflow": "dynamic",
-                    "state_dir": temp_dir,
-                    "max_steps": 1,
-                    "resume": True,
-                    "strict": True,
-                    "mock_eval_score": 75,
-                    "attachments": [
-                        {
-                            "uri": "s3://a2a-media/beachhead/recon-01.jpg",
-                            "checksum": {"algorithm": "sha256", "value": "abc123"},
-                            "kind": "image",
-                            "mime_type": "image/jpeg",
-                            "size_bytes": 4096,
-                            "width": 1920,
-                            "height": 1080,
-                        }
-                    ],
-                },
-            )
+            request_payload = {
+                "mode": "local",
+                "workflow": "dynamic",
+                "state_dir": temp_dir,
+                "max_steps": 1,
+                "resume": True,
+                "strict": True,
+                "mock_eval_score": 75,
+                "attachments": [
+                    {
+                        "uri": "s3://a2a-media/beachhead/recon-01.jpg",
+                        "checksum": {"algorithm": "sha256", "value": "abc123"},
+                        "kind": "image",
+                        "mime_type": "image/jpeg",
+                        "size_bytes": 4096,
+                        "width": 1920,
+                        "height": 1080,
+                    }
+                ],
+            }
+
+            async def call_app():
+                transport = httpx.ASGITransport(app=app)
+                async with httpx.AsyncClient(
+                    transport=transport,
+                    base_url="http://testserver",
+                ) as client:
+                    return await client.post(
+                        f"/workflows/{workflow_id}/resume",
+                        json=request_payload,
+                    )
+
+            response = anyio.run(call_app)
 
             self.assertEqual(response.status_code, 200)
             payload = response.json()
@@ -208,7 +218,6 @@ class WorkflowResumeTest(unittest.TestCase):
             role="recon",
             port=9999,
         )
-        client = TestClient(agent.app)
         payload = {
             "workflow_id": "wf-work-list",
             "work_item": "wf-work-list:activatity-001-recon",
@@ -222,18 +231,29 @@ class WorkflowResumeTest(unittest.TestCase):
             ],
         }
 
-        response = client.post(
-            "/sendMessage",
-            json=payload,
-            headers={"Authorization": "Bearer test-token"},
-        )
+        async def call_app():
+            transport = httpx.ASGITransport(app=agent.app)
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url="http://testserver",
+            ) as client:
+                send_response = await client.post(
+                    "/sendMessage",
+                    json=payload,
+                    headers={"Authorization": "Bearer test-token"},
+                )
+                work_list_response = await client.get(
+                    "/workflows/wf-work-list/work-list"
+                )
+                return send_response, work_list_response
+
+        response, work_list_response = anyio.run(call_app)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["work_item"], payload["work_item"])
         self.assertEqual(response.json()["work_list_size"], 1)
 
-        response = client.get("/workflows/wf-work-list/work-list")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["work_list"], payload["work_list"])
+        self.assertEqual(work_list_response.status_code, 200)
+        self.assertEqual(work_list_response.json()["work_list"], payload["work_list"])
 
     def test_legacy_checkpoint_fields_are_migrated(self):
         with tempfile.TemporaryDirectory() as temp_dir:

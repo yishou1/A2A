@@ -80,6 +80,10 @@ A2A/
 ├── artillery_agent/         # 火力打击 Agent
 ├── assault_agent/           # 登陆突击 Agent
 ├── evaluator_agent/         # 战果评估 & 策略重算 Agent
+├── decision_agents/         # Project 613 三类算法库与 A2A 适配
+├── track_threat_agent/      # 航迹/威胁排序 Agent
+├── decision_planning_agent/ # 方案规划与决策 Agent
+├── compliance_authorization_agent/ # 规则/法律/授权约束 Agent
 ├── registry/                # Nacos 相关配置与客户端封装
 ├── scripts/                 # 恢复 / failover 演示脚本
 ├── tests/                   # 回归测试
@@ -144,6 +148,12 @@ cd /home/yl/yl/jzz/A2A
   --mode local \
   --workflow bpel \
   --workflow-file quick_strike_workflow
+
+# Project 613 三类算法方案：航迹威胁 -> 方案规划 -> 合规授权
+./venv/bin/python -u commander_agent/main.py \
+  --mode local \
+  --workflow bpel \
+  --workflow-file decision_support_workflow
 ```
 
 Agent 收到任务后可以查看当前 workflow 的任务列表快照：
@@ -273,4 +283,10 @@ cd /home/yl/yl/jzz/A2A
 
 ```bash
 ./timing_probe.py --roles recon,artillery,evaluator,assault --iterations 5 --json
+```
+
+三类算法 Agent 的 A2A 层耗时可以单独测：
+
+```bash
+./scripts/decision_agents_timing_probe.py --mode local --json
 ```

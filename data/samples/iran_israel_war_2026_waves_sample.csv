@@ -1,0 +1,6 @@
+wave_uid,operation,wave_number,announced_utc,payload,drones_used,ballistic_missiles_used,cruise_missiles_used,bm_hypersonic,fattah_used,cluster_munitions,cluster_warhead_confirmed,us_bases_targeted,israel_targeted,targeted_tel_aviv,targeted_jerusalem,targeted_haifa,targeted_negev_beersheba,wave_duration_minutes,targets,relevance
+tp4_w01,tp4,1,2026-02-28T21:00:00Z,mixed BM and drones,true,true,false,false,false,false,false,false,true,true,false,false,false,42,"Tel Aviv metro and air defense sites",3
+tp4_w02,tp4,2,2026-03-01T04:20:00Z,ballistic only,false,true,false,true,true,true,true,false,true,false,false,true,false,68,"Haifa port and northern air defense sites",4
+tp4_w03,tp4,3,2026-03-01T20:10:00Z,drones only,true,false,false,false,false,false,false,false,true,false,false,false,true,95,"Negev and Beersheba approaches",2
+tp4_w04,tp4,4,2026-03-02T02:30:00Z,cruise missiles and drones,true,false,true,false,false,false,false,true,false,false,false,false,false,30,"US base in the region",
+tp4_w05,tp4,5,2026-03-03T00:15:00Z,limited drones,true,false,false,false,false,false,false,false,true,false,false,false,false,15,"Open desert intercept area",1
