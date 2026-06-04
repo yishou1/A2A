@@ -505,6 +505,7 @@ class CommanderAgent:
             "eval_score": None,
             "commander_decision": None,
             "assault_result": None,
+            "closed_loop_result": None,
             "replan_result": None,
             "battle_log": [],
             "completed_roles": [],
@@ -696,6 +697,7 @@ class CommanderAgent:
             "eval_score": context.get("eval_score"),
             "commander_decision": context.get("commander_decision"),
             "assault_result": context.get("assault_result"),
+            "closed_loop_result": context.get("closed_loop_result"),
             "replan_result": context.get("replan_result"),
             "completed_roles": list(context.get("completed_roles", [])),
             "battle_log": list(context.get("battle_log", [])),
@@ -794,6 +796,43 @@ class CommanderAgent:
                 "output_hint": "assault_result",
             }, False
 
+        if role == "closed_loop":
+            dataset_paths = {}
+            xbd_damage_csv = os.environ.get("CLOSED_LOOP_XBD_DAMAGE_CSV")
+            sc2le_task_csv = os.environ.get("CLOSED_LOOP_SC2LE_TASK_CSV")
+            if xbd_damage_csv:
+                dataset_paths["xbd_damage_csv"] = xbd_damage_csv
+            if sc2le_task_csv:
+                dataset_paths["sc2le_task_csv"] = sc2le_task_csv
+
+            input_data = {
+                "target_count": int(os.environ.get("CLOSED_LOOP_TARGET_COUNT", "50")),
+                "cycles": int(os.environ.get("CLOSED_LOOP_CYCLES", "3")),
+                "results": {
+                    "recon": {"output_data": {"report": context.get("recon_report")}},
+                    "artillery": {"output_data": {"result": context.get("strike_result")}},
+                    "evaluator": {"output_data": {"eval_score": context.get("eval_score")}},
+                    "assault": {"output_data": {"result": context.get("assault_result")}},
+                },
+            }
+            if dataset_paths:
+                input_data["dataset_paths"] = dataset_paths
+
+            return {
+                "workflow_id": self.workflow_id,
+                "workflow": self.workflow,
+                "workflow_mode": self.mode,
+                "task_id": task_id,
+                "parent_task_id": context.get("last_task_id"),
+                "step_index": step_index,
+                "step_role": role,
+                "command": "closed_loop_optimization",
+                "input": input_data,
+                "context": context_snapshot,
+                "attachments": attachment_snapshot(context.get("attachments", [])),
+                "output_hint": "closed_loop_result",
+            }, False
+
         raise ValueError(f"Unsupported role: {role}")
 
     @staticmethod
@@ -857,6 +896,28 @@ class CommanderAgent:
                 output_value = "Assault unit captured the beachhead."
             context[target_key] = output_value
             context["battle_log"].append(f"[Assault Report] {context[target_key]}")
+        elif role == "closed_loop":
+            target_key = output_key or "closed_loop_result"
+            output_value = output.get(target_key)
+            if output_value is None:
+                output_value = self._first_output_value(output)
+            if output_value is None:
+                output_value = {
+                    "status": "completed",
+                    "message": "Closed-loop optimization completed, but no structured result was returned.",
+                }
+            context[target_key] = output_value
+            result_payload = output_value if isinstance(output_value, dict) else {}
+            output_data = result_payload.get("output_data", {}) if isinstance(result_payload, dict) else {}
+            requirement_report = output_data.get("requirement_report", {})
+            meets_requirements = output_data.get("meets_requirements")
+            processed_targets = output_data.get("execution_control", {}).get("processed_targets")
+            context["battle_log"].append(
+                "[Closed Loop Report] "
+                f"processed_targets={processed_targets}, "
+                f"meets_requirements={meets_requirements}, "
+                f"requirement_report={requirement_report}"
+            )
 
         if role not in context["completed_roles"]:
             context["completed_roles"].append(role)
@@ -889,7 +950,10 @@ class CommanderAgent:
         if "RE-PLAN" in decision or "ABORT" in decision:
             return {"type": "end", "reason": "Commander selected re-plan or abort."}
 
-        if context["assault_result"]:
+        if context["assault_result"] and not context["closed_loop_result"]:
+            return {"type": "agent", "role": "closed_loop", "reason": "Assault is done; run final effect assessment and closed-loop optimization."}
+
+        if context["assault_result"] and context["closed_loop_result"]:
             return {"type": "end", "reason": "Assault phase completed."}
 
         return None
@@ -906,7 +970,7 @@ class CommanderAgent:
             llm = self.build_llm()
             prompt = PromptTemplate.from_template(
                 "You are an A2A workflow planner. Choose the next action from this set only:\n"
-                "- recon\n- artillery\n- evaluator\n- assault\n- decision\n- end\n\n"
+                "- recon\n- artillery\n- evaluator\n- assault\n- closed_loop\n- decision\n- end\n\n"
                 "Rules:\n"
                 "1. Return only one word from the set.\n"
                 "2. Use end if the workflow should stop.\n"
@@ -918,7 +982,7 @@ class CommanderAgent:
             choice = response.content.strip().lower()
             print(f"[LLM FALLBACK] Suggested next action: {choice}")
 
-            if choice in {"recon", "artillery", "evaluator", "assault"}:
+            if choice in {"recon", "artillery", "evaluator", "assault", "closed_loop"}:
                 return {"type": "agent", "role": choice, "reason": "LLM fallback selected an agent role."}
             if choice == "decision":
                 return {"type": "decision", "reason": "LLM fallback selected commander decision."}

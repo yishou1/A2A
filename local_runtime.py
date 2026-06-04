@@ -41,6 +41,11 @@ class LocalAgentRuntime:
             "description": "Local assault unit.",
             "role": "assault",
         },
+        "closed_loop": {
+            "name": "Local_Closed_Loop_Optimization_Agent",
+            "description": "Local execution control, effect assessment and closed-loop optimization unit.",
+            "role": "closed_loop",
+        },
     }
 
     def discover(self, role: str) -> Dict[str, str]:
@@ -161,6 +166,8 @@ class LocalAgentRuntime:
             return f"Local evaluator completed command={command}"
         if role == "assault":
             return f"Local assault completed command={command}"
+        if role == "closed_loop":
+            return f"Local closed-loop optimization completed command={command}"
         return f"Local agent completed command={command}"
 
     def _output_for(self, role: str, payload: dict) -> tuple[dict, str]:
@@ -175,6 +182,14 @@ class LocalAgentRuntime:
             value = int(payload.get("input", {}).get("mock_eval_score", 40))
         elif role == "assault":
             value = "Assault unit captured the beachhead."
+        elif role == "closed_loop":
+            from closed_loop_agent.closed_loop_core import _closed_loop_optimization
+
+            arguments = payload.get("input") if isinstance(payload.get("input"), dict) else {}
+            for passthrough_key in ("targets", "results", "previous_results", "dataset_paths", "cycles", "seed", "target_count"):
+                if passthrough_key in payload and passthrough_key not in arguments:
+                    arguments[passthrough_key] = payload[passthrough_key]
+            value = _closed_loop_optimization(arguments)
         else:
             value = message
         return {output_hint: value}, message

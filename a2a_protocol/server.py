@@ -17,11 +17,12 @@ def verify_token(authorization: str = Header(None)):
     return authorization.split("Bearer ")[1]
 
 class A2ABaseAgent:
-    def __init__(self, name: str, description: str, role: str, port: int):
+    def __init__(self, name: str, description: str, role: str, port: int, skills: list = None):
         self.name = name
         self.description = description
         self.role = role
         self.port = port
+        self.skills = skills or []
         self.started_at = time.time()
         self.ready = True
         self._task_response_cache = {}
@@ -44,7 +45,7 @@ class A2ABaseAgent:
     def get_agent_card(self):
         auth_server_base = os.environ.get("A2A_AUTH_SERVER_BASE", "http://127.0.0.1:8080")
         auth_server_base = auth_server_base.rstrip("/") + "/"
-        return {
+        card = {
             "name": self.name,
             "description": self.description,
             "role": self.role,
@@ -61,6 +62,16 @@ class A2ABaseAgent:
             "healthEndpoint": "/health",
             "readyEndpoint": "/ready",
             "metricsEndpoint": "/metrics",
+        }
+        if self.skills:
+            card["skills"] = self.skills
+        return card
+
+    async def handle_message(self, payload: dict):
+        return {
+            "task_id": self._task_id_from_payload(payload),
+            "status": "Accepted",
+            "message": f"{self.name} received task {payload.get('command')}"
         }
 
     def execute_task(self, payload):

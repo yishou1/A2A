@@ -12,6 +12,7 @@ export RECON_AGENT_PORT=8012
 export ARTILLERY_AGENT_PORT=8013
 export ASSAULT_AGENT_PORT=8014
 export EVALUATOR_AGENT_PORT=8015
+export CLOSED_LOOP_AGENT_PORT=8016
 
 echo "Starting Recon Agent..."
 $PYTHON_EXEC /home/yl/yl/jzz/A2A/recon_agent/main.py &
@@ -27,6 +28,10 @@ sleep 2
 
 echo "Starting Evaluator Agent..."
 $PYTHON_EXEC /home/yl/yl/jzz/A2A/evaluator_agent/main.py &
+sleep 2
+
+echo "Starting Closed Loop Optimization Agent..."
+$PYTHON_EXEC /home/yl/yl/jzz/A2A/closed_loop_agent/main.py &
 sleep 2
 
 echo "Starting Commander Agent..."
