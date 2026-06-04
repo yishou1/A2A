@@ -80,6 +80,7 @@ A2A/
 ├── artillery_agent/         # 火力打击 Agent
 ├── assault_agent/           # 登陆突击 Agent
 ├── evaluator_agent/         # 战果评估 & 策略重算 Agent
+├── track_threat_agent/      # 下游态势分析 Agent：航迹预测、编组识别、保护资产影响和关注排序
 ├── registry/                # Nacos 相关配置与客户端封装
 ├── scripts/                 # 恢复 / failover 演示脚本
 ├── tests/                   # 回归测试
@@ -92,6 +93,10 @@ A2A/
 ├── timing_probe.py          # 阶段耗时测试工具
 └── docker-compose.yml       # 环境部署文件
 ```
+
+### Track Threat Agent
+
+`track_threat_agent/` 是新增的近真实下游态势分析 Agent Demo，推荐注册为 `SERVICE_NAME=A2A-Agent`、`role=track_threat`。它支持 `/.well-known/agent-card`、`/sendMessage`、`/sendMessageStream`、`/workflows/{workflow_id}/work-list` 和 `/health`，可接收上游 `perception_result`，输出航迹、预测航线、疑似编队/编组、保护资产影响和统一关注排序。当前算法以内置 Demo 实现为主，预留 `AlgorithmProvider` 方便后续接入公共算法库或训练版 GNN/ST-GNN。详细说明见 `track_threat_agent/README.md`。
 
 ## 🔄 工作流恢复与接管
 
