@@ -1,0 +1,37 @@
+# 战术情报智能体配置 — 真实神经网络推理（use_mock: false）
+use_mock: false
+
+inference:
+  device: auto
+  # 预训练骨干
+  detection_model: rtdetr-l.pt
+  mask2former_model: facebook/mask2former-swin-tiny-ade-semantic
+  semantic_comm_model: google/flan-t5-small
+  page_index_model: paraphrase-MiniLM-L6-v2
+  embed_dim: 1024
+  # 门限与跟踪
+  confidence_threshold: 0.25
+  edl_min_confidence: 0.35
+  edl_max_epistemic: 0.45
+  motr_iou_threshold: 0.3
+  mask2former_gain: 4.0
+  supcon_temperature: 0.07
+  base_lat: 30.512
+  base_lon: 114.381
+  rag_top_k: 3
+  llm_model: gpt-4o-mini
+
+skills:
+  perception:
+    rt_detr_odconv: {}
+    siamese_mask2former: {}
+    edl: {}
+    motr_neural_kalman: {}
+  cognition:
+    imagebind: {}
+    multimodal_mamba: {}
+    supcon_meta: {}
+    synapse_rag: {}
+  communication:
+    knowledge_semantic_comm: {}
+    marl_dynamic_router: {}
