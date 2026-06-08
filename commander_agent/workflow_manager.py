@@ -58,6 +58,9 @@ class CommanderWorkflowManager:
         resume: bool = False,
         max_steps: int = 10,
         max_workers: int = 4,
+        max_retries: int = 1,
+        retry_backoff: float = 0.2,
+        request_timeout: float = 5.0,
         mock_eval_score: Optional[int] = None,
         mock_decision: Optional[str] = None,
         attachments: Optional[list[dict]] = None,
@@ -96,6 +99,9 @@ class CommanderWorkflowManager:
                 resume,
                 max_steps,
                 max_workers,
+                max_retries,
+                retry_backoff,
+                request_timeout,
                 mock_eval_score,
                 mock_decision,
                 normalize_attachments(attachments or []),
@@ -143,6 +149,24 @@ class CommanderWorkflowManager:
             return []
         return self.lease_manager.list_leases()
 
+    def list_agents(self) -> list[dict]:
+        if self.registry is None:
+            return []
+        return self.registry.discover_service("A2A-Agent")
+
+    def get_checkpoint(self, workflow_id: str) -> dict:
+        if not self.state_store.exists(workflow_id):
+            raise KeyError(f"Workflow checkpoint not found: {workflow_id}")
+        return self.state_store.load(workflow_id)
+
+    def get_work_list(self, workflow_id: str) -> list[dict]:
+        checkpoint = self.get_checkpoint(workflow_id)
+        return checkpoint.get("context", {}).get("work_list", [])
+
+    def get_trace(self, workflow_id: str) -> list[dict]:
+        checkpoint = self.get_checkpoint(workflow_id)
+        return checkpoint.get("context", {}).get("trace", [])
+
     def wait_for_workflow(self, workflow_id: str, timeout: Optional[float] = None) -> dict:
         with self._lock:
             job = self._jobs.get(workflow_id)
@@ -169,6 +193,9 @@ class CommanderWorkflowManager:
         resume: bool,
         max_steps: int,
         max_workers: int,
+        max_retries: int,
+        retry_backoff: float,
+        request_timeout: float,
         mock_eval_score: Optional[int],
         mock_decision: Optional[str],
         attachments: list[dict],
@@ -185,6 +212,9 @@ class CommanderWorkflowManager:
                 mock_eval_score=mock_eval_score,
                 mock_decision=mock_decision,
                 max_workers=max_workers,
+                max_retries=max_retries,
+                retry_backoff=retry_backoff,
+                request_timeout=request_timeout,
                 registry=self.registry,
                 lease_manager=self.lease_manager,
             )
@@ -198,6 +228,9 @@ class CommanderWorkflowManager:
                 workflow_id,
                 status=context.get("workflow_status", "completed"),
                 finished_at=utc_now_iso(),
+                current_activity=context.get("current_activity") or context.get("current_activatity"),
+                last_error=context.get("last_error"),
+                trace_count=len(context.get("trace", [])),
             )
         except Exception as exc:
             self._update_job(

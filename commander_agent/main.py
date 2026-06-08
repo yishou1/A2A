@@ -12,9 +12,11 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from registry.nacos_manager import NacosRegistry
 from a2a_protocol.client import A2AClient
+from a2a_protocol.messages import build_task_response
 from bpel_workflow import BPELActivatity, BPELWorkflowCatalog
 from commander_agent.agent_leases import AgentLeaseManager
 from local_runtime import LocalAgentRuntime
+from observability import append_trace, log_event
 from workflow_state_store import WorkflowStateStore, new_workflow_id, utc_now_iso
 from workflow_payloads import attachment_snapshot, merge_attachments, normalize_attachments
 import json
@@ -49,6 +51,9 @@ class CommanderAgent:
         mock_eval_score: int = None,
         mock_decision: str = None,
         max_workers: int = 4,
+        max_retries: int = None,
+        retry_backoff: float = None,
+        request_timeout: float = None,
         registry=None,
         lease_manager=None,
     ):
@@ -61,7 +66,11 @@ class CommanderAgent:
         self.workflow_file = workflow_file
         self.workflow_id = workflow_id or os.environ.get("A2A_WORKFLOW_ID") or new_workflow_id()
         self.max_workers = max(1, int(max_workers))
+        self.max_retries = max(0, int(max_retries if max_retries is not None else os.environ.get("A2A_MAX_RETRIES", "1")))
+        self.retry_backoff = float(retry_backoff if retry_backoff is not None else os.environ.get("A2A_RETRY_BACKOFF", "0.2"))
+        self.request_timeout = float(request_timeout if request_timeout is not None else os.environ.get("A2A_REQUEST_TIMEOUT", "5"))
         self._checkpoint_lock = threading.RLock()
+        self._last_task_responses = {}
         self.workflow_catalog = BPELWorkflowCatalog(PROJECT_ROOT)
         self.bpel_definition = None
         if self.workflow == "bpel" or self.workflow_file:
@@ -94,6 +103,59 @@ class CommanderAgent:
         print(f"LLM model: {self.model}")
         if self.api_base:
             print(f"LLM base URL: {self.api_base}")
+        self._trace(
+            "commander_started",
+            mode=self.mode,
+            workflow=self.workflow,
+            workflow_file=self.workflow_file,
+            max_workers=self.max_workers,
+            max_retries=self.max_retries,
+        )
+
+    def _trace(self, event_type: str, **fields):
+        event = append_trace(
+            self.workflow_context,
+            event_type,
+            workflow_id=self.workflow_id,
+            **fields,
+        )
+        log_event(
+            event_type,
+            workflow_id=self.workflow_id,
+            **fields,
+        )
+        return event
+
+    def _remember_task_response(self, work_item: str, response: dict, *, role: str = None, target: str = None):
+        if not work_item:
+            return
+        response_snapshot = deepcopy(response or {})
+        if role is not None:
+            response_snapshot.setdefault("role", role)
+        if target is not None:
+            response_snapshot.setdefault("target", target)
+        self._last_task_responses[work_item] = response_snapshot
+        with self._checkpoint_lock:
+            agent_results = self.workflow_context.setdefault("agent_results", {})
+            existing = agent_results.get(work_item)
+            if existing:
+                parallel_results = list(existing.get("parallel_results", [existing]))
+                parallel_results.append(response_snapshot)
+                merged = deepcopy(response_snapshot)
+                merged["parallel_results"] = parallel_results
+                agent_results[work_item] = merged
+                self._last_task_responses[work_item] = merged
+            else:
+                agent_results[work_item] = response_snapshot
+
+    def _task_response_for_context(self, context: dict):
+        work_item = context.get("last_work_item")
+        if not work_item:
+            return None
+        return (
+            self._last_task_responses.get(work_item)
+            or context.get("agent_results", {}).get(work_item)
+        )
 
     def delegate_task(self, role_needed: str, task_payload: dict, stream: bool = False):
         print(f"\n--- STEP: Resolving next unit for role: {role_needed} ---")
@@ -265,33 +327,79 @@ class CommanderAgent:
         ip = target.get("ip")
         port = target.get("port")
         label = self._candidate_label(target)
-        client = A2AClient(ip, port)
-        try:
-            card = client.discover()
-            print(f"[DISCOVERY] {label} Agent Card from '{card.get('name')}'")
+        work_item = task_payload.get("work_item", f"{self.workflow_id}:{role_needed}")
+        retry_policy = task_payload.get("retry_policy", {}) or {}
+        max_retries = int(retry_policy.get("max_retries", self.max_retries))
+        timeout = float(retry_policy.get("timeout_seconds") or self.request_timeout)
+        last_error = None
 
-            token = client.authenticate()
-            print(f"[AUTH] {label} JWT Token: {token[:10]}...")
+        for attempt in range(1, max_retries + 2):
+            client = A2AClient(ip, port, timeout=timeout)
+            try:
+                self._trace(
+                    "agent_call_attempt",
+                    role=role_needed,
+                    work_item=work_item,
+                    target=label,
+                    attempt=attempt,
+                    max_retries=max_retries,
+                )
+                card = client.discover()
+                print(f"[DISCOVERY] {label} Agent Card from '{card.get('name')}'")
 
-            if stream:
-                print(f"[STREAM] {label} receiving '{role_needed}' updates:")
-                for event_data in client.send_message_stream(task_payload):
-                    data = json.loads(event_data)
-                    print(
-                        f"   -> [{label}] [{data.get('status')}] "
-                        f"{data.get('progress', '')} {data.get('message', '')}"
+                token = client.authenticate()
+                print(f"[AUTH] {label} JWT Token: {token[:10]}...")
+
+                if stream:
+                    print(f"[STREAM] {label} receiving '{role_needed}' updates:")
+                    events = []
+                    for event_data in client.send_message_stream(task_payload):
+                        data = json.loads(event_data)
+                        events.append(data)
+                        print(
+                            f"   -> [{label}] [{data.get('status')}] "
+                            f"{data.get('progress', '')} {data.get('message', '')}"
+                        )
+                    response = build_task_response(
+                        workflow_id=task_payload.get("workflow_id"),
+                        work_item=work_item,
+                        agent=card.get("name", label),
+                        role=role_needed,
+                        command=task_payload.get("command"),
+                        status="completed" if events and str(events[-1].get("status", "")).lower() == "completed" else "accepted",
+                        output={},
+                        metrics={"stream_events": len(events)},
+                        message=events[-1].get("message", "") if events else "",
+                        extra={"stream_events": events, "target": label},
                     )
-                return True, None
+                    self._remember_task_response(work_item, response, role=role_needed, target=label)
+                    self._trace("agent_call_completed", role=role_needed, work_item=work_item, target=label, attempt=attempt)
+                    return True, None
 
-            res = client.send_message(task_payload)
-            print(f"[SEND] {label} Task Response: {res}")
-            return True, None
-        except Exception as exc:
-            return False, exc
+                res = client.send_message(task_payload)
+                self._remember_task_response(work_item, res, role=role_needed, target=label)
+                print(f"[SEND] {label} Task Response: {res}")
+                self._trace("agent_call_completed", role=role_needed, work_item=work_item, target=label, attempt=attempt)
+                return True, None
+            except Exception as exc:
+                last_error = exc
+                self._trace(
+                    "agent_call_failed",
+                    role=role_needed,
+                    work_item=work_item,
+                    target=label,
+                    attempt=attempt,
+                    error=str(exc),
+                )
+                if attempt <= max_retries:
+                    time.sleep(self.retry_backoff * attempt)
+
+        return False, last_error
 
     def delegate_local_task(self, role_needed: str, task_payload: dict, stream: bool = False):
         try:
             response, events = self.local_runtime.execute(role_needed, task_payload, stream=stream)
+            self._remember_task_response(task_payload.get("work_item"), response, role=role_needed, target="local")
             card = response.get("agent_card", {})
             print(f"[LOCAL DISCOVERY] Using local Agent Card from '{card.get('name')}'")
             print(f"[LOCAL AUTH] Obtained local token: {response.get('token')}")
@@ -302,9 +410,21 @@ class CommanderAgent:
                     print(f"   -> [{data.get('status')}] {data.get('progress', '')} {data.get('message', '')}")
             else:
                 print(f"[LOCAL SEND] Task Response: {response}")
+            self._trace(
+                "local_agent_call_completed",
+                role=role_needed,
+                work_item=task_payload.get("work_item"),
+                stream=stream,
+            )
             return True
         except Exception as e:
             print(f"[ERROR] Local task execution failed: {e}")
+            self._trace(
+                "local_agent_call_failed",
+                role=role_needed,
+                work_item=task_payload.get("work_item"),
+                error=str(e),
+            )
             return False
 
     def ask_llm(self, battle_log: list):
@@ -367,8 +487,11 @@ class CommanderAgent:
             "workflow_name": self.workflow,
             "workflow_status": "running",
             "workflow_activatity": 0,
+            "workflow_activity": 0,
             "current_activatity": None,
+            "current_activity": None,
             "active_activatities": [],
+            "active_activities": [],
             "last_work_item": None,
             "last_role": None,
             "last_error": None,
@@ -383,6 +506,8 @@ class CommanderAgent:
             "battle_log": [],
             "completed_roles": [],
             "attachments": [],
+            "agent_results": {},
+            "trace": [],
             "work_list": self._initial_work_list(),
         }
 
@@ -396,13 +521,17 @@ class CommanderAgent:
         migrated = dict(context or {})
         legacy_map = {
             "workflow_step": "workflow_activatity",
+            "workflow_activity": "workflow_activatity",
             "current_step": "current_activatity",
+            "current_activity": "current_activatity",
+            "active_activities": "active_activatities",
             "last_task_id": "last_work_item",
         }
         for legacy_key, new_key in legacy_map.items():
             if new_key not in migrated and legacy_key in migrated:
                 migrated[new_key] = migrated[legacy_key]
-            migrated.pop(legacy_key, None)
+            if legacy_key in {"workflow_step", "current_step", "last_task_id"}:
+                migrated.pop(legacy_key, None)
 
         current_activatity = migrated.get("current_activatity")
         if isinstance(current_activatity, dict):
@@ -418,12 +547,14 @@ class CommanderAgent:
         normalized["battle_log"] = list(normalized.get("battle_log", []))
         normalized["completed_roles"] = list(normalized.get("completed_roles", []))
         normalized["attachments"] = normalize_attachments(normalized.get("attachments", []))
+        normalized["agent_results"] = dict(normalized.get("agent_results", {}) or {})
+        normalized["trace"] = list(normalized.get("trace", []))
         normalized["work_list"] = list(normalized.get("work_list", []))
         if self.bpel_definition:
             existing_items = {
-                item.get("activatity_id"): item
+                item.get("activatity_id") or item.get("activity_id"): item
                 for item in normalized["work_list"]
-                if item.get("activatity_id")
+                if item.get("activatity_id") or item.get("activity_id")
             }
             normalized["work_list"] = [
                 {**item, **existing_items.get(item["activatity_id"], {})}
@@ -434,8 +565,11 @@ class CommanderAgent:
         normalized["workflow_name"] = self.workflow
         normalized["workflow_status"] = normalized.get("workflow_status", "running")
         normalized["workflow_activatity"] = int(normalized.get("workflow_activatity", 0) or 0)
+        normalized["workflow_activity"] = normalized["workflow_activatity"]
         normalized["current_activatity"] = normalized.get("current_activatity")
+        normalized["current_activity"] = normalized["current_activatity"]
         normalized["active_activatities"] = list(normalized.get("active_activatities", []))
+        normalized["active_activities"] = list(normalized["active_activatities"])
         normalized["last_work_item"] = normalized.get("last_work_item")
         normalized["last_role"] = normalized.get("last_role")
         normalized["last_error"] = normalized.get("last_error")
@@ -450,10 +584,11 @@ class CommanderAgent:
             "status": context["workflow_status"],
             "created_at": utc_now_iso(),
             "updated_at": utc_now_iso(),
-            "current_activatity": None,
-            "last_error": None,
-            "context": context,
-        }
+                "current_activatity": None,
+                "current_activity": None,
+                "last_error": None,
+                "context": context,
+            }
 
     def _load_or_initialize_workflow_state(self):
         if self.resume and self.state_store.exists(self.workflow_id):
@@ -465,9 +600,11 @@ class CommanderAgent:
             state["status"] = state.get("status") or context["workflow_status"]
             state["current_activatity"] = (
                 state.get("current_activatity")
+                or state.get("current_activity")
                 or state.pop("current_step", None)
                 or context.get("current_activatity")
             )
+            state["current_activity"] = state["current_activatity"]
             state["last_error"] = state.get("last_error") or context.get("last_error")
             state["context"] = context
             self.state_store.save(self.workflow_id, state)
@@ -495,8 +632,13 @@ class CommanderAgent:
                 normalized["workflow_status"] = status
             if current_activatity is not None:
                 normalized["current_activatity"] = current_activatity
+                normalized["current_activity"] = current_activatity
             if last_error is not None:
                 normalized["last_error"] = last_error
+
+            context.clear()
+            context.update(normalized)
+            normalized = context
 
             state = {
                 "workflow_id": self.workflow_id,
@@ -506,6 +648,7 @@ class CommanderAgent:
                 "created_at": self.workflow_state.get("created_at", utc_now_iso()),
                 "updated_at": utc_now_iso(),
                 "current_activatity": normalized.get("current_activatity"),
+                "current_activity": normalized.get("current_activatity"),
                 "last_error": normalized.get("last_error"),
                 "context": normalized,
             }
@@ -538,8 +681,11 @@ class CommanderAgent:
             "workflow_name": context.get("workflow_name"),
             "workflow_status": context.get("workflow_status"),
             "workflow_activatity": context.get("workflow_activatity"),
+            "workflow_activity": context.get("workflow_activity", context.get("workflow_activatity")),
             "current_activatity": context.get("current_activatity"),
+            "current_activity": context.get("current_activity", context.get("current_activatity")),
             "active_activatities": list(context.get("active_activatities", [])),
+            "active_activities": list(context.get("active_activities", context.get("active_activatities", []))),
             "sector": context.get("sector"),
             "coordinates": context.get("coordinates"),
             "recon_report": context.get("recon_report"),
@@ -555,6 +701,8 @@ class CommanderAgent:
             "last_error": context.get("last_error"),
             "attachments": attachment_snapshot(context.get("attachments", [])),
             "work_list": deepcopy(context.get("work_list", [])),
+            "agent_results": deepcopy(context.get("agent_results", {})),
+            "trace_tail": deepcopy(context.get("trace", [])[-20:]),
         }
 
     def build_task_payload(self, role: str, context: dict, activatity_index: int = None, **legacy_kwargs):
@@ -616,6 +764,7 @@ class CommanderAgent:
                 "command": "evaluate_strike",
                 "input": {
                     "target_coordinates": context["coordinates"],
+                    "mock_eval_score": self.mock_eval_score if self.mock_eval_score is not None else 40,
                 },
                 "context": context_snapshot,
                 "attachments": attachment_snapshot(context.get("attachments", [])),
@@ -647,25 +796,48 @@ class CommanderAgent:
     def apply_agent_result(self, role: str, success: bool, context: dict):
         if not success:
             context["battle_log"].append(f"[{role} Error] Task failed or no available agent.")
+            self._trace("agent_result_failed", role=role, work_item=context.get("last_work_item"))
             return
 
+        response = self._task_response_for_context(context) or {}
+        output = response.get("output", {}) or {}
+
         if role == "recon":
-            context["recon_report"] = "Sector_A is heavily fortified with overlapping machine gun nests."
+            context["recon_report"] = output.get(
+                "recon_report",
+                "Sector_A is heavily fortified with overlapping machine gun nests.",
+            )
             context["battle_log"].append(f"[Recon Report] {context['recon_report']}")
         elif role == "artillery":
-            context["strike_result"] = "Suppression barrage executed on Sector_A."
+            context["strike_result"] = output.get(
+                "strike_result",
+                "Suppression barrage executed on Sector_A.",
+            )
             context["battle_log"].append(f"[Artillery Report] {context['strike_result']}")
         elif role == "evaluator":
-            context["eval_score"] = self.mock_eval_score if self.mock_eval_score is not None else 40
+            raw_score = output.get(
+                "eval_score",
+                self.mock_eval_score if self.mock_eval_score is not None else 40,
+            )
+            context["eval_score"] = int(raw_score)
             context["battle_log"].append(
                 f"[Eval Report] Effectiveness matches {context['eval_score']}% destruction rate."
             )
         elif role == "assault":
-            context["assault_result"] = "Assault unit captured the beachhead."
+            context["assault_result"] = output.get(
+                "assault_result",
+                "Assault unit captured the beachhead.",
+            )
             context["battle_log"].append(f"[Assault Report] {context['assault_result']}")
 
         if role not in context["completed_roles"]:
             context["completed_roles"].append(role)
+        self._trace(
+            "agent_result_applied",
+            role=role,
+            work_item=context.get("last_work_item"),
+            output=output,
+        )
 
     def rule_next_step(self, context: dict):
         """Fast state-machine planner. Returns an action dict or None when rules are unsure."""
@@ -747,7 +919,7 @@ class CommanderAgent:
 
     def _work_list_item(self, context: dict, activatity_id: str):
         for item in context.get("work_list", []):
-            if item.get("activatity_id") == activatity_id:
+            if item.get("activatity_id") == activatity_id or item.get("activity_id") == activatity_id:
                 return item
         raise KeyError(f"Unknown activatity: {activatity_id}")
 
@@ -767,24 +939,51 @@ class CommanderAgent:
                 item.setdefault("started_at", item["updated_at"])
                 if activatity.activatity_id not in context["active_activatities"]:
                     context["active_activatities"].append(activatity.activatity_id)
+                context["active_activities"] = list(context["active_activatities"])
                 context["workflow_activatity"] = int(context.get("workflow_activatity", 0) or 0) + 1
+                context["workflow_activity"] = context["workflow_activatity"]
             elif status in {"completed", "failed", "skipped"}:
                 item["finished_at"] = item["updated_at"]
                 if activatity.activatity_id in context["active_activatities"]:
                     context["active_activatities"].remove(activatity.activatity_id)
+                context["active_activities"] = list(context["active_activatities"])
 
             current_activatity = {
                 "activatity_id": activatity.activatity_id,
                 "activatity_index": item["activatity_index"],
+                "activity_id": activatity.activatity_id,
+                "activity_index": item["activatity_index"],
                 "work_item": item["work_item"],
                 "type": activatity.type,
                 "role": activatity.role,
                 "status": status,
             }
             context["current_activatity"] = current_activatity
+            context["current_activity"] = current_activatity
             if activatity.type == "invoke":
                 context["last_work_item"] = item["work_item"]
                 context["last_role"] = activatity.role
+            append_trace(
+                context,
+                "activity_status_changed",
+                workflow_id=self.workflow_id,
+                activity_id=activatity.activatity_id,
+                work_item=item["work_item"],
+                role=activatity.role,
+                activity_type=activatity.type,
+                status=status,
+                error=error,
+            )
+            log_event(
+                "activity_status_changed",
+                workflow_id=self.workflow_id,
+                activity_id=activatity.activatity_id,
+                work_item=item["work_item"],
+                role=activatity.role,
+                activity_type=activatity.type,
+                status=status,
+                error=error,
+            )
             self._save_workflow_checkpoint(
                 context,
                 status=context.get("workflow_status", "running"),
@@ -822,6 +1021,8 @@ class CommanderAgent:
             input_payload = {}
             if input_key:
                 input_payload[input_key] = context.get(input_key, activatity.input_variable)
+            if activatity.role == "evaluator":
+                input_payload["mock_eval_score"] = self.mock_eval_score if self.mock_eval_score is not None else 40
 
             return {
                 "workflow_id": self.workflow_id,
@@ -838,6 +1039,11 @@ class CommanderAgent:
                 "attachments": attachment_snapshot(context.get("attachments", [])),
                 "work_list": deepcopy(context.get("work_list", [])),
                 "output_hint": self._context_key_for_bpel_variable(activatity.output_variable),
+                "retry_policy": {
+                    "max_retries": activatity.retry_count if activatity.retry_count is not None else self.max_retries,
+                    "timeout_seconds": activatity.timeout_seconds or self.request_timeout,
+                    "failure_policy": activatity.failure_policy,
+                },
             }, activatity.role == "artillery"
 
     def _evaluate_bpel_condition(self, condition: str | None, context: dict):
@@ -914,7 +1120,8 @@ class CommanderAgent:
                         executor.submit(self._execute_bpel_activatity, child, context)
                         for child in activatity.children
                     ]
-                    success = all(future.result() for future in as_completed(futures))
+                    results = [future.result() for future in as_completed(futures)]
+                    success = bool(results) and all(results)
             elif activatity.type == "assign":
                 context_key = self._context_key_for_bpel_variable(activatity.assign_to)
                 with self._checkpoint_lock:
@@ -940,10 +1147,29 @@ class CommanderAgent:
                 raise ValueError(f"Unsupported BPEL activatity type: {activatity.type}")
         except Exception as exc:
             with self._checkpoint_lock:
-                context["workflow_status"] = "paused"
                 context["last_error"] = str(exc)
+            if activatity.failure_policy == "skip":
+                with self._checkpoint_lock:
+                    context["workflow_status"] = "running"
+                self._set_activatity_status(context, activatity, "skipped", str(exc))
+                return True
+            with self._checkpoint_lock:
+                context["workflow_status"] = "paused"
             self._set_activatity_status(context, activatity, "failed", str(exc))
+            if activatity.failure_policy == "fail":
+                raise
             return False
+
+        if not success and activatity.failure_policy == "skip":
+            self._set_activatity_status(
+                context,
+                activatity,
+                "skipped",
+                f"Activity failed and was skipped by failure_policy: {activatity.activatity_id}",
+            )
+            return True
+        if not success and activatity.failure_policy == "fail":
+            raise RuntimeError(f"Activity failed: {activatity.activatity_id}")
 
         self._set_activatity_status(
             context,
@@ -968,11 +1194,23 @@ class CommanderAgent:
         with self._checkpoint_lock:
             context["workflow_status"] = "running"
             context["last_error"] = None
+            self._trace(
+                "workflow_started",
+                workflow_type="bpel",
+                process_name=self.bpel_definition.process_name,
+                workflow_file=str(self.bpel_definition.source_path),
+            )
             self._save_workflow_checkpoint(context, status="running")
 
         success = self._execute_bpel_activatity(self.bpel_definition.root_activatity, context)
         with self._checkpoint_lock:
             context["workflow_status"] = "completed" if success else "paused"
+            self._trace(
+                "workflow_finished",
+                workflow_type="bpel",
+                status=context["workflow_status"],
+                last_error=context.get("last_error"),
+            )
             self._save_workflow_checkpoint(
                 context,
                 status=context["workflow_status"],
@@ -997,20 +1235,35 @@ class CommanderAgent:
 
         print("\n=== DYNAMIC WORKFLOW: RULE STATE MACHINE + LLM FALLBACK ===")
         print(f"[WORKFLOW] Resuming from workflow_activatity={context.get('workflow_activatity', 0)}")
+        self._trace(
+            "workflow_started",
+            workflow_type="dynamic",
+            start_activity=int(context.get("workflow_activatity", 0) or 0) + 1,
+        )
 
         start_activatity = int(context.get("workflow_activatity", 0) or 0) + 1
         for activatity_index in range(start_activatity, start_activatity + max_steps):
             step = self.get_next_step(context)
             current_activatity = {
                 "activatity_index": activatity_index,
+                "activity_index": activatity_index,
                 "planner": step.get("planner"),
                 "type": step.get("type"),
                 "role": step.get("role"),
                 "reason": step.get("reason"),
             }
             context["workflow_activatity"] = activatity_index
+            context["workflow_activity"] = activatity_index
             context["current_activatity"] = current_activatity
+            context["current_activity"] = current_activatity
             context["workflow_status"] = "running"
+            self._trace(
+                "dynamic_activity_started",
+                activity_index=activatity_index,
+                role=step.get("role"),
+                action=step.get("type"),
+                reason=step.get("reason"),
+            )
             self._save_workflow_checkpoint(context, status="running", current_activatity=current_activatity)
 
             print(
@@ -1063,11 +1316,23 @@ class CommanderAgent:
                 reason = (step.get("reason") or "").lower()
                 final_status = "paused" if ("re-plan" in reason or "abort" in reason) else "completed"
                 context["workflow_status"] = final_status
+                self._trace(
+                    "workflow_finished",
+                    workflow_type="dynamic",
+                    status=final_status,
+                    reason=step.get("reason"),
+                )
                 self._save_workflow_checkpoint(context, status=final_status, current_activatity=current_activatity)
                 print(f"[WORKFLOW] End: {step.get('reason')}")
                 break
         else:
             context["workflow_status"] = "paused"
+            self._trace(
+                "workflow_finished",
+                workflow_type="dynamic",
+                status="paused",
+                reason=f"Reached max_steps={max_steps}",
+            )
             self._save_workflow_checkpoint(context, status="paused")
             print(f"[WORKFLOW] Reached max_steps={max_steps}. Stop current workflow.")
 
@@ -1197,6 +1462,24 @@ def parse_args():
         help="Maximum number of concurrently dispatched BPEL flow activatities.",
     )
     parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=int(os.environ.get("A2A_MAX_RETRIES", "1")),
+        help="Maximum retries per remote Agent candidate.",
+    )
+    parser.add_argument(
+        "--retry-backoff",
+        type=float,
+        default=float(os.environ.get("A2A_RETRY_BACKOFF", "0.2")),
+        help="Base seconds to wait between retry attempts.",
+    )
+    parser.add_argument(
+        "--request-timeout",
+        type=float,
+        default=float(os.environ.get("A2A_REQUEST_TIMEOUT", "5")),
+        help="HTTP timeout in seconds for A2A discovery/auth/sendMessage.",
+    )
+    parser.add_argument(
         "--mock-eval-score",
         type=int,
         default=None,
@@ -1258,6 +1541,9 @@ if __name__ == "__main__":
         mock_eval_score=args.mock_eval_score,
         mock_decision=args.mock_decision,
         max_workers=args.max_workers,
+        max_retries=args.max_retries,
+        retry_backoff=args.retry_backoff,
+        request_timeout=args.request_timeout,
     )
 
     if args.workflow == "legacy":

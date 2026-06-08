@@ -51,21 +51,38 @@ class BPELActivatity:
     fault_name: str | None = None
     assign_from: str | None = None
     assign_to: str | None = None
+    retry_count: int = 0
+    timeout_seconds: float | None = None
+    failure_policy: str = "pause"
     children: list["BPELActivatity"] = field(default_factory=list)
+
+    @property
+    def activity_id(self) -> str:
+        return self.activatity_id
+
+    @property
+    def parent_activity(self) -> str | None:
+        return self.parent_activatity
 
     def to_work_list_item(self, workflow_id: str, index: int) -> dict:
         return {
             "activatity_id": self.activatity_id,
             "activatity_index": index,
+            "activity_id": self.activatity_id,
+            "activity_index": index,
             "work_item": f"{workflow_id}:{self.activatity_id}",
             "type": self.type,
             "name": self.name,
             "parent_activatity": self.parent_activatity,
+            "parent_activity": self.parent_activatity,
             "role": self.role,
             "partner_link": self.partner_link,
             "operation": self.operation,
             "command": self.command,
             "dispatch_mode": self.dispatch_mode,
+            "retry_count": self.retry_count,
+            "timeout_seconds": self.timeout_seconds,
+            "failure_policy": self.failure_policy,
             "status": "pending",
             "error": None,
         }
@@ -99,6 +116,18 @@ class BPELWorkflowDefinition:
             raise ValueError(f"BPEL workflow has no executable body: {path}")
 
         counter = iter(range(1, 10000))
+
+        def optional_int(*values, default=0):
+            for value in values:
+                if value not in (None, ""):
+                    return int(value)
+            return default
+
+        def optional_float(*values):
+            for value in values:
+                if value not in (None, ""):
+                    return float(value)
+            return None
 
         def parse_element(element, parent_id=None):
             kind = _local_name(element.tag)
@@ -151,6 +180,16 @@ class BPELWorkflowDefinition:
                 fault_name=element.attrib.get("faultName"),
                 assign_from=assign_from,
                 assign_to=assign_to,
+                retry_count=optional_int(
+                    element.attrib.get("retryCount"),
+                    element.attrib.get("maxRetries"),
+                    default=0,
+                ),
+                timeout_seconds=optional_float(
+                    element.attrib.get("timeoutSeconds"),
+                    element.attrib.get("timeout"),
+                ),
+                failure_policy=element.attrib.get("failurePolicy", "pause"),
             )
             activatity.children = [
                 parse_element(child, activatity_id)
