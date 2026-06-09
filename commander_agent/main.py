@@ -134,8 +134,8 @@ class CommanderAgent:
             response_snapshot.setdefault("role", role)
         if target is not None:
             response_snapshot.setdefault("target", target)
-        self._last_task_responses[work_item] = response_snapshot
         with self._checkpoint_lock:
+            self._last_task_responses[work_item] = response_snapshot
             agent_results = self.workflow_context.setdefault("agent_results", {})
             existing = agent_results.get(work_item)
             if existing:
@@ -150,11 +150,14 @@ class CommanderAgent:
 
     def _task_response_for_context(self, context: dict):
         work_item = context.get("last_work_item")
+        return self._task_response_for_work_item(work_item, context)
+
+    def _task_response_for_work_item(self, work_item: str, context: dict = None):
         if not work_item:
             return None
         return (
             self._last_task_responses.get(work_item)
-            or context.get("agent_results", {}).get(work_item)
+            or (context or {}).get("agent_results", {}).get(work_item)
         )
 
     def delegate_task(self, role_needed: str, task_payload: dict, stream: bool = False):
@@ -793,49 +796,75 @@ class CommanderAgent:
 
         raise ValueError(f"Unsupported role: {role}")
 
-    def apply_agent_result(self, role: str, success: bool, context: dict):
+    @staticmethod
+    def _first_output_value(output: dict):
+        for value in (output or {}).values():
+            return value
+        return None
+
+    def apply_agent_result(
+        self,
+        role: str,
+        success: bool,
+        context: dict,
+        work_item: str = None,
+        output_key: str = None,
+    ):
+        work_item = work_item or context.get("last_work_item")
         if not success:
             context["battle_log"].append(f"[{role} Error] Task failed or no available agent.")
-            self._trace("agent_result_failed", role=role, work_item=context.get("last_work_item"))
+            self._trace("agent_result_failed", role=role, work_item=work_item)
             return
 
-        response = self._task_response_for_context(context) or {}
+        response = self._task_response_for_work_item(work_item, context) or self._task_response_for_context(context) or {}
         output = response.get("output", {}) or {}
 
         if role == "recon":
-            context["recon_report"] = output.get(
-                "recon_report",
-                "Sector_A is heavily fortified with overlapping machine gun nests.",
-            )
-            context["battle_log"].append(f"[Recon Report] {context['recon_report']}")
+            target_key = output_key or "recon_report"
+            output_value = output.get(target_key)
+            if output_value is None:
+                output_value = self._first_output_value(output)
+            if output_value is None:
+                output_value = "Sector_A is heavily fortified with overlapping machine gun nests."
+            context[target_key] = output_value
+            context["battle_log"].append(f"[Recon Report] {context[target_key]}")
         elif role == "artillery":
-            context["strike_result"] = output.get(
-                "strike_result",
-                "Suppression barrage executed on Sector_A.",
-            )
-            context["battle_log"].append(f"[Artillery Report] {context['strike_result']}")
+            target_key = output_key or "strike_result"
+            output_value = output.get(target_key)
+            if output_value is None:
+                output_value = self._first_output_value(output)
+            if output_value is None:
+                output_value = "Suppression barrage executed on Sector_A."
+            context[target_key] = output_value
+            context["battle_log"].append(f"[Artillery Report] {context[target_key]}")
         elif role == "evaluator":
-            raw_score = output.get(
-                "eval_score",
-                self.mock_eval_score if self.mock_eval_score is not None else 40,
-            )
-            context["eval_score"] = int(raw_score)
+            target_key = output_key or "eval_score"
+            raw_score = output.get(target_key)
+            if raw_score is None:
+                raw_score = self._first_output_value(output)
+            if raw_score is None:
+                raw_score = self.mock_eval_score if self.mock_eval_score is not None else 40
+            context[target_key] = int(raw_score) if target_key == "eval_score" else raw_score
             context["battle_log"].append(
-                f"[Eval Report] Effectiveness matches {context['eval_score']}% destruction rate."
+                f"[Eval Report] Effectiveness matches {context[target_key]}% destruction rate."
             )
         elif role == "assault":
-            context["assault_result"] = output.get(
-                "assault_result",
-                "Assault unit captured the beachhead.",
-            )
-            context["battle_log"].append(f"[Assault Report] {context['assault_result']}")
+            target_key = output_key or "assault_result"
+            output_value = output.get(target_key)
+            if output_value is None:
+                output_value = self._first_output_value(output)
+            if output_value is None:
+                output_value = "Assault unit captured the beachhead."
+            context[target_key] = output_value
+            context["battle_log"].append(f"[Assault Report] {context[target_key]}")
 
         if role not in context["completed_roles"]:
             context["completed_roles"].append(role)
         self._trace(
             "agent_result_applied",
             role=role,
-            work_item=context.get("last_work_item"),
+            work_item=work_item,
+            output_key=output_key,
             output=output,
         )
 
@@ -1006,8 +1035,44 @@ class CommanderAgent:
             "StrikeResult": "strike_result",
             "EvalScore": "eval_score",
             "CommanderDecision": "commander_decision",
+            "AssaultResult": "assault_result",
+            "ReplanResult": "replan_result",
             "Sector_A": "sector",
         }.get(variable_name, variable_name)
+
+    def _output_keys_for_activatity_tree(self, activatity: BPELActivatity):
+        keys = set()
+        if activatity.type == "invoke":
+            output_key = self._context_key_for_bpel_variable(activatity.output_variable)
+            if output_key:
+                keys.add(output_key)
+        if activatity.type == "assign":
+            assign_key = self._context_key_for_bpel_variable(activatity.assign_to)
+            if assign_key:
+                keys.add(assign_key)
+        for child in activatity.children:
+            keys.update(self._output_keys_for_activatity_tree(child))
+        return keys
+
+    def _validate_flow_output_conflicts(self, flow_activatity: BPELActivatity):
+        writers_by_key = {}
+        for child in flow_activatity.children:
+            for output_key in self._output_keys_for_activatity_tree(child):
+                writers_by_key.setdefault(output_key, []).append(child.activatity_id)
+
+        conflicts = {
+            output_key: writers
+            for output_key, writers in writers_by_key.items()
+            if len(writers) > 1
+        }
+        if conflicts:
+            conflict_text = ", ".join(
+                f"{output_key} <- {', '.join(writers)}"
+                for output_key, writers in sorted(conflicts.items())
+            )
+            raise ValueError(
+                f"BPEL flow has conflicting outputVariable writers: {conflict_text}"
+            )
 
     def _build_bpel_task_payload(self, activatity: BPELActivatity, context: dict):
         with self._checkpoint_lock:
@@ -1087,7 +1152,13 @@ class CommanderAgent:
         else:
             success = self.delegate_task(activatity.role, payload, stream=stream)
         with self._checkpoint_lock:
-            self.apply_agent_result(activatity.role, success, context)
+            self.apply_agent_result(
+                activatity.role,
+                success,
+                context,
+                work_item=payload.get("work_item"),
+                output_key=self._context_key_for_bpel_variable(activatity.output_variable),
+            )
         return success
 
     def _execute_bpel_activatity(self, activatity: BPELActivatity, context: dict):
@@ -1103,25 +1174,40 @@ class CommanderAgent:
                     for child in activatity.children
                 )
             elif activatity.type == "flow":
-                child_roles = {
-                    child.role
-                    for child in activatity.children
-                    if child.type == "invoke" and child.role
-                }
-                if len(child_roles) > 1:
-                    raise ValueError(
-                        "BPEL flow may only contain concurrent activatities for the same agent role"
-                    )
+                self._validate_flow_output_conflicts(activatity)
+                self._trace(
+                    "flow_activity_started",
+                    activity_id=activatity.activatity_id,
+                    child_count=len(activatity.children),
+                    max_workers=self.max_workers,
+                )
                 with ThreadPoolExecutor(
                     max_workers=min(self.max_workers, max(1, len(activatity.children))),
-                    thread_name_prefix="a2a-workflow",
+                    thread_name_prefix="a2a-activity-flow",
                 ) as executor:
-                    futures = [
-                        executor.submit(self._execute_bpel_activatity, child, context)
+                    futures = {
+                        executor.submit(self._execute_bpel_activatity, child, context): child
                         for child in activatity.children
-                    ]
-                    results = [future.result() for future in as_completed(futures)]
+                    }
+                    results = []
+                    for future in as_completed(futures):
+                        child = futures[future]
+                        result = future.result()
+                        results.append(result)
+                        self._trace(
+                            "flow_child_activity_finished",
+                            activity_id=activatity.activatity_id,
+                            child_activity_id=child.activatity_id,
+                            child_type=child.type,
+                            child_role=child.role,
+                            success=result,
+                        )
                     success = bool(results) and all(results)
+                self._trace(
+                    "flow_activity_finished",
+                    activity_id=activatity.activatity_id,
+                    success=success,
+                )
             elif activatity.type == "assign":
                 context_key = self._context_key_for_bpel_variable(activatity.assign_to)
                 with self._checkpoint_lock:
@@ -1169,13 +1255,14 @@ class CommanderAgent:
             )
             return True
         if not success and activatity.failure_policy == "fail":
-            raise RuntimeError(f"Activity failed: {activatity.activatity_id}")
+            raise RuntimeError(context.get("last_error") or f"Activity failed: {activatity.activatity_id}")
 
+        failure_error = context.get("last_error") or f"Activatity failed: {activatity.activatity_id}"
         self._set_activatity_status(
             context,
             activatity,
             "completed" if success else "failed",
-            None if success else f"Activatity failed: {activatity.activatity_id}",
+            None if success else failure_error,
         )
         return success
 
