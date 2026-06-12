@@ -97,3 +97,31 @@ class A2ARuntimeState:
             "workflow_work_list_count": len(self._workflow_work_lists),
             "algorithm_provider": algorithm_provider,
         }
+
+    def export_persistent_state(self) -> Dict[str, Any]:
+        """Return restart-safe runtime state.
+
+        Busy/current fields are intentionally excluded. After a restart the
+        Agent should come back as idle and let the orchestrator retry any work
+        item whose response was not cached.
+        """
+
+        return {
+            "agent_name": self.agent_name,
+            "role": self.role,
+            "processed_task_count": self.processed_task_count,
+            "failed_task_count": self.failed_task_count,
+            "task_response_cache": deepcopy(self._task_response_cache),
+            "stream_response_cache": deepcopy(self._stream_response_cache),
+            "workflow_work_lists": deepcopy(self._workflow_work_lists),
+        }
+
+    def restore_persistent_state(self, state: Dict[str, Any]) -> None:
+        self.agent_status = "idle"
+        self.current_workflow_id = None
+        self.current_work_item = None
+        self.processed_task_count = int(state.get("processed_task_count", 0) or 0)
+        self.failed_task_count = int(state.get("failed_task_count", 0) or 0)
+        self._task_response_cache = deepcopy(state.get("task_response_cache", {}) or {})
+        self._stream_response_cache = deepcopy(state.get("stream_response_cache", {}) or {})
+        self._workflow_work_lists = deepcopy(state.get("workflow_work_lists", {}) or {})

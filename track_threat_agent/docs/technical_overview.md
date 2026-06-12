@@ -4,7 +4,7 @@
 
 ## 项目定位
 
-`amos-track-threat-demo` 是一个仿真态势 Agent。它接收感知检测结果，维护多目标航迹，预测未来短时航线，识别疑似编队/编组，并输出单体和群体的态势关注优先级。
+`amos-track-threat-demo` 是一个仿真态势 Agent。它接收感知检测结果或 TacticalIntelligenceAgent 情报结果，维护多目标航迹，预测未来短时航线，识别疑似编队/编组，并输出单体和群体的态势关注优先级。
 
 当前版本是独立后端 Agent，不包含前端，也不依赖 AMOS 源码。其他同学可以直接通过 HTTP/A2A 调用。AMOS 只作为可选展示平台，可由 AMOS adapter 或 A2A Gateway 消费本 Agent 的 `artifact.events[]`。
 
@@ -14,7 +14,7 @@
 
 ```mermaid
 flowchart LR
-  A["Perception Result / Detection Frame"] --> B["FastAPI Agent"]
+  A["Perception Result / Tactical Intelligence"] --> B["FastAPI Agent"]
   B --> C["MultiTargetTracker"]
   C --> D["ThreatRanker"]
   D --> E["GroupDetector"]
@@ -70,7 +70,9 @@ flowchart LR
 - `small` 使用 alpha-beta 风格平滑。
 - `medium` 使用简化 Kalman-like 更新。
 - `large` 是接口占位，当前回退到 `medium` 并写入 `metadata.large_mock=true`。
-- 为每条 track 预测未来 10/20/30 秒位置。
+- 为每条 track 预测未来 10/20/30/60/120 秒位置。
+- 每个预测点输出 `model_used`、`prediction_model`、`prediction_confidence`、`uncertainty_radius_m` 和 `horizon_type`。
+- 10/20/30 秒为 `short_term`，60/120 秒为 `medium_term`；中期预测置信度会随时域增长而衰减。
 - 检测航向突变、速度突变、低置信度，并写入 `metadata["anomaly"]`。
 - `history_path` 最多保留 50 个点。
 - 超过 300 秒未更新的 track 会被清理。
@@ -81,11 +83,12 @@ flowchart LR
 
 ```text
 score =
-  0.28 * distance_factor
-+ 0.24 * closing_factor
-+ 0.18 * type_factor
-+ 0.18 * anomaly_factor
-+ 0.12 * quality_factor
+  0.22 * distance_factor
++ 0.20 * closing_factor
++ 0.14 * type_factor
++ 0.14 * anomaly_factor
++ 0.10 * quality_factor
++ 0.20 * semantic_factor
 ```
 
 等级规则：
@@ -94,7 +97,7 @@ score =
 - `medium`: score >= 0.45
 - `low`: 其他
 
-输出中包含 `evidence`，用于解释分数来自距离、接近趋势、异常、类型和航迹质量等因素。
+`semantic_factor` 来自上游情报字段，包括 `threat_level`、`affiliation`、`label` 和 `knowledge_graph` 关系。输出中包含 `evidence`，用于解释分数来自距离、接近趋势、异常、类型、航迹质量和上游语义情报等因素。
 
 `backend/app/group_detector.py`
 
@@ -104,6 +107,7 @@ score =
 - 两个 track 如果距离近、航向差小、速度差小，则连边。
 - 连通分量中成员数大于等于 2 的形成 `TrackGroup`。
 - 计算成员、中心点、中心预测线、当前包络、预测包络、凝聚度、编组类型和群体评分。
+- 凝聚度同时考虑运动一致性和语义一致性，例如 `affiliation`、`label`、`threat_level`、`source_class` 是否一致。
 
 群体评分：
 
@@ -112,13 +116,18 @@ group_score =
   0.30 * max_member_score
 + 0.20 * size_factor
 + 0.20 * closing_factor
-+ 0.20 * cohesion_factor
++ 0.16 * cohesion_factor
 + 0.10 * type_mix_factor
++ 0.04 * semantic_cohesion_factor
 ```
 
 `backend/app/asset_impact_analyzer.py`
 
-实现 `AssetImpactAnalyzer`。它分析每条 track 对每个 `ProtectedAsset` 的仿真影响关注优先级，使用当前距离、预测最近距离、接近趋势、资产重要度、目标关注分和异常因子计算 `asset_impacts`。这不是损伤评估，也不是处置建议，只是让 AMOS 地图能看到“哪些己方资产需要关注”。
+实现 `AssetImpactAnalyzer`。它分析每条 track 对每个 `ProtectedAsset` 的仿真影响关注优先级，使用当前距离、预测最近距离、接近趋势、资产重要度、目标关注分、异常因子和 `semantic_asset_factor` 计算 `asset_impacts`。`semantic_asset_factor` 会利用上游 `knowledge_graph` 中的 `threat_of` 等关系，以及 `threat_level`、`affiliation`、`label` 等字段。这不是损伤评估，也不是处置建议，只是让 AMOS 地图能看到“哪些己方资产需要关注”。
+
+`backend/app/intelligence_adapter.py`
+
+实现 TacticalIntelligenceAgent 输入适配。它把上游 `targets[]` 转成内部 `Detection`，从 `geo.lat/lon/alt_m` 提取位置，从连续两帧位置估算 `speed` 和 `heading`，并把 `class`、`label`、`affiliation`、`threat_level`、`knowledge_ref`、`knowledge_graph.nodes[].relations` 保留到 metadata，供排序、资产影响和编组识别使用。
 
 `backend/app/amos_adapter.py`
 
@@ -143,6 +152,16 @@ group_score =
 - 默认 `NACOS_ENABLED=false`，不注册。
 - 启用后尝试注册服务和 metadata。
 - SDK 缺失或连接失败只打印 warning，不影响 Agent 启动。
+
+`backend/app/state_store.py`
+
+提供轻量 JSON 状态快照：
+
+- 默认写入仓库根目录 `.a2a_state/track_threat_agent_state.json`。
+- 保存当前航迹、编组、最近 artifact、`work_item` 幂等缓存、SSE 缓存、workflow work list 和任务计数。
+- 使用临时文件加 `os.replace` 原子替换，避免写到一半留下损坏文件。
+- 不保存 WebSocket、锁、Nacos client、auto demo task 等运行时对象。
+- 服务重启后恢复为 `idle`，未完成任务由 A2A Gateway / Commander 通过 `work_item` 重试。
 
 `backend/app/main.py`
 
@@ -207,19 +226,25 @@ artifact.events[]      -> AMOS Event Bus events
 
 其中 `events` 可由 AMOS plugin 或 A2A Gateway 回写到 AMOS Event Bus。
 
+完整协议合同见：
+
+- `docs/agent_protocol_contract.md`：上游输入、A2A wrapper、输出 artifact、events、Nacos metadata。
+- `docs/nacos_smoke_test.md`：Nacos 启动、注册、发现和 `/sendMessage` 冒烟测试。
+
 ## 内存控制
 
 - `history_path` 最多 50 点。
 - track TTL 为 300 秒。
 - group 每帧重算，不无限存历史。
 - `/demo/state` 只保留最新 artifact。
+- 本地 JSON 状态快照只保存最后一份可恢复状态，不无限追加历史。
 - AMOS bridge 只管理 `TTG-*` 资产和威胁，`RESET` 不影响 AMOS 原有资产。
 
 ## 当前限制
 
 - 算法是演示级简化实现，不是生产级融合算法。
 - `large` 档只是接口占位。
-- 没有数据库持久化。
+- 当前只有本地 JSON 快照，没有生产级数据库持久化、分布式锁或多实例共享状态。
 - Group 识别使用固定阈值，后续应由场景配置或策略服务控制。
 - AMOS 接入当前是在本地克隆仓库中打 bridge patch，后续需要平台同学合并到主仓库或改成插件。
 - Nacos Python 注册是 best-effort；如果团队使用 Nacos Agent Registry/A2A Registry 的严格形态，建议用 sidecar 或统一注册服务发布同一份 AgentCard。

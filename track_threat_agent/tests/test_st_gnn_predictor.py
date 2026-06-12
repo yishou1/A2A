@@ -33,6 +33,8 @@ def test_nearby_comoving_tracks_get_graph_refinement_metadata():
     assert refined[0].metadata["st_gnn_inspired"]["enabled"] is True
     assert refined[0].predicted_path[0]["st_gnn_inspired"] is True
     assert refined[0].predicted_path[0]["graph_neighbor_count"] == 1
+    assert refined[0].predicted_path[0]["model_used"].endswith("_graph_refined")
+    assert refined[0].predicted_path[0]["prediction_model"].endswith("_graph_refined")
 
 
 def test_far_tracks_do_not_influence_each_other():

@@ -19,7 +19,8 @@ def test_first_frame_creates_multiple_tracks():
     tracks = tracker.update(load_detections("frame_1.json"))
     assert len(tracks) == 7
     assert {track.object_type for track in tracks} >= {"aircraft", "ship", "uav", "unknown"}
-    assert all(len(track.predicted_path) == 3 for track in tracks)
+    assert all(len(track.predicted_path) == 5 for track in tracks)
+    assert all([point["dt_s"] for point in track.predicted_path] == [10.0, 20.0, 30.0, 60.0, 120.0] for track in tracks)
 
 
 def test_second_frame_updates_existing_tracks_instead_of_creating_all_new():
@@ -85,9 +86,19 @@ def test_prediction_uses_adaptive_motion_profile_metadata():
         )
 
     track = tracks[0]
-    assert len(track.predicted_path) == 3
+    assert len(track.predicted_path) == 5
     assert track.metadata["prediction"]["model"] == "adaptive_ctra_turn"
     assert track.metadata["prediction"]["turn_rate_dps"] > 0
     assert all("uncertainty_radius_m" in point for point in track.predicted_path)
     assert all("prediction_confidence" in point for point in track.predicted_path)
+    assert all("model_used" in point for point in track.predicted_path)
+    assert all("prediction_model" in point for point in track.predicted_path)
+    assert all(point["horizon_type"] in {"short_term", "medium_term"} for point in track.predicted_path)
+    assert [point["horizon_type"] for point in track.predicted_path] == [
+        "short_term",
+        "short_term",
+        "short_term",
+        "medium_term",
+        "medium_term",
+    ]
     assert track.predicted_path[-1]["heading"] > track.heading

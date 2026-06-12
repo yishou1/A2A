@@ -13,7 +13,7 @@ def make_track(
 ) -> TrackState:
     vx, vy = speed_heading_to_velocity(speed, heading)
     predicted_path = []
-    for dt in (10.0, 20.0, 30.0):
+    for dt in (10.0, 20.0, 30.0, 60.0, 120.0):
         pred_lat, pred_lon = project_position(lat, lon, vx, vy, dt)
         predicted_path.append(
             {
@@ -66,6 +66,7 @@ def test_three_nearby_aircraft_form_air_formation():
     assert len(groups) == 1
     assert groups[0].group_type == "air_formation"
     assert set(groups[0].member_track_ids) == {"a1", "a2", "a3"}
+    assert [point["dt_s"] for point in groups[0].centroid_prediction] == [10.0, 20.0, 30.0, 60.0, 120.0]
 
 
 def test_two_nearby_ships_form_surface_group():
@@ -100,3 +101,26 @@ def test_group_threat_score_is_calculated():
 
     assert groups[0].group_threat_score > 0
     assert groups[0].group_threat_level in {"low", "medium", "high"}
+
+
+def test_semantic_consistency_raises_group_cohesion_and_evidence():
+    semantic_tracks = [
+        make_track("red1", "unknown", 31.4200, 121.3000, 40, 132),
+        make_track("red2", "unknown", 31.4210, 121.3010, 41, 133),
+    ]
+    for track in semantic_tracks:
+        track.metadata.update({"affiliation": "red", "label": "hostile", "threat_level": "high"})
+
+    plain_tracks = [
+        make_track("plain1", "unknown", 31.4200, 121.3000, 40, 132),
+        make_track("plain2", "unknown", 31.4210, 121.3010, 41, 133),
+    ]
+
+    detector = GroupDetector()
+    semantic_group = detector.detect(semantic_tracks, [make_threat(t.track_id, 0.5) for t in semantic_tracks])[0]
+    detector.reset()
+    plain_group = detector.detect(plain_tracks, [make_threat(t.track_id, 0.5) for t in plain_tracks])[0]
+
+    assert semantic_group.cohesion_score > plain_group.cohesion_score
+    assert semantic_group.group_threat_score > plain_group.group_threat_score
+    assert any("semantic" in evidence.lower() or "语义" in evidence for evidence in semantic_group.evidence)

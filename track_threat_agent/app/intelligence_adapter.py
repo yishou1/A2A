@@ -195,6 +195,7 @@ def convert_target_to_detection(
     target: Dict[str, Any],
     timestamp: float,
     track_id: Optional[str] = None,
+    knowledge_relations: Optional[List[Dict[str, Any]]] = None,
 ) -> Detection:
     """将单个 target（同门格式）转换为 Detection。
 
@@ -231,6 +232,7 @@ def convert_target_to_detection(
         "affiliation": target.get("affiliation", ""),
         "threat_level": target.get("threat_level", ""),
         "knowledge_ref": target.get("knowledge_ref", ""),
+        "knowledge_relations": list(knowledge_relations or []),
         "damage_score": target.get("damage_score"),
         "adapted_by": "intelligence_adapter",
     }
@@ -285,16 +287,38 @@ def convert_intelligence_to_detections(
         else:
             timestamp = time.time()
 
+    relations_by_entity = _relations_by_entity(intelligence_payload.get("knowledge_graph", {}) or {})
     detections: List[Detection] = []
     for target in targets:
         try:
-            detection = convert_target_to_detection(target, timestamp)
+            knowledge_ref = str(target.get("knowledge_ref", ""))
+            detection = convert_target_to_detection(
+                target,
+                timestamp,
+                knowledge_relations=relations_by_entity.get(knowledge_ref, []),
+            )
             detections.append(detection)
         except Exception:
             # 单个 target 转换失败不影响整体
             continue
 
     return detections
+
+
+def _relations_by_entity(knowledge_graph: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+    relations: Dict[str, List[Dict[str, Any]]] = {}
+    for node in knowledge_graph.get("nodes", []) or []:
+        entity_id = str(node.get("entity_id", ""))
+        if not entity_id:
+            continue
+        node_relations = node.get("relations", []) or []
+        if isinstance(node_relations, list):
+            relations[entity_id] = [
+                {"predicate": item.get("predicate", ""), "object": item.get("object", "")}
+                for item in node_relations
+                if isinstance(item, dict)
+            ]
+    return relations
 
 
 def extract_scene_from_intelligence(

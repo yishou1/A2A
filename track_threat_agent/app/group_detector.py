@@ -100,15 +100,18 @@ class GroupDetector:
         for member in members:
             predicted_points.extend(member.predicted_path or [{"lat": member.lat, "lon": member.lon, "alt": member.alt}])
         predicted_envelope = bounding_box(predicted_points)
-        cohesion_score = self._cohesion_score(members)
+        motion_cohesion = self._motion_cohesion_score(members)
+        semantic_cohesion = self._semantic_cohesion_score(members)
+        cohesion_score = clamp(0.82 * motion_cohesion + 0.18 * semantic_cohesion)
         group_score, factor_details = self._group_score(
-            members, threat_by_track, scene_context, cohesion_score, group_type
+            members, threat_by_track, scene_context, cohesion_score, group_type, semantic_cohesion
         )
         timestamp = max(member.last_update_time for member in members)
         evidence = [
             f"{len(members)} related tracks connected by distance, heading, and speed similarity",
             f"group type inferred as {group_type}",
             f"cohesion score is {cohesion_score:.2f}",
+            f"semantic cohesion score is {semantic_cohesion:.2f}",
             "group score is a demo attention-priority score, not an engagement recommendation",
             f"group factor details: {factor_details}",
         ]
@@ -129,7 +132,7 @@ class GroupDetector:
 
     def _centroid_prediction(self, members: List[TrackState]) -> List[Dict[str, float]]:
         predictions = []
-        for dt in (10.0, 20.0, 30.0):
+        for dt in (10.0, 20.0, 30.0, 60.0, 120.0):
             points = []
             timestamps = []
             for member in members:
@@ -143,7 +146,7 @@ class GroupDetector:
             predictions.append(centroid)
         return predictions
 
-    def _cohesion_score(self, members: List[TrackState]) -> float:
+    def _motion_cohesion_score(self, members: List[TrackState]) -> float:
         if len(members) < 2:
             return 0.0
         pair_scores = []
@@ -154,6 +157,30 @@ class GroupDetector:
                 speed_score = 1.0 - abs(left.speed - right.speed) / self.max_speed_diff_mps
                 pair_scores.append(clamp((distance_score + heading_score + speed_score) / 3.0))
         return clamp(sum(pair_scores) / len(pair_scores))
+
+    def _semantic_cohesion_score(self, members: List[TrackState]) -> float:
+        if len(members) < 2:
+            return 0.0
+        pair_scores = []
+        for i, left in enumerate(members):
+            for right in members[i + 1 :]:
+                pair_scores.append(self._pair_semantic_score(left, right))
+        return clamp(sum(pair_scores) / len(pair_scores))
+
+    def _pair_semantic_score(self, left: TrackState, right: TrackState) -> float:
+        score = 0.0
+        comparable = 0
+        for key, weight in (("affiliation", 0.40), ("label", 0.30), ("threat_level", 0.20), ("source_class", 0.10)):
+            left_value = str(left.metadata.get(key, "")).strip().lower()
+            right_value = str(right.metadata.get(key, "")).strip().lower()
+            if not left_value or not right_value:
+                continue
+            comparable += 1
+            if left_value == right_value:
+                score += weight
+            elif "unknown" in {left_value, right_value}:
+                score += weight * 0.35
+        return clamp(score if comparable else 0.0)
 
     def _group_type(self, members: List[TrackState]) -> str:
         types = {member.object_type for member in members}
@@ -190,6 +217,7 @@ class GroupDetector:
         scene_context: Dict[str, float],
         cohesion_score: float,
         group_type: str,
+        semantic_cohesion: float,
     ) -> tuple[float, Dict[str, float]]:
         member_scores = [threat_by_track.get(member.track_id).score for member in members if member.track_id in threat_by_track]
         max_member_score = max(member_scores, default=max((member.track_quality for member in members), default=0.0) * 0.45)
@@ -202,8 +230,9 @@ class GroupDetector:
             0.30 * max_member_score
             + 0.20 * size_factor
             + 0.20 * closing_factor
-            + 0.20 * cohesion_score
+            + 0.16 * cohesion_score
             + 0.10 * type_mix_factor
+            + 0.04 * semantic_cohesion
         )
         details = {
             "max_member_score": round(max_member_score, 4),
@@ -211,6 +240,7 @@ class GroupDetector:
             "closing_factor": round(closing_factor, 4),
             "cohesion_factor": round(cohesion_score, 4),
             "type_mix_factor": round(type_mix_factor, 4),
+            "semantic_cohesion_factor": round(semantic_cohesion, 4),
         }
         return group_score, details
 

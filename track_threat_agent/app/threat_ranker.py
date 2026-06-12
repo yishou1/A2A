@@ -40,11 +40,12 @@ class ThreatRanker:
         for track in track_list:
             factors = self._factors(track, zone_lat, zone_lon, radius_m)
             score = clamp(
-                0.28 * factors["distance_factor"]
-                + 0.24 * factors["closing_factor"]
-                + 0.18 * factors["type_factor"]
-                + 0.18 * factors["anomaly_factor"]
-                + 0.12 * factors["quality_factor"]
+                0.22 * factors["distance_factor"]
+                + 0.20 * factors["closing_factor"]
+                + 0.14 * factors["type_factor"]
+                + 0.14 * factors["anomaly_factor"]
+                + 0.10 * factors["quality_factor"]
+                + 0.20 * factors["semantic_factor"]
             )
             dbn_result = self.dbn_evaluator.update(track, score, factors)
             final_score = float(dbn_result["smoothed_score"])
@@ -97,15 +98,44 @@ class ThreatRanker:
         if anomaly.get("low_confidence"):
             anomaly_factor += 0.25
         quality_factor = clamp(track.track_quality)
+        semantic_factor = self._semantic_factor(track)
         return {
             "distance_factor": distance_factor,
             "closing_factor": closing_factor,
             "type_factor": type_factor,
             "anomaly_factor": clamp(anomaly_factor),
             "quality_factor": quality_factor,
+            "semantic_factor": semantic_factor,
             "distance_m": distance_m,
             "predicted_distance_m_30s": predicted_distance_m,
         }
+
+    def _semantic_factor(self, track: TrackState) -> float:
+        threat_level = str(track.metadata.get("threat_level", "")).strip().lower()
+        affiliation = str(track.metadata.get("affiliation", "")).strip().lower()
+        label = str(track.metadata.get("label", "")).strip().lower()
+        relations = track.metadata.get("knowledge_relations") or []
+
+        threat_level_factor = {"high": 1.0, "medium": 0.62, "low": 0.25}.get(threat_level, 0.15)
+        affiliation_factor = {"red": 1.0, "hostile": 1.0, "unknown": 0.45, "blue": 0.0, "friendly": 0.0}.get(
+            affiliation,
+            0.25,
+        )
+        label_factor = {"hostile": 1.0, "suspicious": 0.65, "unknown": 0.35, "friendly": 0.0}.get(label, 0.2)
+        relation_factor = 0.0
+        for relation in relations:
+            predicate = str(relation.get("predicate", "")).lower()
+            relation_object = str(relation.get("object", "")).lower()
+            if "threat" in predicate or "mission" in relation_object or "asset" in relation_object:
+                relation_factor = 1.0
+                break
+
+        return clamp(
+            0.35 * threat_level_factor
+            + 0.30 * affiliation_factor
+            + 0.20 * label_factor
+            + 0.15 * relation_factor
+        )
 
     def _evidence(self, track: TrackState, factors: Dict[str, float], score: float) -> List[str]:
         distance_m = factors["distance_m"]
@@ -118,6 +148,8 @@ class ThreatRanker:
         ]
         if factors["anomaly_factor"] > 0:
             evidence.append(f"anomaly metadata raises attention factor to {factors['anomaly_factor']:.2f}")
+        if factors.get("semantic_factor", 0.0) > 0.45:
+            evidence.append(f"semantic intelligence raises attention factor to {factors['semantic_factor']:.2f}")
         if score >= 0.72:
             evidence.append("score is high because multiple simulated attention factors are elevated")
         elif score >= 0.45:

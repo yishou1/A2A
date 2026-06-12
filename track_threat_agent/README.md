@@ -31,10 +31,11 @@ metadata.status=idle
 ## 2. 当前能力
 
 - 多目标航迹跟踪。
-- 未来 10 / 20 / 30 秒航线预测。
+- 未来 10 / 20 / 30 / 60 / 120 秒航线预测，并输出预测模型、置信度、不确定半径和时域类型。
 - 自适应运动模型：匀速、加速度、CTRA 转弯。
 - ST-GNN-inspired 图关系预测修正。
 - DBN-inspired 动态风险状态平滑。
+- TacticalIntelligenceAgent 语义字段消费：`threat_level`、`affiliation`、`label`、`knowledge_graph` 参与排序和资产影响分析。
 - 疑似空中编队和海上编组识别。
 - 己方保护资产影响分析。
 - 单体、群体、资产影响统一关注排序。
@@ -44,6 +45,7 @@ metadata.status=idle
 - `GET /workflows/{workflow_id}/work-list`。
 - Nacos role/status metadata。
 - `AlgorithmProvider` 预留接口。
+- 本地 JSON 状态快照，支持演示环境重启后恢复航迹、最近 artifact、幂等缓存和 workflow work list。
 
 当前算法以内置 Demo 实现为主，暂不依赖公共算法库。后续公共算法库或 A100 训练版 GNN/ST-GNN 完成后，可替换 `app/algorithm_provider.py` 中的 provider，不改变 A2A/Nacos 对外协议。
 
@@ -85,9 +87,45 @@ export HEARTBEAT_INTERVAL=5
 
 完整示例见 `.env.example`。
 
-## 5. A2A 调用
+完整 Nacos 联调步骤见 `docs/nacos_smoke_test.md`。该文档覆盖 Docker Compose 启动 Nacos、Agent 注册、师兄 `NacosRegistry` 发现、以及通过发现到的 `/sendMessage` endpoint 发起 A2A 调用。
 
-### 5.1 工作流入口
+## 5. 状态快照
+
+Agent 默认会把可恢复状态保存到仓库根目录：
+
+```text
+.a2a_state/track_threat_agent_state.json
+```
+
+该目录已被 `.gitignore` 忽略，不会提交到仓库。状态快照保存：
+
+- 当前 `tracks`；
+- 当前 `groups`；
+- 最近一次 `artifact`；
+- `work_item` 幂等缓存；
+- SSE 缓存；
+- workflow work list；
+- processed / failed 计数。
+
+状态快照不保存：
+
+- 当前锁；
+- WebSocket 连接；
+- 正在运行的 auto demo task；
+- Nacos SDK client；
+- 启动前未完成的 busy 状态。
+
+服务重启后会恢复为 `idle`。如果上游任务未完成，应由 A2A Gateway / Commander 根据 `work_item` 重试。
+
+如需指定状态文件位置：
+
+```bash
+export TRACK_THREAT_STATE_PATH=/tmp/track_threat_agent_state.json
+```
+
+## 6. A2A 调用
+
+### 6.1 工作流入口
 
 ```http
 POST /sendMessage
@@ -125,7 +163,7 @@ Content-Type: application/json
 
 `work_item` 是幂等键。同一个 `work_item` 重试时，Agent 会返回缓存 artifact，不会重复推进航迹历史、DBN 状态或编组状态。
 
-### 5.2 SSE 进度流
+### 6.2 SSE 进度流
 
 ```http
 POST /sendMessageStream
@@ -135,13 +173,13 @@ Content-Type: application/json
 
 返回 `text/event-stream`，包含 `Working`、`Artifact`、`Completed` 等事件。
 
-### 5.3 查询 workflow work list
+### 6.3 查询 workflow work list
 
 ```bash
 curl http://127.0.0.1:8102/workflows/wf-demo-001/work-list
 ```
 
-## 6. 直接调试入口
+## 7. 直接调试入口
 
 保留直接态势输入接口，便于 curl 和本地联调：
 
@@ -151,7 +189,7 @@ curl -X POST http://127.0.0.1:8102/a2a/perception-result \
   --data @sample_data/group_scene.json
 ```
 
-## 7. 输出
+## 8. 输出
 
 返回 `track_threat_group_artifact`，包含：
 
@@ -162,7 +200,18 @@ curl -X POST http://127.0.0.1:8102/a2a/perception-result \
 - `unified_threat_ranking`：单体、群体、资产影响统一排序。
 - `events`：`track.updated`、`threat.updated`、`track.group.updated`、`threat.group.updated`、`threat.ranking.updated`、`asset.impact.updated` 等事件。
 
-## 8. 测试
+每个 `tracks[].predicted_path[]` 预测点包含：
+
+- `dt_s`：预测时间差，当前为 10、20、30、60、120 秒。
+- `horizon_type`：`short_term` 或 `medium_term`。
+- `model_used`：推荐下游读取的模型字段，例如 `adaptive_ctra_turn_graph_refined`。
+- `prediction_model`：兼容旧版本的模型字段，内容与 `model_used` 保持一致。
+- `prediction_confidence`：预测置信度，时间越长通常越低。
+- `uncertainty_radius_m`：仿真预测不确定半径。
+
+更完整的输入、输出、事件和 Nacos metadata 说明见 `docs/agent_protocol_contract.md`。
+
+## 9. 测试
 
 ```bash
 cd track_threat_agent
@@ -182,10 +231,10 @@ uv run --with-requirements requirements.txt pytest -q
 - `work_item` 幂等。
 - `work_list` 查询。
 
-## 9. 当前限制
+## 10. 当前限制
 
 - 当前是 Demo，不是生产系统。
 - ST-GNN 是规则式 inspired 原型，不是训练好的深度 GNN。
 - 训练版 GNN/ST-GNN 计划后续在实验室 A100 上完成。
-- 状态目前保存在内存中，服务重启后不恢复历史航迹。
+- 当前使用本地 JSON 文件做轻量状态快照，还不是生产级数据库或分布式状态存储。
 - 单实例串行处理，多并发建议通过多 Agent 实例水平扩展。

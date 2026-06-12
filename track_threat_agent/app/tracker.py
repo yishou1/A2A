@@ -216,9 +216,11 @@ class MultiTargetTracker:
     def _predict_path(self, track: TrackState) -> List[Dict[str, object]]:
         profile = self._prediction_profile(track)
         predictions = []
-        for dt in (10.0, 20.0, 30.0):
+        for dt in (10.0, 20.0, 30.0, 60.0, 120.0):
             lat, lon, speed, heading, alt = self._project_adaptive(track, profile, dt)
             uncertainty = self._prediction_uncertainty(track, profile, dt)
+            horizon_type = "short_term" if dt <= 30.0 else "medium_term"
+            confidence = self._horizon_confidence(profile, dt)
             predictions.append(
                 {
                     "dt_s": dt,
@@ -228,9 +230,11 @@ class MultiTargetTracker:
                     "alt": alt,
                     "speed": speed,
                     "heading": heading,
+                    "model_used": profile["model"],
                     "prediction_model": profile["model"],
-                    "prediction_confidence": profile["confidence"],
+                    "prediction_confidence": confidence,
                     "uncertainty_radius_m": uncertainty,
+                    "horizon_type": horizon_type,
                 }
             )
         track.metadata["prediction"] = profile
@@ -335,6 +339,14 @@ class MultiTargetTracker:
         maneuver = (maneuver_load + accel_load) * dt_s * 22.0
         missed = track.missed_count * dt_s * 8.0
         return round(base + growth + maneuver + missed, 2)
+
+    def _horizon_confidence(self, profile: Dict[str, object], dt_s: float) -> float:
+        base_confidence = float(profile.get("confidence", 0.5))
+        if dt_s <= 30.0:
+            decay = 0.0
+        else:
+            decay = min(0.35, (dt_s - 30.0) / 90.0 * 0.28)
+        return round(clamp(base_confidence - decay, 0.1, 0.95), 3)
 
     def _motion_caps(self, object_type: str) -> tuple[float, float, float]:
         if object_type == "ship":

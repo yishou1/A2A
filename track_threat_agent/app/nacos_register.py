@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict
+from urllib import parse, request
 
 
 LOGGER = logging.getLogger(__name__)
@@ -162,7 +164,7 @@ class NacosRegistrar:
             metadata=self.settings.metadata,
             ephemeral=True,
             healthy=True,
-            enabled=True,
+            enable=True,
         )
 
     def _deregister_instance(self) -> None:
@@ -197,3 +199,27 @@ class NacosRegistrar:
             metadata=self.settings.metadata,
             ephemeral=True,
         )
+        self._update_instance_metadata_http()
+
+    def _update_instance_metadata_http(self) -> None:
+        params = {
+            "serviceName": self.settings.service_name,
+            "ip": self.settings.service_ip,
+            "port": str(self.settings.service_port),
+            "clusterName": "None",
+            "groupName": self.settings.group_name,
+            "metadata": json.dumps(self.settings.metadata, separators=(",", ":")),
+            "ephemeral": "true",
+            "weight": "1.0",
+            "enabled": "true",
+            "healthy": "true",
+        }
+        if self.settings.namespace and self.settings.namespace != "public":
+            params["namespaceId"] = self.settings.namespace
+        address = self.settings.server
+        if not address.startswith(("http://", "https://")):
+            address = f"http://{address}"
+        url = f"{address}/nacos/v1/ns/instance?{parse.urlencode(params)}"
+        req = request.Request(url, method="PUT")
+        with request.urlopen(req, timeout=5) as response:
+            response.read()

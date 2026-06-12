@@ -222,6 +222,7 @@ class TestConvertIntelligenceToDetections:
         assert t1.metadata["label"] == "hostile"
         assert t1.metadata["affiliation"] == "red"
         assert t1.metadata["knowledge_ref"] == "ENT-T-0001"
+        assert t1.metadata["knowledge_relations"] == [{"predicate": "threat_of", "object": "mission_area"}]
 
     def test_object_type_mapping(self):
         reset_adapter_cache()

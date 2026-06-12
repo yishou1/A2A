@@ -42,12 +42,13 @@ class AssetImpactAnalyzer:
                     continue
                 factors = self._factors(track, asset, threat_by_track.get(track.track_id))
                 score = clamp(
-                    0.26 * factors["current_proximity_factor"]
-                    + 0.24 * factors["predicted_proximity_factor"]
-                    + 0.18 * factors["closing_factor"]
-                    + 0.14 * factors["asset_criticality_factor"]
+                    0.22 * factors["current_proximity_factor"]
+                    + 0.21 * factors["predicted_proximity_factor"]
+                    + 0.16 * factors["closing_factor"]
+                    + 0.12 * factors["asset_criticality_factor"]
                     + 0.10 * factors["track_attention_factor"]
-                    + 0.08 * factors["anomaly_factor"]
+                    + 0.07 * factors["anomaly_factor"]
+                    + 0.12 * factors["semantic_asset_factor"]
                 )
                 if score < 0.18:
                     continue
@@ -102,6 +103,7 @@ class AssetImpactAnalyzer:
             anomaly_factor += 0.35
         if anomaly.get("low_confidence"):
             anomaly_factor += 0.25
+        semantic_asset_factor = self._semantic_asset_factor(track, asset)
         return {
             "current_distance_m": current_distance,
             "predicted_min_distance_m": predicted_min,
@@ -113,7 +115,37 @@ class AssetImpactAnalyzer:
             "track_attention_factor": threat.score if threat else self.TYPE_FACTORS.get(track.object_type, 0.6),
             "type_factor": self.TYPE_FACTORS.get(track.object_type, 0.6),
             "anomaly_factor": clamp(anomaly_factor),
+            "semantic_asset_factor": semantic_asset_factor,
         }
+
+    def _semantic_asset_factor(self, track: TrackState, asset: ProtectedAsset) -> float:
+        threat_level = str(track.metadata.get("threat_level", "")).strip().lower()
+        affiliation = str(track.metadata.get("affiliation", "")).strip().lower()
+        label = str(track.metadata.get("label", "")).strip().lower()
+        relations = track.metadata.get("knowledge_relations") or []
+        asset_tokens = {
+            asset.asset_id.replace("-", "_").lower(),
+            asset.asset_name.replace(" ", "_").lower(),
+            asset.asset_type.lower(),
+            "mission_area",
+            "protected_asset",
+        }
+
+        relation_factor = 0.0
+        for relation in relations:
+            predicate = str(relation.get("predicate", "")).lower()
+            relation_object = str(relation.get("object", "")).replace("-", "_").lower()
+            if "threat" in predicate and (relation_object in asset_tokens or "mission" in relation_object):
+                relation_factor = 1.0
+                break
+
+        threat_factor = {"high": 1.0, "medium": 0.6, "low": 0.25}.get(threat_level, 0.15)
+        affiliation_factor = {"red": 1.0, "hostile": 1.0, "unknown": 0.45, "blue": 0.0, "friendly": 0.0}.get(
+            affiliation,
+            0.25,
+        )
+        label_factor = {"hostile": 1.0, "suspicious": 0.65, "unknown": 0.35, "friendly": 0.0}.get(label, 0.2)
+        return clamp(0.40 * relation_factor + 0.25 * threat_factor + 0.20 * affiliation_factor + 0.15 * label_factor)
 
     def _evidence(
         self,
@@ -134,6 +166,8 @@ class AssetImpactAnalyzer:
             evidence.append("预测轨迹未显示持续接近该资产")
         if factors["anomaly_factor"] > 0:
             evidence.append(f"异常机动/低置信度使资产影响关注因子增加到 {factors['anomaly_factor']:.2f}")
+        if factors.get("semantic_asset_factor", 0.0) > 0.45:
+            evidence.append(f"上游情报/knowledge graph 使资产影响语义因子增加到 {factors['semantic_asset_factor']:.2f}")
         if score >= 0.72:
             evidence.append("综合分数为 high：建议在态势图中重点关注该资产周边情况，不代表交战建议")
         elif score >= 0.45:

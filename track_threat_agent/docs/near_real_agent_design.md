@@ -7,7 +7,7 @@
 `track-threat-group-agent-demo` 是一个下游态势分析 Agent。上游感知或融合模块向它发送 `perception_result`，本 Agent 负责：
 
 - 多目标航迹维护；
-- 未来 10/20/30 秒航线预测；
+- 未来 10/20/30/60/120 秒航线预测；
 - ST-GNN-inspired 图关系预测修正；
 - 疑似空中编队和海上编组识别；
 - 己方保护资产影响分析；
@@ -23,6 +23,8 @@
 - `ThreatRanker`
 - `AssetImpactAnalyzer`
 - `GroupDetector`
+
+当前算法已经消费 TacticalIntelligenceAgent 的上游语义字段：`threat_level`、`affiliation`、`label`、`source_class` 和 `knowledge_graph.nodes[].relations` 会进入单体关注排序、资产影响分析和编组凝聚度计算。训练版 GNN/ST-GNN 仍作为后续 A100 阶段工作。
 
 为了方便后续替换，项目新增 `backend/app/algorithm_provider.py`，当前 provider 为：
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Literal
 
@@ -28,6 +29,7 @@ from .models import Detection, ProtectedAsset
 from .nacos_register import NacosRegistrar
 from .scenario_generator import generate_auto_demo_frame
 from .st_gnn_predictor import STGNNInspiredPredictor
+from .state_store import FileStateStore
 from .threat_ranker import ThreatRanker
 from .tracker import MultiTargetTracker
 
@@ -35,13 +37,16 @@ from .tracker import MultiTargetTracker
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 PROJECT_DIR = BACKEND_DIR.parent
 SAMPLE_DATA_DIR = BACKEND_DIR / "sample_data"
+DEFAULT_STATE_PATH = PROJECT_DIR / ".a2a_state" / "track_threat_agent_state.json"
 
 
 registrar = NacosRegistrar()
+state_store = FileStateStore(os.getenv("TRACK_THREAT_STATE_PATH") or DEFAULT_STATE_PATH)
 
 
 @contextlib.asynccontextmanager
 async def lifespan(_: FastAPI):
+    _restore_state_snapshot()
     await registrar.start()
     try:
         yield
@@ -147,6 +152,10 @@ def health() -> Dict[str, Any]:
         "current_workflow_id": runtime_snapshot["current_workflow_id"],
         "current_work_item": runtime_snapshot["current_work_item"],
         "algorithm_provider": runtime_snapshot["algorithm_provider"],
+        "state_snapshot": {
+            "path": str(state_store.path),
+            "exists": state_store.path.exists(),
+        },
         "nacos": registrar.status(),
         "safety_boundary": "simulation-only risk priority, no weapon control",
     }
@@ -408,6 +417,7 @@ async def send_message(task_payload: Dict[str, Any], token: str = Depends(verify
         "cached": False,
     }
     runtime.set_task_response(work_item, response)
+    _save_state_snapshot()
     return response
 
 
@@ -479,6 +489,7 @@ async def send_message_stream(task_payload: Dict[str, Any], token: str = Depends
             }
         )
         runtime.set_stream_events(work_item, buffered_events)
+        _save_state_snapshot()
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -520,6 +531,7 @@ async def demo_reset() -> Dict[str, Any]:
     await manager.broadcast(message)
     global last_artifact
     last_artifact = message["artifact"]
+    state_store.clear()
     return {"status": "reset", "active_track_count": 0, "active_group_count": 0}
 
 
@@ -530,6 +542,7 @@ async def demo_start() -> Dict[str, Any]:
         return {"status": "already_running"}
     tracker.reset()
     group_detector.reset()
+    state_store.clear()
     auto_demo_task = asyncio.create_task(_run_auto_demo())
     return {"status": "started", "frames": 90, "interval_s": 1}
 
@@ -594,12 +607,34 @@ def _process_payload(payload: PerceptionResultRequest) -> Dict[str, Any]:
         },
     }
     last_artifact = artifact
+    _save_state_snapshot()
     return {
         "task_id": payload.task_id,
         "message_type": "track_threat_group_artifact",
         "status": "completed",
         "artifact": artifact,
     }
+
+
+def _save_state_snapshot() -> None:
+    state_store.save(
+        tracks=tracker.tracks,
+        groups=group_detector.groups,
+        last_artifact=last_artifact,
+        runtime_state=runtime.export_persistent_state(),
+    )
+
+
+def _restore_state_snapshot() -> bool:
+    global last_artifact
+    restored = state_store.load()
+    if restored is None:
+        return False
+    tracker.tracks = restored.tracks
+    group_detector.groups = restored.groups
+    last_artifact = restored.last_artifact or last_artifact
+    runtime.restore_persistent_state(restored.runtime_state)
+    return True
 
 
 def _perception_from_a2a_task(task_payload: Dict[str, Any]) -> PerceptionResultRequest:

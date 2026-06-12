@@ -59,3 +59,36 @@ def test_asset_impact_analysis_scores_protected_asset_relationships():
     assert impacts[0].source_track_id == "trk-near"
     assert impacts[0].score > 0
     assert impacts[0].evidence
+
+
+def test_semantic_relations_raise_asset_impact_score():
+    asset = ProtectedAsset(
+        asset_id="mission-area",
+        asset_name="Mission Area",
+        asset_type="civil_infrastructure",
+        lat=31.2304,
+        lon=121.4737,
+        protection_radius_m=9000,
+        criticality=0.7,
+    )
+    baseline = make_track("baseline", 31.2304, 121.4300, speed=60, heading=90)
+    semantic = make_track("semantic", 31.2304, 121.4300, speed=60, heading=90)
+    semantic.metadata.update(
+        {
+            "label": "hostile",
+            "affiliation": "red",
+            "threat_level": "high",
+            "knowledge_relations": [{"predicate": "threat_of", "object": "mission_area"}],
+        }
+    )
+
+    impacts = AssetImpactAnalyzer().assess(
+        [baseline, semantic],
+        [make_threat("baseline", 0.45), make_threat("semantic", 0.45)],
+        [asset],
+    )
+    by_track = {impact.source_track_id: impact for impact in impacts}
+
+    assert by_track["semantic"].score > by_track["baseline"].score
+    assert by_track["semantic"].factors["semantic_asset_factor"] > 0.8
+    assert any("情报" in evidence or "knowledge" in evidence.lower() for evidence in by_track["semantic"].evidence)

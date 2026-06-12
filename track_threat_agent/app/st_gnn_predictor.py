@@ -58,7 +58,9 @@ class STGNNInspiredPredictor:
                 refined["graph_neighbor_count"] = len(neighbors)
                 refined["graph_influence"] = round(influence, 4)
                 refined["graph_blend"] = round(blend, 4)
-                refined["prediction_model"] = f"{point.get('prediction_model', 'adaptive')}_graph_refined"
+                base_model = point.get("model_used") or point.get("prediction_model", "adaptive")
+                refined["model_used"] = f"{base_model}_graph_refined"
+                refined["prediction_model"] = refined["model_used"]
                 refined["prediction_confidence"] = round(
                     clamp(float(point.get("prediction_confidence", track.track_quality)) + 0.04 * influence),
                     3,

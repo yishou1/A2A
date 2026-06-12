@@ -40,3 +40,28 @@ def test_threat_ranking_is_sorted_by_score_descending():
     assert [item.score for item in ranked] == sorted([item.score for item in ranked], reverse=True)
     assert ranked[0].track_id == "near"
     assert ranked[0].evidence
+
+
+def test_semantic_fields_raise_attention_score():
+    scene = {
+        "protected_zone_lat": 31.2304,
+        "protected_zone_lon": 121.4737,
+        "protected_radius_m": 25000,
+    }
+    baseline = make_track("baseline", 31.45, 121.62, "unknown")
+    semantic = make_track("semantic", 31.45, 121.62, "unknown")
+    semantic.metadata.update(
+        {
+            "label": "hostile",
+            "affiliation": "red",
+            "threat_level": "high",
+            "knowledge_relations": [{"predicate": "threat_of", "object": "mission_area"}],
+        }
+    )
+
+    ranked = ThreatRanker().rank([baseline, semantic], scene)
+    by_track = {item.track_id: item for item in ranked}
+
+    assert by_track["semantic"].score > by_track["baseline"].score
+    assert by_track["semantic"].factors["semantic_factor"] > 0.8
+    assert any("semantic" in evidence.lower() or "情报" in evidence for evidence in by_track["semantic"].evidence)
