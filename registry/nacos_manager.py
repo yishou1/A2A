@@ -16,6 +16,12 @@ def utc_now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
+def normalize_cluster_name(cluster_name):
+    if cluster_name in (None, "", "None"):
+        return "DEFAULT"
+    return cluster_name
+
+
 def load_env_file(path=os.path.join(PROJECT_ROOT, ".env")):
     if not os.path.exists(path):
         return
@@ -67,6 +73,7 @@ class NacosRegistry:
         cluster_name=None,
         group_name="DEFAULT_GROUP",
     ):
+        cluster_name = normalize_cluster_name(cluster_name)
         if metadata is None:
             metadata = {}
         metadata = dict(metadata)
@@ -113,6 +120,7 @@ class NacosRegistry:
             )
 
     def _register_service_sdk(self, service_name, ip, port, metadata, ephemeral=True, cluster_name=None, group_name="DEFAULT_GROUP"):
+        cluster_name = normalize_cluster_name(cluster_name)
         try:
             self.client.add_naming_instance(
                 service_name,
@@ -159,6 +167,7 @@ class NacosRegistry:
         return f"{service_name}#{ip}#{port}"
 
     def _register_service_http(self, service_name, ip, port, metadata, ephemeral=True, cluster_name=None, group_name="DEFAULT_GROUP"):
+        cluster_name = normalize_cluster_name(cluster_name)
         params = {
             "serviceName": service_name,
             "ip": ip,
@@ -167,8 +176,7 @@ class NacosRegistry:
             "ephemeral": "true" if ephemeral else "false",
             **self._namespace_params(),
         }
-        if cluster_name is not None:
-            params["clusterName"] = cluster_name
+        params["clusterName"] = cluster_name
         if group_name:
             params["groupName"] = group_name
         response = self.http.post(f"{self._base_url()}/instance", params=params, timeout=5)
@@ -184,7 +192,9 @@ class NacosRegistry:
     ):
         ip = instance.get("ip")
         port = instance.get("port")
-        cluster_name = instance.get("clusterName") or instance.get("cluster_name")
+        cluster_name = normalize_cluster_name(
+            instance.get("clusterName") or instance.get("cluster_name")
+        )
         group_name = instance.get("groupName") or instance.get("group_name") or "DEFAULT_GROUP"
         ephemeral = instance.get("ephemeral", True)
         metadata = dict(instance.get("metadata", {}) or {})
@@ -195,20 +205,6 @@ class NacosRegistry:
         metadata["heartbeat_at"] = utc_now_iso()
 
         try:
-            self.client.modify_naming_instance(
-                service_name,
-                ip,
-                port,
-                cluster_name=cluster_name,
-                metadata=metadata,
-                ephemeral=ephemeral,
-                group_name=group_name,
-            )
-        except Exception as sdk_error:
-            print(
-                f"Nacos SDK metadata update failed for {service_name} at "
-                f"{ip}:{port}: {sdk_error}. Trying HTTP fallback."
-            )
             self._update_instance_metadata_http(
                 service_name,
                 ip,
@@ -216,6 +212,20 @@ class NacosRegistry:
                 metadata,
                 ephemeral=ephemeral,
                 cluster_name=cluster_name,
+                group_name=group_name,
+            )
+        except Exception as http_error:
+            print(
+                f"Nacos HTTP metadata update failed for {service_name} at "
+                f"{ip}:{port}: {http_error}. Trying SDK fallback."
+            )
+            self.client.modify_naming_instance(
+                service_name,
+                ip,
+                port,
+                cluster_name=cluster_name,
+                metadata=metadata,
+                ephemeral=ephemeral,
                 group_name=group_name,
             )
 
@@ -233,6 +243,7 @@ class NacosRegistry:
         cluster_name=None,
         group_name="DEFAULT_GROUP",
     ):
+        cluster_name = normalize_cluster_name(cluster_name)
         params = {
             "serviceName": service_name,
             "ip": ip,
@@ -242,8 +253,7 @@ class NacosRegistry:
             "groupName": group_name,
             **self._namespace_params(),
         }
-        if cluster_name is not None:
-            params["clusterName"] = cluster_name
+        params["clusterName"] = cluster_name
         response = self.http.put(f"{self._base_url()}/instance", params=params, timeout=5)
         response.raise_for_status()
 
@@ -255,6 +265,7 @@ class NacosRegistry:
             supervisor.update_metadata(metadata)
 
     def _send_heartbeat_http(self, service_name, ip, port, cluster_name=None, weight=1.0, metadata=None, ephemeral=True, group_name="DEFAULT_GROUP"):
+        cluster_name = normalize_cluster_name(cluster_name)
         beat_data = {
             "serviceName": service_name,
             "ip": ip,
@@ -262,8 +273,7 @@ class NacosRegistry:
             "weight": weight,
             "ephemeral": ephemeral,
         }
-        if cluster_name is not None:
-            beat_data["cluster"] = cluster_name
+        beat_data["cluster"] = cluster_name
         if metadata is not None:
             beat_data["metadata"] = metadata
 
@@ -278,6 +288,7 @@ class NacosRegistry:
         return response.json()
 
     def send_heartbeat(self, service_name, ip, port, cluster_name=None, weight=1.0, metadata=None, ephemeral=True, group_name="DEFAULT_GROUP"):
+        cluster_name = normalize_cluster_name(cluster_name)
         heartbeat_metadata = dict(metadata or {})
         heartbeat_metadata["heartbeat_ts"] = int(time.time())
         heartbeat_metadata["heartbeat_at"] = utc_now_iso()
@@ -307,6 +318,7 @@ class NacosRegistry:
             )
 
     def _start_heartbeat(self, service_name, ip, port, metadata, heartbeat_interval, cluster_name=None, group_name="DEFAULT_GROUP", ephemeral=True):
+        cluster_name = normalize_cluster_name(cluster_name)
         supervisor = AgentHeartbeatSupervisor(
             registry=self,
             service_name=service_name,
@@ -425,7 +437,7 @@ class AgentHeartbeatSupervisor(threading.Thread):
         self.port = port
         self.metadata = dict(metadata or {})
         self.heartbeat_interval = float(heartbeat_interval)
-        self.cluster_name = cluster_name
+        self.cluster_name = normalize_cluster_name(cluster_name)
         self.group_name = group_name
         self.ephemeral = ephemeral
         self._stop_event = threading.Event()
@@ -455,6 +467,18 @@ class AgentHeartbeatSupervisor(threading.Thread):
                     metadata=heartbeat_metadata,
                     ephemeral=self.ephemeral,
                     group_name=self.group_name,
+                )
+                self.registry.update_instance_metadata(
+                    self.service_name,
+                    {
+                        "ip": self.ip,
+                        "port": self.port,
+                        "clusterName": self.cluster_name,
+                        "groupName": self.group_name,
+                        "ephemeral": self.ephemeral,
+                        "metadata": heartbeat_metadata,
+                    },
+                    metadata_updates=heartbeat_metadata,
                 )
             except Exception as exc:
                 print(f"[HEARTBEAT] failed for {heartbeat_key}: {exc}")
