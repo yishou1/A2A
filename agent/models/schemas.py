@@ -42,12 +42,27 @@ class SensorBatch(BaseModel):
 # --- 技能中间结果 ---
 
 
+class TargetGeo(BaseModel):
+    """目标三维位置（感知层地理解算输出）。"""
+
+    lat: float
+    lon: float
+    alt_m: float
+    slant_range_m: float | None = None
+    domain: str | None = None
+    alt_source: str | None = None
+    alt_confidence: float | None = None
+    geo_method: str | None = None
+    vertical_offset_m: float | None = None
+    class_name: str | None = None
+
+
 class Detection(BaseModel):
     track_id: str | None = None
     class_name: str
     confidence: float
     bbox: list[float] | None = None
-    geo: dict[str, float] | None = None
+    geo: TargetGeo | dict[str, Any] | None = None
     damage_score: float | None = None
     epistemic_uncertainty: float | None = None
 

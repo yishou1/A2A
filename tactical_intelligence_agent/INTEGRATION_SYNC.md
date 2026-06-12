@@ -2,7 +2,18 @@
 
 > 基线：`3d94a36 Add resident multi-workflow commander manager`  
 > 分支建议：`feature/<name>-tactical-intelligence`  
-> **本仓库为独立开发副本，合并前请勿直接修改 A2A-main 目录。**
+> **详细接入说明（含源码引用与验收对照）见 [`PROJECT_SYNC.md`](PROJECT_SYNC.md)**
+
+## 0. 快速导航
+
+| 文档 | 内容 |
+|------|------|
+| **[README.md](README.md)** | **交付说明（§11 四项：代码/测试/文档/demo）** |
+| [PROJECT_SYNC.md](PROJECT_SYNC.md) | 与《项目同步说明-新》逐条对照 |
+| [DEMO_GUIDE.md](DEMO_GUIDE.md) | 分步可视化演示命令 |
+| [MERGE_CHECKLIST.md](MERGE_CHECKLIST.md) | PR 验收清单 |
+
+---
 
 ## 1. 职责边界
 

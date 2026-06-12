@@ -62,8 +62,12 @@ class _ClipEmbedder:
 
         model_id = "openai/clip-vit-base-patch32"
         self.device = device
-        self.processor = CLIPProcessor.from_pretrained(model_id)
-        self.model = CLIPModel.from_pretrained(model_id)
+        try:
+            self.processor = CLIPProcessor.from_pretrained(model_id, local_files_only=True)
+            self.model = CLIPModel.from_pretrained(model_id, local_files_only=True)
+        except OSError:
+            self.processor = CLIPProcessor.from_pretrained(model_id)
+            self.model = CLIPModel.from_pretrained(model_id)
         self.model.eval()
         self.model.to(device)
 

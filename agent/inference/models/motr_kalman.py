@@ -89,10 +89,31 @@ class MOTRTracker(nn.Module):
         *,
         device: str,
         iou_thr: float,
-        base_lat: float,
-        base_lon: float,
+        config: dict[str, Any] | None = None,
+        visual_frame: dict[str, Any] | None = None,
+        batch_context: dict[str, Any] | None = None,
+        image_width: int | None = None,
+        image_height: int | None = None,
     ) -> dict[str, Any]:
         from PIL import Image
+
+        from agent.inference.geo_estimator import estimate_target_geo
+        from agent.inference.geolocation import parse_sensor_georef_context
+
+        cfg = config or {}
+        frame_meta = (visual_frame or {}).get("metadata") or {}
+        georef = parse_sensor_georef_context(
+            visual_frame,
+            cfg,
+            batch_context=batch_context,
+            image_width=image_width,
+            image_height=image_height,
+        )
+        prior_geo_by_id = {
+            str(pt.get("track_id", "")): pt.get("geo")
+            for pt in prior_tracks
+            if pt.get("track_id") and pt.get("geo")
+        }
 
         self.to(device)
         img = Image.fromarray(image_rgb) if image_rgb is not None else None
@@ -179,7 +200,18 @@ class MOTRTracker(nn.Module):
                 kalman_gain = 0.5
 
             cx, cy = (bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2
-            idx = len(tracks_out)
+            prior_geo = prior_geo_by_id.get(tid) if matched_tid else None
+            geo = estimate_target_geo(
+                bbox,
+                georef,
+                class_name=str(det.get("class_name", "unknown")),
+                det_meta=det.get("metadata") if isinstance(det.get("metadata"), dict) else {},
+                frame_meta=frame_meta,
+                batch_context=batch_context,
+                config=cfg,
+                prior_geo=prior_geo if isinstance(prior_geo, dict) else None,
+                smooth_alpha=float(cfg.get("geo_smooth_alpha", 0.7)),
+            )
             tracks_out.append(
                 {
                     "track_id": tid,
@@ -189,7 +221,7 @@ class MOTRTracker(nn.Module):
                     "bbox": bbox,
                     "last_bbox": bbox,
                     "position_px": [cx, cy],
-                    "geo": {"lat": base_lat + idx * 0.001, "lon": base_lon + idx * 0.001, "alt_m": 120.0},
+                    "geo": geo,
                     "kalman_gain": round(kalman_gain, 3),
                 }
             )

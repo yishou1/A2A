@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import threading
 from typing import Any, AsyncIterator
 
@@ -14,7 +15,7 @@ except ImportError:  # TIA 独立仓库无 server.A2ABaseAgent
 
 from agent.models.schemas import SemanticIntelligencePacket
 from agent.orchestrator import TacticalIntelligenceAgent
-from tactical_intelligence_agent.bootstrap import create_engine, default_role
+from tactical_intelligence_agent.bootstrap import create_engine, default_role, warmup_inference
 from tactical_intelligence_agent.payload_adapter import commander_payload_to_batch
 
 AGENT_NAME = "Tactical_Intelligence_Agent"
@@ -102,6 +103,8 @@ class TacticalIntelligenceCommanderAgent(_CommanderAgentBase):
         self._engine = engine or create_engine()
         self._result_cache: dict[str, SemanticIntelligencePacket] = {}
         self._result_lock = threading.RLock()
+        if engine is None and os.environ.get("TIA_SKIP_WARMUP", "0") != "1":
+            warmup_inference()
         super().__init__(
             name=AGENT_NAME,
             description=AGENT_DESCRIPTION,
@@ -193,7 +196,19 @@ class TacticalIntelligenceCommanderAgent(_CommanderAgentBase):
             role=self.role,
         )
 
-        packet = self._get_or_process(payload)
+        try:
+            packet = await asyncio.to_thread(self._get_or_process, payload)
+        except Exception as exc:
+            yield self._sse_event(
+                status="Failed",
+                progress="100%",
+                stage="error",
+                role=self.role,
+                work_item=work_item,
+                message=f"Tactical intelligence failed: {exc}",
+            )
+            return
+
         yield self._sse_event(
             status="Completed",
             progress="100%",

@@ -181,7 +181,7 @@ def step3_receive_task(base_url: str, pause: bool) -> tuple[bool, dict]:
     print(f"Headers: Authorization: Bearer mock-jwt-token-abcd")
     print("Body:\n")
     print(_pretty(payload))
-    r200 = requests.post(url, json=payload, headers=headers, timeout=30)
+    r200 = requests.post(url, json=payload, headers=headers, timeout=600)
     print(f"\nHTTP 状态: {r200.status_code}")
     body = r200.json()
     print("响应 JSON:\n")
@@ -218,22 +218,29 @@ def step5_stream(base_url: str, work_item: str, pause: bool) -> bool:
         "Accept": "text/event-stream",
     }
     print(f"请求: POST {url}\n")
-    res = requests.post(url, json=payload, headers=headers, stream=True, timeout=60)
+    res = requests.post(url, json=payload, headers=headers, stream=True, timeout=600)
     print(f"HTTP 状态: {res.status_code}\n")
 
     events: list[dict] = []
     print("SSE 事件（逐条打印）:\n")
-    for raw_line in res.iter_lines(decode_unicode=True):
-        if not raw_line or not raw_line.startswith("data: "):
-            continue
-        data = json.loads(raw_line[6:])
-        events.append(data)
-        stage = data.get("stage") or data.get("status")
-        progress = data.get("progress", "")
-        print(f"  ── 事件 #{len(events)}  stage/status={stage}  progress={progress}")
-        print(textwrap.indent(_pretty(data), "     "))
-        if pause and len(events) < 4:
-            input("     >>> 按 Enter 看下一条 SSE… ")
+    try:
+        for raw_line in res.iter_lines(decode_unicode=True):
+            if not raw_line or not raw_line.startswith("data: "):
+                continue
+            data = json.loads(raw_line[6:])
+            events.append(data)
+            stage = data.get("stage") or data.get("status")
+            progress = data.get("progress", "")
+            print(f"  ── 事件 #{len(events)}  stage/status={stage}  progress={progress}")
+            print(textwrap.indent(_pretty(data), "     "))
+            if pause and len(events) < 4:
+                input("     >>> 按 Enter 看下一条 SSE… ")
+    except requests.exceptions.ChunkedEncodingError as exc:
+        print(f"\n[WARN] SSE 连接提前断开: {exc}")
+        print("       常见原因: Agent 端推理异常（如 HuggingFace 下载超时）。")
+        print("       请查看启动 Agent 的终端报错；可先运行:")
+        print("         python scripts/download_models.py")
+        print("       并确保 Clash 代理对终端生效，或设置 HF_ENDPOINT。")
 
     ok = (
         len(events) >= 4
@@ -255,13 +262,13 @@ def step6_idempotent(base_url: str, work_item: str, pause: bool) -> bool:
     headers = {"Authorization": "Bearer mock-jwt-token-abcd"}
 
     print("第一次 sendMessage:\n")
-    first = requests.post(url, json=payload, headers=headers, timeout=30).json()
+    first = requests.post(url, json=payload, headers=headers, timeout=600).json()
     print(_pretty(first))
 
     time.sleep(0.3)
 
     print("\n第二次 sendMessage（相同 work_item）:\n")
-    second = requests.post(url, json=payload, headers=headers, timeout=30).json()
+    second = requests.post(url, json=payload, headers=headers, timeout=600).json()
     print(_pretty(second))
 
     ok = first == second
@@ -273,14 +280,14 @@ def step6_idempotent(base_url: str, work_item: str, pause: bool) -> bool:
     s1 = list(
         line[6:]
         for line in requests.post(
-            stream_url, json=payload, headers=stream_headers, stream=True, timeout=60
+            stream_url, json=payload, headers=stream_headers, stream=True, timeout=600
         ).iter_lines(decode_unicode=True)
         if line and line.startswith("data: ")
     )
     s2 = list(
         line[6:]
         for line in requests.post(
-            stream_url, json=payload, headers=stream_headers, stream=True, timeout=60
+            stream_url, json=payload, headers=stream_headers, stream=True, timeout=600
         ).iter_lines(decode_unicode=True)
         if line and line.startswith("data: ")
     )

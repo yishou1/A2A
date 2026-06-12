@@ -18,6 +18,27 @@ inference:
   supcon_temperature: 0.07
   base_lat: 30.512
   base_lon: 114.381
+  # 三维地理解算（多域：land / air / sea）
+  ground_elevation_m: 120.0
+  sea_surface_elevation_m: 0.0
+  default_platform_altitude_m: 3200.0
+  default_platform_heading_deg: 0.0
+  default_depression_angle_deg: 75.0
+  default_fov_h_deg: 45.0
+  geo_smooth_alpha: 0.7
+  geo_target_profiles:
+    land:
+      default: { vertical_offset_m: 2.0 }
+      tank: { vertical_offset_m: 2.5 }
+      person: { vertical_offset_m: 1.8 }
+    air:
+      default: { reference_height_m: 5.0 }
+      airplane: { reference_height_m: 8.0 }
+      helicopter: { reference_height_m: 4.5 }
+      drone: { reference_height_m: 1.2 }
+    sea:
+      default: { vertical_offset_m: 12.0 }
+      ship: { vertical_offset_m: 18.0 }
   rag_top_k: 3
   llm_model: gpt-4o-mini
 

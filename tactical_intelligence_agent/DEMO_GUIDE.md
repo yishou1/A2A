@@ -1,5 +1,6 @@
 # 战术情报 Agent — 分步可视化验收指南
 
+> **接入原理、验收对照与源码说明**：见 [`PROJECT_SYNC.md`](PROJECT_SYNC.md)
 
 ---
 

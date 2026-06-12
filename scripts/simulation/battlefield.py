@@ -86,6 +86,31 @@ class BattlefieldSimulation:
     def _ts(self, offset_sec: int = 0) -> datetime:
         return datetime.now(timezone.utc) + timedelta(seconds=offset_sec)
 
+    def _uav_platform_geo(self) -> dict[str, float]:
+        """从红蓝态势中取蓝方 UAV 平台位姿，供地理解算使用。"""
+        for unit in self.situation._blue.units:
+            if unit.type == "uav":
+                geo = unit.geo or {}
+                return {
+                    "platform_lat": float(geo.get("lat", self.config.base_lat)),
+                    "platform_lon": float(geo.get("lon", self.config.base_lon)),
+                    "altitude_m": float(geo.get("alt_m", 3200.0)),
+                }
+        ao = (self.situation._raw.get("area_of_operations") or {}).get("center") or {}
+        return {
+            "platform_lat": float(ao.get("lat", self.config.base_lat)),
+            "platform_lon": float(ao.get("lon", self.config.base_lon)),
+            "altitude_m": 3200.0,
+        }
+
+    def _ground_elevation_m(self) -> float:
+        """作战区内典型地表海拔（谷地地面目标）。"""
+        for unit in self.situation._red.units:
+            geo = unit.geo or {}
+            if "alt_m" in geo:
+                return float(geo["alt_m"])
+        return 120.0
+
     def _eo(
         self,
         sensor_id: str,
@@ -94,6 +119,7 @@ class BattlefieldSimulation:
         scene: str,
         offset_sec: int = 0,
     ) -> SensorFrame:
+        platform = self._uav_platform_geo()
         return SensorFrame(
             sensor_id=sensor_id,
             modality=SensorModality.EO_IR,
@@ -106,7 +132,12 @@ class BattlefieldSimulation:
             metadata={
                 "resolution": f"{self._scene_clear.shape[1]}x{self._scene_clear.shape[0]}",
                 "platform": "UAV-Reaper-07",
-                "altitude_m": 3200.0,
+                "altitude_m": platform["altitude_m"],
+                "platform_lat": platform["platform_lat"],
+                "platform_lon": platform["platform_lon"],
+                "heading_deg": 0.0,
+                "depression_angle_deg": 75.0,
+                "ground_elevation_m": self._ground_elevation_m(),
             },
         )
 
@@ -163,6 +194,7 @@ class BattlefieldSimulation:
             "jamming_level": overlay["jamming_level"],
             "subscriber_agents": overlay["subscriber_agents"],
             "area_of_operations": ao,
+            "ground_elevation_m": self._ground_elevation_m(),
             "knowledge_base": self.situation.knowledge_base(),
             "rag_query": overlay["rag_query"],
             "battlefield_situation": snap,

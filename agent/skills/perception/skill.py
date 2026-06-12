@@ -52,6 +52,7 @@ class PerceptionSkill:
                 "verified_detections": verified,
                 "prior_tracks": prior_tracks or [],
                 "visual_frame": visual_frames[0] if visual_frames else None,
+                "batch_context": batch.context,
             }
         )
         trace[self.tracker.name] = f"{len(track_result.get('tracks', []))} tracks"

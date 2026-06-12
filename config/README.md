@@ -7,6 +7,20 @@
 
 ## 真实推理（default.yaml）
 
+## 验收
+cd D:\a2a_project\A2A-main
+$env:PYTHONPATH = "."; $env:TIA_PORT = "8016"
+.\.venv\Scripts\python.exe scripts\demo_tactical_intelligence_acceptance.py --pause
+
+
+$env:PYTHONPATH = "."
+$env:TIA_CONFIG = "config\default.yaml"
+$env:TIA_ALLOW_INLINE_FRAMES = "1"
+$env:TIA_NACOS_REGISTER = "0" 
+$env:TIA_PORT = "8016"
+.\.venv\Scripts\python.exe tactical_intelligence_agent\main.py
+
+
 ```powershell
 cd D:\a2a_project\A2A-main
 

@@ -23,18 +23,23 @@ if __name__ == "__main__":
     if os.environ.get("TIA_NACOS_REGISTER", "1") == "1":
         registry = NacosRegistry()
         ip = get_host_ip()
-        registry.register_service(
-            service_name=os.environ.get("TIA_NACOS_SERVICE", "A2A-Agent"),
-            ip=ip,
-            port=port,
-            metadata={
-                "role": role,
-                "status": "idle",
-                "capability": "semantic_intelligence",
-                "protocol": "http+a2a-commander",
-            },
-            heartbeat_interval=heartbeat_interval,
-        )
-        print(f"[NACOS] registered A2A-Agent at {ip}:{port} role={role}")
+        try:
+            registry.register_service(
+                service_name=os.environ.get("TIA_NACOS_SERVICE", "A2A-Agent"),
+                ip=ip,
+                port=port,
+                metadata={
+                    "role": role,
+                    "status": "idle",
+                    "capability": "semantic_intelligence",
+                    "protocol": "http+a2a-commander",
+                },
+                heartbeat_interval=heartbeat_interval,
+            )
+            print(f"[NACOS] registered A2A-Agent at {ip}:{port} role={role}")
+        except Exception as exc:
+            print(f"[NACOS] register skipped (Nacos unavailable): {exc}")
+            print("[NACOS] HTTP Agent will still start. For local demo set TIA_NACOS_REGISTER=0")
+            print("[NACOS] Or start Nacos: docker compose up -d")
 
     agent.start()
