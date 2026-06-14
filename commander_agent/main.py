@@ -4,8 +4,11 @@ import time
 import re
 import argparse
 import threading
+import queue
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
+
+import requests
 
 # Ensure imports work from project root
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -69,6 +72,7 @@ class CommanderAgent:
         self.max_retries = max(0, int(max_retries if max_retries is not None else os.environ.get("A2A_MAX_RETRIES", "1")))
         self.retry_backoff = float(retry_backoff if retry_backoff is not None else os.environ.get("A2A_RETRY_BACKOFF", "0.2"))
         self.request_timeout = float(request_timeout if request_timeout is not None else os.environ.get("A2A_REQUEST_TIMEOUT", "5"))
+        self.lease_heartbeat_check_interval = float(os.environ.get("A2A_LEASE_HEARTBEAT_CHECK_INTERVAL", "1"))
         self._checkpoint_lock = threading.RLock()
         self._last_task_responses = {}
         self.workflow_catalog = BPELWorkflowCatalog(PROJECT_ROOT)
@@ -188,7 +192,18 @@ class CommanderAgent:
             if success:
                 return True
             last_error = error
+            if self._is_agent_unavailable_error(error):
+                self._mark_agent_unavailable(target, role_needed, task_payload, error)
             print(f"[WARN] Candidate {ip}:{port} failed: {error}")
+            if index < len(instances):
+                self._trace(
+                    "agent_failover_reassigning",
+                    role=role_needed,
+                    work_item=task_payload.get("work_item"),
+                    failed_target=self._candidate_label(target),
+                    remaining_candidates=len(instances) - index,
+                    error=str(error),
+                )
 
         print(f"[ERROR] A2A communication failed after trying {len(instances)} candidates: {last_error}")
         return False
@@ -225,13 +240,30 @@ class CommanderAgent:
             for future in as_completed(futures):
                 target = futures[future]
                 success, error = future.result()
-                results.append(success)
+                results.append((success, error, target))
                 if not success:
+                    if self._is_agent_unavailable_error(error):
+                        self._mark_agent_unavailable(target, role_needed, task_payload, error)
                     print(f"[WARN] Parallel candidate {target.get('ip')}:{target.get('port')} failed: {error}")
 
-        success_count = sum(results)
+        success_count = sum(1 for success, _, _ in results if success)
+        blocking_failures = [
+            (error, target)
+            for success, error, target in results
+            if not success and not self._is_agent_unavailable_error(error)
+        ]
         print(f"[PARALLEL] Completed {success_count}/{len(instances)} {role_needed} assignment(s).")
-        return bool(results) and all(results)
+        if blocking_failures:
+            return False
+        if success_count and success_count < len(instances):
+            self._trace(
+                "agent_parallel_degraded",
+                role=role_needed,
+                work_item=task_payload.get("work_item"),
+                success_count=success_count,
+                failed_count=len(instances) - success_count,
+            )
+        return success_count > 0
 
     def _delegate_task_with_lease(self, role_needed: str, task_payload: dict, stream: bool = False):
         work_item = task_payload.get("work_item", f"{self.workflow_id}:{role_needed}")
@@ -255,20 +287,24 @@ class CommanderAgent:
             attempted_keys.add(lease.instance_key)
             label = self._candidate_label(target)
             print(f"[LEASE] {self.workflow_id} acquired {role_needed} at {label}")
-            try:
-                success, error = self._delegate_remote_candidate(
-                    role_needed,
-                    target,
-                    task_payload,
-                    stream=stream,
-                )
-            finally:
-                self._release_agent_lease(lease)
+            success, error = self._delegate_leased_candidate(
+                lease,
+                role_needed,
+                task_payload,
+                stream=stream,
+            )
 
             if success:
                 return True
             last_error = error
             print(f"[WARN] Candidate {label} failed: {error}")
+            self._trace(
+                "agent_failover_reassigning",
+                role=role_needed,
+                work_item=work_item,
+                failed_target=label,
+                error=str(error),
+            )
 
     def _delegate_parallel_task_with_lease(self, role_needed: str, task_payload: dict, stream: bool = False):
         work_item = task_payload.get("work_item", f"{self.workflow_id}:{role_needed}")
@@ -296,29 +332,125 @@ class CommanderAgent:
             for future in as_completed(futures):
                 target = futures[future]
                 success, error = future.result()
-                results.append(success)
+                results.append((success, error, target))
                 if not success:
                     print(f"[WARN] Parallel candidate {self._candidate_label(target)} failed: {error}")
 
-        success_count = sum(results)
+        success_count = sum(1 for success, _, _ in results if success)
+        blocking_failures = [
+            (error, target)
+            for success, error, target in results
+            if not success and not self._is_agent_unavailable_error(error)
+        ]
         print(f"[PARALLEL] Completed {success_count}/{len(leases)} leased {role_needed} assignment(s).")
-        return bool(results) and all(results)
+        if blocking_failures:
+            return False
+        if success_count and success_count < len(leases):
+            self._trace(
+                "agent_parallel_degraded",
+                role=role_needed,
+                work_item=work_item,
+                success_count=success_count,
+                failed_count=len(leases) - success_count,
+            )
+        return success_count > 0
 
     def _delegate_leased_candidate(self, lease, role_needed: str, task_payload: dict, stream: bool = False):
-        try:
-            return self._delegate_remote_candidate(
+        if self.lease_heartbeat_check_interval <= 0:
+            success, error = self._delegate_remote_candidate(
                 role_needed,
                 lease.target,
                 task_payload,
                 stream=stream,
+                lease=lease,
             )
-        finally:
-            self._release_agent_lease(lease)
+            self._release_agent_lease(
+                lease,
+                available=success or not self._is_agent_unavailable_error(error),
+                error=error,
+            )
+            return success, error
 
-    def _release_agent_lease(self, lease):
+        result_queue = queue.Queue(maxsize=1)
+
+        def run_candidate():
+            try:
+                result = self._delegate_remote_candidate(
+                    role_needed,
+                    lease.target,
+                    task_payload,
+                    stream=stream,
+                    lease=lease,
+                )
+            except Exception as exc:
+                result = (False, exc)
+            try:
+                result_queue.put_nowait(result)
+            except queue.Full:
+                pass
+
+        thread = threading.Thread(
+            target=run_candidate,
+            name=f"a2a-lease-call-{lease.instance_key}",
+            daemon=True,
+        )
+        thread.start()
+
+        while True:
+            try:
+                success, error = result_queue.get(
+                    timeout=self.lease_heartbeat_check_interval
+                )
+                self._release_agent_lease(
+                    lease,
+                    available=success or not self._is_agent_unavailable_error(error),
+                    error=error,
+                )
+                return success, error
+            except queue.Empty:
+                if not self.lease_manager.is_current(lease):
+                    error = RuntimeError(f"Lease no longer active for {lease.instance_key}")
+                    return False, error
+                if not self.lease_manager.is_lease_fresh(lease):
+                    error = RuntimeError(f"heartbeat lost for {lease.instance_key}")
+                    self._trace(
+                        "agent_heartbeat_lost",
+                        role=role_needed,
+                        work_item=lease.work_item,
+                        target=lease.instance_key,
+                        check_interval=self.lease_heartbeat_check_interval,
+                    )
+                    self._release_agent_lease(
+                        lease,
+                        available=False,
+                        error=error,
+                    )
+                    return False, error
+
+    def _release_agent_lease(self, lease, *, available: bool = True, error=None):
         try:
-            self.lease_manager.release(lease)
-            print(f"[LEASE] Released {lease.role} at {lease.instance_key}")
+            if available:
+                self.lease_manager.release(lease)
+                print(f"[LEASE] Released {lease.role} at {lease.instance_key}")
+                return
+            self.lease_manager.release(
+                lease,
+                status="unavailable",
+                metadata_updates={
+                    "unavailable_workflow_id": lease.workflow_id,
+                    "unavailable_work_item": lease.work_item,
+                    "unavailable_at": utc_now_iso(),
+                    "unavailable_reason": str(error),
+                },
+            )
+            self._trace(
+                "agent_marked_unavailable",
+                role=lease.role,
+                work_item=lease.work_item,
+                target=lease.instance_key,
+                error=str(error),
+            )
+            print(f"[LEASE] Released {lease.role} at {lease.instance_key} as unavailable")
         except Exception as exc:
             print(f"[WARN] Failed to mirror lease release for {lease.instance_key}: {exc}")
 
@@ -326,7 +458,78 @@ class CommanderAgent:
     def _candidate_label(target: dict):
         return f"{target.get('ip')}:{target.get('port')}"
 
-    def _delegate_remote_candidate(self, role_needed: str, target: dict, task_payload: dict, stream: bool = False):
+    @staticmethod
+    def _is_agent_unavailable_error(error) -> bool:
+        if error is None:
+            return False
+        if isinstance(error, requests.exceptions.RequestException):
+            return True
+        response = getattr(error, "response", None)
+        if response is not None and getattr(response, "status_code", None) in {502, 503, 504}:
+            return True
+        text = str(error).lower()
+        unavailable_markers = (
+            "connection refused",
+            "connection aborted",
+            "connection reset",
+            "failed to establish a new connection",
+            "max retries exceeded",
+            "read timed out",
+            "connect timeout",
+            "timed out",
+            "heartbeat lost",
+            "503",
+            "service unavailable",
+            "agent is not ready",
+        )
+        return any(marker in text for marker in unavailable_markers)
+
+    def _mark_agent_unavailable(self, target: dict, role: str, task_payload: dict, error) -> None:
+        if self.registry is None:
+            return
+        label = self._candidate_label(target)
+        try:
+            self.registry.update_instance_metadata(
+                "A2A-Agent",
+                target,
+                metadata_updates={
+                    "status": "unavailable",
+                    "unavailable_workflow_id": self.workflow_id,
+                    "unavailable_work_item": task_payload.get("work_item"),
+                    "unavailable_at": utc_now_iso(),
+                    "unavailable_reason": str(error),
+                },
+                remove_keys=[
+                    "lease_workflow_id",
+                    "lease_work_item",
+                    "lease_acquired_at",
+                ],
+            )
+            self._trace(
+                "agent_marked_unavailable",
+                role=role,
+                work_item=task_payload.get("work_item"),
+                target=label,
+                error=str(error),
+            )
+        except Exception as exc:
+            print(f"[WARN] Failed to mark unavailable agent {label}: {exc}")
+
+    def _lease_allows_response(self, lease, target_label: str, work_item: str, role: str) -> bool:
+        if lease is None or self.lease_manager is None:
+            return True
+        if self.lease_manager.is_current(lease) and self.lease_manager.is_lease_fresh(lease):
+            return True
+        self._trace(
+            "agent_late_response_ignored",
+            role=role,
+            work_item=work_item,
+            target=target_label,
+            lease_instance=lease.instance_key,
+        )
+        return False
+
+    def _delegate_remote_candidate(self, role_needed: str, target: dict, task_payload: dict, stream: bool = False, lease=None):
         ip = target.get("ip")
         port = target.get("port")
         label = self._candidate_label(target)
@@ -375,11 +578,15 @@ class CommanderAgent:
                         message=events[-1].get("message", "") if events else "",
                         extra={"stream_events": events, "target": label},
                     )
+                    if not self._lease_allows_response(lease, label, work_item, role_needed):
+                        return False, RuntimeError(f"late response ignored after failover: {label}")
                     self._remember_task_response(work_item, response, role=role_needed, target=label)
                     self._trace("agent_call_completed", role=role_needed, work_item=work_item, target=label, attempt=attempt)
                     return True, None
 
                 res = client.send_message(task_payload)
+                if not self._lease_allows_response(lease, label, work_item, role_needed):
+                    return False, RuntimeError(f"late response ignored after failover: {label}")
                 self._remember_task_response(work_item, res, role=role_needed, target=label)
                 print(f"[SEND] {label} Task Response: {res}")
                 self._trace("agent_call_completed", role=role_needed, work_item=work_item, target=label, attempt=attempt)

@@ -142,6 +142,28 @@ class NacosRegistry:
                 print(f"Discovery error: {sdk_error}")
                 return []
 
+    def find_instance(self, service_name, target):
+        """Return the latest registry snapshot for a specific instance."""
+        target_ip = str(target.get("ip"))
+        target_port = str(target.get("port"))
+        try:
+            instances = self._discover_service_http(service_name)
+        except Exception as http_error:
+            print(f"Nacos HTTP instance lookup failed for {service_name}: {http_error}. Trying SDK fallback.")
+            try:
+                instances = self.client.list_naming_instance(service_name)
+            except Exception as sdk_error:
+                print(f"Instance lookup error: {sdk_error}")
+                return None
+
+        for instance in instances.get("hosts", []):
+            if str(instance.get("ip")) == target_ip and str(instance.get("port")) == target_port:
+                return instance
+        return None
+
+    def is_instance_fresh(self, instance):
+        return self._is_instance_fresh(instance)
+
     def _base_url(self):
         # Use the first configured Nacos address. The project passes a single address today.
         address = self.server_addresses.split(",")[0].strip()
@@ -435,16 +457,34 @@ class AgentHeartbeatSupervisor(threading.Thread):
         with self._metadata_lock:
             self.metadata = dict(metadata or {})
 
+    def _metadata_for_heartbeat(self):
+        with self._metadata_lock:
+            heartbeat_metadata = dict(self.metadata)
+
+        finder = getattr(self.registry, "find_instance", None)
+        if finder is not None:
+            try:
+                latest = finder(
+                    self.service_name,
+                    {"ip": self.ip, "port": self.port},
+                )
+            except Exception:
+                latest = None
+            if latest:
+                latest_metadata = dict(latest.get("metadata", {}) or {})
+                heartbeat_metadata.update(latest_metadata)
+
+        heartbeat_metadata["heartbeat_ts"] = int(time.time())
+        heartbeat_metadata["heartbeat_at"] = utc_now_iso()
+        return heartbeat_metadata
+
     def run(self):
         heartbeat_key = f"{self.service_name}#{self.ip}#{self.port}"
         print(
             f"[HEARTBEAT] started for {heartbeat_key} every {self.heartbeat_interval:.1f}s"
         )
         while not self._stop_event.is_set():
-            with self._metadata_lock:
-                heartbeat_metadata = dict(self.metadata)
-            heartbeat_metadata["heartbeat_ts"] = int(time.time())
-            heartbeat_metadata["heartbeat_at"] = utc_now_iso()
+            heartbeat_metadata = self._metadata_for_heartbeat()
 
             try:
                 self.registry.send_heartbeat(

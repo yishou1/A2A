@@ -78,6 +78,28 @@ class AgentLeaseManagerTest(unittest.TestCase):
             all(instance["metadata"]["status"] == "idle" for instance in registry.instances)
         )
 
+    def test_release_can_mark_down_agent_unavailable(self):
+        registry = FakeRegistry()
+        leases = AgentLeaseManager(registry)
+
+        acquired = leases.acquire_one("recon", "wf-1", "wf-1:1:recon")
+        leases.release(
+            acquired,
+            status="unavailable",
+            metadata_updates={
+                "unavailable_reason": "connection refused",
+                "unavailable_workflow_id": "wf-1",
+            },
+        )
+
+        self.assertEqual(leases.list_leases(), [])
+        self.assertEqual(acquired.target["metadata"]["status"], "unavailable")
+        self.assertEqual(
+            acquired.target["metadata"]["unavailable_reason"],
+            "connection refused",
+        )
+        self.assertNotIn("lease_workflow_id", acquired.target["metadata"])
+
 
 if __name__ == "__main__":
     unittest.main()

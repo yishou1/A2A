@@ -38,6 +38,44 @@ class AgentHeartbeatTest(unittest.TestCase):
         self.assertIn("heartbeat_ts", fake_registry.calls[0]["kwargs"]["metadata"])
         self.assertIn("heartbeat_at", fake_registry.calls[0]["kwargs"]["metadata"])
 
+    def test_heartbeat_preserves_latest_registry_metadata(self):
+        class RegistryWithLatest(FakeRegistry):
+            def find_instance(self, service_name, target):
+                return {
+                    "ip": target["ip"],
+                    "port": target["port"],
+                    "metadata": {
+                        "role": "recon",
+                        "status": "busy",
+                        "lease_workflow_id": "wf-1",
+                        "lease_work_item": "wf-1:1:recon",
+                        "heartbeat_ts": time.time() - 1,
+                    },
+                }
+
+        fake_registry = RegistryWithLatest()
+        supervisor = AgentHeartbeatSupervisor(
+            registry=fake_registry,
+            service_name="A2A-Agent",
+            ip="127.0.0.1",
+            port=8002,
+            metadata={"role": "recon", "status": "idle"},
+            heartbeat_interval=0.05,
+        )
+
+        supervisor.start()
+        deadline = time.time() + 1.0
+        while time.time() < deadline and not fake_registry.calls:
+            time.sleep(0.01)
+        supervisor.stop()
+        supervisor.join(timeout=1.0)
+
+        heartbeat_metadata = fake_registry.calls[0]["kwargs"]["metadata"]
+        self.assertEqual(heartbeat_metadata["status"], "busy")
+        self.assertEqual(heartbeat_metadata["lease_workflow_id"], "wf-1")
+        self.assertEqual(heartbeat_metadata["lease_work_item"], "wf-1:1:recon")
+        self.assertGreater(heartbeat_metadata["heartbeat_ts"], time.time() - 1)
+
     def test_filter_instances_discards_stale_instances(self):
         registry = NacosRegistry(server_addresses="127.0.0.1:8848")
         registry.heartbeat_grace_seconds = 5

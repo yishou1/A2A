@@ -68,21 +68,41 @@ class AgentLeaseManager:
                     break
         return leases
 
-    def release(self, lease: AgentLease) -> None:
+    def release(
+        self,
+        lease: AgentLease,
+        *,
+        status: str = "idle",
+        metadata_updates: Optional[dict] = None,
+        remove_keys: Optional[Iterable[str]] = None,
+    ) -> None:
         with self._lock:
             current = self._leases.get(lease.instance_key)
             if current != lease:
                 return
             self._leases.pop(lease.instance_key, None)
+            updates = {"status": status}
+            updates.update(metadata_updates or {})
+            cleanup_keys = [
+                "lease_workflow_id",
+                "lease_work_item",
+                "lease_acquired_at",
+            ]
+            if status == "idle":
+                cleanup_keys.extend(
+                    [
+                        "unavailable_workflow_id",
+                        "unavailable_work_item",
+                        "unavailable_at",
+                        "unavailable_reason",
+                    ]
+                )
+            cleanup_keys.extend(remove_keys or [])
             self.registry.update_instance_metadata(
                 lease.service_name,
                 lease.target,
-                metadata_updates={"status": "idle"},
-                remove_keys=[
-                    "lease_workflow_id",
-                    "lease_work_item",
-                    "lease_acquired_at",
-                ],
+                metadata_updates=updates,
+                remove_keys=cleanup_keys,
             )
 
     def release_workflow(self, workflow_id: str) -> None:
@@ -94,6 +114,32 @@ class AgentLeaseManager:
             ]
         for lease in leases:
             self.release(lease)
+
+    def is_current(self, lease: AgentLease) -> bool:
+        with self._lock:
+            return self._leases.get(lease.instance_key) == lease
+
+    def latest_instance(self, lease: AgentLease) -> Optional[dict]:
+        finder = getattr(self.registry, "find_instance", None)
+        if finder is None:
+            return lease.target
+        return finder(lease.service_name, lease.target)
+
+    def is_lease_fresh(self, lease: AgentLease) -> bool:
+        if not self.is_current(lease):
+            return False
+
+        checker = (
+            getattr(self.registry, "is_instance_fresh", None)
+            or getattr(self.registry, "_is_instance_fresh", None)
+        )
+        if checker is None:
+            return True
+
+        latest = self.latest_instance(lease)
+        if latest is None:
+            return False
+        return bool(checker(latest))
 
     def list_leases(self) -> list[dict]:
         with self._lock:

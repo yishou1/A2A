@@ -4,7 +4,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import requests
+
 from bpel_workflow import BPELWorkflowCatalog
+from commander_agent.agent_leases import AgentLeaseManager
 from commander_agent.main import CommanderAgent
 from scripts.demo_bpel_workflows import main as demo_bpel_workflows_main
 
@@ -98,7 +101,7 @@ class BPELWorkflowTest(unittest.TestCase):
                         {"ip": "10.0.0.2", "port": 8013},
                     ]
 
-            def fake_remote_candidate(role, target, payload, stream=False):
+            def fake_remote_candidate(role, target, payload, stream=False, **kwargs):
                 label = target["ip"]
                 timing[f"{label}_role"] = role
                 timing[f"{label}_start"] = time.perf_counter()
@@ -123,6 +126,314 @@ class BPELWorkflowTest(unittest.TestCase):
                 max(timing["10.0.0.1_start"], timing["10.0.0.2_start"]),
                 min(timing["10.0.0.1_end"], timing["10.0.0.2_end"]),
             )
+
+    def test_single_remote_dispatch_reassigns_when_agent_is_down(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            commander = CommanderAgent(mode="local", state_dir=temp_dir)
+            calls = []
+
+            class FakeRegistry:
+                def __init__(self):
+                    self.instances = [
+                        {
+                            "ip": "10.0.0.1",
+                            "port": 8012,
+                            "metadata": {"role": "recon", "status": "idle"},
+                        },
+                        {
+                            "ip": "10.0.0.2",
+                            "port": 8012,
+                            "metadata": {"role": "recon", "status": "idle"},
+                        },
+                    ]
+
+                def discover_service(self, service_name, required_tags=None):
+                    return [
+                        instance
+                        for instance in self.instances
+                        if all(
+                            instance["metadata"].get(key) == value
+                            for key, value in (required_tags or {}).items()
+                        )
+                    ]
+
+                def update_instance_metadata(
+                    self,
+                    service_name,
+                    instance,
+                    metadata_updates=None,
+                    remove_keys=None,
+                ):
+                    instance["metadata"].update(metadata_updates or {})
+                    for key in remove_keys or []:
+                        instance["metadata"].pop(key, None)
+                    return instance["metadata"]
+
+            def fake_remote_candidate(role, target, payload, stream=False, **kwargs):
+                calls.append(target["ip"])
+                if target["ip"] == "10.0.0.1":
+                    return False, requests.exceptions.ConnectionError("connection refused")
+                return True, None
+
+            registry = FakeRegistry()
+            commander.mode = "remote"
+            commander.registry = registry
+            commander.lease_manager = None
+            commander._delegate_remote_candidate = fake_remote_candidate
+
+            success = commander.delegate_task(
+                "recon",
+                {"workflow_id": "wf-failover", "work_item": "wf-failover:recon"},
+            )
+
+            self.assertTrue(success)
+            self.assertEqual(calls, ["10.0.0.1", "10.0.0.2"])
+            self.assertEqual(registry.instances[0]["metadata"]["status"], "unavailable")
+            self.assertEqual(registry.instances[1]["metadata"]["status"], "idle")
+
+    def test_leased_remote_dispatch_reassigns_when_agent_is_down(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            commander = CommanderAgent(mode="local", state_dir=temp_dir)
+            calls = []
+
+            class FakeRegistry:
+                def __init__(self):
+                    self.instances = [
+                        {
+                            "ip": "10.0.0.1",
+                            "port": 8012,
+                            "metadata": {"role": "recon", "status": "idle"},
+                        },
+                        {
+                            "ip": "10.0.0.2",
+                            "port": 8012,
+                            "metadata": {"role": "recon", "status": "idle"},
+                        },
+                    ]
+
+                def discover_service(self, service_name, required_tags=None):
+                    return [
+                        instance
+                        for instance in self.instances
+                        if all(
+                            instance["metadata"].get(key) == value
+                            for key, value in (required_tags or {}).items()
+                        )
+                    ]
+
+                def update_instance_metadata(
+                    self,
+                    service_name,
+                    instance,
+                    metadata_updates=None,
+                    remove_keys=None,
+                ):
+                    instance["metadata"].update(metadata_updates or {})
+                    for key in remove_keys or []:
+                        instance["metadata"].pop(key, None)
+                    return instance["metadata"]
+
+            def fake_remote_candidate(role, target, payload, stream=False, **kwargs):
+                calls.append(target["ip"])
+                if target["ip"] == "10.0.0.1":
+                    return False, requests.exceptions.ConnectionError("connection refused")
+                return True, None
+
+            registry = FakeRegistry()
+            commander.mode = "remote"
+            commander.registry = registry
+            commander.lease_manager = AgentLeaseManager(registry)
+            commander._delegate_remote_candidate = fake_remote_candidate
+
+            success = commander.delegate_task(
+                "recon",
+                {"workflow_id": "wf-failover", "work_item": "wf-failover:recon"},
+            )
+
+            self.assertTrue(success)
+            self.assertEqual(calls, ["10.0.0.1", "10.0.0.2"])
+            self.assertEqual(registry.instances[0]["metadata"]["status"], "unavailable")
+            self.assertEqual(registry.instances[1]["metadata"]["status"], "idle")
+            self.assertEqual(commander.lease_manager.list_leases(), [])
+
+    def test_active_lease_heartbeat_loss_reassigns_running_task(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            commander = CommanderAgent(mode="local", state_dir=temp_dir)
+            commander.lease_heartbeat_check_interval = 0.02
+            calls = []
+            late_responses = []
+
+            class FakeRegistry:
+                heartbeat_grace_seconds = 0.05
+
+                def __init__(self):
+                    now = time.time()
+                    self.instances = [
+                        {
+                            "ip": "10.0.0.1",
+                            "port": 8012,
+                            "metadata": {
+                                "role": "recon",
+                                "status": "idle",
+                                "heartbeat_ts": now,
+                            },
+                        },
+                        {
+                            "ip": "10.0.0.2",
+                            "port": 8012,
+                            "metadata": {
+                                "role": "recon",
+                                "status": "idle",
+                                "heartbeat_ts": now,
+                            },
+                        },
+                    ]
+
+                def discover_service(self, service_name, required_tags=None):
+                    return [
+                        instance
+                        for instance in self.instances
+                        if all(
+                            instance["metadata"].get(key) == value
+                            for key, value in (required_tags or {}).items()
+                        )
+                    ]
+
+                def find_instance(self, service_name, target):
+                    for instance in self.instances:
+                        if (
+                            instance["ip"] == target["ip"]
+                            and instance["port"] == target["port"]
+                        ):
+                            return instance
+                    return None
+
+                def is_instance_fresh(self, instance):
+                    heartbeat_ts = float(instance["metadata"].get("heartbeat_ts", 0))
+                    return (time.time() - heartbeat_ts) <= self.heartbeat_grace_seconds
+
+                def update_instance_metadata(
+                    self,
+                    service_name,
+                    instance,
+                    metadata_updates=None,
+                    remove_keys=None,
+                ):
+                    instance["metadata"].update(metadata_updates or {})
+                    for key in remove_keys or []:
+                        instance["metadata"].pop(key, None)
+                    return instance["metadata"]
+
+            def fake_remote_candidate(role, target, payload, stream=False, **kwargs):
+                calls.append(target["ip"])
+                if target["ip"] == "10.0.0.1":
+                    target["metadata"]["heartbeat_ts"] = time.time() - 10
+                    time.sleep(0.2)
+                    allowed = commander._lease_allows_response(
+                        kwargs.get("lease"),
+                        f"{target['ip']}:{target['port']}",
+                        payload["work_item"],
+                        role,
+                    )
+                    late_responses.append("accepted" if allowed else "ignored")
+                    return True, None
+                return True, None
+
+            registry = FakeRegistry()
+            commander.mode = "remote"
+            commander.registry = registry
+            commander.lease_manager = AgentLeaseManager(registry)
+            commander._delegate_remote_candidate = fake_remote_candidate
+
+            success = commander.delegate_task(
+                "recon",
+                {"workflow_id": "wf-heartbeat", "work_item": "wf-heartbeat:recon"},
+            )
+
+            self.assertTrue(success)
+            deadline = time.time() + 1.0
+            while time.time() < deadline and not late_responses:
+                time.sleep(0.01)
+            self.assertEqual(calls[:2], ["10.0.0.1", "10.0.0.2"])
+            self.assertEqual(late_responses, ["ignored"])
+            self.assertEqual(registry.instances[0]["metadata"]["status"], "unavailable")
+            self.assertEqual(
+                registry.instances[0]["metadata"]["unavailable_reason"],
+                "heartbeat lost for 10.0.0.1:8012",
+            )
+            self.assertEqual(registry.instances[1]["metadata"]["status"], "idle")
+            trace_types = {
+                event["event_type"]
+                for event in commander.workflow_context.get("trace", [])
+            }
+            self.assertIn("agent_heartbeat_lost", trace_types)
+            self.assertIn("agent_failover_reassigning", trace_types)
+            self.assertIn("agent_late_response_ignored", trace_types)
+
+    def test_parallel_dispatch_continues_when_one_agent_is_down(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            commander = CommanderAgent(mode="local", state_dir=temp_dir, max_workers=2)
+            calls = []
+
+            class FakeRegistry:
+                def __init__(self):
+                    self.instances = [
+                        {
+                            "ip": "10.0.0.1",
+                            "port": 8013,
+                            "metadata": {"role": "artillery", "status": "idle"},
+                        },
+                        {
+                            "ip": "10.0.0.2",
+                            "port": 8013,
+                            "metadata": {"role": "artillery", "status": "idle"},
+                        },
+                    ]
+
+                def discover_service(self, service_name, required_tags=None):
+                    return [
+                        instance
+                        for instance in self.instances
+                        if all(
+                            instance["metadata"].get(key) == value
+                            for key, value in (required_tags or {}).items()
+                        )
+                    ]
+
+                def update_instance_metadata(
+                    self,
+                    service_name,
+                    instance,
+                    metadata_updates=None,
+                    remove_keys=None,
+                ):
+                    instance["metadata"].update(metadata_updates or {})
+                    for key in remove_keys or []:
+                        instance["metadata"].pop(key, None)
+                    return instance["metadata"]
+
+            def fake_remote_candidate(role, target, payload, stream=False, **kwargs):
+                calls.append(target["ip"])
+                if target["ip"] == "10.0.0.1":
+                    return False, requests.exceptions.ConnectionError("connection refused")
+                return True, None
+
+            registry = FakeRegistry()
+            commander.mode = "remote"
+            commander.registry = registry
+            commander.lease_manager = None
+            commander._delegate_remote_candidate = fake_remote_candidate
+
+            success = commander.delegate_parallel_task(
+                "artillery",
+                {"workflow_id": "wf-failover", "work_item": "wf-failover:artillery"},
+                stream=True,
+            )
+
+            self.assertTrue(success)
+            self.assertCountEqual(calls, ["10.0.0.1", "10.0.0.2"])
+            self.assertEqual(registry.instances[0]["metadata"]["status"], "unavailable")
+            self.assertEqual(registry.instances[1]["metadata"]["status"], "idle")
 
     def test_bpel_flow_runs_different_activity_roles_concurrently(self):
         bpel_text = """<?xml version="1.0" encoding="UTF-8"?>
