@@ -1,63 +1,35 @@
 {
   "request_id": "decision-planning-demo-001",
   "agent_profile": {
-    "compute_budget": "small",
+    "compute_budget": "medium",
     "risk_policy": "balanced"
   },
-  "tracks": [
-    {
-      "id": "TRK-TGT-A",
-      "source_observations": [
-        "OBS-001",
-        "OBS-002"
-      ],
-      "object_type": "surface_contact",
-      "speed": 2.828,
-      "heading": 45.0,
-      "trend": "slow movement toward northeast",
-      "confidence": 0.84
-    },
-    {
-      "id": "TRK-TGT-B",
-      "source_observations": [
-        "OBS-003",
-        "OBS-004"
-      ],
-      "object_type": "air_track",
-      "speed": 10.817,
-      "heading": 33.7,
-      "trend": "fast movement toward northeast",
-      "confidence": 0.895
-    }
-  ],
   "risk_assessments": [
     {
-      "track_id": "TRK-TGT-B",
+      "target_id": "TGT-B",
       "priority": 1,
       "risk": "high",
       "threat_score": 71.09,
       "probability": 0.853,
-      "rationale": "fast air track inside monitored radius",
+      "rationale": "high-priority target inside monitored radius",
       "triggered_rules": [
-        "type_watch:air_track",
-        "high_speed",
         "inside_monitored_radius"
       ]
     },
     {
-      "track_id": "TRK-TGT-A",
+      "target_id": "TGT-A",
       "priority": 2,
       "risk": "low",
       "threat_score": 33.37,
       "probability": 0.2,
-      "rationale": "slow surface contact",
+      "rationale": "lower-priority target",
       "triggered_rules": []
     }
   ],
   "scheduled_tasks": [
     {
       "id": "TASK-001",
-      "target_id": "TRK-TGT-B",
+      "target_id": "TGT-B",
       "priority": 1,
       "task_type": "monitor",
       "required_resource_types": [
@@ -66,7 +38,7 @@
     },
     {
       "id": "TASK-002",
-      "target_id": "TRK-TGT-A",
+      "target_id": "TGT-A",
       "priority": 2,
       "task_type": "watch",
       "required_resource_types": [
@@ -94,9 +66,72 @@
       "capacity": 0.5
     }
   ],
+  "target_histories": [
+    {
+      "target_id": "TGT-B",
+      "steps": [
+        {
+          "timestamp": "2026-06-12T10:00:00Z",
+          "risk_score": 58.0,
+          "probability": 0.62,
+          "priority": 1,
+          "resource_pressure": 0.55
+        },
+        {
+          "timestamp": "2026-06-12T10:05:00Z",
+          "risk_score": 66.0,
+          "probability": 0.76,
+          "priority": 1,
+          "resource_pressure": 0.62
+        },
+        {
+          "timestamp": "2026-06-12T10:10:00Z",
+          "risk_score": 71.09,
+          "probability": 0.853,
+          "priority": 1,
+          "resource_pressure": 0.7
+        }
+      ]
+    },
+    {
+      "target_id": "TGT-A",
+      "steps": [
+        {
+          "timestamp": "2026-06-12T10:00:00Z",
+          "risk_score": 38.0,
+          "probability": 0.24,
+          "priority": 2,
+          "resource_pressure": 0.4
+        },
+        {
+          "timestamp": "2026-06-12T10:10:00Z",
+          "risk_score": 33.37,
+          "probability": 0.2,
+          "priority": 2,
+          "resource_pressure": 0.35
+        }
+      ]
+    }
+  ],
+  "planning_objectives": [
+    "risk_first",
+    "decision-support"
+  ],
   "constraints": [
     "simulation-only",
     "decision-support outputs only",
     "compliance check required before downstream handoff"
-  ]
+  ],
+  "authorization": {
+    "status": "pending_review",
+    "approval_level": "demo-review",
+    "scope": [
+      "simulation-only",
+      "decision-support"
+    ],
+    "approved_plan_ids": [],
+    "notes": [
+      "operator review has not been completed"
+    ]
+  }
 }

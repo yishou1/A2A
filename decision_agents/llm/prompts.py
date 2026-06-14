@@ -4,13 +4,9 @@ from __future__ import annotations
 
 
 AGENT_TASKS = {
-    "track_threat_agent": (
-        "Convert user text into an AgentRequest for track generation and threat "
-        "ranking. Use observations when coordinates or sensor reports are present."
-    ),
     "decision_planning_agent": (
         "Convert user text into an AgentRequest for candidate plan generation. "
-        "Use scheduled_tasks, resources, tracks, risk_assessments, and constraints."
+        "Use scheduled_tasks, resources, risk_assessments, and constraints."
     ),
     "compliance_authorization_agent": (
         "Convert user text into an AgentRequest for compliance and authorization "
@@ -31,8 +27,6 @@ Return valid JSON only, with this shape:
     "agent_profile": {"compute_budget": "small|medium|large", "risk_policy": "conservative|balanced"},
     "algorithm_id": null,
     "algorithm_params": {},
-    "observations": [],
-    "tracks": [],
     "risk_assessments": [],
     "scheduled_tasks": [],
     "resources": [],
@@ -47,7 +41,7 @@ Prefer risk_policy="conservative" when the user asks for conservative, cautious,
 
 
 EXPLAIN_SYSTEM_PROMPT = """You explain deterministic algorithm results.
-Do not change scores, rankings, compliance decisions, violations, plans, or tracks.
+Do not change scores, compliance decisions, violations, or plans.
 Return valid JSON only:
 {
   "explanation": "concise Chinese explanation",
@@ -68,4 +62,3 @@ def explain_user_prompt(agent_name: str, request_json: str, response_json: str) 
         f"Validated AgentRequest JSON:\n{request_json}\n\n"
         f"Algorithm AgentResponse JSON:\n{response_json}"
     )
-

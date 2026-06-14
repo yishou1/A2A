@@ -80,8 +80,7 @@ A2A/
 ├── artillery_agent/         # 火力打击 Agent
 ├── assault_agent/           # 登陆突击 Agent
 ├── evaluator_agent/         # 战果评估 & 策略重算 Agent
-├── decision_agents/         # Project 613 三类算法库与 A2A 适配
-├── track_threat_agent/      # 航迹/威胁排序 Agent
+├── decision_agents/         # Project 613 方案/规则算法库与 A2A 适配
 ├── decision_planning_agent/ # 方案规划与决策 Agent
 ├── compliance_authorization_agent/ # 规则/法律/授权约束 Agent
 ├── registry/                # Nacos 相关配置与客户端封装
@@ -149,11 +148,12 @@ cd /home/yl/yl/jzz/A2A
   --workflow bpel \
   --workflow-file quick_strike_workflow
 
-# Project 613 三类算法方案：航迹威胁 -> 方案规划 -> 合规授权
+# Project 613 方案/规则流程：方案规划 -> 合规授权
 ./venv/bin/python -u commander_agent/main.py \
   --mode local \
   --workflow bpel \
-  --workflow-file decision_support_workflow
+  --workflow-file decision_support_workflow \
+  --input-json data/samples/decision_planning_input.json
 ```
 
 Agent 收到任务后可以查看当前 workflow 的任务列表快照：

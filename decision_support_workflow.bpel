@@ -1,19 +1,14 @@
 <process name="DecisionSupportWorkflow" targetNamespace="http://a2a.project613/workflow">
 
     <variables>
-        <variable name="Observations" type="JsonArray"/>
-        <variable name="TrackThreatResult" type="JsonObject"/>
         <variable name="DecisionPlanningResult" type="JsonObject"/>
         <variable name="ComplianceAuthorizationResult" type="JsonObject"/>
     </variables>
 
     <sequence>
 
-        <invoke partnerLink="TrackThreatAgent" operation="generateTrackThreat"
-                inputVariable="Observations" outputVariable="TrackThreatResult"/>
-
         <invoke partnerLink="DecisionPlanningAgent" operation="generateDecisionPlan"
-                inputVariable="TrackThreatResult" outputVariable="DecisionPlanningResult"/>
+                inputVariable="PlanningInput" outputVariable="DecisionPlanningResult"/>
 
         <invoke partnerLink="ComplianceAuthorizationAgent" operation="checkComplianceAuthorization"
                 inputVariable="DecisionPlanningResult" outputVariable="ComplianceAuthorizationResult"/>

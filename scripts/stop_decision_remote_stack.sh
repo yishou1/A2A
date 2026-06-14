@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 LOG_DIR="$PROJECT_ROOT/logs/decision_remote_stack"
 
-for name in auth_mock track_threat_agent decision_planning_agent compliance_authorization_agent; do
+for name in auth_mock decision_planning_agent compliance_authorization_agent; do
   pid_file="$LOG_DIR/$name.pid"
   if [ ! -f "$pid_file" ]; then
     echo "$name is not running"

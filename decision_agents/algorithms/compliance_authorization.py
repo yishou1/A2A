@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 
+from math import exp
 from typing import Any
 
 from decision_agents.algorithms.onnx_adapter import OnnxAlgorithmSpec, run_onnx_or_fallback
@@ -13,7 +14,7 @@ from decision_agents.algorithms.registry import (
     missing_required_fields,
     select_algorithm,
 )
-from decision_agents.knowledge.retrieval import retrieve_evidence
+from decision_agents.knowledge.retrieval import retrieve_rag_result
 from decision_agents.knowledge.rule_tables import (
     BLOCKING_ACTION_TERMS,
     REVIEW_TERMS,
@@ -30,21 +31,39 @@ from decision_agents.schemas import (
 )
 
 
+COMPLIANCE_LOGISTIC_WEIGHTS = {
+    "intercept": -2.20,
+    "blocking_violation_count": 3.00,
+    "warning_violation_count": 0.85,
+    "authorization_status_score": 1.10,
+    "authorization_out_of_scope": 0.90,
+    "rag_evidence_count": 0.35,
+    "law_of_war_rule_hit": 0.80,
+}
+RISK_REVIEW_THRESHOLD = 0.55
+
+
 def _small_compliance_authorization(request: AgentRequest) -> dict:
     result = evaluate_compliance(request)
-    return {
+    payload = {
         **result.model_dump(mode="json"),
         "method": "rule_keyword_authorization_check",
     }
+    payload.update(_compliance_rag_payload(result, request))
+    return payload
 
 
 def _medium_compliance_authorization(request: AgentRequest) -> dict:
     result = evaluate_compliance(request, use_rule_table=True)
-    return {
+    payload = {
         **result.model_dump(mode="json"),
-        "method": "rule_table_dsl_authorization_check",
+        "method": "rule_table_rag_logistic_calibration",
+        "algorithm_stages": ["compliance_authorization_logistic"],
         "rule_table_version": "law-of-war-demo-v1",
     }
+    payload.update(_calibrate_compliance_result(result, request))
+    payload.update(_compliance_rag_payload(result, request))
+    return payload
 
 
 def _onnx_compliance_authorization(request: AgentRequest) -> dict:
@@ -63,7 +82,7 @@ def _onnx_compliance_authorization(request: AgentRequest) -> dict:
             ],
             "method": "onnx_compliance_authorization",
         },
-        fallback_algorithm_id="compliance_authorization_medium",
+        fallback_algorithm_id="compliance_authorization_logistic",
         fallback_run_fn=_medium_compliance_authorization,
         metadata={"category": "compliance_authorization"},
     )
@@ -77,6 +96,13 @@ ALGORITHMS = [
         parameter_size="small",
         required_fields=("candidate_plans", "authorization"),
         run_fn=_small_compliance_authorization,
+    ),
+    AlgorithmSpec(
+        algorithm_id="compliance_authorization_logistic",
+        category="compliance_authorization",
+        parameter_size="medium",
+        required_fields=("candidate_plans", "authorization"),
+        run_fn=_medium_compliance_authorization,
     ),
     AlgorithmSpec(
         algorithm_id="compliance_authorization_medium",
@@ -118,18 +144,21 @@ def run_compliance_authorization(request: AgentRequest) -> AgentResponse:
     result = algorithm.run_fn(request)
     decision = result.get("decision", "unknown")
     selected_algorithms = [algorithm.algorithm_id]
+    for stage in result.get("algorithm_stages", []):
+        if stage not in selected_algorithms:
+            selected_algorithms.append(stage)
     warnings = []
     onnx_info = result.get("onnx", {})
     if onnx_info.get("fallback"):
         fallback_algorithm_id = onnx_info.get("fallback_algorithm_id")
-        if fallback_algorithm_id:
+        if fallback_algorithm_id and fallback_algorithm_id not in selected_algorithms:
             selected_algorithms.append(fallback_algorithm_id)
         warnings.append(f"onnx_fallback:{onnx_info.get('reason', 'unavailable')}")
     return AgentResponse(
         agent="compliance_authorization_agent",
         selected_algorithms=selected_algorithms,
         result=result,
-        rag_evidence=result.get("evidence", []),
+        rag_evidence=result.get("rag_evidence", result.get("evidence", [])),
         summary=(
             f"Compliance decision is {decision}; "
             f"human_approval_required={result.get('requires_human_approval')}."
@@ -158,6 +187,143 @@ def evaluate_compliance(
         authorization_status=request.authorization,
         per_plan_results=per_plan_results,
     )
+
+
+def _calibrate_compliance_result(
+    result: ComplianceCheckResult,
+    request: AgentRequest,
+) -> dict[str, Any]:
+    features = _compliance_logistic_features(result, request)
+    risk_probability = _logistic_probability(features, COMPLIANCE_LOGISTIC_WEIGHTS)
+    compliance_probability = round(1.0 - risk_probability, 4)
+    decision = _calibrated_decision(result, risk_probability, features)
+    requires_human_approval = decision in {"blocked", "review_required"}
+    approved = decision == "approved"
+
+    per_plan_scores = [
+        _calibrate_plan_result(plan_result, request)
+        for plan_result in result.per_plan_results
+    ]
+    return {
+        "decision": decision,
+        "approved_for_demo_handoff": approved,
+        "requires_human_approval": requires_human_approval,
+        "compliance_probability": compliance_probability,
+        "risk_probability": round(risk_probability, 4),
+        "logistic_features": features,
+        "per_plan_logistic_scores": per_plan_scores,
+    }
+
+
+def _compliance_rag_payload(
+    result: ComplianceCheckResult,
+    request: AgentRequest,
+) -> dict[str, Any]:
+    rag_result = retrieve_rag_result(
+        _compliance_rag_query(result, request),
+        purpose="compliance",
+        top_k=6,
+    )
+    evidence = result.evidence or rag_result.evidence
+    return {
+        "rag_evidence": [
+            item.model_dump(mode="json")
+            for item in evidence
+        ],
+        "rag_answer": rag_result.answer,
+        "rag_model_profile": rag_result.model_profile,
+        "rag_warnings": rag_result.warnings,
+        "rag_query": rag_result.rewritten_query,
+        "rag_keywords": rag_result.keywords,
+    }
+
+
+def _calibrate_plan_result(
+    result: PlanComplianceResult,
+    request: AgentRequest,
+) -> dict[str, Any]:
+    features = _plan_logistic_features(result, request)
+    risk_probability = _logistic_probability(features, COMPLIANCE_LOGISTIC_WEIGHTS)
+    return {
+        "plan_id": result.plan_id,
+        "risk_probability": round(risk_probability, 4),
+        "compliance_probability": round(1.0 - risk_probability, 4),
+        "features": features,
+    }
+
+
+def _compliance_logistic_features(
+    result: ComplianceCheckResult,
+    request: AgentRequest,
+) -> dict[str, float]:
+    return _plan_logistic_features(result, request)
+
+
+def _plan_logistic_features(
+    result: PlanComplianceResult,
+    request: AgentRequest,
+) -> dict[str, float]:
+    blocking_count = sum(1 for violation in result.violations if violation.severity == "blocking")
+    warning_count = sum(1 for violation in result.violations if violation.severity == "warning")
+    rule_ids = {violation.rule_id for violation in result.violations}
+    return {
+        "blocking_violation_count": min(blocking_count, 3) / 3.0,
+        "warning_violation_count": min(warning_count, 5) / 5.0,
+        "authorization_status_score": _authorization_risk_score(request.authorization.status),
+        "authorization_out_of_scope": _authorization_out_of_scope_feature(result),
+        "rag_evidence_count": min(len(result.evidence), 6) / 6.0,
+        "law_of_war_rule_hit": 1.0 if any(rule_id.startswith("LOW-") for rule_id in rule_ids) else 0.0,
+    }
+
+
+def _calibrated_decision(
+    result: ComplianceCheckResult,
+    risk_probability: float,
+    features: dict[str, float],
+) -> str:
+    if features["blocking_violation_count"] > 0.0:
+        return "blocked"
+    if result.decision == "review_required":
+        return "review_required"
+    if features["warning_violation_count"] > 0.0:
+        return "review_required"
+    if risk_probability >= RISK_REVIEW_THRESHOLD:
+        return "review_required"
+    return "approved"
+
+
+def _authorization_risk_score(status: str) -> float:
+    return {
+        "approved": 0.0,
+        "pending_review": 0.55,
+        "unknown": 0.65,
+        "expired": 0.95,
+        "denied": 1.0,
+    }.get(status, 0.65)
+
+
+def _authorization_out_of_scope_feature(result: PlanComplianceResult) -> float:
+    for violation in result.violations:
+        if violation.rule_id in {"AUTH-STATE-APPROVED", "LOW-AUTH-SCOPE-001"}:
+            return 1.0
+    return 0.0
+
+
+def _logistic_probability(features: dict[str, float], weights: dict[str, float]) -> float:
+    z = weights.get("intercept", 0.0)
+    for key, weight in weights.items():
+        if key == "intercept":
+            continue
+        z += weight * features.get(key, 0.0)
+    return _sigmoid(z)
+
+
+def _sigmoid(value: float) -> float:
+    if value >= 0:
+        z = exp(-value)
+        return 1.0 / (1.0 + z)
+    z = exp(value)
+    return z / (1.0 + z)
 
 
 def _evaluate_plan(
@@ -487,7 +653,11 @@ def _collect_evidence(
         " ".join(violation.rule_id for violation in violations),
         " ".join(violation.message for violation in violations),
     ]
-    evidence = retrieve_evidence(" ".join(query_parts), top_k=6)
+    evidence = retrieve_rag_result(
+        " ".join(query_parts),
+        purpose="compliance",
+        top_k=6,
+    ).evidence
     by_rule: dict[str, RuleEvidence] = {}
     for item in evidence:
         by_rule.setdefault(item.rule_id, item)
@@ -524,3 +694,21 @@ def _constraint_text(constraint: dict[str, Any] | str) -> str:
     if isinstance(constraint, str):
         return constraint
     return " ".join(str(value) for value in constraint.values())
+
+
+def _compliance_rag_query(
+    result: ComplianceCheckResult,
+    request: AgentRequest,
+) -> str:
+    return " ".join(
+        [
+            "rules authorization law-of-war compliance review",
+            request.authorization.status,
+            " ".join(request.authorization.scope),
+            " ".join(_constraint_text(constraint) for constraint in request.constraints),
+            result.selected_plan_id,
+            " ".join(violation.rule_id for violation in result.violations),
+            " ".join(violation.message for violation in result.violations),
+            " ".join(result.blocked_items),
+        ]
+    )

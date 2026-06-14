@@ -17,6 +17,7 @@ class WorkflowSubmitRequest(BaseModel):
     max_workers: int = Field(default=4, ge=1)
     mock_eval_score: Optional[int] = None
     mock_decision: Optional[Literal["ASSAULT", "RE-PLAN"]] = None
+    initial_context: Dict[str, Any] = Field(default_factory=dict)
     attachments: list[Dict[str, Any]] = Field(default_factory=list)
 
 

@@ -20,7 +20,6 @@ export RECON_AGENT_PORT=8012
 export ARTILLERY_AGENT_PORT=8013
 export ASSAULT_AGENT_PORT=8014
 export EVALUATOR_AGENT_PORT=8015
-export TRACK_THREAT_AGENT_PORT=10201
 export DECISION_PLANNING_AGENT_PORT=10202
 export COMPLIANCE_AUTHORIZATION_AGENT_PORT=10203
 
@@ -38,10 +37,6 @@ sleep 2
 
 echo "Starting Evaluator Agent..."
 $PYTHON_EXEC "$SCRIPT_DIR/evaluator_agent/main.py" &
-sleep 2
-
-echo "Starting Track Threat Agent..."
-$PYTHON_EXEC "$SCRIPT_DIR/track_threat_agent/main.py" &
 sleep 2
 
 echo "Starting Decision Planning Agent..."

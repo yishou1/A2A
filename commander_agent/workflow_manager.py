@@ -60,6 +60,7 @@ class CommanderWorkflowManager:
         max_workers: int = 4,
         mock_eval_score: Optional[int] = None,
         mock_decision: Optional[str] = None,
+        initial_context: Optional[dict] = None,
         attachments: Optional[list[dict]] = None,
     ) -> dict:
         if workflow not in {"bpel", "dynamic"}:
@@ -98,6 +99,7 @@ class CommanderWorkflowManager:
                 max_workers,
                 mock_eval_score,
                 mock_decision,
+                deepcopy(initial_context or {}),
                 normalize_attachments(attachments or []),
             )
             job["future"] = future
@@ -171,6 +173,7 @@ class CommanderWorkflowManager:
         max_workers: int,
         mock_eval_score: Optional[int],
         mock_decision: Optional[str],
+        initial_context: dict,
         attachments: list[dict],
     ) -> None:
         self._update_job(workflow_id, status="running", started_at=utc_now_iso())
@@ -185,6 +188,7 @@ class CommanderWorkflowManager:
                 mock_eval_score=mock_eval_score,
                 mock_decision=mock_decision,
                 max_workers=max_workers,
+                initial_context=initial_context,
                 registry=self.registry,
                 lease_manager=self.lease_manager,
             )

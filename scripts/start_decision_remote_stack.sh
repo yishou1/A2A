@@ -26,7 +26,6 @@ export NACOS_ADDR="${NACOS_ADDR:-127.0.0.1:8848}"
 export NACOS_NAMESPACE="${NACOS_NAMESPACE:-public}"
 export A2A_AUTH_SERVER_BASE="${A2A_AUTH_SERVER_BASE:-http://127.0.0.1:8080}"
 export A2A_HEARTBEAT_INTERVAL="${A2A_HEARTBEAT_INTERVAL:-5}"
-export TRACK_THREAT_AGENT_PORT="${TRACK_THREAT_AGENT_PORT:-10201}"
 export DECISION_PLANNING_AGENT_PORT="${DECISION_PLANNING_AGENT_PORT:-10202}"
 export COMPLIANCE_AUTHORIZATION_AGENT_PORT="${COMPLIANCE_AUTHORIZATION_AGENT_PORT:-10203}"
 
@@ -48,6 +47,5 @@ start_process() {
 }
 
 start_process "auth_mock" "$PYTHON_EXEC -u scripts/auth_mock_server.py"
-start_process "track_threat_agent" "$PYTHON_EXEC -u track_threat_agent/main.py"
 start_process "decision_planning_agent" "$PYTHON_EXEC -u decision_planning_agent/main.py"
 start_process "compliance_authorization_agent" "$PYTHON_EXEC -u compliance_authorization_agent/main.py"

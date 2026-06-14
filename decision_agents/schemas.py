@@ -1,16 +1,15 @@
-"""Shared request and response schemas for the three agent families."""
+"""Shared request and response schemas for the planning and rule agents."""
 
 from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 
 ComputeBudget = Literal["small", "medium", "large"]
 RiskPolicy = Literal["conservative", "balanced"]
 AgentName = Literal[
-    "track_threat_agent",
     "decision_planning_agent",
     "compliance_authorization_agent",
 ]
@@ -34,41 +33,8 @@ class AgentProfile(BaseModel):
     risk_policy: RiskPolicy = "balanced"
 
 
-class Observation(BaseModel):
-    id: str
-    timestamp: str | int | float
-    x: float | None = None
-    y: float | None = None
-    latitude: float | None = Field(default=None, ge=-90.0, le=90.0)
-    longitude: float | None = Field(default=None, ge=-180.0, le=180.0)
-    altitude: float | None = None
-    source_format: str | None = None
-    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
-    target_hint: str | None = None
-    sensor_id: str | None = None
-    source_reliability: float = Field(default=1.0, ge=0.0, le=1.0)
-    object_type: str = "unknown"
-    speed_hint: float | None = Field(default=None, ge=0.0)
-    heading_hint: float | None = Field(default=None, ge=0.0, le=360.0)
-    features: dict[str, Any] = Field(default_factory=dict)
-
-
-class Track(BaseModel):
-    id: str
-    source_observations: list[str] = Field(default_factory=list)
-    object_type: str = "unknown"
-    start_time: str | None = None
-    end_time: str | None = None
-    last_position: dict[str, float] = Field(default_factory=dict)
-    velocity: dict[str, float] = Field(default_factory=dict)
-    speed: float = Field(default=0.0, ge=0.0)
-    heading: float = Field(default=0.0, ge=0.0, le=360.0)
-    trend: str = "insufficient observations"
-    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
-
-
 class RiskAssessment(BaseModel):
-    track_id: str
+    target_id: str
     priority: int = Field(ge=1)
     risk: RiskLevel
     threat_score: float = Field(ge=0.0, le=100.0)
@@ -93,6 +59,19 @@ class Resource(BaseModel):
     capacity: float = Field(default=1.0, ge=0.0)
     location: str | None = None
     attributes: dict[str, Any] = Field(default_factory=dict)
+
+
+class TargetHistoryStep(BaseModel):
+    timestamp: str | None = None
+    risk_score: float = Field(default=50.0, ge=0.0, le=100.0)
+    probability: float = Field(default=0.5, ge=0.0, le=1.0)
+    priority: int = Field(default=1, ge=1)
+    resource_pressure: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+class TargetHistory(BaseModel):
+    target_id: str
+    steps: list[TargetHistoryStep] = Field(default_factory=list)
 
 
 class CandidatePlan(BaseModel):
@@ -160,23 +139,14 @@ class AgentRequest(BaseModel):
     agent_profile: AgentProfile = Field(default_factory=AgentProfile)
     algorithm_id: str | None = None
     algorithm_params: dict[str, Any] = Field(default_factory=dict)
-    observations: list[Observation] = Field(default_factory=list)
-    tracks: list[Track] = Field(default_factory=list)
     risk_assessments: list[RiskAssessment] = Field(default_factory=list)
     scheduled_tasks: list[ScheduledTask] = Field(default_factory=list)
     resources: list[Resource] = Field(default_factory=list)
+    target_histories: list[TargetHistory] = Field(default_factory=list)
+    planning_objectives: list[str] = Field(default_factory=list)
     candidate_plans: list[CandidatePlan] = Field(default_factory=list)
     constraints: list[dict[str, Any] | str] = Field(default_factory=list)
     authorization: AuthorizationState = Field(default_factory=AuthorizationState)
-
-    @field_validator("observations")
-    @classmethod
-    def unique_observation_ids(cls, observations: list[Observation]) -> list[Observation]:
-        ids = [observation.id for observation in observations]
-        if len(ids) != len(set(ids)):
-            raise ValueError("observation ids must be unique")
-        return observations
-
 
 class AgentResponse(BaseModel):
     status: ResponseStatus = "completed"

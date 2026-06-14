@@ -15,22 +15,12 @@ from starlette.routing import Route
 from decision_agents.agents import (
     ComplianceAuthorizationAgent,
     DecisionPlanningAgent,
-    TrackThreatAgent,
 )
 from decision_agents.agents.base import AlgorithmAgent
 from decision_agents.config import get_settings
 
 
 AGENT_DEFINITIONS = {
-    "track_threat": {
-        "agent_class": TrackThreatAgent,
-        "agent_name": "track_threat_agent",
-        "description": "Generates tracks and threat priority rankings.",
-        "skill_id": "track_threat_analysis",
-        "skill_name": "Track and Threat Analysis",
-        "default_port": 10201,
-        "artifact_name": "track_threat_result",
-    },
     "decision_planning": {
         "agent_class": DecisionPlanningAgent,
         "agent_name": "decision_planning_agent",

@@ -12,6 +12,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from registry.nacos_manager import NacosRegistry
 from a2a_protocol.client import A2AClient
+from a2a_protocol.messages import is_success_response
 from bpel_workflow import BPELActivatity, BPELWorkflowCatalog
 from commander_agent.agent_leases import AgentLeaseManager
 from local_runtime import LocalAgentRuntime
@@ -49,6 +50,7 @@ class CommanderAgent:
         mock_eval_score: int = None,
         mock_decision: str = None,
         max_workers: int = 4,
+        initial_context: dict = None,
         registry=None,
         lease_manager=None,
     ):
@@ -61,6 +63,7 @@ class CommanderAgent:
         self.workflow_file = workflow_file
         self.workflow_id = workflow_id or os.environ.get("A2A_WORKFLOW_ID") or new_workflow_id()
         self.max_workers = max(1, int(max_workers))
+        self.initial_context = deepcopy(initial_context or {})
         self._checkpoint_lock = threading.RLock()
         self.workflow_catalog = BPELWorkflowCatalog(PROJECT_ROOT)
         self.bpel_definition = None
@@ -305,7 +308,7 @@ class CommanderAgent:
                     print(f"   -> [{data.get('status')}] {data.get('progress', '')} {data.get('message', '')}")
             else:
                 print(f"[LOCAL SEND] Task Response: {response}")
-            return True
+            return is_success_response(response)
         except Exception as e:
             print(f"[ERROR] Local task execution failed: {e}")
             return False
@@ -314,6 +317,9 @@ class CommanderAgent:
         if isinstance(response, dict):
             with self._checkpoint_lock:
                 self._last_agent_responses[role] = deepcopy(response)
+                work_item = response.get("work_item")
+                if work_item:
+                    self.workflow_context.setdefault("agent_results", {})[work_item] = deepcopy(response)
 
     def ask_llm(self, battle_log: list):
         log_str = "\n".join(battle_log)
@@ -388,19 +394,19 @@ class CommanderAgent:
             "commander_decision": None,
             "assault_result": None,
             "replan_result": None,
-            "observations": [],
-            "tracks": [],
             "risk_assessments": [],
             "scheduled_tasks": [],
             "resources": [],
+            "target_histories": [],
+            "planning_objectives": [],
             "candidate_plans": [],
             "constraints": [],
             "authorization": {},
-            "track_threat_result": None,
             "decision_planning_result": None,
             "compliance_authorization_result": None,
             "compliance_decision": None,
             "agent_outputs": {},
+            "agent_results": {},
             "battle_log": [],
             "completed_roles": [],
             "attachments": [],
@@ -440,15 +446,18 @@ class CommanderAgent:
         normalized["completed_roles"] = list(normalized.get("completed_roles", []))
         normalized["attachments"] = normalize_attachments(normalized.get("attachments", []))
         normalized["work_list"] = list(normalized.get("work_list", []))
-        normalized["observations"] = list(normalized.get("observations", []))
-        normalized["tracks"] = list(normalized.get("tracks", []))
         normalized["risk_assessments"] = list(normalized.get("risk_assessments", []))
         normalized["scheduled_tasks"] = list(normalized.get("scheduled_tasks", []))
         normalized["resources"] = list(normalized.get("resources", []))
+        normalized["target_histories"] = list(normalized.get("target_histories", []))
+        normalized["planning_objectives"] = list(
+            normalized.get("planning_objectives", [])
+        )
         normalized["candidate_plans"] = list(normalized.get("candidate_plans", []))
         normalized["constraints"] = list(normalized.get("constraints", []))
         normalized["authorization"] = dict(normalized.get("authorization", {}) or {})
         normalized["agent_outputs"] = dict(normalized.get("agent_outputs", {}) or {})
+        normalized["agent_results"] = dict(normalized.get("agent_results", {}) or {})
         if self.bpel_definition:
             existing_items = {
                 item.get("activatity_id"): item
@@ -472,7 +481,7 @@ class CommanderAgent:
         return normalized
 
     def _default_workflow_state(self):
-        context = self._normalize_context(self.initial_workflow_context())
+        context = self._normalize_context({**self.initial_workflow_context(), **self.initial_context})
         return {
             "workflow_id": self.workflow_id,
             "workflow": self.workflow,
@@ -489,6 +498,9 @@ class CommanderAgent:
         if self.resume and self.state_store.exists(self.workflow_id):
             state = self.state_store.load(self.workflow_id)
             context = self._normalize_context(state.get("context", {}))
+            if self.initial_context:
+                context.update(self.initial_context)
+                context = self._normalize_context(context)
             state["workflow_id"] = self.workflow_id
             state["workflow"] = self.workflow
             state["mode"] = self.mode
@@ -557,6 +569,18 @@ class CommanderAgent:
         )
         return merged
 
+    def merge_initial_context(self, context_updates: dict | None):
+        if not context_updates:
+            return self.workflow_context
+        self.workflow_context.update(deepcopy(context_updates))
+        self._save_workflow_checkpoint(
+            self.workflow_context,
+            status=self.workflow_context.get("workflow_status", "running"),
+            current_activatity=self.workflow_context.get("current_activatity"),
+            last_error=self.workflow_context.get("last_error"),
+        )
+        return self.workflow_context
+
     def _work_item_for_activatity(self, role: str, activatity_index: int):
         return f"{self.workflow_id}:{activatity_index}:{role}"
 
@@ -578,21 +602,21 @@ class CommanderAgent:
             "commander_decision": context.get("commander_decision"),
             "assault_result": context.get("assault_result"),
             "replan_result": context.get("replan_result"),
-            "observations": deepcopy(context.get("observations", [])),
-            "tracks": deepcopy(context.get("tracks", [])),
             "risk_assessments": deepcopy(context.get("risk_assessments", [])),
             "scheduled_tasks": deepcopy(context.get("scheduled_tasks", [])),
             "resources": deepcopy(context.get("resources", [])),
+            "target_histories": deepcopy(context.get("target_histories", [])),
+            "planning_objectives": deepcopy(context.get("planning_objectives", [])),
             "candidate_plans": deepcopy(context.get("candidate_plans", [])),
             "constraints": deepcopy(context.get("constraints", [])),
             "authorization": deepcopy(context.get("authorization", {})),
-            "track_threat_result": deepcopy(context.get("track_threat_result")),
             "decision_planning_result": deepcopy(context.get("decision_planning_result")),
             "compliance_authorization_result": deepcopy(
                 context.get("compliance_authorization_result")
             ),
             "compliance_decision": context.get("compliance_decision"),
             "agent_outputs": deepcopy(context.get("agent_outputs", {})),
+            "agent_results": deepcopy(context.get("agent_results", {})),
             "completed_roles": list(context.get("completed_roles", [])),
             "battle_log": list(context.get("battle_log", [])),
             "last_work_item": context.get("last_work_item"),
@@ -708,11 +732,7 @@ class CommanderAgent:
         elif role == "assault":
             context["assault_result"] = "Assault unit captured the beachhead."
             context["battle_log"].append(f"[Assault Report] {context['assault_result']}")
-        elif role in {
-            "track_threat",
-            "decision_planning",
-            "compliance_authorization",
-        }:
+        elif role in {"decision_planning", "compliance_authorization"}:
             self._apply_decision_agent_result(role, context)
 
         if role not in context["completed_roles"]:
@@ -720,33 +740,41 @@ class CommanderAgent:
 
     def _apply_decision_agent_result(self, role: str, context: dict):
         raw_response = deepcopy(self._last_agent_responses.get(role, {}))
+        work_item = raw_response.get("work_item") or context.get("last_work_item")
+        agent_result = context.get("agent_results", {}).get(work_item, {})
+        if isinstance(agent_result, dict) and agent_result:
+            raw_response = deepcopy(agent_result)
+
+        output = raw_response.get("output") if isinstance(raw_response, dict) else {}
+        if not isinstance(output, dict):
+            output = {}
+        if work_item and raw_response:
+            context.setdefault("agent_results", {})[work_item] = deepcopy(raw_response)
+
         agent_response = raw_response.get("agent_response")
+        if not isinstance(agent_response, dict):
+            agent_response = output.get("agent_response")
         if not isinstance(agent_response, dict):
             agent_response = {
                 "status": raw_response.get("status"),
                 "agent": raw_response.get("agent"),
-                "selected_algorithms": raw_response.get("selected_algorithms", []),
+                "selected_algorithms": raw_response.get("selected_algorithms", output.get("selected_algorithms", [])),
                 "result": raw_response.get("result", {}),
-                "rag_evidence": raw_response.get("rag_evidence", []),
+                "rag_evidence": raw_response.get("rag_evidence", output.get("rag_evidence", [])),
                 "summary": raw_response.get("message", ""),
-                "warnings": raw_response.get("warnings", []),
+                "warnings": raw_response.get("warnings", output.get("warnings", [])),
             }
         result = agent_response.get("result") if isinstance(agent_response, dict) else {}
         if not isinstance(result, dict):
             result = {}
 
+        output_result = output.get(f"{role}_result")
+        if isinstance(output_result, dict):
+            result = output_result
+            agent_response["result"] = result
+
         context.setdefault("agent_outputs", {})[role] = agent_response
         summary = agent_response.get("summary") or raw_response.get("message") or "completed"
-
-        if role == "track_threat":
-            context["track_threat_result"] = result
-            context["tracks"] = result.get("tracks", context.get("tracks", []))
-            context["risk_assessments"] = result.get(
-                "risk_assessments",
-                context.get("risk_assessments", []),
-            )
-            context["battle_log"].append(f"[Track Threat Report] {summary}")
-            return
 
         if role == "decision_planning":
             context["decision_planning_result"] = result
@@ -903,15 +931,15 @@ class CommanderAgent:
             "EvalScore": "eval_score",
             "CommanderDecision": "commander_decision",
             "Sector_A": "sector",
-            "Observations": "observations",
-            "Tracks": "tracks",
             "RiskAssessments": "risk_assessments",
             "ScheduledTasks": "scheduled_tasks",
             "Resources": "resources",
+            "TargetHistories": "target_histories",
+            "PlanningObjectives": "planning_objectives",
             "CandidatePlans": "candidate_plans",
             "Constraints": "constraints",
             "Authorization": "authorization",
-            "TrackThreatResult": "track_threat_result",
+            "PlanningInput": "planning_input",
             "DecisionPlanningResult": "decision_planning_result",
             "ComplianceAuthorizationResult": "compliance_authorization_result",
         }.get(variable_name, variable_name)
@@ -1248,6 +1276,11 @@ def parse_args():
         help="Reuse an existing workflow checkpoint id to resume a previous run.",
     )
     parser.add_argument(
+        "--input-json",
+        default=None,
+        help="JSON file merged into the workflow context before execution.",
+    )
+    parser.add_argument(
         "--state-dir",
         default=None,
         help="Directory used to persist workflow checkpoints.",
@@ -1317,8 +1350,19 @@ def parse_args():
     return parser.parse_args()
 
 
+def load_initial_context(path: str | None) -> dict:
+    if not path:
+        return {}
+    with open(path, "r", encoding="utf-8") as input_file:
+        payload = json.load(input_file)
+    if not isinstance(payload, dict):
+        raise ValueError("--input-json must contain a JSON object")
+    return payload
+
+
 if __name__ == "__main__":
     args = parse_args()
+    initial_context = load_initial_context(args.input_json)
 
     if args.list_workflows:
         catalog = BPELWorkflowCatalog(PROJECT_ROOT)
@@ -1364,6 +1408,7 @@ if __name__ == "__main__":
         mock_eval_score=args.mock_eval_score,
         mock_decision=args.mock_decision,
         max_workers=args.max_workers,
+        initial_context=initial_context,
     )
 
     if args.workflow == "legacy":

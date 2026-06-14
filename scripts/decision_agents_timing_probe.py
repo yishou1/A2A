@@ -24,13 +24,11 @@ from decision_agents.a2a_adapter import DecisionAlgorithmA2AAgent  # noqa: E402
 from decision_agents.agents import (  # noqa: E402
     ComplianceAuthorizationAgent,
     DecisionPlanningAgent,
-    TrackThreatAgent,
 )
 from registry.nacos_manager import NacosRegistry  # noqa: E402
 
 
 LOCAL_AGENTS = {
-    "track_threat": (TrackThreatAgent, "Track_Threat_Agent", 10201, "track_threat_input.json"),
     "decision_planning": (
         DecisionPlanningAgent,
         "Decision_Planning_Agent",
@@ -105,6 +103,7 @@ def measure_local_workflow():
                 workflow_file="DecisionSupportWorkflow",
                 workflow_id="timing-decision-support",
                 state_dir=state_dir,
+                initial_context=sample_request("decision_planning_input.json"),
             )
             started = now_ms()
             context = commander.run_bpel_workflow()

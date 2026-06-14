@@ -10,15 +10,15 @@
       "name": "Broad surveillance coverage",
       "status": "recommended",
       "target_ids": [
-        "TRK-TGT-B",
-        "TRK-TGT-A"
+        "TGT-B",
+        "TGT-A"
       ],
       "assigned_resources": [
         "RES-001",
         "RES-002"
       ],
       "actions": [
-        "maintain broad-area tracking continuity",
+        "maintain broad-area monitoring continuity",
         "prepare simulation-only decision-support handoff"
       ],
       "expected_effects": [
@@ -45,4 +45,3 @@
     ]
   }
 }
-

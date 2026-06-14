@@ -4,33 +4,25 @@ from __future__ import annotations
 
 import json
 
-from pathlib import Path
 from typing import Any
 
+from a2a_protocol.messages import build_task_error_response, build_task_response
 from decision_agents.schemas import AgentResponse
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 AGENT_REQUEST_FIELDS = {
     "request_id",
     "agent_profile",
     "algorithm_id",
     "algorithm_params",
-    "observations",
-    "tracks",
     "risk_assessments",
     "scheduled_tasks",
     "resources",
+    "target_histories",
+    "planning_objectives",
     "candidate_plans",
     "constraints",
     "authorization",
-}
-
-SAMPLE_INPUTS = {
-    "track_threat_agent": "track_threat_input.json",
-    "decision_planning_agent": "decision_planning_input.json",
-    "compliance_authorization_agent": "compliance_authorization_input.json",
 }
 
 
@@ -41,7 +33,7 @@ def build_agent_request_payload(agent_name: str, payload: dict[str, Any]) -> dic
         _merge_request_fields(request_payload, explicit_request, allow_empty=True)
         return request_payload
 
-    request_payload = _load_sample_request(agent_name)
+    request_payload: dict[str, Any] = {}
     context = payload.get("context") if isinstance(payload.get("context"), dict) else {}
     input_payload = payload.get("input") if isinstance(payload.get("input"), dict) else {}
 
@@ -69,24 +61,58 @@ def agent_response_to_a2a_response(
     work_list_size: int,
 ) -> dict[str, Any]:
     response_payload = response.model_dump(mode="json")
-    status = {
-        "completed": "Completed",
-        "input_required": "InputRequired",
-        "error": "Error",
-    }.get(response.status, response.status)
-    return {
-        "work_item": payload.get("work_item") or payload.get("task_id", "work-item-001"),
-        "workflow_id": payload.get("workflow_id"),
-        "status": status,
-        "agent": agent_name,
-        "message": response.summary,
+    output = agent_response_to_output(response)
+    work_item = payload.get("work_item") or payload.get("task_id", "work-item-001")
+    extra = {
         "selected_algorithms": list(response.selected_algorithms),
         "result": response.result,
         "rag_evidence": response.rag_evidence,
         "warnings": response.warnings,
         "agent_response": response_payload,
-        "work_list_size": work_list_size,
     }
+    if response.status == "completed":
+        return build_task_response(
+            workflow_id=payload.get("workflow_id"),
+            work_item=work_item,
+            agent=agent_name,
+            role=payload.get("activatity_role") or payload.get("role") or agent_role(agent_name),
+            command=payload.get("command"),
+            status="completed",
+            output=output,
+            message=response.summary,
+            work_list_size=work_list_size,
+            extra=extra,
+        )
+    return build_task_error_response(
+        workflow_id=payload.get("workflow_id"),
+        work_item=work_item,
+        agent=agent_name,
+        role=payload.get("activatity_role") or payload.get("role") or agent_role(agent_name),
+        command=payload.get("command"),
+        error=response.summary or response.status,
+        output=output,
+        metrics={},
+    ) | extra
+
+
+def agent_role(agent_name: str) -> str:
+    return agent_name.removesuffix("_agent")
+
+
+def agent_response_to_output(response: AgentResponse) -> dict[str, Any]:
+    output = {
+        "decision_planning_result": {},
+        "compliance_authorization_result": {},
+        "agent_response": response.model_dump(mode="json"),
+        "selected_algorithms": list(response.selected_algorithms),
+        "warnings": list(response.warnings),
+        "rag_evidence": list(response.rag_evidence),
+    }
+    if response.agent == "decision_planning_agent":
+        output["decision_planning_result"] = response.result
+    elif response.agent == "compliance_authorization_agent":
+        output["compliance_authorization_result"] = response.result
+    return output
 
 
 def _find_agent_request(payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -99,16 +125,6 @@ def _find_agent_request(payload: dict[str, Any]) -> dict[str, Any] | None:
         if isinstance(agent_request, dict):
             return agent_request
     return None
-
-
-def _load_sample_request(agent_name: str) -> dict[str, Any]:
-    sample_name = SAMPLE_INPUTS.get(agent_name)
-    if not sample_name:
-        return {}
-    sample_path = PROJECT_ROOT / "data" / "samples" / sample_name
-    if not sample_path.exists():
-        return {}
-    return json.loads(sample_path.read_text(encoding="utf-8"))
 
 
 def _merge_request_fields(
@@ -127,13 +143,6 @@ def _merge_request_fields(
 
 
 def _merge_previous_agent_outputs(target: dict[str, Any], context: dict[str, Any]) -> None:
-    track_result = _result_from_context(context, "track_threat")
-    if track_result:
-        if track_result.get("tracks"):
-            target["tracks"] = track_result["tracks"]
-        if track_result.get("risk_assessments"):
-            target["risk_assessments"] = track_result["risk_assessments"]
-
     planning_result = _result_from_context(context, "decision_planning")
     if planning_result and planning_result.get("candidate_plans"):
         target["candidate_plans"] = planning_result["candidate_plans"]

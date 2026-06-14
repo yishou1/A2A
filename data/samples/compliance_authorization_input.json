@@ -1,7 +1,7 @@
 {
   "request_id": "compliance-demo-001",
   "agent_profile": {
-    "compute_budget": "small",
+    "compute_budget": "medium",
     "risk_policy": "conservative"
   },
   "candidate_plans": [
@@ -10,8 +10,8 @@
       "name": "Broad surveillance coverage",
       "status": "recommended",
       "target_ids": [
-        "TRK-TGT-B",
-        "TRK-TGT-A"
+        "TGT-B",
+        "TGT-A"
       ],
       "assigned_resources": [
         "RES-001",
@@ -19,7 +19,7 @@
       ],
       "actions": [
         "spread available resources across all scheduled targets",
-        "maintain broad-area tracking continuity",
+        "maintain broad-area monitoring continuity",
         "prepare simulation-only decision-support handoff"
       ],
       "expected_effects": [
@@ -29,7 +29,7 @@
       "score": 90.25,
       "rationale": "coverage=100.0, risk_alignment=100.0",
       "risk_notes": [
-        "TRK-TGT-B: high risk, score=71.09, priority=1"
+        "TGT-B: high risk, score=71.09, priority=1"
       ]
     }
   ],

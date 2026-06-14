@@ -7,7 +7,6 @@ from decision_agents.a2a_payloads import agent_response_to_a2a_response, run_age
 from decision_agents.agents import (
     ComplianceAuthorizationAgent,
     DecisionPlanningAgent,
-    TrackThreatAgent,
 )
 
 
@@ -25,7 +24,6 @@ class LocalAgentRuntime:
         self._stream_response_cache = {}
         self._workflow_work_lists = {}
         self._algorithm_agents = {
-            "track_threat": TrackThreatAgent(),
             "decision_planning": DecisionPlanningAgent(),
             "compliance_authorization": ComplianceAuthorizationAgent(),
         }
@@ -50,11 +48,6 @@ class LocalAgentRuntime:
             "name": "Local_Assault_Agent",
             "description": "Local assault unit.",
             "role": "assault",
-        },
-        "track_threat": {
-            "name": "Local_Track_Threat_Agent",
-            "description": "Local track and threat analysis unit.",
-            "role": "track_threat",
         },
         "decision_planning": {
             "name": "Local_Decision_Planning_Agent",

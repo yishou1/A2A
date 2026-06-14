@@ -1,7 +1,8 @@
 import requests
 import sseclient
-from pydantic import BaseModel
-from typing import Dict, Any, Optional
+from typing import Dict, Any
+
+from a2a_protocol.messages import is_success_response
 
 class A2AClient:
     def __init__(self, target_ip, target_port):
@@ -46,7 +47,10 @@ class A2AClient:
         url = f'{self.base_url}{self.agent_card.get("sendMessageEndpoint", "/sendMessage")}'
         headers = {"Authorization": f"Bearer {self.jwt_token}"}
         res = self.http.post(url, json=task_payload, headers=headers, timeout=5)
-        return res.json()
+        payload = res.json()
+        if not is_success_response(payload):
+            raise RuntimeError(payload.get("error") or payload.get("message") or "Agent returned failed response")
+        return payload
 
     def send_message_stream(self, task_payload: Dict[str, Any]):
         """4. sendMessageStream API using SSE"""

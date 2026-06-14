@@ -10,7 +10,7 @@
       "name": "Direct execution action",
       "status": "recommended",
       "target_ids": [
-        "TRK-TGT-B"
+        "TGT-B"
       ],
       "assigned_resources": [
         "RES-001"
@@ -40,4 +40,3 @@
     "approved_plan_ids": []
   }
 }
-

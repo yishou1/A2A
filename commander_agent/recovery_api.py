@@ -26,6 +26,7 @@ class RecoveryRequest(BaseModel):
     strict: bool = True
     mock_eval_score: Optional[int] = None
     mock_decision: Optional[Literal["ASSAULT", "RE-PLAN"]] = None
+    initial_context: Dict[str, Any] = Field(default_factory=dict)
     attachments: list[Dict[str, Any]] = Field(default_factory=list)
 
 
@@ -55,6 +56,7 @@ def takeover_workflow(workflow_id: str, request: RecoveryRequest) -> Dict[str, A
         mock_eval_score=request.mock_eval_score,
         mock_decision=request.mock_decision,
         max_workers=request.max_workers,
+        initial_context=request.initial_context,
     )
 
     attachments = normalize_attachments(request.attachments)
