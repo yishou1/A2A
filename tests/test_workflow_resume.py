@@ -74,7 +74,10 @@ class WorkflowResumeTest(unittest.TestCase):
                 mock_eval_score=75,
             )
 
-            self.assertEqual(resumed.workflow_context["recon_report"], "Sector_A is heavily fortified.")
+            self.assertEqual(
+                resumed.workflow_context["recon_report"][0]["value"],
+                "Sector_A is heavily fortified.",
+            )
             payload, stream = resumed.build_task_payload("artillery", resumed.workflow_context, activatity_index=2)
 
             self.assertTrue(stream)
@@ -197,7 +200,7 @@ class WorkflowResumeTest(unittest.TestCase):
             payload = response.json()
             self.assertEqual(payload["workflow_id"], workflow_id)
             self.assertEqual(payload["context"]["workflow_activatity"], 3)
-            self.assertEqual(payload["context"]["eval_score"], 75)
+            self.assertEqual(payload["context"]["eval_score"][0]["value"], 75)
             self.assertEqual(payload["context"]["attachments"][0]["uri"], "s3://a2a-media/beachhead/recon-01.jpg")
             self.assertEqual(payload["context"]["attachments"][0]["checksum"]["value"], "abc123")
 

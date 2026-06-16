@@ -215,6 +215,7 @@ class A2ABaseAgent:
                 self._metrics["last_work_item"] = work_item
             try:
                 output, message = self.execute_task(payload)
+                duration_ms = round((time.perf_counter() - started) * 1000, 3)
                 response = build_task_response(
                     workflow_id=payload.get("workflow_id"),
                     work_item=work_item,
@@ -224,7 +225,8 @@ class A2ABaseAgent:
                     status="completed",
                     output=output,
                     metrics={
-                        "latency_ms": round((time.perf_counter() - started) * 1000, 3),
+                        "latency_ms": duration_ms,
+                        "duration_ms": duration_ms,
                     },
                     message=message,
                     work_list_size=len(self.get_work_list(payload.get("workflow_id"))),
@@ -234,6 +236,7 @@ class A2ABaseAgent:
                     self._task_response_cache[work_item] = response
                 return response
             except Exception as exc:
+                duration_ms = round((time.perf_counter() - started) * 1000, 3)
                 response = build_task_error_response(
                     workflow_id=payload.get("workflow_id"),
                     work_item=work_item,
@@ -242,7 +245,8 @@ class A2ABaseAgent:
                     command=payload.get("command"),
                     error=str(exc),
                     metrics={
-                        "latency_ms": round((time.perf_counter() - started) * 1000, 3),
+                        "latency_ms": duration_ms,
+                        "duration_ms": duration_ms,
                     },
                 )
                 with self._state_lock:

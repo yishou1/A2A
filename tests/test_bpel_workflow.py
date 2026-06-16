@@ -519,9 +519,9 @@ class BPELWorkflowTest(unittest.TestCase):
             context = commander.run_bpel_workflow()
 
             self.assertEqual(context["workflow_status"], "completed")
-            self.assertEqual(context["recon_report"], "recon-result")
-            self.assertEqual(context["eval_score"], 88)
-            self.assertEqual(context["assault_result"], "assault-result")
+            self.assertEqual(context["recon_report"][0]["value"], "recon-result")
+            self.assertEqual(context["eval_score"][0]["value"], 88)
+            self.assertEqual(context["assault_result"][0]["value"], "assault-result")
             self.assertLess(
                 max(timing["recon_start"], timing["evaluator_start"]),
                 min(timing["recon_end"], timing["evaluator_end"]),
@@ -578,11 +578,11 @@ class BPELWorkflowTest(unittest.TestCase):
                 timing["recon_end"],
             )
 
-    def test_bpel_flow_rejects_parallel_output_conflicts(self):
+    def test_bpel_flow_collects_parallel_output_writers(self):
         bpel_text = """<?xml version="1.0" encoding="UTF-8"?>
-<process name="ConflictFlowWorkflow">
+<process name="CollectedOutputFlowWorkflow">
   <sequence name="RootSequence">
-    <flow name="ConflictingFlow">
+    <flow name="CollectedOutputFlow">
       <invoke name="ReconBranch" partnerLink="ReconAgent" operation="scanBeachDefenses" inputVariable="Sector_A" outputVariable="ReconReport"/>
       <invoke name="ArtilleryBranch" partnerLink="ArtilleryAgent" operation="suppressBeachSector" inputVariable="StrikeCoordinates" outputVariable="ReconReport"/>
     </flow>
@@ -590,29 +590,109 @@ class BPELWorkflowTest(unittest.TestCase):
 </process>
 """
         with tempfile.TemporaryDirectory() as temp_dir:
-            workflow_path = Path(temp_dir) / "conflict_flow.bpel"
+            workflow_path = Path(temp_dir) / "collected_output_flow.bpel"
             workflow_path.write_text(bpel_text, encoding="utf-8")
             commander = CommanderAgent(
                 mode="local",
                 workflow="bpel",
                 workflow_file=str(workflow_path),
                 state_dir=temp_dir,
-                max_workers=2,
+                max_activity_workers=2,
             )
             calls = []
 
             def fake_delegate(role, payload, stream=False):
                 calls.append(role)
+                commander._remember_task_response(
+                    payload["work_item"],
+                    {
+                        "status": "completed",
+                        "output": {payload["output_hint"]: f"{role}-output"},
+                        "metrics": {"duration_ms": 12.5},
+                    },
+                    role=role,
+                    target="test",
+                )
                 return True
 
             commander.delegate_task = fake_delegate
             context = commander.run_bpel_workflow()
 
-            self.assertEqual(context["workflow_status"], "paused")
-            self.assertIn("conflicting outputVariable", context["last_error"])
-            self.assertEqual(calls, [])
+            self.assertEqual(context["workflow_status"], "completed")
+            self.assertCountEqual(calls, ["recon", "artillery"])
+            self.assertIsInstance(context["recon_report"], list)
+            self.assertEqual(len(context["recon_report"]), 2)
+            self.assertCountEqual(
+                [entry["role"] for entry in context["recon_report"]],
+                ["recon", "artillery"],
+            )
+            self.assertCountEqual(
+                [entry["value"] for entry in context["recon_report"]],
+                ["recon-output", "artillery-output"],
+            )
+            self.assertTrue(
+                all(entry["activity_id"] and entry["work_item"] for entry in context["recon_report"])
+            )
+            self.assertTrue(all(entry["created_at"] for entry in context["recon_report"]))
+            self.assertTrue(all(entry["status"] == "completed" for entry in context["recon_report"]))
+            self.assertTrue(all(entry["error"] is None for entry in context["recon_report"]))
+            self.assertTrue(all(entry["duration_ms"] == 12.5 for entry in context["recon_report"]))
 
-    def test_bpel_flow_rejects_cross_branch_input_dependencies(self):
+    def test_bpel_input_variable_receives_all_output_entries(self):
+        bpel_text = """<?xml version="1.0" encoding="UTF-8"?>
+<process name="CollectedInputWorkflow">
+  <sequence name="RootSequence">
+    <flow name="CollectedReconFlow">
+      <invoke name="ReconA" partnerLink="ReconAgent" operation="scanBeachDefenses" inputVariable="Sector_A" outputVariable="ReconReport"/>
+      <invoke name="ReconB" partnerLink="ReconAgent" operation="scanBeachDefenses" inputVariable="Sector_A" outputVariable="ReconReport"/>
+    </flow>
+    <invoke name="EvalCollectedRecon" partnerLink="EvaluatorAgent" operation="evaluateStrike" inputVariable="ReconReport" outputVariable="EvalScore"/>
+  </sequence>
+</process>
+"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workflow_path = Path(temp_dir) / "collected_input_flow.bpel"
+            workflow_path.write_text(bpel_text, encoding="utf-8")
+            commander = CommanderAgent(
+                mode="local",
+                workflow="bpel",
+                workflow_file=str(workflow_path),
+                state_dir=temp_dir,
+                mock_eval_score=91,
+                max_activity_workers=2,
+            )
+            evaluator_inputs = []
+
+            def fake_delegate(role, payload, stream=False):
+                if role == "evaluator":
+                    evaluator_inputs.append(payload["input"]["recon_report"])
+                output_value = (
+                    payload["input"].get("mock_eval_score")
+                    if role == "evaluator"
+                    else f"{payload['activatity_id']}-output"
+                )
+                commander._remember_task_response(
+                    payload["work_item"],
+                    {"output": {payload["output_hint"]: output_value}},
+                    role=role,
+                    target="test",
+                )
+                return True
+
+            commander.delegate_task = fake_delegate
+            context = commander.run_bpel_workflow()
+
+            self.assertEqual(context["workflow_status"], "completed")
+            self.assertEqual(len(context["recon_report"]), 2)
+            self.assertEqual(len(evaluator_inputs), 1)
+            self.assertEqual(len(evaluator_inputs[0]), 2)
+            self.assertCountEqual(
+                [entry["value"] for entry in evaluator_inputs[0]],
+                [entry["value"] for entry in context["recon_report"]],
+            )
+            self.assertEqual(context["eval_score"][0]["value"], 91)
+
+    def test_bpel_flow_dag_schedules_cross_branch_input_dependencies(self):
         bpel_text = """<?xml version="1.0" encoding="UTF-8"?>
 <process name="DependentFlowWorkflow">
   <sequence name="RootSequence">
@@ -634,18 +714,45 @@ class BPELWorkflowTest(unittest.TestCase):
                 max_activity_workers=2,
             )
             calls = []
+            timing = {}
+            evaluator_inputs = []
 
             def fake_delegate(role, payload, stream=False):
                 calls.append(role)
+                timing[f"{role}_start"] = time.perf_counter()
+                if role == "recon":
+                    time.sleep(0.1)
+                if role == "evaluator":
+                    evaluator_inputs.append(payload["input"]["recon_report"])
+                timing[f"{role}_end"] = time.perf_counter()
+                commander._remember_task_response(
+                    payload["work_item"],
+                    {
+                        "status": "completed",
+                        "output": {
+                            payload["output_hint"]: (
+                                payload["input"].get("mock_eval_score")
+                                if role == "evaluator"
+                                else "recon-output"
+                            )
+                        },
+                        "metrics": {"duration_ms": 7.0},
+                    },
+                    role=role,
+                    target="test",
+                )
                 return True
 
             commander.delegate_task = fake_delegate
             context = commander.run_bpel_workflow()
 
-            self.assertEqual(context["workflow_status"], "paused")
-            self.assertIn("parallel inputVariable dependency", context["last_error"])
-            self.assertIn("use sequence", context["last_error"])
-            self.assertEqual(calls, [])
+            self.assertEqual(context["workflow_status"], "completed")
+            self.assertEqual(calls, ["recon", "evaluator"])
+            self.assertGreaterEqual(timing["evaluator_start"], timing["recon_end"])
+            self.assertEqual(len(evaluator_inputs), 1)
+            self.assertEqual(evaluator_inputs[0][0]["value"], "recon-output")
+            self.assertEqual(context["eval_score"][0]["status"], "completed")
+            self.assertEqual(context["eval_score"][0]["duration_ms"], 7.0)
 
     def test_demo_script_runs_both_workflows(self):
         with tempfile.TemporaryDirectory() as temp_dir:
