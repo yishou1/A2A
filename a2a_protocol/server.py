@@ -196,6 +196,7 @@ class A2ABaseAgent:
                     role=self.role,
                     command=payload.get("command"),
                     error="agent is not ready",
+                    error_code="AGENT_NOT_READY",
                 )
             self._capture_work_list(payload)
             work_item = self._work_item_from_payload(payload)
@@ -244,6 +245,7 @@ class A2ABaseAgent:
                     role=self.role,
                     command=payload.get("command"),
                     error=str(exc),
+                    error_code="AGENT_BUSINESS_ERROR",
                     metrics={
                         "latency_ms": duration_ms,
                         "duration_ms": duration_ms,

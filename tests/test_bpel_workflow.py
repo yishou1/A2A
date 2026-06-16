@@ -189,6 +189,10 @@ class BPELWorkflowTest(unittest.TestCase):
             self.assertTrue(success)
             self.assertEqual(calls, ["10.0.0.1", "10.0.0.2"])
             self.assertEqual(registry.instances[0]["metadata"]["status"], "unavailable")
+            self.assertEqual(
+                registry.instances[0]["metadata"]["unavailable_error_code"],
+                "AGENT_UNAVAILABLE",
+            )
             self.assertEqual(registry.instances[1]["metadata"]["status"], "idle")
 
     def test_leased_remote_dispatch_reassigns_when_agent_is_down(self):
@@ -253,6 +257,10 @@ class BPELWorkflowTest(unittest.TestCase):
             self.assertTrue(success)
             self.assertEqual(calls, ["10.0.0.1", "10.0.0.2"])
             self.assertEqual(registry.instances[0]["metadata"]["status"], "unavailable")
+            self.assertEqual(
+                registry.instances[0]["metadata"]["unavailable_error_code"],
+                "AGENT_UNAVAILABLE",
+            )
             self.assertEqual(registry.instances[1]["metadata"]["status"], "idle")
             self.assertEqual(commander.lease_manager.list_leases(), [])
 
@@ -360,6 +368,10 @@ class BPELWorkflowTest(unittest.TestCase):
             self.assertEqual(
                 registry.instances[0]["metadata"]["unavailable_reason"],
                 "heartbeat lost for 10.0.0.1:8012",
+            )
+            self.assertEqual(
+                registry.instances[0]["metadata"]["unavailable_error_code"],
+                "AGENT_HEARTBEAT_LOST",
             )
             self.assertEqual(registry.instances[1]["metadata"]["status"], "idle")
             trace_types = {

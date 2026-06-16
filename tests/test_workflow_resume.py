@@ -238,6 +238,32 @@ class WorkflowResumeTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["work_list"], payload["work_list"])
 
+    def test_agent_not_ready_response_has_standard_error_code(self):
+        agent = A2ABaseAgent(
+            name="Test_Agent",
+            description="Test ready state.",
+            role="recon",
+            port=9999,
+        )
+        agent.ready = False
+        client = TestClient(agent.app)
+
+        response = client.post(
+            "/sendMessage",
+            json={
+                "workflow_id": "wf-not-ready",
+                "work_item": "wf-not-ready:1:recon",
+                "command": "scan_beach_defenses",
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "failed")
+        self.assertEqual(payload["error_code"], "AGENT_NOT_READY")
+        self.assertEqual(payload["error"], "agent is not ready")
+
     def test_legacy_checkpoint_fields_are_migrated(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workflow_id = "wf-legacy"

@@ -95,6 +95,8 @@ class AgentLeaseManager:
                         "unavailable_work_item",
                         "unavailable_at",
                         "unavailable_reason",
+                        "unavailable_error_code",
+                        "unavailable_error_category",
                     ]
                 )
             cleanup_keys.extend(remove_keys or [])

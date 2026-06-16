@@ -94,6 +94,8 @@ class DemoRegistry:
                 "unavailable_work_item",
                 "unavailable_at",
                 "unavailable_reason",
+                "unavailable_error_code",
+                "unavailable_error_category",
             ]:
                 metadata.pop(key, None)
 
@@ -106,6 +108,7 @@ class DemoRegistry:
                 "status": instance["metadata"].get("status"),
                 "lease_workflow_id": instance["metadata"].get("lease_workflow_id"),
                 "unavailable_reason": instance["metadata"].get("unavailable_reason"),
+                "unavailable_error_code": instance["metadata"].get("unavailable_error_code"),
             }
             for instance in self.instances
         ]

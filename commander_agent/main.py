@@ -8,8 +8,6 @@ import queue
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 from copy import deepcopy
 
-import requests
-
 # Ensure imports work from project root
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -18,6 +16,7 @@ from a2a_protocol.client import A2AClient
 from a2a_protocol.messages import build_task_response
 from bpel_workflow import BPELActivatity, BPELWorkflowCatalog
 from commander_agent.agent_leases import AgentLeaseManager
+from commander_agent.error_classification import classify_agent_error
 from local_runtime import LocalAgentRuntime
 from observability import append_trace, log_event
 from workflow_state_store import WorkflowStateStore, new_workflow_id, utc_now_iso
@@ -220,6 +219,7 @@ class CommanderAgent:
                 self._mark_agent_unavailable(target, role_needed, task_payload, error)
             print(f"[WARN] Candidate {ip}:{port} failed: {error}")
             if index < len(instances):
+                error_info = classify_agent_error(error)
                 self._trace(
                     "agent_failover_reassigning",
                     role=role_needed,
@@ -227,6 +227,7 @@ class CommanderAgent:
                     failed_target=self._candidate_label(target),
                     remaining_candidates=len(instances) - index,
                     error=str(error),
+                    **error_info.trace_fields(),
                 )
 
         print(f"[ERROR] A2A communication failed after trying {len(instances)} candidates: {last_error}")
@@ -322,12 +323,14 @@ class CommanderAgent:
                 return True
             last_error = error
             print(f"[WARN] Candidate {label} failed: {error}")
+            error_info = classify_agent_error(error)
             self._trace(
                 "agent_failover_reassigning",
                 role=role_needed,
                 work_item=work_item,
                 failed_target=label,
                 error=str(error),
+                **error_info.trace_fields(),
             )
 
     def _delegate_parallel_task_with_lease(self, role_needed: str, task_payload: dict, stream: bool = False):
@@ -437,12 +440,14 @@ class CommanderAgent:
                     return False, error
                 if not self.lease_manager.is_lease_fresh(lease):
                     error = RuntimeError(f"heartbeat lost for {lease.instance_key}")
+                    error_info = classify_agent_error(error)
                     self._trace(
                         "agent_heartbeat_lost",
                         role=role_needed,
                         work_item=lease.work_item,
                         target=lease.instance_key,
                         check_interval=self.lease_heartbeat_check_interval,
+                        **error_info.trace_fields(),
                     )
                     self._release_agent_lease(
                         lease,
@@ -457,6 +462,7 @@ class CommanderAgent:
                 self.lease_manager.release(lease)
                 print(f"[LEASE] Released {lease.role} at {lease.instance_key}")
                 return
+            error_info = classify_agent_error(error)
             self.lease_manager.release(
                 lease,
                 status="unavailable",
@@ -465,6 +471,8 @@ class CommanderAgent:
                     "unavailable_work_item": lease.work_item,
                     "unavailable_at": utc_now_iso(),
                     "unavailable_reason": str(error),
+                    "unavailable_error_code": error_info.code,
+                    "unavailable_error_category": error_info.category,
                 },
             )
             self._trace(
@@ -473,6 +481,7 @@ class CommanderAgent:
                 work_item=lease.work_item,
                 target=lease.instance_key,
                 error=str(error),
+                **error_info.trace_fields(),
             )
             print(f"[LEASE] Released {lease.role} at {lease.instance_key} as unavailable")
         except Exception as exc:
@@ -484,34 +493,13 @@ class CommanderAgent:
 
     @staticmethod
     def _is_agent_unavailable_error(error) -> bool:
-        if error is None:
-            return False
-        if isinstance(error, requests.exceptions.RequestException):
-            return True
-        response = getattr(error, "response", None)
-        if response is not None and getattr(response, "status_code", None) in {502, 503, 504}:
-            return True
-        text = str(error).lower()
-        unavailable_markers = (
-            "connection refused",
-            "connection aborted",
-            "connection reset",
-            "failed to establish a new connection",
-            "max retries exceeded",
-            "read timed out",
-            "connect timeout",
-            "timed out",
-            "heartbeat lost",
-            "503",
-            "service unavailable",
-            "agent is not ready",
-        )
-        return any(marker in text for marker in unavailable_markers)
+        return classify_agent_error(error).failover
 
     def _mark_agent_unavailable(self, target: dict, role: str, task_payload: dict, error) -> None:
         if self.registry is None:
             return
         label = self._candidate_label(target)
+        error_info = classify_agent_error(error)
         try:
             self.registry.update_instance_metadata(
                 "A2A-Agent",
@@ -522,6 +510,8 @@ class CommanderAgent:
                     "unavailable_work_item": task_payload.get("work_item"),
                     "unavailable_at": utc_now_iso(),
                     "unavailable_reason": str(error),
+                    "unavailable_error_code": error_info.code,
+                    "unavailable_error_category": error_info.category,
                 },
                 remove_keys=[
                     "lease_workflow_id",
@@ -535,6 +525,7 @@ class CommanderAgent:
                 work_item=task_payload.get("work_item"),
                 target=label,
                 error=str(error),
+                **error_info.trace_fields(),
             )
         except Exception as exc:
             print(f"[WARN] Failed to mark unavailable agent {label}: {exc}")
@@ -544,12 +535,14 @@ class CommanderAgent:
             return True
         if self.lease_manager.is_current(lease) and self.lease_manager.is_lease_fresh(lease):
             return True
+        error_info = classify_agent_error("late response ignored after failover")
         self._trace(
             "agent_late_response_ignored",
             role=role,
             work_item=work_item,
             target=target_label,
             lease_instance=lease.instance_key,
+            **error_info.trace_fields(),
         )
         return False
 
@@ -623,6 +616,7 @@ class CommanderAgent:
                 return True, None
             except Exception as exc:
                 last_error = exc
+                error_info = classify_agent_error(exc)
                 self._trace(
                     "agent_call_failed",
                     role=role_needed,
@@ -630,6 +624,7 @@ class CommanderAgent:
                     target=label,
                     attempt=attempt,
                     error=str(exc),
+                    **error_info.trace_fields(),
                 )
                 if attempt <= max_retries:
                     time.sleep(self.retry_backoff * attempt)
