@@ -1,0 +1,116 @@
+# 铁谷方向红蓝对抗态势（可自行修改后重新导出）
+# 导出: python scripts/build_situation.py
+# 仿真: python scripts/run_simulation.py
+
+mission_id: OP-IRON-VALLEY-2026
+operation_name: 铁谷谷地攻防
+friendly_side: blue
+enemy_side: red
+
+area_of_operations:
+  name: Iron Valley
+  center:
+    lat: 30.512
+    lon: 114.381
+  radius_km: 12.0
+  control_measures:
+    - id: LINE-ALPHA
+      type: forward_line_of_troops
+      description: 蓝方前沿接触线（北侧谷口）
+    - id: ZONE-NFA
+      type: no_fire_area
+      description: 西侧平民区禁射区
+
+blue_force:
+  designation: 蓝方第7侦察营（我方）
+  commander: 蓝方营指挥所
+  units:
+    - unit_id: BLUE-UAV-07
+      name: 死神-07 无人机侦察排
+      type: uav
+      geo: { lat: 30.518, lon: 114.375, alt_m: 3200 }
+      status: active
+      notes: 搭载 EO/SAR，执行走廊巡逻
+    - unit_id: BLUE-FO-1
+      name: 前沿观察员 Alpha
+      type: forward_observer
+      geo: { lat: 30.515, lon: 114.378, alt_m: 180 }
+      status: active
+      notes: 目视报告与激光指示
+    - unit_id: BLUE-CMD-1
+      name: 营指挥所
+      type: command_post
+      geo: { lat: 30.508, lon: 114.368, alt_m: 95 }
+      status: active
+      notes: 订阅指挥 Agent 情报
+
+red_force:
+  designation: 红方第91机械化旅前沿支队（敌方）
+  commander: 红方旅前进指挥所
+  units:
+    - unit_id: RED-ARMOR-01
+      name: 装甲突击纵队
+      type: armor_column
+      geo: { lat: 30.528, lon: 114.392, alt_m: 120 }
+      status: active
+      strength: 6
+      notes: 北侧公路机动，烟尘明显
+    - unit_id: RED-AD-01
+      name: 机动防空小组
+      type: air_defense
+      geo: { lat: 30.525, lon: 114.388, alt_m: 110 }
+      status: active
+      strength: 2
+      notes: 掩护装甲纵队
+
+phases:
+  recon:
+    label: 侦察阶段
+    jamming_level: 0.05
+    blue_summary: 蓝方无人机对谷地北缘实施侦察，未发现大规模交火。
+    red_summary: 红方装甲纵队正在北侧公路集结，尚未越线。
+    observer_report: |
+      蓝方侦察报告：北侧 3 公里处发现红方车辆活动，规模约一个连，
+      判断为红方装甲纵队前置，建议持续监视并上报指挥所。
+    rag_query: 红方集结识别与蓝方巡逻交战规则
+
+  contact:
+    label: 接触阶段
+    jamming_level: 0.28
+    blue_summary: 蓝方前沿与红方装甲纵队接触，请求火力协调。
+    red_summary: 红方装甲纵队越线进入蓝方禁戒区，威胁等级升高。
+    observer_report: |
+      前沿观察员报告：红方装甲纵队约 6 辆已进入禁戒区北侧，
+      属敌对目标，请求蓝方火力单元压制并通报指挥所。
+    rag_query: 红方接触目标威胁判定与交战授权
+    red_unit_updates:
+      - unit_id: RED-ARMOR-01
+        status: engaged
+
+  bda:
+    label: 打击后评估
+    jamming_level: 0.12
+    blue_summary: 蓝方对红方纵队实施精确打击后，开展毁伤评估。
+    red_summary: 红方装甲纵队遭打击，毁伤显著。
+    observer_report: |
+      BDA 报告：红方装甲纵队阵地可见大面积毁伤与燃烟，
+      残余车辆数下降，建议维持监视以防反扑。
+    rag_query: 红方残余威胁与打击效果评估
+    red_unit_updates:
+      - unit_id: RED-ARMOR-01
+        status: damaged
+        strength: 2
+
+  jammed:
+    label: 强电磁干扰
+    jamming_level: 0.78
+    blue_summary: 蓝方通信遭红方强电磁压制，切换备用链路。
+    red_summary: 红方实施电磁干扰，掩护残余兵力调整。
+    observer_report: |
+      电磁环境恶化，红方干扰源活跃。蓝方光学链路降级，
+      请指挥所启用 fhss 备用信道，优先传递高威胁目标情报。
+    rag_query: 强干扰下蓝方情报分发与链路切换
+    red_unit_updates:
+      - unit_id: RED-AD-01
+        status: active
+        notes: 疑似参与电子压制
