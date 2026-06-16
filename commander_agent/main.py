@@ -53,7 +53,9 @@ class CommanderAgent:
         resume: bool = False,
         mock_eval_score: int = None,
         mock_decision: str = None,
-        max_workers: int = 4,
+        max_workers: int = None,
+        max_activity_workers: int = None,
+        max_agent_workers: int = None,
         max_retries: int = None,
         retry_backoff: float = None,
         request_timeout: float = None,
@@ -68,7 +70,25 @@ class CommanderAgent:
         self.workflow = workflow
         self.workflow_file = workflow_file
         self.workflow_id = workflow_id or os.environ.get("A2A_WORKFLOW_ID") or new_workflow_id()
-        self.max_workers = max(1, int(max_workers))
+        legacy_max_workers = int(max_workers if max_workers is not None else os.environ.get("A2A_MAX_WORKERS", "4"))
+        self.max_activity_workers = max(
+            1,
+            int(
+                max_activity_workers
+                if max_activity_workers is not None
+                else os.environ.get("A2A_MAX_ACTIVITY_WORKERS", legacy_max_workers)
+            ),
+        )
+        self.max_agent_workers = max(
+            1,
+            int(
+                max_agent_workers
+                if max_agent_workers is not None
+                else os.environ.get("A2A_MAX_AGENT_WORKERS", legacy_max_workers)
+            ),
+        )
+        # Backward-compatible alias for older tests/scripts that still inspect max_workers.
+        self.max_workers = self.max_activity_workers
         self.max_retries = max(0, int(max_retries if max_retries is not None else os.environ.get("A2A_MAX_RETRIES", "1")))
         self.retry_backoff = float(retry_backoff if retry_backoff is not None else os.environ.get("A2A_RETRY_BACKOFF", "0.2"))
         self.request_timeout = float(request_timeout if request_timeout is not None else os.environ.get("A2A_REQUEST_TIMEOUT", "5"))
@@ -102,7 +122,8 @@ class CommanderAgent:
         print(f"Workflow: {self.workflow} ({self.workflow_id})")
         if self.bpel_definition:
             print(f"BPEL definition: {self.bpel_definition.source_path}")
-            print(f"Parallel workers: {self.max_workers}")
+            print(f"Activity workers: {self.max_activity_workers}")
+            print(f"Agent workers: {self.max_agent_workers}")
         print(f"Workflow state: {self.state_store.state_path(self.workflow_id)}")
         print(f"LLM model: {self.model}")
         if self.api_base:
@@ -113,6 +134,8 @@ class CommanderAgent:
             workflow=self.workflow,
             workflow_file=self.workflow_file,
             max_workers=self.max_workers,
+            max_activity_workers=self.max_activity_workers,
+            max_agent_workers=self.max_agent_workers,
             max_retries=self.max_retries,
         )
 
@@ -223,7 +246,7 @@ class CommanderAgent:
 
         print(f"[PARALLEL] Dispatching {len(instances)} {role_needed} instance(s).")
         with ThreadPoolExecutor(
-            max_workers=min(self.max_workers, len(instances)),
+            max_workers=min(self.max_agent_workers, len(instances)),
             thread_name_prefix=f"a2a-{role_needed}",
         ) as executor:
             futures = {
@@ -315,7 +338,7 @@ class CommanderAgent:
 
         print(f"[PARALLEL] Dispatching {len(leases)} leased {role_needed} instance(s).")
         with ThreadPoolExecutor(
-            max_workers=min(self.max_workers, len(leases)),
+            max_workers=min(self.max_agent_workers, len(leases)),
             thread_name_prefix=f"a2a-{role_needed}",
         ) as executor:
             futures = {
@@ -1261,6 +1284,16 @@ class CommanderAgent:
             keys.update(self._output_keys_for_activatity_tree(child))
         return keys
 
+    def _input_keys_for_activatity_tree(self, activatity: BPELActivatity):
+        keys = set()
+        if activatity.type == "invoke":
+            input_key = self._context_key_for_bpel_variable(activatity.input_variable)
+            if input_key:
+                keys.add(input_key)
+        for child in activatity.children:
+            keys.update(self._input_keys_for_activatity_tree(child))
+        return keys
+
     def _validate_flow_output_conflicts(self, flow_activatity: BPELActivatity):
         writers_by_key = {}
         for child in flow_activatity.children:
@@ -1279,6 +1312,33 @@ class CommanderAgent:
             )
             raise ValueError(
                 f"BPEL flow has conflicting outputVariable writers: {conflict_text}"
+            )
+
+    def _validate_flow_input_dependencies(self, flow_activatity: BPELActivatity):
+        branch_io = {}
+        for child in flow_activatity.children:
+            branch_io[child.activatity_id] = {
+                "inputs": self._input_keys_for_activatity_tree(child),
+                "outputs": self._output_keys_for_activatity_tree(child),
+            }
+
+        dependencies = []
+        for consumer_id, consumer_io in branch_io.items():
+            for producer_id, producer_io in branch_io.items():
+                if consumer_id == producer_id:
+                    continue
+                shared_keys = consumer_io["inputs"] & producer_io["outputs"]
+                for key in sorted(shared_keys):
+                    dependencies.append((consumer_id, key, producer_id))
+
+        if dependencies:
+            dependency_text = ", ".join(
+                f"{consumer} inputVariable={key} depends on {producer} outputVariable={key}"
+                for consumer, key, producer in dependencies
+            )
+            raise ValueError(
+                "BPEL flow has parallel inputVariable dependency; "
+                f"use sequence for dependent activatities: {dependency_text}"
             )
 
     def _build_bpel_task_payload(self, activatity: BPELActivatity, context: dict):
@@ -1382,14 +1442,15 @@ class CommanderAgent:
                 )
             elif activatity.type == "flow":
                 self._validate_flow_output_conflicts(activatity)
+                self._validate_flow_input_dependencies(activatity)
                 self._trace(
                     "flow_activity_started",
                     activity_id=activatity.activatity_id,
                     child_count=len(activatity.children),
-                    max_workers=self.max_workers,
+                    max_activity_workers=self.max_activity_workers,
                 )
                 with ThreadPoolExecutor(
-                    max_workers=min(self.max_workers, max(1, len(activatity.children))),
+                    max_workers=min(self.max_activity_workers, max(1, len(activatity.children))),
                     thread_name_prefix="a2a-activity-flow",
                 ) as executor:
                     futures = {
@@ -1752,8 +1813,20 @@ def parse_args():
     parser.add_argument(
         "--max-workers",
         type=int,
-        default=4,
-        help="Maximum number of concurrently dispatched BPEL flow activatities.",
+        default=None,
+        help="Backward-compatible worker limit used for both activity and Agent workers when the split limits are omitted.",
+    )
+    parser.add_argument(
+        "--max-activity-workers",
+        type=int,
+        default=None,
+        help="Maximum number of concurrently executed BPEL flow activatities inside one workflow.",
+    )
+    parser.add_argument(
+        "--max-agent-workers",
+        type=int,
+        default=None,
+        help="Maximum number of concurrently dispatched same-role Agent instances for one activity.",
     )
     parser.add_argument(
         "--max-retries",
@@ -1835,6 +1908,8 @@ if __name__ == "__main__":
         mock_eval_score=args.mock_eval_score,
         mock_decision=args.mock_decision,
         max_workers=args.max_workers,
+        max_activity_workers=args.max_activity_workers,
+        max_agent_workers=args.max_agent_workers,
         max_retries=args.max_retries,
         retry_backoff=args.retry_backoff,
         request_timeout=args.request_timeout,

@@ -34,7 +34,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-workers",
         type=int,
-        default=4,
+        default=None,
+        help="Backward-compatible worker limit used when split worker limits are omitted",
+    )
+    parser.add_argument(
+        "--max-activity-workers",
+        type=int,
+        default=None,
+        help="Maximum concurrent BPEL flow activities",
+    )
+    parser.add_argument(
+        "--max-agent-workers",
+        type=int,
+        default=None,
         help="Maximum concurrent same-role agent assignments",
     )
     parser.add_argument(
@@ -70,7 +82,9 @@ def run_workflow(
     workflow_ref: str,
     mock_eval_score: int,
     state_dir: Path,
-    max_workers: int,
+    max_workers: int | None,
+    max_activity_workers: int | None,
+    max_agent_workers: int | None,
     details: bool,
 ) -> dict:
     workflow_id = f"demo-{workflow_ref}"
@@ -85,6 +99,8 @@ def run_workflow(
             state_dir=str(state_dir),
             mock_eval_score=mock_eval_score,
             max_workers=max_workers,
+            max_activity_workers=max_activity_workers,
+            max_agent_workers=max_agent_workers,
         )
         context = commander.run_bpel_workflow()
 
@@ -141,6 +157,8 @@ def main() -> None:
             mock_eval_score=mock_eval_score,
             state_dir=state_dir,
             max_workers=args.max_workers,
+            max_activity_workers=args.max_activity_workers,
+            max_agent_workers=args.max_agent_workers,
             details=args.details,
         )
         results.append(result)

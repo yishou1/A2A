@@ -14,13 +14,21 @@ class WorkflowSubmitRequest(BaseModel):
     workflow_id: Optional[str] = None
     resume: bool = False
     max_steps: int = Field(default=10, ge=1)
-    max_workers: int = Field(default=4, ge=1)
+    max_workers: Optional[int] = Field(default=None, ge=1)
+    max_activity_workers: Optional[int] = Field(default=None, ge=1)
+    max_agent_workers: Optional[int] = Field(default=None, ge=1)
     max_retries: int = Field(default=1, ge=0)
     retry_backoff: float = Field(default=0.2, ge=0)
     request_timeout: float = Field(default=5.0, gt=0)
     mock_eval_score: Optional[int] = None
     mock_decision: Optional[Literal["ASSAULT", "RE-PLAN"]] = None
     attachments: list[Dict[str, Any]] = Field(default_factory=list)
+
+
+def _request_payload(request: BaseModel) -> dict:
+    if hasattr(request, "model_dump"):
+        return request.model_dump()
+    return request.dict()
 
 
 def build_workflow_manager_app(
@@ -60,7 +68,7 @@ def build_workflow_manager_app(
     @app.post("/workflows", status_code=202)
     async def submit_workflow(request: WorkflowSubmitRequest):
         try:
-            return app.state.workflow_manager.submit_workflow(**request.dict())
+            return app.state.workflow_manager.submit_workflow(**_request_payload(request))
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except (RuntimeError, ValueError) as exc:
@@ -78,7 +86,7 @@ def build_workflow_manager_app(
 
     @app.post("/workflows/{workflow_id}/resume", status_code=202)
     async def resume_workflow(workflow_id: str, request: WorkflowSubmitRequest):
-        payload = request.dict()
+        payload = _request_payload(request)
         payload.pop("workflow_id", None)
         payload.pop("resume", None)
         try:
