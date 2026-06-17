@@ -42,7 +42,7 @@ AGENT_ID=track-threat-group-agent-01 \
 AGENT_ROLE=track_threat \
 AGENT_STATUS=idle \
 HEARTBEAT_INTERVAL=5 \
-uv run --with-requirements ../requirements.txt --with-requirements requirements.txt \
+PYTHONPATH=.. uv run --with-requirements ../requirements.txt --with-requirements requirements.txt \
   uvicorn app.main:app --host 127.0.0.1 --port 8102
 ```
 
@@ -179,7 +179,7 @@ PY
 
 ```json
 {
-  "status": "Completed",
+  "status": "completed",
   "track_count": 7,
   "threat_count": 7,
   "group_count": 2,

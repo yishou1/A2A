@@ -55,7 +55,8 @@ metadata.status=idle
 
 ```bash
 cd track_threat_agent
-uv run --with-requirements requirements.txt uvicorn app.main:app --host 0.0.0.0 --port 8102
+PYTHONPATH=.. uv run --with-requirements ../requirements.txt --with-requirements requirements.txt \
+  uvicorn app.main:app --host 0.0.0.0 --port 8102
 ```
 
 健康检查：
@@ -197,7 +198,7 @@ Content-Type: application/json
     "message_type": "track_threat_group_artifact",
     "artifact": {}
   },
-  "metrics": {"latency_ms": 12.3},
+  "metrics": {"latency_ms": 12.3, "duration_ms": 12.3},
   "error": null,
   "cached": false
 }
@@ -255,7 +256,7 @@ curl -X POST http://127.0.0.1:8102/a2a/perception-result \
 
 ```bash
 cd track_threat_agent
-uv run --with-requirements requirements.txt pytest -q
+uv run --with-requirements requirements.txt --with-requirements ../requirements.txt pytest -q
 ```
 
 当前测试覆盖：

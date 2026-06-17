@@ -110,6 +110,7 @@ async def test_send_message_returns_standard_a2a_response_envelope():
     assert response["output"]["message_type"] == "track_threat_group_artifact"
     assert response["output"]["artifact"]["summary"]["track_count"] == 7
     assert response["metrics"]["track_count"] == 7
+    assert response["metrics"]["duration_ms"] == response["metrics"]["latency_ms"]
     assert response["cached"] is False
 
 
@@ -129,6 +130,7 @@ async def test_send_message_ready_false_returns_standard_failure_envelope():
     assert response["status"] == "failed"
     assert response["output"] == {}
     assert response["error"] == "agent is not ready"
+    assert response["error_code"] == "AGENT_NOT_READY"
     assert response["message"] == "agent is not ready"
     assert response["cached"] is False
 

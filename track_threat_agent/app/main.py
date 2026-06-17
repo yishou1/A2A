@@ -440,6 +440,7 @@ async def send_message(task_payload: Dict[str, Any], token: str = Depends(verify
             role=runtime.role,
             command=task_payload.get("command"),
             error="agent is not ready",
+            error_code="AGENT_NOT_READY",
         )
 
     cached = runtime.get_task_response(work_item)
@@ -458,6 +459,7 @@ async def send_message(task_payload: Dict[str, Any], token: str = Depends(verify
                 role=runtime.role,
                 command=task_payload.get("command"),
                 error="agent is not ready",
+                error_code="AGENT_NOT_READY",
             )
         runtime.mark_busy(workflow_id, work_item)
         registrar.set_agent_status("busy", lease_workflow_id=workflow_id or "", lease_work_item=work_item)
@@ -469,7 +471,17 @@ async def send_message(task_payload: Dict[str, Any], token: str = Depends(verify
             runtime.mark_error(str(exc))
             runtime.mark_idle()
             registrar.set_agent_status("idle", last_error="TRACK_THREAT_AGENT_FAILED")
-            raise
+            duration_ms = round((time.perf_counter() - started) * 1000, 3)
+            return build_task_error_response(
+                workflow_id=workflow_id,
+                work_item=work_item,
+                agent=runtime.agent_name,
+                role=runtime.role,
+                command=task_payload.get("command"),
+                error=str(exc),
+                error_code="AGENT_BUSINESS_ERROR",
+                metrics={"latency_ms": duration_ms, "duration_ms": duration_ms},
+            )
         runtime.mark_idle()
         registrar.set_agent_status("idle", lease_workflow_id="", lease_work_item="")
     await _broadcast_events(result["artifact"]["events"], result["artifact"])
@@ -479,6 +491,7 @@ async def send_message(task_payload: Dict[str, Any], token: str = Depends(verify
         "artifact": result["artifact"],
         "safety_boundary": "simulation-only situation-awareness priority; no weapon control",
     }
+    duration_ms = round((time.perf_counter() - started) * 1000, 3)
     response = build_task_response(
         workflow_id=workflow_id,
         work_item=work_item,
@@ -488,7 +501,8 @@ async def send_message(task_payload: Dict[str, Any], token: str = Depends(verify
         status="completed",
         output=output,
         metrics={
-            "latency_ms": round((time.perf_counter() - started) * 1000, 3),
+            "latency_ms": duration_ms,
+            "duration_ms": duration_ms,
             "track_count": result["artifact"]["summary"].get("track_count", 0),
             "group_count": result["artifact"]["summary"].get("group_count", 0),
             "ranking_count": len(result["artifact"].get("unified_threat_ranking", [])),

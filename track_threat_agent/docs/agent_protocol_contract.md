@@ -172,6 +172,7 @@ Content-Type: application/json
   },
   "metrics": {
     "latency_ms": 12.3,
+    "duration_ms": 12.3,
     "track_count": 7,
     "group_count": 2,
     "ranking_count": 10
@@ -197,6 +198,7 @@ ready=false 时返回标准失败信封：
   "status": "failed",
   "output": {},
   "error": "agent is not ready",
+  "error_code": "AGENT_NOT_READY",
   "message": "agent is not ready",
   "attempts": 1,
   "cached": false
