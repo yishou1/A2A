@@ -102,3 +102,39 @@ def test_prediction_uses_adaptive_motion_profile_metadata():
         "medium_term",
     ]
     assert track.predicted_path[-1]["heading"] > track.heading
+
+
+def test_prediction_exposes_imm_probabilities_and_hypotheses():
+    tracker = MultiTargetTracker()
+    tracker.update(load_detections("frame_1.json"))
+    tracks = tracker.update(load_detections("frame_2.json"))
+
+    track = tracks[0]
+    prediction_meta = track.metadata["prediction"]
+
+    assert prediction_meta["prediction_method"] == "imm_fused"
+    assert set(prediction_meta["model_probabilities"]) == {
+        "constant_velocity",
+        "constant_acceleration",
+        "coordinated_turn",
+    }
+    assert round(sum(prediction_meta["model_probabilities"].values()), 6) == 1.0
+    assert len(prediction_meta["prediction_hypotheses"]) == 3
+    assert all(len(hypothesis["points"]) == 5 for hypothesis in prediction_meta["prediction_hypotheses"])
+    assert all("probability" in hypothesis for hypothesis in prediction_meta["prediction_hypotheses"])
+    assert all(point["model_used"] == "imm_fused" for point in track.predicted_path)
+    assert all("primary_model" in point for point in track.predicted_path)
+
+
+def test_prediction_eval_records_previous_forecast_error_on_update():
+    tracker = MultiTargetTracker()
+    tracker.update(load_detections("frame_1.json"))
+    tracks = tracker.update(load_detections("frame_2.json"))
+
+    evals = [track.metadata.get("prediction_eval") for track in tracks]
+
+    assert all(eval_item is not None for eval_item in evals)
+    assert all(eval_item["matched_horizon_s"] > 0 for eval_item in evals)
+    assert all(eval_item["fde_m"] >= 0 for eval_item in evals)
+    assert all(eval_item["ade_m"] >= 0 for eval_item in evals)
+    assert all(eval_item["sample_count"] >= 1 for eval_item in evals)

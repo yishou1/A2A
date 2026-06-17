@@ -34,8 +34,11 @@ async def test_send_message_accepts_a2a_task_payload():
 
     body = await send_message(task_payload, token="unit-test")
 
-    assert body["status"] == "Completed"
+    assert body["status"] == "completed"
+    assert body["output"]["message_type"] == "track_threat_group_artifact"
+    assert body["output"]["artifact"]["summary"]["track_count"] == len(payload["detections"])
     assert body["artifact"]["summary"]["track_count"] == len(payload["detections"])
+    assert "prediction_eval" in body["artifact"]["summary"]
     assert body["artifact"]["tracks"][0]["predicted_path"][0]["st_gnn_inspired"] in {True, False}
 
 

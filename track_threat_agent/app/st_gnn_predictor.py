@@ -68,6 +68,11 @@ class STGNNInspiredPredictor:
                 refined_path.append(refined)
 
             track.predicted_path = refined_path
+            final_model = refined_path[0].get("model_used", "graph_refined") if refined_path else "graph_refined"
+            prediction_meta = dict(track.metadata.get("prediction", {}) or {})
+            prediction_meta["final_model_used"] = final_model
+            prediction_meta["graph_refined"] = True
+            track.metadata["prediction"] = prediction_meta
             track.metadata["st_gnn_inspired"] = {
                 "enabled": True,
                 "neighbor_count": len(neighbors),

@@ -32,7 +32,8 @@ metadata.status=idle
 
 - 多目标航迹跟踪。
 - 未来 10 / 20 / 30 / 60 / 120 秒航线预测，并输出预测模型、置信度、不确定半径和时域类型。
-- 自适应运动模型：匀速、加速度、CTRA 转弯。
+- IMM-inspired 多模型融合预测：匀速、匀加速、协调转弯三类假设按概率融合，并保留多假设预测线。
+- ADE/FDE 回看评估：下一帧到达后记录上一帧预测误差，summary 中输出聚合评估。
 - ST-GNN-inspired 图关系预测修正。
 - DBN-inspired 动态风险状态平滑。
 - TacticalIntelligenceAgent 语义字段消费：`threat_level`、`affiliation`、`label`、`knowledge_graph` 参与排序和资产影响分析。
@@ -43,7 +44,8 @@ metadata.status=idle
 - `workflow_id` / `work_item` / `work_list` 工作流字段。
 - `work_item` 幂等缓存。
 - `GET /workflows/{workflow_id}/work-list`。
-- Nacos role/status metadata。
+- `GET /ready`、`POST /lifecycle/ready`、`GET /metrics`，适配 Commander 宕机恢复/ready=false 切换规范。
+- Nacos role/status metadata 和 heartbeat_ts 心跳；心跳会保留 Commander 写入的 busy/unavailable/lease_* 状态。
 - `AlgorithmProvider` 预留接口。
 - 本地 JSON 状态快照，支持演示环境重启后恢复航迹、最近 artifact、幂等缓存和 workflow work list。
 
@@ -68,6 +70,16 @@ Agent Card：
 curl http://127.0.0.1:8102/.well-known/agent-card
 ```
 
+ready 和 metrics：
+
+```bash
+curl http://127.0.0.1:8102/ready
+curl http://127.0.0.1:8102/metrics
+curl -X POST http://127.0.0.1:8102/lifecycle/ready \
+  -H "Content-Type: application/json" \
+  -d '{"ready": false}'
+```
+
 ## 4. Nacos 配置
 
 默认不强依赖 Nacos，便于本地单独运行。接入 A2A Commander 时可启用：
@@ -88,6 +100,14 @@ export HEARTBEAT_INTERVAL=5
 完整示例见 `.env.example`。
 
 完整 Nacos 联调步骤见 `docs/nacos_smoke_test.md`。该文档覆盖 Docker Compose 启动 Nacos、Agent 注册、师兄 `NacosRegistry` 发现、以及通过发现到的 `/sendMessage` endpoint 发起 A2A 调用。
+
+接入 Commander 宕机恢复时，本 Agent 遵守师兄统一规范：
+
+- 服务名使用 `A2A-Agent`。
+- metadata 至少包含 `role=track_threat` 和 `status=idle`。
+- 存活时持续刷新 `heartbeat_ts` / `heartbeat_at`。
+- 如果 Commander 把实例标记为 `busy`、`unavailable` 或写入 `lease_*` 字段，Agent 心跳不会用本地旧 metadata 覆盖这些调度状态。
+- 当 `/lifecycle/ready` 设置为 `ready=false` 时，`/sendMessage` 返回标准失败信封，`/sendMessageStream` 返回 503，Commander 可切换到同 role 其他 idle Agent。
 
 ## 5. 状态快照
 
@@ -162,6 +182,26 @@ Content-Type: application/json
 ```
 
 `work_item` 是幂等键。同一个 `work_item` 重试时，Agent 会返回缓存 artifact，不会重复推进航迹历史、DBN 状态或编组状态。
+
+`/sendMessage` 返回统一 A2A 任务响应信封，业务结果放在 `output` 中，同时为了兼容调试保留顶层 `artifact`：
+
+```json
+{
+  "workflow_id": "wf-demo-001",
+  "work_item": "track-threat-step-001",
+  "agent": "track-threat-group-agent",
+  "role": "track_threat",
+  "command": "analyze_perception_result",
+  "status": "completed",
+  "output": {
+    "message_type": "track_threat_group_artifact",
+    "artifact": {}
+  },
+  "metrics": {"latency_ms": 12.3},
+  "error": null,
+  "cached": false
+}
+```
 
 ### 6.2 SSE 进度流
 

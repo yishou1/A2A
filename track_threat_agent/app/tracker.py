@@ -49,6 +49,7 @@ class MultiTargetTracker:
                     track = self._update_alpha_beta(track, detection)
                 else:
                     track = self._update_kalman_like(track, detection)
+                track.metadata["prediction_eval"] = self._evaluate_previous_prediction(previous, detection)
                 track.metadata["anomaly"] = self._detect_anomaly(previous, detection)
                 if algorithm_level == "large":
                     track.metadata["large_mock"] = True
@@ -215,9 +216,15 @@ class MultiTargetTracker:
 
     def _predict_path(self, track: TrackState) -> List[Dict[str, object]]:
         profile = self._prediction_profile(track)
+        model_probabilities = self._imm_model_probabilities(track, profile)
+        hypotheses = self._prediction_hypotheses(track, profile, model_probabilities)
         predictions = []
         for dt in (10.0, 20.0, 30.0, 60.0, 120.0):
-            lat, lon, speed, heading, alt = self._project_adaptive(track, profile, dt)
+            candidate_points = [
+                next(point for point in hypothesis["points"] if point["dt_s"] == dt)
+                for hypothesis in hypotheses
+            ]
+            lat, lon, speed, heading, alt = self._fuse_hypothesis_points(candidate_points, model_probabilities)
             uncertainty = self._prediction_uncertainty(track, profile, dt)
             horizon_type = "short_term" if dt <= 30.0 else "medium_term"
             confidence = self._horizon_confidence(profile, dt)
@@ -230,13 +237,18 @@ class MultiTargetTracker:
                     "alt": alt,
                     "speed": speed,
                     "heading": heading,
-                    "model_used": profile["model"],
-                    "prediction_model": profile["model"],
+                    "model_used": "imm_fused",
+                    "prediction_model": "imm_fused",
+                    "primary_model": profile["model"],
+                    "model_probabilities": model_probabilities,
                     "prediction_confidence": confidence,
                     "uncertainty_radius_m": uncertainty,
                     "horizon_type": horizon_type,
                 }
             )
+        profile["prediction_method"] = "imm_fused"
+        profile["model_probabilities"] = model_probabilities
+        profile["prediction_hypotheses"] = hypotheses
         track.metadata["prediction"] = profile
         return predictions
 
@@ -306,6 +318,121 @@ class MultiTargetTracker:
             "confidence": round(confidence, 3),
             "basis_points": len(recent),
         }
+
+    def _imm_model_probabilities(self, track: TrackState, profile: Dict[str, object]) -> Dict[str, float]:
+        accel = abs(float(profile.get("accel_mps2", 0.0)))
+        turn_rate = abs(float(profile.get("turn_rate_dps", 0.0)))
+        accel_cap, turn_cap, _ = self._motion_caps(track.object_type)
+        accel_load = clamp(accel / max(accel_cap, 0.1))
+        turn_load = clamp(turn_rate / max(turn_cap, 0.1))
+        quality = clamp(track.track_quality)
+
+        cv = 0.58 * (1.0 - 0.55 * accel_load) * (1.0 - 0.60 * turn_load) + 0.08 * quality
+        ca = 0.20 + 0.62 * accel_load + 0.08 * (1.0 - quality)
+        ct = 0.18 + 0.70 * turn_load
+
+        anomaly = track.metadata.get("anomaly", {}) or {}
+        if anomaly.get("heading_jump"):
+            ct += 0.18
+            cv *= 0.82
+        if anomaly.get("speed_jump"):
+            ca += 0.14
+            cv *= 0.88
+        if track.missed_count:
+            cv += min(track.missed_count, 3) * 0.04
+
+        raw = {
+            "constant_velocity": max(cv, 0.03),
+            "constant_acceleration": max(ca, 0.03),
+            "coordinated_turn": max(ct, 0.03),
+        }
+        total = sum(raw.values()) or 1.0
+        normalized = {key: value / total for key, value in raw.items()}
+        rounded = {key: round(value, 6) for key, value in normalized.items()}
+        drift = round(1.0 - sum(rounded.values()), 6)
+        rounded["constant_velocity"] = round(rounded["constant_velocity"] + drift, 6)
+        return rounded
+
+    def _prediction_hypotheses(
+        self,
+        track: TrackState,
+        profile: Dict[str, object],
+        model_probabilities: Dict[str, float],
+    ) -> List[Dict[str, object]]:
+        hypotheses = []
+        for model_name, probability in model_probabilities.items():
+            points = []
+            for dt in (10.0, 20.0, 30.0, 60.0, 120.0):
+                lat, lon, speed, heading, alt = self._project_motion_model(track, profile, dt, model_name)
+                points.append(
+                    {
+                        "dt_s": dt,
+                        "timestamp": track.last_update_time + dt,
+                        "lat": lat,
+                        "lon": lon,
+                        "alt": alt,
+                        "speed": speed,
+                        "heading": heading,
+                        "model_used": model_name,
+                    }
+                )
+            hypotheses.append(
+                {
+                    "hypothesis_id": model_name,
+                    "model_used": model_name,
+                    "probability": probability,
+                    "points": points,
+                }
+            )
+        hypotheses.sort(key=lambda item: item["probability"], reverse=True)
+        return hypotheses
+
+    def _fuse_hypothesis_points(
+        self,
+        points: List[Dict[str, float]],
+        model_probabilities: Dict[str, float],
+    ) -> tuple[float, float, float, float, float]:
+        weights = [model_probabilities.get(str(point.get("model_used", "")), 0.0) for point in points]
+        if not any(weights):
+            weights = [1.0 / max(len(points), 1)] * len(points)
+        total = sum(weights) or 1.0
+        weights = [weight / total for weight in weights]
+        lat = sum(float(point["lat"]) * weight for point, weight in zip(points, weights))
+        lon = sum(float(point["lon"]) * weight for point, weight in zip(points, weights))
+        alt = sum(float(point.get("alt", 0.0)) * weight for point, weight in zip(points, weights))
+        speed = sum(float(point.get("speed", 0.0)) * weight for point, weight in zip(points, weights))
+        sin_sum = sum(math.sin(math.radians(float(point.get("heading", 0.0)))) * weight for point, weight in zip(points, weights))
+        cos_sum = sum(math.cos(math.radians(float(point.get("heading", 0.0)))) * weight for point, weight in zip(points, weights))
+        heading = math.degrees(math.atan2(sin_sum, cos_sum)) % 360.0 if abs(sin_sum) + abs(cos_sum) > 1e-9 else 0.0
+        return lat, lon, speed, heading, alt
+
+    def _project_motion_model(
+        self,
+        track: TrackState,
+        profile: Dict[str, object],
+        dt_s: float,
+        model_name: str,
+    ) -> tuple[float, float, float, float, float]:
+        model_profile = dict(profile)
+        if model_name == "constant_velocity":
+            model_profile["accel_mps2"] = 0.0
+            model_profile["turn_rate_dps"] = 0.0
+        elif model_name == "constant_acceleration":
+            model_profile["turn_rate_dps"] = 0.0
+        elif model_name == "coordinated_turn":
+            model_profile["accel_mps2"] = 0.0
+            if abs(float(model_profile.get("turn_rate_dps", 0.0))) < 0.05:
+                model_profile["turn_rate_dps"] = self._default_turn_rate(track)
+        return self._project_adaptive(track, model_profile, dt_s)
+
+    def _default_turn_rate(self, track: TrackState) -> float:
+        if track.object_type == "ship":
+            return 0.12
+        if track.object_type == "aircraft":
+            return 0.8
+        if track.object_type == "uav":
+            return 1.4
+        return 0.6
 
     def _project_adaptive(self, track: TrackState, profile: Dict[str, object], dt_s: float) -> tuple[float, float, float, float, float]:
         lat = track.lat
@@ -398,3 +525,29 @@ class MultiTargetTracker:
         if heading is not None:
             point["heading"] = heading % 360.0
         return point
+
+    def _evaluate_previous_prediction(self, previous: TrackState, detection: Detection) -> Dict[str, float]:
+        if not previous.predicted_path:
+            return {
+                "matched_horizon_s": 0.0,
+                "ade_m": 0.0,
+                "fde_m": 0.0,
+                "sample_count": 0,
+            }
+        elapsed = max(0.0, detection.timestamp - previous.last_update_time)
+        candidates = [
+            point for point in previous.predicted_path
+            if abs(float(point.get("dt_s", 0.0)) - elapsed) <= max(5.0, elapsed * 0.35)
+        ]
+        if not candidates:
+            candidates = [min(previous.predicted_path, key=lambda point: abs(float(point.get("dt_s", 0.0)) - elapsed))]
+        errors = [
+            haversine_m(float(point["lat"]), float(point["lon"]), detection.lat, detection.lon)
+            for point in candidates
+        ]
+        return {
+            "matched_horizon_s": float(candidates[-1].get("dt_s", 0.0)),
+            "ade_m": round(sum(errors) / max(len(errors), 1), 2),
+            "fde_m": round(errors[-1], 2),
+            "sample_count": len(errors),
+        }

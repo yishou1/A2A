@@ -71,7 +71,10 @@ flowchart LR
 - `medium` 使用简化 Kalman-like 更新。
 - `large` 是接口占位，当前回退到 `medium` 并写入 `metadata.large_mock=true`。
 - 为每条 track 预测未来 10/20/30/60/120 秒位置。
-- 每个预测点输出 `model_used`、`prediction_model`、`prediction_confidence`、`uncertainty_radius_m` 和 `horizon_type`。
+- 预测模块升级为 IMM-inspired 多模型融合：同时生成 `constant_velocity`、`constant_acceleration`、`coordinated_turn` 三条假设线，并按模型概率融合成兼容旧接口的 `predicted_path`。
+- 每个预测点输出 `model_used=imm_fused`、`primary_model`、`model_probabilities`、`prediction_confidence`、`uncertainty_radius_m` 和 `horizon_type`。
+- 每条 track 的 `metadata.prediction.prediction_hypotheses` 保留三类模型的多假设预测线，便于后续 AMOS 或算法评估模块展示。
+- 下一帧更新时会对上一帧预测做 ADE/FDE 回看评估，并写入 `metadata.prediction_eval`；artifact summary 会聚合输出 `prediction_eval`。
 - 10/20/30 秒为 `short_term`，60/120 秒为 `medium_term`；中期预测置信度会随时域增长而衰减。
 - 检测航向突变、速度突变、低置信度，并写入 `metadata["anomaly"]`。
 - `history_path` 最多保留 50 个点。

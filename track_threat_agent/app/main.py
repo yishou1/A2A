@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Literal
 
@@ -13,6 +14,8 @@ from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocke
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+
+from a2a_protocol.messages import build_task_error_response, build_task_response
 
 from .a2a_runtime import A2ARuntimeState
 from .algorithm_provider import LocalBuiltInAlgorithmProvider
@@ -143,6 +146,9 @@ def health() -> Dict[str, Any]:
     runtime_snapshot = runtime_status()
     return {
         "status": "ok",
+        "ready": runtime_snapshot["ready"],
+        "agent": runtime.agent_name,
+        "role": runtime.role,
         "agent_status": runtime_snapshot["agent_status"],
         "active_track_count": len(tracker.tracks),
         "active_group_count": len(group_detector.groups),
@@ -159,6 +165,46 @@ def health() -> Dict[str, Any]:
         "nacos": registrar.status(),
         "safety_boundary": "simulation-only risk priority, no weapon control",
     }
+
+
+@app.get("/ready")
+def ready() -> Dict[str, Any]:
+    runtime_snapshot = runtime_status()
+    return {
+        "ready": runtime_snapshot["ready"],
+        "agent": runtime.agent_name,
+        "role": runtime.role,
+        "agent_status": runtime_snapshot["agent_status"],
+        "active_tasks": runtime_snapshot["active_task_count"],
+        "current_workflow_id": runtime_snapshot["current_workflow_id"],
+        "current_work_item": runtime_snapshot["current_work_item"],
+    }
+
+
+@app.post("/lifecycle/ready")
+def set_ready(payload: Dict[str, Any]) -> Dict[str, Any]:
+    is_ready = bool(payload.get("ready", True))
+    runtime.set_ready(is_ready)
+    if not is_ready:
+        registrar.set_agent_status("unavailable", unavailable_reason="ready=false")
+    elif runtime.agent_status != "busy":
+        runtime.mark_idle()
+        registrar.set_agent_status("idle", unavailable_reason="")
+    return ready()
+
+
+@app.get("/metrics")
+def metrics() -> Dict[str, Any]:
+    snapshot = runtime.metrics_snapshot()
+    snapshot.update(
+        {
+            "active_track_count": len(tracker.tracks),
+            "active_group_count": len(group_detector.groups),
+            "algorithm_provider": algorithm_provider.mode,
+            "state_snapshot_exists": state_store.path.exists(),
+        }
+    )
+    return snapshot
 
 
 def runtime_status() -> Dict[str, Any]:
@@ -263,6 +309,9 @@ def _agent_card_payload() -> Dict[str, Any]:
         "sendMessageEndpoint": "/sendMessage",
         "sendMessageStreamEndpoint": "/sendMessageStream",
         "workListEndpoint": "/workflows/{workflow_id}/work-list",
+        "healthEndpoint": "/health",
+        "readyEndpoint": "/ready",
+        "metricsEndpoint": "/metrics",
         "securitySchemes": {
             "openIdConnect": {
                 "type": "openIdConnect",
@@ -381,41 +430,80 @@ async def demo_frame(payload: PerceptionResultRequest) -> Dict[str, Any]:
 async def send_message(task_payload: Dict[str, Any], token: str = Depends(verify_a2a_token)) -> Dict[str, Any]:
     runtime.capture_work_list(task_payload)
     work_item = runtime.work_item_from_payload(task_payload)
+    workflow_id = task_payload.get("workflow_id")
+
+    if not runtime.ready:
+        return build_task_error_response(
+            workflow_id=workflow_id,
+            work_item=work_item,
+            agent=runtime.agent_name,
+            role=runtime.role,
+            command=task_payload.get("command"),
+            error="agent is not ready",
+        )
+
     cached = runtime.get_task_response(work_item)
     if cached is not None:
         return cached
 
-    workflow_id = task_payload.get("workflow_id")
     async with processing_lock:
         cached = runtime.get_task_response(work_item)
         if cached is not None:
             return cached
+        if not runtime.ready:
+            return build_task_error_response(
+                workflow_id=workflow_id,
+                work_item=work_item,
+                agent=runtime.agent_name,
+                role=runtime.role,
+                command=task_payload.get("command"),
+                error="agent is not ready",
+            )
         runtime.mark_busy(workflow_id, work_item)
         registrar.set_agent_status("busy", lease_workflow_id=workflow_id or "", lease_work_item=work_item)
+        started = time.perf_counter()
         try:
             payload = _perception_from_a2a_task(task_payload)
             result = _process_payload(payload)
-        except Exception:
-            runtime.mark_error()
+        except Exception as exc:
+            runtime.mark_error(str(exc))
             runtime.mark_idle()
             registrar.set_agent_status("idle", last_error="TRACK_THREAT_AGENT_FAILED")
             raise
         runtime.mark_idle()
         registrar.set_agent_status("idle", lease_workflow_id="", lease_work_item="")
     await _broadcast_events(result["artifact"]["events"], result["artifact"])
-    response = {
+    output = {
         "task_id": payload.task_id,
-        "workflow_id": workflow_id,
-        "work_item": work_item,
-        "status": "Completed",
-        "role": registrar.settings.role,
-        "message": "Track/threat situation analysis completed",
-        "artifact_summary": result["artifact"]["summary"],
+        "message_type": result["message_type"],
         "artifact": result["artifact"],
         "safety_boundary": "simulation-only situation-awareness priority; no weapon control",
-        "token_accepted": bool(token),
-        "cached": False,
     }
+    response = build_task_response(
+        workflow_id=workflow_id,
+        work_item=work_item,
+        agent=runtime.agent_name,
+        role=runtime.role,
+        command=task_payload.get("command"),
+        status="completed",
+        output=output,
+        metrics={
+            "latency_ms": round((time.perf_counter() - started) * 1000, 3),
+            "track_count": result["artifact"]["summary"].get("track_count", 0),
+            "group_count": result["artifact"]["summary"].get("group_count", 0),
+            "ranking_count": len(result["artifact"].get("unified_threat_ranking", [])),
+        },
+        message="Track/threat situation analysis completed",
+        work_list_size=len(runtime.get_work_list(workflow_id)) if workflow_id else None,
+        cached=False,
+        extra={
+            "task_id": payload.task_id,
+            "artifact_summary": result["artifact"]["summary"],
+            "artifact": result["artifact"],
+            "safety_boundary": "simulation-only situation-awareness priority; no weapon control",
+            "token_accepted": bool(token),
+        },
+    )
     runtime.set_task_response(work_item, response)
     _save_state_snapshot()
     return response
@@ -423,6 +511,9 @@ async def send_message(task_payload: Dict[str, Any], token: str = Depends(verify
 
 @app.post("/sendMessageStream")
 async def send_message_stream(task_payload: Dict[str, Any], token: str = Depends(verify_a2a_token)) -> StreamingResponse:
+    if not runtime.ready:
+        raise HTTPException(status_code=503, detail="agent is not ready")
+
     async def event_stream():
         runtime.capture_work_list(task_payload)
         work_item = runtime.work_item_from_payload(task_payload)
@@ -603,6 +694,7 @@ def _process_payload(payload: PerceptionResultRequest) -> Dict[str, Any]:
             "highest_track_score": threats[0].score if threats else 0.0,
             "highest_group_score": max((group.group_threat_score for group in groups), default=0.0),
             "highest_asset_impact_score": asset_impacts[0].score if asset_impacts else 0.0,
+            "prediction_eval": _prediction_eval_summary(tracks),
             "safety_boundary": "Simulation-only situation-awareness priority; no weapon control or engagement advice.",
         },
     }
@@ -613,6 +705,27 @@ def _process_payload(payload: PerceptionResultRequest) -> Dict[str, Any]:
         "message_type": "track_threat_group_artifact",
         "status": "completed",
         "artifact": artifact,
+    }
+
+
+def _prediction_eval_summary(tracks: List[Any]) -> Dict[str, Any]:
+    evals = [
+        track.metadata.get("prediction_eval")
+        for track in tracks
+        if track.metadata.get("prediction_eval") and track.metadata["prediction_eval"].get("sample_count", 0) > 0
+    ]
+    if not evals:
+        return {
+            "sample_count": 0,
+            "mean_ade_m": None,
+            "mean_fde_m": None,
+            "note": "No previous prediction was available for this frame.",
+        }
+    return {
+        "sample_count": sum(int(item.get("sample_count", 0)) for item in evals),
+        "track_count": len(evals),
+        "mean_ade_m": round(sum(float(item.get("ade_m", 0.0)) for item in evals) / len(evals), 2),
+        "mean_fde_m": round(sum(float(item.get("fde_m", 0.0)) for item in evals) / len(evals), 2),
     }
 
 

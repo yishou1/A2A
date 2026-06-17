@@ -74,6 +74,65 @@ def test_health_exposes_near_real_agent_runtime_fields():
     assert "algorithm_provider" in body
 
 
+def test_ready_endpoint_reports_dispatch_readiness():
+    body = main.ready()
+
+    assert body["ready"] is True
+    assert body["agent"] == "track-threat-group-agent"
+    assert body["role"] == "track_threat"
+    assert body["agent_status"] in {"idle", "busy", "error"}
+
+
+def test_metrics_endpoint_exposes_runtime_counters():
+    body = main.metrics()
+
+    assert body["agent"] == "track-threat-group-agent"
+    assert body["role"] == "track_threat"
+    assert "tasks_completed" in body
+    assert "cache_hits" in body
+    assert "uptime_seconds" in body
+
+
+@pytest.mark.anyio
+async def test_send_message_returns_standard_a2a_response_envelope():
+    await main.demo_reset()
+    task_payload = _task_payload("wi-envelope-001")
+
+    response = await main.send_message(task_payload, token="unit-test")
+
+    assert response["workflow_id"] == task_payload["workflow_id"]
+    assert response["work_item"] == task_payload["work_item"]
+    assert response["agent"] == "track-threat-group-agent"
+    assert response["role"] == "track_threat"
+    assert response["command"] == "analyze_perception_result"
+    assert response["status"] == "completed"
+    assert response["error"] is None
+    assert response["output"]["message_type"] == "track_threat_group_artifact"
+    assert response["output"]["artifact"]["summary"]["track_count"] == 7
+    assert response["metrics"]["track_count"] == 7
+    assert response["cached"] is False
+
+
+@pytest.mark.anyio
+async def test_send_message_ready_false_returns_standard_failure_envelope():
+    await main.demo_reset()
+    task_payload = _task_payload("wi-not-ready-001")
+
+    main.set_ready({"ready": False})
+    try:
+        response = await main.send_message(task_payload, token="unit-test")
+    finally:
+        main.set_ready({"ready": True})
+
+    assert response["workflow_id"] == task_payload["workflow_id"]
+    assert response["work_item"] == task_payload["work_item"]
+    assert response["status"] == "failed"
+    assert response["output"] == {}
+    assert response["error"] == "agent is not ready"
+    assert response["message"] == "agent is not ready"
+    assert response["cached"] is False
+
+
 def test_local_builtin_algorithm_provider_has_stable_mode_name():
     provider = LocalBuiltInAlgorithmProvider(main.tracker, main.graph_predictor, main.ranker, main.impact_analyzer, main.group_detector)
 

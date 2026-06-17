@@ -153,6 +153,56 @@ Content-Type: application/json
 - `work_list`：工作流步骤列表，用于查询和汇报。
 - `payload`：标准 `perception_result`。
 
+### 3.1 sendMessage 统一响应信封
+
+`/sendMessage` 按师兄 A2A 宕机恢复接入规范返回统一任务响应信封。Commander 判断成功/失败时读取 `status` 和 `error`；业务结果统一放在 `output` 内。
+
+```json
+{
+  "workflow_id": "wf-demo-001",
+  "work_item": "track-threat-step-001",
+  "agent": "track-threat-group-agent",
+  "role": "track_threat",
+  "command": "analyze_perception_result",
+  "status": "completed",
+  "output": {
+    "task_id": "task-001",
+    "message_type": "track_threat_group_artifact",
+    "artifact": {}
+  },
+  "metrics": {
+    "latency_ms": 12.3,
+    "track_count": 7,
+    "group_count": 2,
+    "ranking_count": 10
+  },
+  "error": null,
+  "message": "Track/threat situation analysis completed",
+  "attempts": 1,
+  "cached": false
+}
+```
+
+兼容说明：为了方便本地 curl 调试，响应仍保留顶层 `artifact` 和 `artifact_summary`，但上游/Commander 推荐读取 `output.artifact`。
+
+ready=false 时返回标准失败信封：
+
+```json
+{
+  "workflow_id": "wf-demo-001",
+  "work_item": "track-threat-step-001",
+  "agent": "track-threat-group-agent",
+  "role": "track_threat",
+  "command": "analyze_perception_result",
+  "status": "failed",
+  "output": {},
+  "error": "agent is not ready",
+  "message": "agent is not ready",
+  "attempts": 1,
+  "cached": false
+}
+```
+
 ## 4. 输出 Artifact
 
 成功响应：
@@ -209,8 +259,14 @@ metadata
   "alt": 5200.0,
   "speed": 210.0,
   "heading": 72.0,
-  "model_used": "adaptive_constant_velocity_graph_refined",
-  "prediction_model": "adaptive_constant_velocity_graph_refined",
+  "model_used": "imm_fused_graph_refined",
+  "prediction_model": "imm_fused_graph_refined",
+  "primary_model": "adaptive_constant_velocity",
+  "model_probabilities": {
+    "constant_velocity": 0.62,
+    "constant_acceleration": 0.21,
+    "coordinated_turn": 0.17
+  },
   "prediction_confidence": 0.89,
   "uncertainty_radius_m": 86.4,
   "horizon_type": "short_term",
@@ -233,6 +289,20 @@ metadata
 `model_used` 是推荐给下游读取的字段。`prediction_model` 保留用于兼容旧版本。
 
 `uncertainty_radius_m` 表示仿真预测不确定半径，时间越长、机动越明显、航迹质量越低，该半径越大。
+
+当前预测器采用 IMM-inspired 多模型融合：`constant_velocity`、`constant_acceleration`、`coordinated_turn` 三类假设会分别生成预测线，再按 `model_probabilities` 融合为 `predicted_path`。完整多假设结果保存在：
+
+```text
+tracks[].metadata.prediction.prediction_hypotheses
+```
+
+下一帧到达后，Agent 会把上一帧预测与当前检测位置进行回看比较，输出：
+
+```text
+tracks[].metadata.prediction_eval.ade_m
+tracks[].metadata.prediction_eval.fde_m
+artifact.summary.prediction_eval
+```
 
 ### 4.3 threats
 
@@ -380,6 +450,8 @@ send_message_endpoint=http://127.0.0.1:8102/sendMessage
 send_message_stream_endpoint=http://127.0.0.1:8102/sendMessageStream
 work_list_endpoint=http://127.0.0.1:8102/workflows/{workflow_id}/work-list
 health_endpoint=http://127.0.0.1:8102/health
+ready_endpoint=http://127.0.0.1:8102/ready
+metrics_endpoint=http://127.0.0.1:8102/metrics
 agent_card=http://127.0.0.1:8102/.well-known/agent-card.json
 skills=trajectory_tracking,trajectory_prediction,st_gnn_inspired_trajectory_prediction,threat_ranking,dbn_inspired_threat_assessment,group_detection,group_threat_ranking,protected_asset_impact_analysis,xai_evidence_generation
 algorithm_levels=small,medium,large
@@ -387,6 +459,43 @@ heartbeat_ts=<recent unix timestamp>
 ```
 
 Nacos 只负责服务发现、健康和能力 metadata，不承载每一帧航迹数据。航迹数据通过 A2A HTTP/SSE 或 AMOS Bridge 传输。
+
+心跳保护约定：
+
+- Agent 存活时持续刷新 `heartbeat_ts` 和 `heartbeat_at`。
+- Commander 领取租约后可能直接在 Nacos 写入 `status=busy`、`lease_workflow_id`、`lease_work_item`。
+- Commander 判定宕机或断心跳后可能写入 `status=unavailable`、`unavailable_reason`、`unavailable_workflow_id`、`unavailable_work_item`。
+- 本 Agent 每次发送心跳前会读取 Nacos 当前实例 metadata；如果发现上述调度状态，会保留这些字段，只刷新心跳时间，避免把 Commander 的 busy/unavailable 状态覆盖回本地旧 idle。
+
+### 6.1 Ready / Metrics 接口
+
+```http
+GET /ready
+POST /lifecycle/ready
+GET /metrics
+```
+
+`/ready` 返回当前是否可接任务：
+
+```json
+{
+  "ready": true,
+  "agent": "track-threat-group-agent",
+  "role": "track_threat",
+  "agent_status": "idle",
+  "active_tasks": 0
+}
+```
+
+`POST /lifecycle/ready` 可临时切换接单状态：
+
+```bash
+curl -X POST http://127.0.0.1:8102/lifecycle/ready \
+  -H "Content-Type: application/json" \
+  -d '{"ready": false}'
+```
+
+当 `ready=false` 时，`/sendMessage` 返回 `status=failed,error=agent is not ready`，`/sendMessageStream` 返回 503。Commander 可将该实例视为不可用并切换到同 role 其他 idle Agent。
 
 ## 7. 状态快照和重试语义
 

@@ -53,6 +53,8 @@ class NacosSettings:
             "send_message_endpoint": f"{base_url}/sendMessage",
             "send_message_stream_endpoint": f"{base_url}/sendMessageStream",
             "health_endpoint": f"{base_url}/health",
+            "ready_endpoint": f"{base_url}/ready",
+            "metrics_endpoint": f"{base_url}/metrics",
             "agent_card": f"{base_url}/.well-known/agent-card.json",
             "a2a_agent_card": f"{base_url}/.well-known/agent-card",
             "legacy_agent_card": f"{base_url}/agent-card",
@@ -189,8 +191,7 @@ class NacosRegistrar:
 
     def _send_heartbeat(self) -> None:
         assert self.client is not None
-        self.settings.metadata["heartbeat_ts"] = str(int(time.time()))
-        self.settings.metadata["heartbeat_at"] = _utc_now_iso()
+        self.settings.metadata = self._build_heartbeat_metadata()
         self.client.send_heartbeat(
             self.settings.service_name,
             self.settings.service_ip,
@@ -200,6 +201,54 @@ class NacosRegistrar:
             ephemeral=True,
         )
         self._update_instance_metadata_http()
+
+    def _build_heartbeat_metadata(self) -> Dict[str, str]:
+        """Build heartbeat metadata without clobbering Commander lease state.
+
+        Commander may mark this instance busy/unavailable directly in Nacos.
+        The heartbeat must refresh liveness fields while preserving those
+        scheduler-owned status fields.
+        """
+
+        metadata = dict(self.settings.metadata)
+        current = self._fetch_current_instance_metadata_http()
+        if current:
+            current_status = current.get("status")
+            local_status = metadata.get("status")
+            scheduler_owns_state = current_status in {"busy", "unavailable"} and local_status != current_status
+            if scheduler_owns_state:
+                metadata["status"] = str(current_status)
+            for key, value in current.items():
+                if key.startswith("lease_") or key.startswith("unavailable_"):
+                    metadata[key] = str(value)
+            if current_status in {"busy", "unavailable"}:
+                self.settings.status = str(current_status)
+
+        metadata["heartbeat_ts"] = str(int(time.time()))
+        metadata["heartbeat_at"] = _utc_now_iso()
+        return metadata
+
+    def _fetch_current_instance_metadata_http(self) -> Dict[str, str]:
+        params = {
+            "serviceName": self.settings.service_name,
+            "ip": self.settings.service_ip,
+            "port": str(self.settings.service_port),
+            "groupName": self.settings.group_name,
+            "ephemeral": "true",
+        }
+        if self.settings.namespace and self.settings.namespace != "public":
+            params["namespaceId"] = self.settings.namespace
+        address = self.settings.server
+        if not address.startswith(("http://", "https://")):
+            address = f"http://{address}"
+        url = f"{address}/nacos/v1/ns/instance?{parse.urlencode(params)}"
+        try:
+            with request.urlopen(url, timeout=2) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except Exception:
+            return {}
+        metadata = payload.get("metadata") if isinstance(payload, dict) else {}
+        return {str(key): str(value) for key, value in (metadata or {}).items()}
 
     def _update_instance_metadata_http(self) -> None:
         params = {
