@@ -1,7 +1,7 @@
 from a2a_protocol.server import A2ABaseAgent
 from registry.nacos_manager import NacosRegistry, get_host_ip
 import os
-
+# 111
 if __name__ == "__main__":
     port = int(os.environ.get("ASSAULT_AGENT_PORT", "8004"))
     heartbeat_interval = float(os.environ.get("A2A_HEARTBEAT_INTERVAL", "5"))

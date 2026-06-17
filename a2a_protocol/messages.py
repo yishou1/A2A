@@ -40,6 +40,7 @@ def build_task_response(
     work_list_size: Optional[int] = None,
     attempts: int = 1,
     cached: bool = False,
+    error_code: Optional[str] = None,
     extra: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
@@ -56,6 +57,8 @@ def build_task_response(
         "attempts": attempts,
         "cached": cached,
     }
+    if error_code is not None:
+        payload["error_code"] = error_code
     if work_list_size is not None:
         payload["work_list_size"] = work_list_size
     if extra:
@@ -71,6 +74,7 @@ def build_task_error_response(
     role: str,
     command: Optional[str],
     error: str,
+    error_code: Optional[str] = None,
     attempts: int = 1,
     metrics: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
@@ -84,6 +88,7 @@ def build_task_error_response(
         output={},
         metrics=metrics,
         error=error,
+        error_code=error_code,
         message=error,
         attempts=attempts,
     )

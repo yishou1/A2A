@@ -13,17 +13,20 @@ class FakeCommander:
     lock = threading.Lock()
     active = 0
     max_active = 0
+    init_kwargs = {}
 
     @classmethod
     def reset(cls):
         with cls.lock:
             cls.active = 0
             cls.max_active = 0
+            cls.init_kwargs = {}
 
     def __init__(self, **kwargs):
         self.workflow_id = kwargs["workflow_id"]
         self.state_store = WorkflowStateStore(kwargs["state_dir"])
         self.attachments = []
+        type(self).init_kwargs[self.workflow_id] = dict(kwargs)
 
     def merge_external_attachments(self, attachments):
         self.attachments = attachments
@@ -87,6 +90,30 @@ class CommanderWorkflowManagerTest(unittest.TestCase):
                 self.assertTrue(
                     all(manager.state_store.exists(workflow_id) for workflow_id in ids)
                 )
+            finally:
+                manager.shutdown()
+
+    def test_split_worker_limits_are_passed_to_commander(self):
+        FakeCommander.reset()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = CommanderWorkflowManager(
+                mode="local",
+                state_dir=temp_dir,
+                max_workflows=1,
+                commander_factory=FakeCommander,
+            )
+            try:
+                manager.submit_workflow(
+                    workflow_id="wf-workers",
+                    workflow_file="quick_strike_workflow",
+                    max_activity_workers=2,
+                    max_agent_workers=7,
+                )
+                manager.wait_for_workflow("wf-workers", timeout=2)
+                kwargs = FakeCommander.init_kwargs["wf-workers"]
+                self.assertEqual(kwargs["max_activity_workers"], 2)
+                self.assertEqual(kwargs["max_agent_workers"], 7)
+                self.assertIsNone(kwargs["max_workers"])
             finally:
                 manager.shutdown()
 

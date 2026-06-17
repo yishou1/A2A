@@ -74,7 +74,10 @@ class WorkflowResumeTest(unittest.TestCase):
                 mock_eval_score=75,
             )
 
-            self.assertEqual(resumed.workflow_context["recon_report"], "Sector_A is heavily fortified.")
+            self.assertEqual(
+                resumed.workflow_context["recon_report"][0]["value"],
+                "Sector_A is heavily fortified.",
+            )
             payload, stream = resumed.build_task_payload("artillery", resumed.workflow_context, activatity_index=2)
 
             self.assertTrue(stream)
@@ -197,7 +200,7 @@ class WorkflowResumeTest(unittest.TestCase):
             payload = response.json()
             self.assertEqual(payload["workflow_id"], workflow_id)
             self.assertEqual(payload["context"]["workflow_activatity"], 3)
-            self.assertEqual(payload["context"]["eval_score"], 75)
+            self.assertEqual(payload["context"]["eval_score"][0]["value"], 75)
             self.assertEqual(payload["context"]["attachments"][0]["uri"], "s3://a2a-media/beachhead/recon-01.jpg")
             self.assertEqual(payload["context"]["attachments"][0]["checksum"]["value"], "abc123")
 
@@ -234,6 +237,32 @@ class WorkflowResumeTest(unittest.TestCase):
         response = client.get("/workflows/wf-work-list/work-list")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["work_list"], payload["work_list"])
+
+    def test_agent_not_ready_response_has_standard_error_code(self):
+        agent = A2ABaseAgent(
+            name="Test_Agent",
+            description="Test ready state.",
+            role="recon",
+            port=9999,
+        )
+        agent.ready = False
+        client = TestClient(agent.app)
+
+        response = client.post(
+            "/sendMessage",
+            json={
+                "workflow_id": "wf-not-ready",
+                "work_item": "wf-not-ready:1:recon",
+                "command": "scan_beach_defenses",
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "failed")
+        self.assertEqual(payload["error_code"], "AGENT_NOT_READY")
+        self.assertEqual(payload["error"], "agent is not ready")
 
     def test_legacy_checkpoint_fields_are_migrated(self):
         with tempfile.TemporaryDirectory() as temp_dir:
