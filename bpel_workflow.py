@@ -34,6 +34,16 @@ def _slug(value: str) -> str:
     return normalized or "activity"
 
 
+def _split_list_attribute(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [
+        item.strip()
+        for item in re.split(r"[,;\s]+", value)
+        if item.strip()
+    ]
+
+
 @dataclass
 class BPELActivatity:
     activatity_id: str
@@ -54,6 +64,7 @@ class BPELActivatity:
     retry_count: int = 0
     timeout_seconds: float | None = None
     failure_policy: str = "pause"
+    depends_on: list[str] = field(default_factory=list)
     children: list["BPELActivatity"] = field(default_factory=list)
 
     @property
@@ -80,9 +91,12 @@ class BPELActivatity:
             "operation": self.operation,
             "command": self.command,
             "dispatch_mode": self.dispatch_mode,
+            "input_variable": self.input_variable,
+            "output_variable": self.output_variable,
             "retry_count": self.retry_count,
             "timeout_seconds": self.timeout_seconds,
             "failure_policy": self.failure_policy,
+            "depends_on": list(self.depends_on),
             "status": "pending",
             "error": None,
         }
@@ -190,6 +204,7 @@ class BPELWorkflowDefinition:
                     element.attrib.get("timeout"),
                 ),
                 failure_policy=element.attrib.get("failurePolicy", "pause"),
+                depends_on=_split_list_attribute(element.attrib.get("dependsOn")),
             )
             activatity.children = [
                 parse_element(child, activatity_id)
