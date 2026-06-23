@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from .dbn_threat_evaluator import DBNThreatEvaluator
 from .models import ThreatAssessment, TrackState
+from .semantic_reasoner import KGTransformerSemanticReasoner
 from .utils import clamp, haversine_m, project_position, risk_level
 from .xai_explainer import XAIExplanationBuilder
 
@@ -21,8 +22,13 @@ class ThreatRanker:
         "unknown": 0.78,
     }
 
-    def __init__(self, dbn_evaluator: DBNThreatEvaluator | None = None) -> None:
+    def __init__(
+        self,
+        dbn_evaluator: DBNThreatEvaluator | None = None,
+        semantic_reasoner: KGTransformerSemanticReasoner | None = None,
+    ) -> None:
         self.dbn_evaluator = dbn_evaluator or DBNThreatEvaluator()
+        self.semantic_reasoner = semantic_reasoner or KGTransformerSemanticReasoner()
         self.explainer = XAIExplanationBuilder()
 
     def reset(self) -> None:
@@ -38,7 +44,9 @@ class ThreatRanker:
         now = max((track.last_update_time for track in track_list), default=0.0)
 
         for track in track_list:
-            factors = self._factors(track, zone_lat, zone_lon, radius_m)
+            semantic_result = self.semantic_reasoner.reason(track)
+            track.metadata["semantic_reasoning"] = semantic_result
+            factors = self._factors(track, zone_lat, zone_lon, radius_m, semantic_result)
             score = clamp(
                 0.22 * factors["distance_factor"]
                 + 0.20 * factors["closing_factor"]
@@ -56,6 +64,9 @@ class ThreatRanker:
                 "dbn_medium_prob": float(dbn_result["posterior"]["medium"]),
                 "dbn_high_prob": float(dbn_result["posterior"]["high"]),
                 "dbn_state_factor": float(dbn_result["state_factor"]),
+                "coa_asset_approach_prob": float(dbn_result["coa_probabilities"]["asset_approach"]),
+                "coa_surveillance_prob": float(dbn_result["coa_probabilities"]["surveillance_or_probe"]),
+                "coa_formation_prob": float(dbn_result["coa_probabilities"]["formation_coordination"]),
             }
             assessments.append(
                 ThreatAssessment(
@@ -70,6 +81,7 @@ class ThreatRanker:
                     metadata={
                         **xai_metadata,
                         "dbn": dbn_result,
+                        "semantic_reasoning": semantic_result,
                         "weighted_score_before_dbn": round(score, 4),
                     },
                 )
@@ -80,7 +92,14 @@ class ThreatRanker:
             assessment.rank = index
         return assessments
 
-    def _factors(self, track: TrackState, zone_lat: float, zone_lon: float, radius_m: float) -> Dict[str, float]:
+    def _factors(
+        self,
+        track: TrackState,
+        zone_lat: float,
+        zone_lon: float,
+        radius_m: float,
+        semantic_result: Dict[str, object],
+    ) -> Dict[str, float]:
         distance_m = haversine_m(track.lat, track.lon, zone_lat, zone_lon)
         predicted_lat, predicted_lon = project_position(track.lat, track.lon, track.vx, track.vy, 30.0)
         predicted_distance_m = haversine_m(predicted_lat, predicted_lon, zone_lat, zone_lon)
@@ -98,7 +117,8 @@ class ThreatRanker:
         if anomaly.get("low_confidence"):
             anomaly_factor += 0.25
         quality_factor = clamp(track.track_quality)
-        semantic_factor = self._semantic_factor(track)
+        semantic_factor = float(semantic_result.get("semantic_factor", 0.0))
+        intent_probabilities = semantic_result.get("intent_probabilities", {}) or {}
         return {
             "distance_factor": distance_factor,
             "closing_factor": closing_factor,
@@ -106,6 +126,10 @@ class ThreatRanker:
             "anomaly_factor": clamp(anomaly_factor),
             "quality_factor": quality_factor,
             "semantic_factor": semantic_factor,
+            "intent_asset_approach_prob": float(intent_probabilities.get("asset_approach", 0.0)),
+            "intent_surveillance_prob": float(intent_probabilities.get("surveillance_or_probe", 0.0)),
+            "intent_formation_prob": float(intent_probabilities.get("formation_coordination", 0.0)),
+            "intent_anomalous_maneuver_prob": float(intent_probabilities.get("anomalous_maneuver", 0.0)),
             "distance_m": distance_m,
             "predicted_distance_m_30s": predicted_distance_m,
         }
@@ -150,6 +174,10 @@ class ThreatRanker:
             evidence.append(f"anomaly metadata raises attention factor to {factors['anomaly_factor']:.2f}")
         if factors.get("semantic_factor", 0.0) > 0.45:
             evidence.append(f"semantic intelligence raises attention factor to {factors['semantic_factor']:.2f}")
+            semantic = track.metadata.get("semantic_reasoning", {}) or {}
+            evidence.extend(semantic.get("evidence", [])[:3])
+        if factors.get("intent_asset_approach_prob", 0.0) > 0.24:
+            evidence.append(f"KG+Transformer asset-approach intent probability is {factors['intent_asset_approach_prob']:.2f}")
         if score >= 0.72:
             evidence.append("score is high because multiple simulated attention factors are elevated")
         elif score >= 0.45:

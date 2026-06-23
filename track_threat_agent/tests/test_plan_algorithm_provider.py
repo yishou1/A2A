@@ -50,7 +50,10 @@ async def test_artifact_exposes_plan_algorithm_trace_for_reporting():
 
     assert first_track["metadata"]["plan_algorithms"]["trajectory_prediction"]["algorithm"] == "ST-GNN"
     assert first_prediction["st_gnn"]["algorithm"] == "ST-GNN"
-    assert first_prediction["st_gnn"]["fallback_provider"] == "baseline_motion_provider"
+    assert first_prediction["st_gnn"]["runtime_provider"] == "local_numpy_message_passing"
+    assert first_prediction["st_gnn"]["runtime"] == "local_numpy_message_passing"
     assert first_threat["metadata"]["plan_algorithms"]["threat_assessment"]["algorithm"] == "DBN"
+    assert first_threat["metadata"]["plan_algorithms"]["threat_assessment"]["runtime_provider"] == "dbn_with_coa_probability_runtime"
     assert first_threat["metadata"]["plan_algorithms"]["semantic_reasoning"]["algorithm"] == "KG+Transformer"
+    assert first_threat["metadata"]["plan_algorithms"]["semantic_reasoning"]["runtime_provider"] == "kg_transformer_self_attention_runtime"
     assert first_threat["metadata"]["xai"]["algorithm"] == "XAI"

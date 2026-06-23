@@ -119,6 +119,13 @@ class MultiTargetTracker:
                 "last_detection_id": detection.detection_id,
                 "anomaly": anomaly,
                 "filter": "initialized",
+                "kalman_filter": {
+                    "reference_lat": detection.lat,
+                    "reference_lon": detection.lon,
+                    "state": [0.0, 0.0, vx, vy],
+                    "covariance": np.diag([900.0, 900.0, 100.0, 100.0]).tolist(),
+                    "model": "constant_velocity_xy",
+                },
                 **detection.metadata,
             },
         )
@@ -145,27 +152,92 @@ class MultiTargetTracker:
         dt = max(1.0, detection.timestamp - track.last_update_time)
         measured_vx, measured_vy = speed_heading_to_velocity(detection.speed, detection.heading)
 
-        state = np.array([track.lat, track.lon, track.vx, track.vy], dtype=float)
-        pred_lat, pred_lon = project_position(track.lat, track.lon, track.vx, track.vy, dt)
-        predicted = np.array([pred_lat, pred_lon, track.vx, track.vy], dtype=float)
-        measurement = np.array([detection.lat, detection.lon, measured_vx, measured_vy], dtype=float)
+        kalman = track.metadata.get("kalman_filter") or {}
+        ref_lat = float(kalman.get("reference_lat", track.lat))
+        ref_lon = float(kalman.get("reference_lon", track.lon))
+        state = np.array(kalman.get("state", self._state_from_track(track, ref_lat, ref_lon)), dtype=float)
+        covariance = np.array(kalman.get("covariance", np.diag([900.0, 900.0, 100.0, 100.0])), dtype=float)
+        if state.shape != (4,) or covariance.shape != (4, 4):
+            state = self._state_from_track(track, ref_lat, ref_lon)
+            covariance = np.diag([900.0, 900.0, 100.0, 100.0])
 
-        confidence_gain = clamp(0.35 + detection.confidence * 0.45, 0.35, 0.8)
-        velocity_gain = clamp(0.2 + detection.confidence * 0.35, 0.2, 0.55)
-        gain = np.array([confidence_gain, confidence_gain, velocity_gain, velocity_gain], dtype=float)
-        updated = predicted + gain * (measurement - predicted)
+        measurement_x, measurement_y = self._latlon_to_local_m(detection.lat, detection.lon, ref_lat, ref_lon)
+        measurement = np.array([measurement_x, measurement_y, measured_vx, measured_vy], dtype=float)
+        f = np.array(
+            [
+                [1.0, 0.0, dt, 0.0],
+                [0.0, 1.0, 0.0, dt],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+            dtype=float,
+        )
+        h = np.eye(4, dtype=float)
+        accel_noise = self._process_noise(track.object_type)
+        q = accel_noise**2 * np.array(
+            [
+                [dt**4 / 4.0, 0.0, dt**3 / 2.0, 0.0],
+                [0.0, dt**4 / 4.0, 0.0, dt**3 / 2.0],
+                [dt**3 / 2.0, 0.0, dt**2, 0.0],
+                [0.0, dt**3 / 2.0, 0.0, dt**2],
+            ],
+            dtype=float,
+        )
+        position_sigma = max(18.0, 260.0 * (1.0 - detection.confidence))
+        velocity_sigma = max(2.0, 28.0 * (1.0 - detection.confidence))
+        r = np.diag([position_sigma**2, position_sigma**2, velocity_sigma**2, velocity_sigma**2])
 
-        track.lat = float(updated[0])
-        track.lon = float(updated[1])
+        predicted_state = f @ state
+        predicted_covariance = f @ covariance @ f.T + q
+        innovation = measurement - h @ predicted_state
+        innovation_covariance = h @ predicted_covariance @ h.T + r
+        kalman_gain = predicted_covariance @ h.T @ np.linalg.pinv(innovation_covariance)
+        updated = predicted_state + kalman_gain @ innovation
+        identity = np.eye(4, dtype=float)
+        updated_covariance = (identity - kalman_gain @ h) @ predicted_covariance
+
+        track.lat, track.lon = self._local_m_to_latlon(float(updated[0]), float(updated[1]), ref_lat, ref_lon)
         track.vx = float(updated[2])
         track.vy = float(updated[3])
         track.alt = float(0.65 * track.alt + 0.35 * detection.alt)
         track.speed, track.heading = velocity_to_speed_heading(track.vx, track.vy)
-        track.metadata["kalman_like_state"] = {
-            "prior": state.tolist(),
-            "gain": gain.tolist(),
+        track.metadata["kalman_filter"] = {
+            "reference_lat": ref_lat,
+            "reference_lon": ref_lon,
+            "state": updated.tolist(),
+            "covariance": updated_covariance.tolist(),
+            "innovation": innovation.tolist(),
+            "kalman_gain": kalman_gain.tolist(),
+            "position_sigma_m": round(position_sigma, 2),
+            "velocity_sigma_mps": round(velocity_sigma, 2),
+            "model": "constant_velocity_xy",
         }
-        return self._finalize_track_update(track, detection, "kalman_like")
+        return self._finalize_track_update(track, detection, "kalman_cv")
+
+    def _state_from_track(self, track: TrackState, reference_lat: float, reference_lon: float) -> np.ndarray:
+        x_m, y_m = self._latlon_to_local_m(track.lat, track.lon, reference_lat, reference_lon)
+        return np.array([x_m, y_m, track.vx, track.vy], dtype=float)
+
+    def _latlon_to_local_m(self, lat: float, lon: float, reference_lat: float, reference_lon: float) -> tuple[float, float]:
+        cos_lat = max(0.01, math.cos(math.radians(reference_lat)))
+        east_m = (lon - reference_lon) * 111_320.0 * cos_lat
+        north_m = (lat - reference_lat) * 111_320.0
+        return east_m, north_m
+
+    def _local_m_to_latlon(self, east_m: float, north_m: float, reference_lat: float, reference_lon: float) -> tuple[float, float]:
+        cos_lat = max(0.01, math.cos(math.radians(reference_lat)))
+        lat = reference_lat + north_m / 111_320.0
+        lon = reference_lon + east_m / (111_320.0 * cos_lat)
+        return lat, lon
+
+    def _process_noise(self, object_type: str) -> float:
+        if object_type == "ship":
+            return 0.45
+        if object_type == "uav":
+            return 2.2
+        if object_type == "aircraft":
+            return 3.2
+        return 2.8
 
     def _finalize_track_update(self, track: TrackState, detection: Detection, filter_name: str) -> TrackState:
         track.object_type = detection.object_type

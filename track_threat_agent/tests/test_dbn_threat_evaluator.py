@@ -37,6 +37,8 @@ def test_dbn_high_probability_rises_with_repeated_elevated_observations():
 
     assert second["posterior"]["high"] >= first["posterior"]["high"]
     assert second["smoothed_score"] >= first["smoothed_score"]
+    assert second["coa_probabilities"]["asset_approach"] > 0
+    assert second["dominant_coa"] in second["coa_probabilities"]
 
 
 def test_dbn_reset_clears_state():
@@ -54,3 +56,25 @@ def test_dbn_reset_clears_state():
     after_reset = evaluator.update(track, 0.8, factors)
 
     assert after_reset["prior"]["high"] < elevated["posterior"]["high"]
+
+
+def test_dbn_coa_probability_reflects_asset_approach_factors():
+    evaluator = DBNThreatEvaluator()
+    track = make_track()
+    factors = {
+        "distance_factor": 0.95,
+        "closing_factor": 0.92,
+        "type_factor": 0.7,
+        "anomaly_factor": 0.1,
+        "quality_factor": 0.9,
+        "semantic_factor": 0.85,
+        "intent_asset_approach_prob": 0.7,
+        "intent_surveillance_prob": 0.1,
+        "intent_formation_prob": 0.1,
+        "intent_anomalous_maneuver_prob": 0.1,
+    }
+
+    result = evaluator.update(track, 0.76, factors)
+
+    assert result["coa_probabilities"]["asset_approach"] == max(result["coa_probabilities"].values())
+    assert result["coa_risk_factor"] > 0.2

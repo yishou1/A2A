@@ -276,7 +276,17 @@ metadata
   "st_gnn": {
     "algorithm": "ST-GNN",
     "contract": "dynamic_entity_tracking_and_trajectory_prediction",
-    "fallback_provider": "baseline_motion_provider",
+    "runtime": "local_numpy_message_passing",
+    "runtime_provider": "local_numpy_message_passing",
+    "message_passing_layers": 2,
+    "node_embedding": [0.12, -0.04, 0.31, 0.65],
+    "edge_attention": [{"track_id": "trk-xxx", "attention_weight": 0.62}],
+    "decoder_adjustment": {
+      "vx_delta_mps": 1.7,
+      "vy_delta_mps": -0.6,
+      "accel_x_mps2": 0.02,
+      "accel_y_mps2": 0.01
+    },
     "trained_model_loaded": false,
     "graph_neighbor_count": 2,
     "graph_influence": 0.74
@@ -300,7 +310,7 @@ metadata
 
 `uncertainty_radius_m` 表示仿真预测不确定半径，时间越长、机动越明显、航迹质量越低，该半径越大。
 
-当前对外算法契约采用计划书中的 ST-GNN 动态实体跟踪与轨迹预测。训练权重或公共算法库未加载时，`baseline_motion_provider` 使用 `constant_velocity`、`constant_acceleration`、`coordinated_turn` 三类运动假设生成 fallback 预测线，再按 `model_probabilities` 融合为 `predicted_path`。完整多假设结果保存在：
+当前对外算法契约采用计划书中的 ST-GNN 动态实体跟踪与轨迹预测。本地运行时先用 `constant_velocity`、`constant_acceleration`、`coordinated_turn` 三类运动假设生成 IMM 基础预测线，再用 NumPy ST-GNN 消息传递根据邻近编队/编组关系修正短时预测。完整多假设结果保存在：
 
 ```text
 tracks[].metadata.prediction.prediction_hypotheses
@@ -464,8 +474,9 @@ ready_endpoint=http://127.0.0.1:8102/ready
 metrics_endpoint=http://127.0.0.1:8102/metrics
 agent_card=http://127.0.0.1:8102/.well-known/agent-card.json
 skills=trajectory_tracking,st_gnn_dynamic_entity_tracking,dynamic_bayesian_network_threat_assessment,kg_transformer_semantic_sitrep,group_detection,group_threat_ranking,protected_asset_impact_analysis,xai_evidence_generation
-algorithm_family=st_gnn,dbn,kg_transformer,xai,baseline_fallback
-fallback_providers=baseline_motion_provider,baseline_dbn_runtime,metadata_kg_transformer_adapter
+algorithm_family=st_gnn,dbn,kg_transformer,xai,imm,kalman
+runtime_providers=local_numpy_st_gnn_message_passing,dbn_with_coa_probability_runtime,kg_transformer_self_attention_runtime,covariance_kalman_cv_filter
+fallback_providers=baseline_motion_provider
 algorithm_levels=small,medium,large
 heartbeat_ts=<recent unix timestamp>
 ```
@@ -580,8 +591,8 @@ predicted_path[].horizon_type
 ## 9. 当前限制
 
 - 当前仍是 Demo，不是生产系统。
-- 训练版 ST-GNN 权重尚未随仓库提供；当前由 `baseline_motion_provider` 保证 A2A/Nacos 联调可运行。
-- KG+Transformer 当前为语义 adapter 契约，尚未接 Neo4j/LLM 服务。
+- 训练版 ST-GNN 权重尚未随仓库提供；当前使用本地 NumPy ST-GNN 消息传递运行时。
+- KG+Transformer 当前使用本地 token self-attention，尚未接 Neo4j/LLM 服务。
 - 状态使用本地 JSON 快照恢复，不是生产级数据库或分布式状态存储。
 - 单实例采用串行处理；并发建议通过多个 Agent 实例注册到 Nacos。
 - `threat` / `risk` / `impact` 只表示仿真关注优先级。

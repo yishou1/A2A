@@ -138,3 +138,18 @@ def test_prediction_eval_records_previous_forecast_error_on_update():
     assert all(eval_item["fde_m"] >= 0 for eval_item in evals)
     assert all(eval_item["ade_m"] >= 0 for eval_item in evals)
     assert all(eval_item["sample_count"] >= 1 for eval_item in evals)
+
+
+def test_medium_update_uses_covariance_kalman_filter_metadata():
+    tracker = MultiTargetTracker()
+    tracker.update(load_detections("frame_1.json"), algorithm_level="medium")
+    tracks = tracker.update(load_detections("frame_2.json"), algorithm_level="medium")
+
+    kalman = tracks[0].metadata["kalman_filter"]
+
+    assert tracks[0].metadata["filter"] == "kalman_cv"
+    assert kalman["model"] == "constant_velocity_xy"
+    assert len(kalman["state"]) == 4
+    assert len(kalman["covariance"]) == 4
+    assert len(kalman["kalman_gain"]) == 4
+    assert kalman["position_sigma_m"] > 0

@@ -36,6 +36,10 @@ def test_nearby_comoving_tracks_get_graph_refinement_metadata():
     assert refined[0].predicted_path[0]["model_used"].endswith("_graph_refined")
     assert refined[0].predicted_path[0]["prediction_model"].endswith("_graph_refined")
     assert refined[0].metadata["prediction"]["final_model_used"].endswith("_graph_refined")
+    assert refined[0].predicted_path[0]["st_gnn"]["runtime"] == "local_numpy_message_passing"
+    assert refined[0].predicted_path[0]["st_gnn"]["message_passing_layers"] == 2
+    assert refined[0].predicted_path[0]["st_gnn"]["edge_attention"][0]["track_id"] == "trk-2"
+    assert len(refined[0].predicted_path[0]["st_gnn"]["node_embedding"]) >= 4
 
 
 def test_far_tracks_do_not_influence_each_other():
@@ -47,3 +51,5 @@ def test_far_tracks_do_not_influence_each_other():
 
     assert refined[0].metadata["st_gnn_inspired"]["enabled"] is False
     assert refined[0].predicted_path[0]["graph_neighbor_count"] == 0
+    assert refined[0].predicted_path[0]["st_gnn"]["runtime"] == "local_numpy_message_passing"
+    assert refined[0].predicted_path[0]["st_gnn"]["edge_attention"] == []

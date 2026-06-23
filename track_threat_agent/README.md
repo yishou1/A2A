@@ -33,11 +33,12 @@ metadata.status=idle
 - 多目标航迹跟踪。
 - 未来 10 / 20 / 30 / 60 / 120 秒航线预测，并输出预测模型、置信度、不确定半径和时域类型。
 - 计划书算法 Provider：默认使用 `PlanAlgorithmProvider` 暴露 ST-GNN、DBN、KG+Transformer、XAI 四类正式算法契约。
-- ST-GNN 动态实体跟踪与轨迹预测契约：输出 10 / 20 / 30 / 60 / 120 秒预测点、图关系影响、置信度、不确定半径和 fallback 状态。
-- baseline motion provider：在训练版 ST-GNN 或公共算法库尚未加载时，使用 IMM 多模型预测作为可运行 fallback。
+- ST-GNN 动态实体跟踪与轨迹预测：本地 NumPy 消息传递运行时会构建目标图、计算边注意力、生成节点 embedding，并修正 10 / 20 / 30 / 60 / 120 秒预测点。
+- IMM 多模型运动预测：同时生成 `constant_velocity`、`constant_acceleration`、`coordinated_turn` 三类假设，并按概率融合为基础预测线。
+- 协方差 Kalman 滤波：`medium` 档使用 CV 状态空间 Kalman 更新，输出 state、covariance、innovation 和 kalman_gain。
 - ADE/FDE 回看评估：下一帧到达后记录上一帧预测误差，summary 中输出聚合评估。
-- DBN 动态威胁状态评估：输出 low / medium / high 后验概率和 threat score；当前运行时 DBN 作为正式概率评估模块，后续可替换为公共算法库实现。
-- KG+Transformer 语义态势契约：消费 TacticalIntelligenceAgent 语义字段和 knowledge relations，输出语义态势因子与证据链；当前使用 metadata adapter 作为 fallback。
+- DBN + COA 动态威胁状态评估：输出 low / medium / high 后验概率、COA 概率、dominant_coa 和 threat score。
+- KG+Transformer 语义态势推理：把 TacticalIntelligenceAgent 语义字段和 knowledge relations 转成 KG token，通过本地 Transformer 自注意力输出语义态势因子、意图类别概率与证据链。
 - TacticalIntelligenceAgent 语义字段消费：`threat_level`、`affiliation`、`label`、`knowledge_graph` 参与排序和资产影响分析。
 - 疑似空中编队和海上编组识别。
 - 己方保护资产影响分析。
@@ -48,10 +49,10 @@ metadata.status=idle
 - `GET /workflows/{workflow_id}/work-list`。
 - `GET /ready`、`POST /lifecycle/ready`、`GET /metrics`，适配 Commander 宕机恢复/ready=false 切换规范。
 - Nacos role/status metadata 和 heartbeat_ts 心跳；心跳会保留 Commander 写入的 busy/unavailable/lease_* 状态。
-- `AlgorithmProvider` 预留接口，默认主线已经切换到计划书算法契约。
+- `AlgorithmProvider` 作为算法边界，默认主线已经切换到本地可运行的计划书算法栈。
 - 本地 JSON 状态快照，支持演示环境重启后恢复航迹、最近 artifact、幂等缓存和 workflow work list。
 
-当前工程不再把启发式规则作为主算法口径。`PlanAlgorithmProvider` 将计划书中的 ST-GNN、DBN、KG+Transformer、XAI 作为对外算法契约；已有 IMM/图关系/metadata 逻辑降级为 baseline/fallback provider。后续公共算法库或 A100 训练版 ST-GNN 完成后，只需替换 `app/algorithm_provider.py` 后端实现，不改变 A2A/Nacos 对外协议。
+当前工程不再只是“预留接口”。`PlanAlgorithmProvider` 会实际调用本地算法：协方差 Kalman 跟踪、IMM 多模型预测、本地 ST-GNN 消息传递、KG+Transformer 自注意力语义推理、DBN+COA 后验评估和 XAI 证据链。后续公共算法库或 A100 训练版 ST-GNN 完成后，可以替换 `app/algorithm_provider.py` 后端实现和模型权重，但 A2A/Nacos 对外协议不需要改变。
 
 ## 3. 启动
 
@@ -269,15 +270,16 @@ uv run --with-requirements requirements.txt --with-requirements ../requirements.
 - 编队/编组识别。
 - 保护资产影响分析。
 - AMOS/A2A 事件适配。
-- ST-GNN 动态实体跟踪与轨迹预测契约，当前由 baseline motion provider 保证可运行。
-- DBN 威胁状态后验概率评估。
+- ST-GNN 动态实体跟踪与轨迹预测，本地 NumPy 消息传递运行时会输出 embedding 和 edge attention。
+- KG+Transformer 本地自注意力语义推理。
+- DBN+COA 威胁状态后验概率评估。
 - `work_item` 幂等。
 - `work_list` 查询。
 
 ## 10. 当前限制
 
 - 当前是 Demo，不是生产系统。
-- 训练版 ST-GNN 权重尚未随仓库提供，当前以 baseline provider 保证 A2A/Nacos 联调可运行。
-- KG+Transformer 当前为语义 adapter 契约，后续接入知识图谱服务和 Transformer/LLM 语义模型。
+- 训练版 ST-GNN 权重尚未随仓库提供，当前使用本地 NumPy ST-GNN 消息传递运行时。
+- KG+Transformer 当前使用本地 token self-attention，尚未接 Neo4j/LLM 服务。
 - 当前使用本地 JSON 文件做轻量状态快照，还不是生产级数据库或分布式状态存储。
 - 单实例串行处理，多并发建议通过多 Agent 实例水平扩展。

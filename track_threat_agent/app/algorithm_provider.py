@@ -3,9 +3,9 @@
 The provider is the seam between A2A/Nacos plumbing and the project-plan
 algorithm stack. The plan-facing provider exposes ST-GNN trajectory prediction,
 DBN threat assessment, KG+Transformer semantic reasoning, and XAI evidence as
-the primary contract. Existing in-process algorithms remain available as
-baseline/fallback providers until trained models or the shared algorithm library
-are plugged in.
+the primary contract. The current in-process runtime now executes local
+implementations for those algorithm families while keeping a legacy fallback
+path for compatibility and future model replacement.
 """
 
 from __future__ import annotations
@@ -52,12 +52,13 @@ class LocalBuiltInAlgorithmProvider:
 
 @dataclass
 class PlanAlgorithmProvider(LocalBuiltInAlgorithmProvider):
-    """Project-plan algorithm contract with baseline runtime fallback.
+    """Project-plan algorithm contract backed by local runtime algorithms.
 
-    This class makes the algorithm layer report the plan algorithms as the
-    primary path while preserving the current stable runtime as fallback. It is
-    intentionally an adapter: later the methods can delegate to trained ST-GNN,
-    DBN, and KG+Transformer services without changing the A2A artifact shape.
+    This class reports the project-plan algorithms as the primary path and
+    executes local implementations for ST-GNN-style graph message passing, DBN
+    threat-state estimation, KG+Transformer self-attention semantics, and XAI
+    evidence. Later trained model weights can replace the local matrices without
+    changing the A2A artifact shape.
     """
 
     mode: str = "plan_algorithm_provider"
@@ -78,10 +79,16 @@ class PlanAlgorithmProvider(LocalBuiltInAlgorithmProvider):
                 "semantic_reasoning": "metadata_kg_transformer_adapter",
                 "explainability": "xai_evidence_runtime",
             },
+            "local_runtime_implementations": {
+                "trajectory_prediction": "local_numpy_st_gnn_message_passing",
+                "threat_assessment": "dbn_with_coa_probability_runtime",
+                "semantic_reasoning": "kg_transformer_self_attention_runtime",
+                "tracking_filter": "covariance_kalman_cv_filter",
+            },
             "training_status": {
-                "st_gnn": "external_weights_or_algorithm_library_pending",
+                "st_gnn": "local_runtime_available; trained_external_weights_pending",
                 "dbn": "runtime_probabilistic_model_available",
-                "kg_transformer": "adapter_contract_available",
+                "kg_transformer": "local_self_attention_runtime_available",
             },
         }
 
@@ -100,12 +107,12 @@ class PlanAlgorithmProvider(LocalBuiltInAlgorithmProvider):
                     "threat_assessment": {
                         "algorithm": "DBN",
                         "contract": "dynamic_bayesian_network_threat_state",
-                        "fallback_provider": "baseline_dbn_runtime",
+                        "runtime_provider": "dbn_with_coa_probability_runtime",
                     },
                     "semantic_reasoning": {
                         "algorithm": "KG+Transformer",
                         "contract": "knowledge_graph_transformer_semantic_sitrep",
-                        "fallback_provider": "metadata_kg_transformer_adapter",
+                        "runtime_provider": "kg_transformer_self_attention_runtime",
                     },
                 }
             )
@@ -123,17 +130,22 @@ class PlanAlgorithmProvider(LocalBuiltInAlgorithmProvider):
         plan_algorithms["trajectory_prediction"] = {
             "algorithm": "ST-GNN",
             "contract": "dynamic_entity_tracking_and_trajectory_prediction",
+            "runtime_provider": graph_meta.get("runtime", "local_numpy_message_passing"),
             "fallback_provider": "baseline_motion_provider",
             "graph_neighbor_count": int(graph_meta.get("neighbor_count", 0) or 0),
             "graph_influence": float(graph_meta.get("graph_influence", 0.0) or 0.0),
             "trained_model_loaded": False,
         }
         for point in track.predicted_path:
-            point["st_gnn"] = {
-                "algorithm": "ST-GNN",
-                "contract": "dynamic_entity_tracking_and_trajectory_prediction",
-                "fallback_provider": "baseline_motion_provider",
-                "trained_model_loaded": False,
-                "graph_neighbor_count": int(point.get("graph_neighbor_count", graph_meta.get("neighbor_count", 0)) or 0),
-                "graph_influence": float(point.get("graph_influence", graph_meta.get("graph_influence", 0.0)) or 0.0),
-            }
+            st_gnn = dict(point.get("st_gnn", {}) or {})
+            st_gnn.update(
+                {
+                    "algorithm": "ST-GNN",
+                    "contract": "dynamic_entity_tracking_and_trajectory_prediction",
+                    "runtime_provider": st_gnn.get("runtime", graph_meta.get("runtime", "local_numpy_message_passing")),
+                    "trained_model_loaded": False,
+                    "graph_neighbor_count": int(point.get("graph_neighbor_count", graph_meta.get("neighbor_count", 0)) or 0),
+                    "graph_influence": float(point.get("graph_influence", graph_meta.get("graph_influence", 0.0)) or 0.0),
+                }
+            )
+            point["st_gnn"] = st_gnn

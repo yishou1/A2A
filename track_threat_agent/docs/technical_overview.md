@@ -68,10 +68,11 @@ flowchart LR
 - 支持 `aircraft`、`ship`、`uav`、`unknown`。
 - 最近邻关联输入 detection 和已有 track。
 - `small` 使用 alpha-beta 风格平滑。
-- `medium` 使用简化 Kalman-like 更新。
+- `medium` 使用协方差 CV Kalman 更新，状态向量为 `[east_m, north_m, vx, vy]`，并输出 `state`、`covariance`、`innovation`、`kalman_gain`。
 - `large` 是接口占位，当前回退到 `medium` 并写入 `metadata.large_mock=true`。
 - 为每条 track 预测未来 10/20/30/60/120 秒位置。
-- 预测模块升级为计划书 ST-GNN 动态实体跟踪与轨迹预测契约；训练版 ST-GNN 或公共算法库未加载时，由 `baseline_motion_provider` 同时生成 `constant_velocity`、`constant_acceleration`、`coordinated_turn` 三条假设线，并按模型概率融合成兼容旧接口的 `predicted_path`。
+- 预测模块先由 IMM 生成 `constant_velocity`、`constant_acceleration`、`coordinated_turn` 三条假设线，并按模型概率融合成基础 `predicted_path`。
+- 随后本地 ST-GNN 运行时把 track 构造成动态实体图，用距离、航向差、速度差和类型一致性形成边权；两层 NumPy 消息传递生成节点 embedding，再用 decoder 对速度和加速度做小幅修正，输出 `predicted_path[].st_gnn.node_embedding`、`edge_attention` 和 `decoder_adjustment`。
 - 每个预测点输出 `model_used=imm_fused`、`primary_model`、`model_probabilities`、`prediction_confidence`、`uncertainty_radius_m` 和 `horizon_type`。
 - 每条 track 的 `metadata.prediction.prediction_hypotheses` 保留三类模型的多假设预测线，便于后续 AMOS 或算法评估模块展示。
 - 下一帧更新时会对上一帧预测做 ADE/FDE 回看评估，并写入 `metadata.prediction_eval`；artifact summary 会聚合输出 `prediction_eval`。
@@ -100,7 +101,9 @@ score =
 - `medium`: score >= 0.45
 - `low`: 其他
 
-`semantic_factor` 来自上游情报字段，包括 `threat_level`、`affiliation`、`label` 和 `knowledge_graph` 关系。输出中包含 `evidence`，用于解释分数来自距离、接近趋势、异常、类型、航迹质量和上游语义情报等因素。
+`semantic_factor` 来自 `KGTransformerSemanticReasoner`。它把 `threat_level`、`affiliation`、`label`、`source_class`、`mission_hint` 和 `knowledge_graph` 关系转成 KG token，通过本地 Transformer self-attention 计算 token attention、语义态势因子和意图类别概率。输出中包含 `evidence`，用于解释分数来自距离、接近趋势、异常、类型、航迹质量和上游语义情报等因素。
+
+威胁状态还会进入 `DBNThreatEvaluator`。DBN 保留每条 track 的 low/medium/high 先验，结合当前观测 likelihood 更新后验；同时计算 `asset_approach`、`surveillance_or_probe`、`formation_coordination`、`anomalous_maneuver`、`transit_or_background` 五类 COA 概率，只作为态势关注类别，不生成行动建议。
 
 `backend/app/group_detector.py`
 

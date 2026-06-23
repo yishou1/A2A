@@ -572,7 +572,7 @@ async def send_message_stream(task_payload: Dict[str, Any], token: str = Depends
             runtime.mark_idle()
             registrar.set_agent_status("idle", lease_workflow_id="", lease_work_item="")
         artifact = result["artifact"]
-        yield await emit({"status": "Working", "progress": 45, "message": "ST-GNN trajectory prediction contract completed with baseline provider"})
+        yield await emit({"status": "Working", "progress": 45, "message": "local ST-GNN message-passing trajectory prediction completed"})
         yield await emit({"status": "Working", "progress": 65, "message": "groups and protected-asset impacts analyzed"})
         yield await emit({"status": "Working", "progress": 85, "message": "DBN threat assessment and XAI evidence generated"})
         yield await emit(
