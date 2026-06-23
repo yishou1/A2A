@@ -10,6 +10,7 @@ from copy import deepcopy
 from urllib.parse import urljoin
 
 from a2a_protocol.messages import build_task_error_response, build_task_response
+from observability import exception_diagnostics, log_event
 
 def verify_token(authorization: str = Header(None)):
     if not authorization or not authorization.startswith("Bearer "):
@@ -38,6 +39,7 @@ class A2ABaseAgent:
             "last_error": None,
             "last_work_item": None,
         }
+        self._last_error_details = None
         self._state_lock = threading.RLock()
         self.app = FastAPI(title=name)
         self.setup_routes()
@@ -128,6 +130,10 @@ class A2ABaseAgent:
         )
         return snapshot
 
+    def last_error_diagnostics(self):
+        with self._state_lock:
+            return deepcopy(self._last_error_details)
+
     async def _replay_stream(self, cached_events):
         for event in cached_events:
             yield event
@@ -207,6 +213,7 @@ class A2ABaseAgent:
                     role=self.role,
                     command=payload.get("command"),
                     error="agent is not ready",
+                    error_code="AGENT_NOT_READY",
                 )
             self._capture_work_list(payload)
             work_item = self._work_item_from_payload(payload)
@@ -226,6 +233,7 @@ class A2ABaseAgent:
                 self._metrics["last_work_item"] = work_item
             try:
                 output, message = self.execute_task(payload)
+                duration_ms = round((time.perf_counter() - started) * 1000, 3)
                 response = build_task_response(
                     workflow_id=payload.get("workflow_id"),
                     work_item=work_item,
@@ -235,7 +243,8 @@ class A2ABaseAgent:
                     status="completed",
                     output=output,
                     metrics={
-                        "latency_ms": round((time.perf_counter() - started) * 1000, 3),
+                        "latency_ms": duration_ms,
+                        "duration_ms": duration_ms,
                     },
                     message=message,
                     work_list_size=len(self.get_work_list(payload.get("workflow_id"))),
@@ -245,6 +254,8 @@ class A2ABaseAgent:
                     self._task_response_cache[work_item] = response
                 return response
             except Exception as exc:
+                diagnostics = exception_diagnostics(exc)
+                duration_ms = round((time.perf_counter() - started) * 1000, 3)
                 response = build_task_error_response(
                     workflow_id=payload.get("workflow_id"),
                     work_item=work_item,
@@ -252,14 +263,25 @@ class A2ABaseAgent:
                     role=self.role,
                     command=payload.get("command"),
                     error=str(exc),
+                    error_code="AGENT_BUSINESS_ERROR",
                     metrics={
-                        "latency_ms": round((time.perf_counter() - started) * 1000, 3),
+                        "latency_ms": duration_ms,
+                        "duration_ms": duration_ms,
                     },
                 )
                 with self._state_lock:
                     self._metrics["tasks_failed"] += 1
                     self._metrics["last_error"] = str(exc)
+                    self._last_error_details = diagnostics
                     self._task_response_cache[work_item] = response
+                log_event(
+                    "agent_task_failed",
+                    agent=self.name,
+                    role=self.role,
+                    workflow_id=payload.get("workflow_id"),
+                    work_item=work_item,
+                    **diagnostics,
+                )
                 return response
             finally:
                 with self._state_lock:

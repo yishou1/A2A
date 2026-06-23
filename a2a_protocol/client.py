@@ -4,6 +4,13 @@ from typing import Dict, Any
 
 from a2a_protocol.messages import is_success_response
 
+
+class A2AClientError(RuntimeError):
+    def __init__(self, message: str, response_payload=None):
+        super().__init__(message)
+        self.response_payload = response_payload or {}
+
+
 class A2AClient:
     def __init__(self, target_ip, target_port, timeout=5, stream_timeout=30):
         self.base_url = f"http://{target_ip}:{target_port}"
@@ -52,7 +59,10 @@ class A2AClient:
         res.raise_for_status()
         payload = res.json()
         if not is_success_response(payload):
-            raise RuntimeError(payload.get("error") or payload.get("message") or "Agent returned failed response")
+            raise A2AClientError(
+                payload.get("error") or payload.get("message") or "Agent returned failed response",
+                response_payload=payload,
+            )
         return payload
 
     def send_message_stream(self, task_payload: Dict[str, Any]):

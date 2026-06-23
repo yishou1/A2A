@@ -21,7 +21,9 @@ class RecoveryRequest(BaseModel):
     workflow_file: Optional[str] = None
     state_dir: Optional[str] = None
     max_steps: int = Field(default=10, ge=1)
-    max_workers: int = Field(default=4, ge=1)
+    max_workers: Optional[int] = Field(default=None, ge=1)
+    max_activity_workers: Optional[int] = Field(default=None, ge=1)
+    max_agent_workers: Optional[int] = Field(default=None, ge=1)
     resume: bool = True
     strict: bool = True
     mock_eval_score: Optional[int] = None
@@ -55,6 +57,8 @@ def takeover_workflow(workflow_id: str, request: RecoveryRequest) -> Dict[str, A
         mock_eval_score=request.mock_eval_score,
         mock_decision=request.mock_decision,
         max_workers=request.max_workers,
+        max_activity_workers=request.max_activity_workers,
+        max_agent_workers=request.max_agent_workers,
     )
 
     attachments = normalize_attachments(request.attachments)

@@ -7,6 +7,7 @@ from copy import deepcopy
 from typing import Any, Callable, Optional
 
 from commander_agent.agent_leases import AgentLeaseManager
+from commander_agent.distributed_lock import RedisDistributedLock
 from commander_agent.main import CommanderAgent, PROJECT_ROOT
 from registry.nacos_manager import NacosRegistry
 from workflow_payloads import normalize_attachments
@@ -36,7 +37,10 @@ class CommanderWorkflowManager:
         self.state_store = WorkflowStateStore(self.state_dir)
         self.registry = None if mode == "local" else (registry or NacosRegistry())
         self.lease_manager = (
-            AgentLeaseManager(self.registry)
+            AgentLeaseManager(
+                self.registry,
+                distributed_lock=RedisDistributedLock.from_env(),
+            )
             if self.registry is not None
             else None
         )
@@ -57,7 +61,9 @@ class CommanderWorkflowManager:
         workflow_id: Optional[str] = None,
         resume: bool = False,
         max_steps: int = 10,
-        max_workers: int = 4,
+        max_workers: Optional[int] = None,
+        max_activity_workers: Optional[int] = None,
+        max_agent_workers: Optional[int] = None,
         max_retries: int = 1,
         retry_backoff: float = 0.2,
         request_timeout: float = 5.0,
@@ -99,6 +105,8 @@ class CommanderWorkflowManager:
                 resume,
                 max_steps,
                 max_workers,
+                max_activity_workers,
+                max_agent_workers,
                 max_retries,
                 retry_backoff,
                 request_timeout,
@@ -182,6 +190,8 @@ class CommanderWorkflowManager:
                 return
             self._closed = True
         self._executor.shutdown(wait=wait)
+        if self.lease_manager is not None:
+            self.lease_manager.close()
         if self.registry is not None:
             self.registry.close()
 
@@ -192,7 +202,9 @@ class CommanderWorkflowManager:
         workflow_file: Optional[str],
         resume: bool,
         max_steps: int,
-        max_workers: int,
+        max_workers: Optional[int],
+        max_activity_workers: Optional[int],
+        max_agent_workers: Optional[int],
         max_retries: int,
         retry_backoff: float,
         request_timeout: float,
@@ -212,6 +224,8 @@ class CommanderWorkflowManager:
                 mock_eval_score=mock_eval_score,
                 mock_decision=mock_decision,
                 max_workers=max_workers,
+                max_activity_workers=max_activity_workers,
+                max_agent_workers=max_agent_workers,
                 max_retries=max_retries,
                 retry_backoff=retry_backoff,
                 request_timeout=request_timeout,
