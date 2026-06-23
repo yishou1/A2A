@@ -5,3 +5,7 @@ requests
 nacos-sdk-python<2.0.0
 sseclient-py
 Pillow
+numpy
+scikit-learn
+torch
+torchvision

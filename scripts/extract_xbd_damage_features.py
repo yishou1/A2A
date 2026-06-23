@@ -6,7 +6,7 @@ import math
 import re
 from collections import Counter
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from PIL import Image, ImageDraw
 
@@ -124,6 +124,13 @@ def _polygon_features(
     brightness_sum = 0.0
     texture_sum = 0.0
     dark_or_changed = 0
+    high_change = 0
+    severe_damage = 0
+    collapse = 0
+    pre_brightness_sum = 0.0
+    post_brightness_sum = 0.0
+    spectral_values: List[float] = []
+    max_spectral = 0.0
     cx_sum = 0.0
     cy_sum = 0.0
     for y in range(crop_h):
@@ -135,14 +142,26 @@ def _polygon_features(
             cy_sum += top + y
             pr, pg, pb = pre_pixels[x, y]
             qr, qg, qb = post_pixels[x, y]
+            pre_brightness = pre_gray[y][x]
+            post_brightness = post_gray[y][x]
             spectral = (abs(qr - pr) + abs(qg - pg) + abs(qb - pb)) / (3.0 * 255.0)
             spectral_sum += spectral
-            brightness_delta = abs(post_gray[y][x] - pre_gray[y][x])
+            spectral_values.append(spectral)
+            max_spectral = max(max_spectral, spectral)
+            pre_brightness_sum += pre_brightness
+            post_brightness_sum += post_brightness
+            brightness_delta = abs(post_brightness - pre_brightness)
             brightness_sum += brightness_delta
             texture_delta = abs(_gradient(post_gray, x, y) - _gradient(pre_gray, x, y)) / 2.0
             texture_sum += texture_delta
-            if spectral > 0.18 or post_gray[y][x] < pre_gray[y][x] - 0.12:
+            if spectral > 0.18 or post_brightness < pre_brightness - 0.12:
                 dark_or_changed += 1
+            if spectral > 0.15:
+                high_change += 1
+            if spectral > 0.20 and post_brightness < pre_brightness - 0.06:
+                severe_damage += 1
+            if post_brightness < pre_brightness - 0.14:
+                collapse += 1
 
     if area <= 0:
         return None
@@ -150,12 +169,23 @@ def _polygon_features(
     cy = cy_sum / area
     center_dist = math.sqrt((cx - width / 2.0) ** 2 + (cy - height / 2.0) ** 2)
     max_dist = math.sqrt((width / 2.0) ** 2 + (height / 2.0) ** 2) or 1.0
+    mean_spectral = spectral_sum / area
+    spectral_variance = sum((value - mean_spectral) ** 2 for value in spectral_values) / area
+    pre_brightness_mean = pre_brightness_sum / area
+    post_brightness_mean = post_brightness_sum / area
     return {
         "pre_area": _clamp(area / float(width * height)),
-        "spectral_delta": _clamp(spectral_sum / area),
+        "spectral_delta": _clamp(mean_spectral),
         "texture_delta": _clamp(texture_sum / area),
         "heat_signature": _clamp(brightness_sum / area),
         "crater_density": _clamp(dark_or_changed / float(area)),
+        "std_spectral": _clamp(math.sqrt(spectral_variance)),
+        "max_spectral": _clamp(max_spectral),
+        "high_change_ratio": _clamp(high_change / float(area)),
+        "severe_damage_ratio": _clamp(severe_damage / float(area)),
+        "collapse_ratio": _clamp(collapse / float(area)),
+        "post_brightness": _clamp(post_brightness_mean),
+        "brightness_drop": _clamp(max(0.0, pre_brightness_mean - post_brightness_mean)),
         "normalized_distance": _clamp(center_dist / max_dist),
         "centroid_x": cx,
         "centroid_y": cy,
@@ -164,7 +194,39 @@ def _polygon_features(
 
 
 def _damage_label(subtype: str) -> int:
-    return 0 if (subtype or "").strip().lower() in {"", "no-damage", "un-classified", "unclassified"} else 1
+    normalized = (subtype or "").strip().lower()
+    if normalized in {"", "no-damage"}:
+        return 0
+    if normalized in {"un-classified", "unclassified"}:
+        return -1
+    return 1
+
+
+def _severity_label(value: Any) -> int:
+    raw = str(value or "").strip().lower().replace("_", "-")
+    if raw in {"un-classified", "unclassified"}:
+        return -1
+    severity_map = {
+        "": 0,
+        "no-damage": 0,
+        "minor-damage": 1,
+        "major-damage": 2,
+        "destroyed": 3,
+        "minor": 1,
+        "major": 2,
+    }
+    if raw in severity_map:
+        return severity_map[raw]
+    try:
+        numeric = int(float(raw))
+        if 0 <= numeric <= 3:
+            return numeric
+    except (TypeError, ValueError):
+        pass
+    binary = _damage_label(raw)
+    if binary < 0:
+        return -1
+    return 0 if binary == 0 else 1
 
 
 def extract_features(input_root: Path, output_csv: Path, report_json: Path) -> dict:
@@ -176,7 +238,7 @@ def extract_features(input_root: Path, output_csv: Path, report_json: Path) -> d
     rows: List[dict] = []
     skipped = 0
     pairs = _image_pairs(images_dir)
-    for sample_id, pair in sorted(pairs.items()):
+    for sample_index, (sample_id, pair) in enumerate(sorted(pairs.items())):
         pre_path = pair.get("pre")
         post_path = pair.get("post")
         post_label = _label_path(labels_dir, sample_id, "post")
@@ -188,6 +250,12 @@ def extract_features(input_root: Path, output_csv: Path, report_json: Path) -> d
         for index, building in enumerate(_load_buildings(post_label)):
             props = building["properties"]
             subtype = str(props.get("subtype") or "")
+            severity_label = _severity_label(subtype)
+            if severity_label < 0:
+                skipped += 1
+                continue
+            damage_label = 0 if severity_label == 0 else 1
+            damage_tier = 0 if severity_label <= 0 else (1 if severity_label == 1 else 2)
             features = _polygon_features(pre_image, post_image, building["polygon"])
             if features is None:
                 skipped += 1
@@ -203,15 +271,26 @@ def extract_features(input_root: Path, output_csv: Path, report_json: Path) -> d
                     "texture_delta": features["texture_delta"],
                     "heat_signature": features["heat_signature"],
                     "crater_density": features["crater_density"],
+                    "std_spectral": features["std_spectral"],
+                    "max_spectral": features["max_spectral"],
+                    "high_change_ratio": features["high_change_ratio"],
+                    "severe_damage_ratio": features["severe_damage_ratio"],
+                    "collapse_ratio": features["collapse_ratio"],
+                    "post_brightness": features["post_brightness"],
+                    "brightness_drop": features["brightness_drop"],
                     "normalized_distance": features["normalized_distance"],
                     "detection_confidence": 1.0,
                     "threat_score": 0.5,
-                    "damage_label": _damage_label(subtype),
+                    "severity_label": severity_label,
+                    "damage_tier": damage_tier,
+                    "damage_label": damage_label,
                     "centroid_x": features["centroid_x"],
                     "centroid_y": features["centroid_y"],
                     "pixel_area": features["pixel_area"],
                 }
             )
+        if sample_index > 0 and sample_index % 100 == 0:
+            print(f"processed {sample_index} image pairs, building rows={len(rows)}", flush=True)
 
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     report_json.parent.mkdir(parents=True, exist_ok=True)
@@ -225,9 +304,18 @@ def extract_features(input_root: Path, output_csv: Path, report_json: Path) -> d
         "texture_delta",
         "heat_signature",
         "crater_density",
+        "std_spectral",
+        "max_spectral",
+        "high_change_ratio",
+        "severe_damage_ratio",
+        "collapse_ratio",
+        "post_brightness",
+        "brightness_drop",
         "normalized_distance",
         "detection_confidence",
         "threat_score",
+        "severity_label",
+        "damage_tier",
         "damage_label",
         "centroid_x",
         "centroid_y",
@@ -239,6 +327,8 @@ def extract_features(input_root: Path, output_csv: Path, report_json: Path) -> d
         writer.writerows(rows)
 
     label_counts = Counter(str(row["damage_label"]) for row in rows)
+    tier_counts = Counter(str(row["damage_tier"]) for row in rows)
+    severity_counts = Counter(str(row["severity_label"]) for row in rows)
     subtype_counts = Counter(str(row["subtype"]) for row in rows)
     report = {
         "input_root": str(input_root),
@@ -247,6 +337,8 @@ def extract_features(input_root: Path, output_csv: Path, report_json: Path) -> d
         "building_rows": len(rows),
         "skipped_items": skipped,
         "damage_label_counts": dict(label_counts),
+        "damage_tier_counts": dict(tier_counts),
+        "severity_label_counts": dict(severity_counts),
         "subtype_counts": dict(subtype_counts),
         "fieldnames": fieldnames,
         "note": "This is an xBD sample feature table. It is suitable for pipeline verification; full benchmark metrics require a larger train/test split.",

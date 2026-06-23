@@ -1,0 +1,43 @@
+{
+  "input_root": "data\\xbd\\train\\train",
+  "output_csv": "data\\xbd\\processed\\xbd_damage_features_train.csv",
+  "sample_pairs": 2799,
+  "building_rows": 159794,
+  "skipped_items": 2993,
+  "damage_label_counts": {
+    "0": 117426,
+    "1": 42368
+  },
+  "subtype_counts": {
+    "no-damage": 117426,
+    "minor-damage": 14980,
+    "destroyed": 13227,
+    "major-damage": 14161
+  },
+  "fieldnames": [
+    "sample_id",
+    "building_index",
+    "uid",
+    "subtype",
+    "pre_area",
+    "spectral_delta",
+    "texture_delta",
+    "heat_signature",
+    "crater_density",
+    "std_spectral",
+    "max_spectral",
+    "high_change_ratio",
+    "severe_damage_ratio",
+    "collapse_ratio",
+    "post_brightness",
+    "brightness_drop",
+    "normalized_distance",
+    "detection_confidence",
+    "threat_score",
+    "damage_label",
+    "centroid_x",
+    "centroid_y",
+    "pixel_area"
+  ],
+  "note": "This is an xBD sample feature table. It is suitable for pipeline verification; full benchmark metrics require a larger train/test split."
+}
