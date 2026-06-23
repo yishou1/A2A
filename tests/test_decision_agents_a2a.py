@@ -1,12 +1,10 @@
 import json
+import asyncio
 import contextlib
 import io
 import tempfile
 import unittest
 from pathlib import Path
-
-import anyio
-import httpx
 
 from bpel_workflow import BPELWorkflowCatalog
 from commander_agent.main import CommanderAgent
@@ -15,6 +13,10 @@ from decision_agents.agents import ComplianceAuthorizationAgent, DecisionPlannin
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def route_endpoint(app, path: str):
+    return next(route.endpoint for route in app.routes if getattr(route, "path", None) == path)
 
 
 def sample_payload(name: str) -> dict:
@@ -83,21 +85,11 @@ class DecisionAgentsA2ATest(unittest.TestCase):
             ],
         }
 
-        async def call_app():
-            transport = httpx.ASGITransport(app=agent.app)
-            async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-                response = await client.post(
-                    "/sendMessage",
-                    json=payload,
-                    headers={"Authorization": "Bearer test-token"},
-                )
-                work_list_response = await client.get("/workflows/wf-decision-agent/work-list")
-                return response, work_list_response
+        send_message = route_endpoint(agent.app, "/sendMessage")
+        work_list = route_endpoint(agent.app, "/workflows/{workflow_id}/work-list")
+        body = asyncio.run(send_message(payload, token="test-token"))
+        work_list_body = asyncio.run(work_list("wf-decision-agent"))
 
-        response, work_list_response = anyio.run(call_app)
-
-        self.assertEqual(response.status_code, 200)
-        body = response.json()
         self.assertEqual(body["status"], "completed")
         self.assertIn("output", body)
         self.assertIn("agent_response", body["output"])
@@ -106,8 +98,7 @@ class DecisionAgentsA2ATest(unittest.TestCase):
         self.assertTrue(body["output"]["decision_planning_result"]["candidate_plans"])
         self.assertEqual(body["agent_response"]["agent"], "decision_planning_agent")
 
-        self.assertEqual(work_list_response.status_code, 200)
-        self.assertEqual(work_list_response.json()["work_list"], payload["work_list"])
+        self.assertEqual(work_list_body["work_list"], payload["work_list"])
 
     def test_a2a_send_message_reports_missing_planning_input(self):
         agent = DecisionAlgorithmA2AAgent(
@@ -125,19 +116,9 @@ class DecisionAgentsA2ATest(unittest.TestCase):
             "work_list": [],
         }
 
-        async def call_app():
-            transport = httpx.ASGITransport(app=agent.app)
-            async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-                return await client.post(
-                    "/sendMessage",
-                    json=payload,
-                    headers={"Authorization": "Bearer test-token"},
-                )
+        send_message = route_endpoint(agent.app, "/sendMessage")
+        body = asyncio.run(send_message(payload, token="test-token"))
 
-        response = anyio.run(call_app)
-
-        self.assertEqual(response.status_code, 200)
-        body = response.json()
         self.assertEqual(body["status"], "failed")
         self.assertIn("missing:scheduled_tasks", body["agent_response"]["warnings"])
         self.assertIn("missing:resources", body["agent_response"]["warnings"])

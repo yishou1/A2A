@@ -80,9 +80,9 @@ A2A/
 ├── artillery_agent/         # 火力打击 Agent
 ├── assault_agent/           # 登陆突击 Agent
 ├── evaluator_agent/         # 战果评估 & 策略重算 Agent
-├── decision_agents/         # Project 613 方案/规则算法库与 A2A 适配
-├── decision_planning_agent/ # 方案规划与决策 Agent
-├── compliance_authorization_agent/ # 规则/法律/授权约束 Agent
+├── decision_agents/         # 方案生成、规则授权、RAG 与算法适配库
+├── decision_planning_agent/ # 方案生成 Agent
+├── compliance_authorization_agent/ # 规则/合规授权 Agent
 ├── registry/                # Nacos 相关配置与客户端封装
 ├── scripts/                 # 恢复 / failover 演示脚本
 ├── tests/                   # 回归测试
@@ -123,6 +123,8 @@ cd /home/yl/yl/jzz/A2A
 
 `beachhead_workflow.bpel` 中不同角色严格按 `recon -> artillery -> evaluator -> assault` 顺序推进。炮兵节点使用 `dispatchMode="parallel"`，Commander 会把同一个火力任务并发派发给多个 `role=artillery` 实例。`--max-workers` 控制最大并发数。
 
+`decision_support_workflow.bpel` 只保留两步决策支持流程：`decision_planning -> compliance_authorization`。外部输入通过 `--input-json`、Manager API 的 `initial_context` 或 `CommanderAgent(initial_context=...)` 注入，字段包括 `scheduled_tasks`、`resources`、`risk_assessments`、`constraints`、`authorization`、`target_histories` 和 `planning_objectives`。方案生成侧当前提供模板生成、逻辑回归评分、轻量 LSTM 趋势预测和本地 RAG 证据增强；规则侧提供规则表/RAG 证据绑定和逻辑回归风险校准。两个 Agent 都输出 main 风格的标准 `output`，其中包含 `agent_response`、`selected_algorithms`、`warnings` 和 `rag_evidence`。
+
 项目中可以提前保存多套 BPEL，并在运行前选择：
 
 ```bash
@@ -148,7 +150,7 @@ cd /home/yl/yl/jzz/A2A
   --workflow bpel \
   --workflow-file quick_strike_workflow
 
-# Project 613 方案/规则流程：方案规划 -> 合规授权
+# Project 613 决策支持：方案生成 -> 规则/合规授权
 ./venv/bin/python -u commander_agent/main.py \
   --mode local \
   --workflow bpel \
@@ -283,10 +285,4 @@ cd /home/yl/yl/jzz/A2A
 
 ```bash
 ./timing_probe.py --roles recon,artillery,evaluator,assault --iterations 5 --json
-```
-
-三类算法 Agent 的 A2A 层耗时可以单独测：
-
-```bash
-./scripts/decision_agents_timing_probe.py --mode local --json
 ```

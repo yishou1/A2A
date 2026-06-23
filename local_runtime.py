@@ -3,6 +3,7 @@ import time
 from copy import deepcopy
 from typing import Dict, Iterable, Tuple
 
+from a2a_protocol.messages import build_task_response
 from decision_agents.a2a_payloads import agent_response_to_a2a_response, run_agent_payload
 from decision_agents.agents import (
     ComplianceAuthorizationAgent,
@@ -103,15 +104,20 @@ class LocalAgentRuntime:
             self._task_response_cache[work_item] = response
             return response
 
-        response = {
-            "work_item": work_item,
-            "workflow_id": payload.get("workflow_id"),
-            "status": "Accepted",
-            "mode": "local",
-            "role": role,
-            "message": self._message_for(role, payload),
-            "work_list_size": len(self.get_work_list(payload.get("workflow_id"))),
-        }
+        output, message = self._output_for(role, payload)
+        response = build_task_response(
+            workflow_id=payload.get("workflow_id"),
+            work_item=work_item,
+            agent=self.AGENTS[role]["name"],
+            role=role,
+            command=payload.get("command"),
+            status="completed",
+            output=output,
+            metrics={"latency_ms": 0.0, "duration_ms": 0.0},
+            message=message,
+            work_list_size=len(self.get_work_list(payload.get("workflow_id"))),
+            extra={"mode": "local"},
+        )
         self._task_response_cache[work_item] = response
         return response
 
@@ -156,12 +162,20 @@ class LocalAgentRuntime:
         events = []
         if stream:
             events = list(self.send_message_stream(role, payload))
-            response = {
-                "status": "Completed" if events and events[-1].get("status") == "Completed" else "Accepted",
-                "mode": "local",
-                "role": role,
-                "token": token,
-            }
+            output, message = self._output_for(role, payload)
+            response = build_task_response(
+                workflow_id=payload.get("workflow_id"),
+                work_item=self._work_item_from_payload(payload),
+                agent=card["name"],
+                role=role,
+                command=payload.get("command"),
+                status="completed" if events and events[-1].get("status") == "Completed" else "accepted",
+                output=output,
+                metrics={"stream_events": len(events), "duration_ms": 0.0},
+                message=message,
+                work_list_size=len(self.get_work_list(payload.get("workflow_id"))),
+                extra={"mode": "local", "token": token},
+            )
         else:
             response = self.send_message(role, payload)
             response["token"] = token
@@ -180,3 +194,19 @@ class LocalAgentRuntime:
         if role == "assault":
             return f"Local assault completed command={command}"
         return f"Local agent completed command={command}"
+
+    def _output_for(self, role: str, payload: dict) -> tuple[dict, str]:
+        output_hint = payload.get("output_hint") or "result"
+        message = self._message_for(role, payload)
+
+        if role == "recon":
+            value = "Sector_A is heavily fortified with overlapping machine gun nests."
+        elif role == "artillery":
+            value = "Suppression barrage executed on Sector_A."
+        elif role == "evaluator":
+            value = int(payload.get("input", {}).get("mock_eval_score", 40))
+        elif role == "assault":
+            value = "Assault unit captured the beachhead."
+        else:
+            value = message
+        return {output_hint: value}, message

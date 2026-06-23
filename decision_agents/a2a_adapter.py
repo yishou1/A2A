@@ -10,6 +10,14 @@ from decision_agents.a2a_payloads import (
 )
 
 
+class A2ATaskResponseError(RuntimeError):
+    """Carry a fully formed task response through the main A2A server error path."""
+
+    def __init__(self, task_response):
+        super().__init__(task_response.get("message") or task_response.get("error") or "agent task failed")
+        self.task_response = task_response
+
+
 class DecisionAlgorithmA2AAgent(A2ABaseAgent):
     def __init__(self, *, algorithm_agent, name: str, description: str, role: str, port: int):
         self.algorithm_agent = algorithm_agent
@@ -40,7 +48,14 @@ class DecisionAlgorithmA2AAgent(A2ABaseAgent):
     def execute_task(self, payload):
         response = self._run_algorithm(payload)
         if response.status != "completed":
-            raise RuntimeError(response.summary or response.status)
+            raise A2ATaskResponseError(
+                agent_response_to_a2a_response(
+                    payload=payload,
+                    response=response,
+                    agent_name=self.algorithm_agent.agent_name,
+                    work_list_size=len(self.get_work_list(payload.get("workflow_id"))),
+                )
+            )
         return agent_response_to_output(response), response.summary
 
     def _run_algorithm(self, payload):

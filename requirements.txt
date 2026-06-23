@@ -3,6 +3,7 @@ starlette>=0.46.2,<0.47.0
 uvicorn
 pydantic>=2.10.6
 requests
+redis>=5.0,<7.0
 nacos-sdk-python<2.0.0
 sseclient-py
 python-dotenv

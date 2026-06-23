@@ -1,17 +1,23 @@
 from fastapi import FastAPI, Depends, HTTPException, Header
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 import uvicorn
 import asyncio
 import json
 import os
 import threading
+import time
 from copy import deepcopy
 from urllib.parse import urljoin
 
-async def verify_token(authorization: str = Header(None)):
+from a2a_protocol.messages import build_task_error_response, build_task_response
+from observability import exception_diagnostics, log_event
+
+
+def verify_token(authorization: str = Header(None)):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Unauthorized")
     return authorization.split("Bearer ")[1]
+
 
 class A2ABaseAgent:
     def __init__(self, name: str, description: str, role: str, port: int):
@@ -19,9 +25,22 @@ class A2ABaseAgent:
         self.description = description
         self.role = role
         self.port = port
+        self.started_at = time.time()
+        self.ready = True
         self._task_response_cache = {}
         self._stream_response_cache = {}
         self._workflow_work_lists = {}
+        self._metrics = {
+            "tasks_received": 0,
+            "tasks_completed": 0,
+            "tasks_failed": 0,
+            "stream_requests": 0,
+            "cache_hits": 0,
+            "active_tasks": 0,
+            "last_error": None,
+            "last_work_item": None,
+        }
+        self._last_error_details = None
         self._state_lock = threading.RLock()
         self.app = FastAPI(title=name)
         self.setup_routes()
@@ -43,25 +62,38 @@ class A2ABaseAgent:
             "sendMessageEndpoint": "/sendMessage",
             "sendMessageStreamEndpoint": "/sendMessageStream",
             "workListEndpoint": "/workflows/{workflow_id}/work-list",
+            "healthEndpoint": "/health",
+            "readyEndpoint": "/ready",
+            "metricsEndpoint": "/metrics",
         }
 
+    def execute_task(self, payload):
+        output_hint = payload.get("output_hint") or "result"
+        message = f"{self.name} completed command={payload.get('command')}"
+        output = {output_hint: self._default_output_value(output_hint, payload)}
+        return output, message
+
+    def _default_output_value(self, output_hint, payload):
+        if output_hint == "recon_report":
+            sector = payload.get("input", {}).get("sector", "unknown sector")
+            return f"{sector} is heavily fortified with overlapping defensive positions."
+        if output_hint == "strike_result":
+            coordinates = payload.get("input", {}).get("coordinates", "unknown coordinates")
+            return f"Suppression barrage executed on {coordinates}."
+        if output_hint == "eval_score":
+            return int(payload.get("input", {}).get("mock_eval_score", 40))
+        if output_hint == "assault_result":
+            coordinates = payload.get("input", {}).get("coordinates", "unknown coordinates")
+            return f"Assault unit captured objective at {coordinates}."
+        return f"{self.name} completed {payload.get('command')}"
+
     async def execute_stream(self, payload):
-        # 默认的流式状态汇报
         yield f"data: {json.dumps({'status': 'Working', 'message': f'{self.name} processing stream'})}\n\n"
         await asyncio.sleep(1)
         yield f"data: {json.dumps({'status': 'Completed', 'message': 'Done'})}\n\n"
 
     def _work_item_from_payload(self, payload):
         return payload.get("work_item") or payload.get("task_id", "work-item-001")
-
-    def handle_message(self, payload, token):
-        return {
-            "work_item": self._work_item_from_payload(payload),
-            "workflow_id": payload.get("workflow_id"),
-            "status": "Accepted",
-            "message": f"{self.name} received work item {payload.get('command')}",
-            "work_list_size": len(self.get_work_list(payload.get("workflow_id"))),
-        }
 
     def _capture_work_list(self, payload):
         workflow_id = payload.get("workflow_id")
@@ -73,6 +105,24 @@ class A2ABaseAgent:
     def get_work_list(self, workflow_id):
         with self._state_lock:
             return deepcopy(self._workflow_work_lists.get(workflow_id, []))
+
+    def metrics_snapshot(self):
+        with self._state_lock:
+            snapshot = deepcopy(self._metrics)
+        snapshot.update(
+            {
+                "agent": self.name,
+                "role": self.role,
+                "port": self.port,
+                "ready": self.ready,
+                "uptime_seconds": round(time.time() - self.started_at, 3),
+            }
+        )
+        return snapshot
+
+    def last_error_diagnostics(self):
+        with self._state_lock:
+            return deepcopy(self._last_error_details)
 
     async def _replay_stream(self, cached_events):
         for event in cached_events:
@@ -96,6 +146,39 @@ class A2ABaseAgent:
             self._stream_response_cache[work_item] = buffered_events
 
     def setup_routes(self):
+        @self.app.get("/health")
+        async def health():
+            return {
+                "status": "ok",
+                "agent": self.name,
+                "role": self.role,
+                "uptime_seconds": round(time.time() - self.started_at, 3),
+            }
+
+        @self.app.get("/ready")
+        async def ready():
+            with self._state_lock:
+                active_tasks = self._metrics["active_tasks"]
+            return {
+                "ready": self.ready,
+                "agent": self.name,
+                "role": self.role,
+                "active_tasks": active_tasks,
+            }
+
+        @self.app.post("/lifecycle/ready")
+        async def set_ready(payload: dict):
+            self.ready = bool(payload.get("ready", True))
+            return {
+                "ready": self.ready,
+                "agent": self.name,
+                "role": self.role,
+            }
+
+        @self.app.get("/metrics")
+        async def metrics():
+            return self.metrics_snapshot()
+
         @self.app.get("/.well-known/agent-card")
         async def agent_card():
             return self.get_agent_card()
@@ -111,21 +194,112 @@ class A2ABaseAgent:
 
         @self.app.post("/sendMessage")
         async def send_message(payload: dict, token: str = Depends(verify_token)):
+            if not self.ready:
+                work_item = self._work_item_from_payload(payload)
+                return build_task_error_response(
+                    workflow_id=payload.get("workflow_id"),
+                    work_item=work_item,
+                    agent=self.name,
+                    role=self.role,
+                    command=payload.get("command"),
+                    error="agent is not ready",
+                    error_code="AGENT_NOT_READY",
+                )
             self._capture_work_list(payload)
             work_item = self._work_item_from_payload(payload)
             with self._state_lock:
                 cached_response = self._task_response_cache.get(work_item)
             if cached_response is not None:
-                return cached_response
+                with self._state_lock:
+                    self._metrics["cache_hits"] += 1
+                cached = deepcopy(cached_response)
+                cached["cached"] = True
+                return cached
 
-            response = self.handle_message(payload, token)
+            started = time.perf_counter()
             with self._state_lock:
-                self._task_response_cache[work_item] = response
-            return JSONResponse(response)
+                self._metrics["tasks_received"] += 1
+                self._metrics["active_tasks"] += 1
+                self._metrics["last_work_item"] = work_item
+            try:
+                output, message = self.execute_task(payload)
+                duration_ms = round((time.perf_counter() - started) * 1000, 3)
+                response = build_task_response(
+                    workflow_id=payload.get("workflow_id"),
+                    work_item=work_item,
+                    agent=self.name,
+                    role=self.role,
+                    command=payload.get("command"),
+                    status="completed",
+                    output=output,
+                    metrics={
+                        "latency_ms": duration_ms,
+                        "duration_ms": duration_ms,
+                    },
+                    message=message,
+                    work_list_size=len(self.get_work_list(payload.get("workflow_id"))),
+                    extra={
+                        key: output[key]
+                        for key in ("agent_response", "selected_algorithms", "warnings", "rag_evidence")
+                        if isinstance(output, dict) and key in output
+                    },
+                )
+                with self._state_lock:
+                    self._metrics["tasks_completed"] += 1
+                    self._task_response_cache[work_item] = response
+                return response
+            except Exception as exc:
+                diagnostics = exception_diagnostics(exc)
+                duration_ms = round((time.perf_counter() - started) * 1000, 3)
+                task_response = getattr(exc, "task_response", None)
+                if isinstance(task_response, dict):
+                    response = deepcopy(task_response)
+                    response.setdefault("metrics", {})
+                    response["metrics"].update(
+                        {
+                            "latency_ms": duration_ms,
+                            "duration_ms": duration_ms,
+                        }
+                    )
+                    response.setdefault("error_code", "AGENT_BUSINESS_ERROR")
+                else:
+                    response = build_task_error_response(
+                        workflow_id=payload.get("workflow_id"),
+                        work_item=work_item,
+                        agent=self.name,
+                        role=self.role,
+                        command=payload.get("command"),
+                        error=str(exc),
+                        error_code="AGENT_BUSINESS_ERROR",
+                        metrics={
+                            "latency_ms": duration_ms,
+                            "duration_ms": duration_ms,
+                        },
+                    )
+                with self._state_lock:
+                    self._metrics["tasks_failed"] += 1
+                    self._metrics["last_error"] = str(exc)
+                    self._last_error_details = diagnostics
+                    self._task_response_cache[work_item] = response
+                log_event(
+                    "agent_task_failed",
+                    agent=self.name,
+                    role=self.role,
+                    workflow_id=payload.get("workflow_id"),
+                    work_item=work_item,
+                    **diagnostics,
+                )
+                return response
+            finally:
+                with self._state_lock:
+                    self._metrics["active_tasks"] = max(0, self._metrics["active_tasks"] - 1)
         
         @self.app.post("/sendMessageStream")
         async def send_message_stream(payload: dict, token: str = Depends(verify_token)):
-            # 引入流式SSE返回
+            if not self.ready:
+                raise HTTPException(status_code=503, detail="agent is not ready")
+            with self._state_lock:
+                self._metrics["stream_requests"] += 1
             return StreamingResponse(self._cached_stream(payload), media_type="text/event-stream")
 
     def start(self):
