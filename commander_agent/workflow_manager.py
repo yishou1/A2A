@@ -7,6 +7,7 @@ from copy import deepcopy
 from typing import Any, Callable, Optional
 
 from commander_agent.agent_leases import AgentLeaseManager
+from commander_agent.distributed_lock import RedisDistributedLock
 from commander_agent.main import CommanderAgent, PROJECT_ROOT
 from registry.nacos_manager import NacosRegistry
 from workflow_payloads import normalize_attachments
@@ -36,7 +37,10 @@ class CommanderWorkflowManager:
         self.state_store = WorkflowStateStore(self.state_dir)
         self.registry = None if mode == "local" else (registry or NacosRegistry())
         self.lease_manager = (
-            AgentLeaseManager(self.registry)
+            AgentLeaseManager(
+                self.registry,
+                distributed_lock=RedisDistributedLock.from_env(),
+            )
             if self.registry is not None
             else None
         )
@@ -186,6 +190,8 @@ class CommanderWorkflowManager:
                 return
             self._closed = True
         self._executor.shutdown(wait=wait)
+        if self.lease_manager is not None:
+            self.lease_manager.close()
         if self.registry is not None:
             self.registry.close()
 

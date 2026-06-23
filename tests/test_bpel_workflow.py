@@ -256,11 +256,9 @@ class BPELWorkflowTest(unittest.TestCase):
 
             self.assertTrue(success)
             self.assertEqual(calls, ["10.0.0.1", "10.0.0.2"])
-            self.assertEqual(registry.instances[0]["metadata"]["status"], "unavailable")
-            self.assertEqual(
-                registry.instances[0]["metadata"]["unavailable_error_code"],
-                "AGENT_UNAVAILABLE",
-            )
+            self.assertEqual(registry.instances[0]["metadata"]["status"], "idle")
+            self.assertEqual(registry.instances[0]["metadata"]["circuit_state"], "closed")
+            self.assertEqual(registry.instances[0]["metadata"]["circuit_failure_count"], 1)
             self.assertEqual(registry.instances[1]["metadata"]["status"], "idle")
             self.assertEqual(commander.lease_manager.list_leases(), [])
 
@@ -364,15 +362,9 @@ class BPELWorkflowTest(unittest.TestCase):
                 time.sleep(0.01)
             self.assertEqual(calls[:2], ["10.0.0.1", "10.0.0.2"])
             self.assertEqual(late_responses, ["ignored"])
-            self.assertEqual(registry.instances[0]["metadata"]["status"], "unavailable")
-            self.assertEqual(
-                registry.instances[0]["metadata"]["unavailable_reason"],
-                "heartbeat lost for 10.0.0.1:8012",
-            )
-            self.assertEqual(
-                registry.instances[0]["metadata"]["unavailable_error_code"],
-                "AGENT_HEARTBEAT_LOST",
-            )
+            self.assertEqual(registry.instances[0]["metadata"]["status"], "idle")
+            self.assertEqual(registry.instances[0]["metadata"]["circuit_state"], "closed")
+            self.assertEqual(registry.instances[0]["metadata"]["circuit_failure_count"], 1)
             self.assertEqual(registry.instances[1]["metadata"]["status"], "idle")
             trace_types = {
                 event["event_type"]
@@ -765,6 +757,270 @@ class BPELWorkflowTest(unittest.TestCase):
             self.assertEqual(evaluator_inputs[0][0]["value"], "recon-output")
             self.assertEqual(context["eval_score"][0]["status"], "completed")
             self.assertEqual(context["eval_score"][0]["duration_ms"], 7.0)
+
+    def test_bpel_flow_respects_explicit_depends_on(self):
+        bpel_text = """<?xml version="1.0" encoding="UTF-8"?>
+<process name="ExplicitDependencyWorkflow">
+  <sequence name="RootSequence">
+    <flow name="ExplicitDependencyFlow">
+      <invoke name="ReconBranch" partnerLink="ReconAgent" operation="scanBeachDefenses" inputVariable="Sector_A" outputVariable="ReconReport"/>
+      <invoke name="EvalBranch" partnerLink="EvaluatorAgent" operation="evaluateStrike" inputVariable="StrikeCoordinates" outputVariable="EvalScore" dependsOn="ReconBranch"/>
+    </flow>
+  </sequence>
+</process>
+"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workflow_path = Path(temp_dir) / "explicit_dependency_flow.bpel"
+            workflow_path.write_text(bpel_text, encoding="utf-8")
+            commander = CommanderAgent(
+                mode="local",
+                workflow="bpel",
+                workflow_file=str(workflow_path),
+                state_dir=temp_dir,
+                mock_eval_score=86,
+                max_activity_workers=2,
+            )
+            calls = []
+            timing = {}
+
+            eval_item = next(item for item in commander.workflow_context["work_list"] if item["name"] == "EvalBranch")
+            self.assertEqual(eval_item["depends_on"], ["ReconBranch"])
+
+            def fake_delegate(role, payload, stream=False):
+                calls.append(role)
+                timing[f"{role}_start"] = time.perf_counter()
+                if role == "recon":
+                    time.sleep(0.1)
+                timing[f"{role}_end"] = time.perf_counter()
+                commander._remember_task_response(
+                    payload["work_item"],
+                    {
+                        "status": "completed",
+                        "output": {
+                            payload["output_hint"]: (
+                                payload["input"].get("mock_eval_score")
+                                if role == "evaluator"
+                                else "recon-output"
+                            )
+                        },
+                    },
+                    role=role,
+                    target="test",
+                )
+                return True
+
+            commander.delegate_task = fake_delegate
+            context = commander.run_bpel_workflow()
+
+            self.assertEqual(context["workflow_status"], "completed")
+            self.assertEqual(calls, ["recon", "evaluator"])
+            self.assertGreaterEqual(timing["evaluator_start"], timing["recon_end"])
+            self.assertEqual(context["eval_score"][0]["value"], 86)
+            flow_started = next(
+                event
+                for event in context["trace"]
+                if event["event_type"] == "flow_activity_started"
+            )
+            self.assertEqual(flow_started["execution_mode"], "dag")
+            self.assertTrue(
+                any(
+                    edge.get("source") == "dependsOn"
+                    and edge.get("reference") == "ReconBranch"
+                    for edge in flow_started["dependencies"]
+                )
+            )
+
+    def test_bpel_resume_recovers_interrupted_running_activity(self):
+        bpel_text = """<?xml version="1.0" encoding="UTF-8"?>
+<process name="InterruptedResumeWorkflow">
+  <sequence name="RootSequence">
+    <invoke name="ReconBranch" partnerLink="ReconAgent" operation="scanBeachDefenses" inputVariable="Sector_A" outputVariable="ReconReport"/>
+  </sequence>
+</process>
+"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workflow_path = Path(temp_dir) / "interrupted_resume.bpel"
+            workflow_path.write_text(bpel_text, encoding="utf-8")
+            workflow_id = "wf-interrupted"
+            seed = CommanderAgent(
+                mode="local",
+                workflow="bpel",
+                workflow_file=str(workflow_path),
+                workflow_id=workflow_id,
+                state_dir=temp_dir,
+            )
+            context = seed.workflow_context
+            recon_item = next(item for item in context["work_list"] if item["role"] == "recon")
+            recon_item["status"] = "running"
+            recon_item["started_at"] = "2026-01-01T00:00:00+00:00"
+            context["active_activatities"] = [recon_item["activatity_id"]]
+            context["active_activities"] = list(context["active_activatities"])
+            seed.state_store.save(
+                workflow_id,
+                {
+                    "workflow_id": workflow_id,
+                    "workflow": "bpel",
+                    "mode": "local",
+                    "status": "paused",
+                    "context": context,
+                },
+            )
+
+            resumed = CommanderAgent(
+                mode="local",
+                workflow="bpel",
+                workflow_file=str(workflow_path),
+                workflow_id=workflow_id,
+                state_dir=temp_dir,
+                resume=True,
+            )
+
+            recovered_item = next(item for item in resumed.workflow_context["work_list"] if item["role"] == "recon")
+            self.assertEqual(recovered_item["status"], "pending")
+            self.assertEqual(resumed.workflow_context["active_activatities"], [])
+            self.assertIn("Recovered interrupted running activity", recovered_item["error"])
+            self.assertTrue(
+                any(
+                    event["event_type"] == "interrupted_activities_recovered"
+                    for event in resumed.workflow_context["trace"]
+                )
+            )
+
+    def test_bpel_resume_clears_failed_node_downstream_outputs(self):
+        bpel_text = """<?xml version="1.0" encoding="UTF-8"?>
+<process name="DagCleanupResumeWorkflow">
+  <sequence name="RootSequence">
+    <flow name="DependentFlow">
+      <invoke name="ReconBranch" partnerLink="ReconAgent" operation="scanBeachDefenses" inputVariable="Sector_A" outputVariable="ReconReport"/>
+      <invoke name="EvalBranch" partnerLink="EvaluatorAgent" operation="evaluateStrike" inputVariable="ReconReport" outputVariable="EvalScore"/>
+    </flow>
+    <invoke name="AssaultAfterEval" partnerLink="AssaultAgent" operation="captureBeachhead" inputVariable="EvalScore" outputVariable="AssaultResult"/>
+  </sequence>
+</process>
+"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workflow_path = Path(temp_dir) / "dag_cleanup_resume.bpel"
+            workflow_path.write_text(bpel_text, encoding="utf-8")
+            workflow_id = "wf-dag-cleanup"
+            seed = CommanderAgent(
+                mode="local",
+                workflow="bpel",
+                workflow_file=str(workflow_path),
+                workflow_id=workflow_id,
+                state_dir=temp_dir,
+                mock_eval_score=90,
+            )
+            context = seed.workflow_context
+            by_name = {
+                activity.name: activity
+                for activity in seed.bpel_definition.activatities_by_id.values()
+            }
+            by_id = {
+                item["activatity_id"]: item
+                for item in context["work_list"]
+            }
+            root_id = by_name["RootSequence"].activatity_id
+            flow_id = by_name["DependentFlow"].activatity_id
+            recon_id = by_name["ReconBranch"].activatity_id
+            eval_id = by_name["EvalBranch"].activatity_id
+            assault_id = by_name["AssaultAfterEval"].activatity_id
+            by_id[root_id]["status"] = "failed"
+            by_id[flow_id]["status"] = "failed"
+            by_id[recon_id]["status"] = "completed"
+            by_id[eval_id]["status"] = "failed"
+            by_id[assault_id]["status"] = "completed"
+            context["workflow_status"] = "paused"
+            context["recon_report"] = [
+                seed._make_context_entry(
+                    "old-recon",
+                    activity_id=recon_id,
+                    work_item=by_id[recon_id]["work_item"],
+                    role="recon",
+                    output={"recon_report": "old-recon"},
+                )
+            ]
+            context["eval_score"] = [
+                seed._make_context_entry(
+                    10,
+                    activity_id=eval_id,
+                    work_item=by_id[eval_id]["work_item"],
+                    role="evaluator",
+                    output={"eval_score": 10},
+                    status="failed",
+                    error="old evaluator failure",
+                )
+            ]
+            context["assault_result"] = [
+                seed._make_context_entry(
+                    "stale-assault",
+                    activity_id=assault_id,
+                    work_item=by_id[assault_id]["work_item"],
+                    role="assault",
+                    output={"assault_result": "stale-assault"},
+                )
+            ]
+            context["agent_results"] = {
+                by_id[eval_id]["work_item"]: {"output": {"eval_score": 10}},
+                by_id[assault_id]["work_item"]: {"output": {"assault_result": "stale-assault"}},
+            }
+            seed.state_store.save(
+                workflow_id,
+                {
+                    "workflow_id": workflow_id,
+                    "workflow": "bpel",
+                    "mode": "local",
+                    "status": "paused",
+                    "context": context,
+                },
+            )
+
+            resumed = CommanderAgent(
+                mode="local",
+                workflow="bpel",
+                workflow_file=str(workflow_path),
+                workflow_id=workflow_id,
+                state_dir=temp_dir,
+                resume=True,
+                mock_eval_score=90,
+            )
+            calls = []
+
+            def fake_delegate(role, payload, stream=False):
+                calls.append(role)
+                output_value = payload["input"].get("mock_eval_score", f"new-{role}")
+                commander_response = {
+                    "status": "completed",
+                    "output": {payload["output_hint"]: output_value},
+                    "metrics": {"duration_ms": 3.0},
+                }
+                resumed._remember_task_response(
+                    payload["work_item"],
+                    commander_response,
+                    role=role,
+                    target="test",
+                )
+                return True
+
+            resumed.delegate_task = fake_delegate
+            final_context = resumed.run_bpel_workflow()
+
+            self.assertEqual(final_context["workflow_status"], "completed")
+            self.assertEqual(calls, ["evaluator", "assault"])
+            self.assertEqual([entry["value"] for entry in final_context["recon_report"]], ["old-recon"])
+            self.assertEqual([entry["value"] for entry in final_context["eval_score"]], [90])
+            self.assertEqual([entry["value"] for entry in final_context["assault_result"]], ["new-assault"])
+            self.assertEqual(
+                final_context["agent_results"][by_id[eval_id]["work_item"]]["output"]["eval_score"],
+                90,
+            )
+            self.assertTrue(
+                any(
+                    event["event_type"] == "dag_resume_cleanup"
+                    and eval_id in event["affected_activity_ids"]
+                    and assault_id in event["affected_activity_ids"]
+                    for event in final_context["trace"]
+                )
+            )
 
     def test_demo_script_runs_both_workflows(self):
         with tempfile.TemporaryDirectory() as temp_dir:
