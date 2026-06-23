@@ -184,12 +184,9 @@ class LocalAgentRuntime:
             value = "Assault unit captured the beachhead."
         elif role == "closed_loop":
             from closed_loop_agent.closed_loop_core import _closed_loop_optimization
+            from closed_loop_agent.main import build_closed_loop_arguments
 
-            arguments = payload.get("input") if isinstance(payload.get("input"), dict) else {}
-            for passthrough_key in ("targets", "results", "previous_results", "dataset_paths", "cycles", "seed", "target_count"):
-                if passthrough_key in payload and passthrough_key not in arguments:
-                    arguments[passthrough_key] = payload[passthrough_key]
-            value = _closed_loop_optimization(arguments)
+            value = _closed_loop_optimization(build_closed_loop_arguments(payload))
         else:
             value = message
         return {output_hint: value}, message

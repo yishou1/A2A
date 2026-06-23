@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import sys
@@ -5,8 +6,28 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from a2a_protocol.server import A2ABaseAgent
-from registry.nacos_manager import NacosRegistry, get_host_ip
 from closed_loop_agent.closed_loop_core import _closed_loop_optimization
+from registry.nacos_manager import NacosRegistry, get_host_ip
+
+CLOSED_LOOP_COMMAND = "closed_loop_optimization"
+PASSTHROUGH_INPUT_KEYS = (
+    "targets",
+    "results",
+    "previous_results",
+    "dataset_paths",
+    "cycles",
+    "seed",
+    "target_count",
+)
+
+
+def build_closed_loop_arguments(payload: dict) -> dict:
+    """Build closed-loop core arguments from a standard A2A task payload."""
+    arguments = dict(payload.get("input")) if isinstance(payload.get("input"), dict) else {}
+    for key in PASSTHROUGH_INPUT_KEYS:
+        if key in payload and key not in arguments:
+            arguments[key] = payload[key]
+    return arguments
 
 
 class ClosedLoopAgent(A2ABaseAgent):
@@ -21,7 +42,7 @@ class ClosedLoopAgent(A2ABaseAgent):
             port=port,
             skills=[
                 {
-                    "name": "closed_loop_optimization",
+                    "name": CLOSED_LOOP_COMMAND,
                     "description": "执行控制、效果评估与闭环优化",
                     "input": {
                         "targets": "Optional live target list. If omitted, simulated targets are generated.",
@@ -30,28 +51,18 @@ class ClosedLoopAgent(A2ABaseAgent):
                         "cycles": "Closed-loop iteration count, 1 to 8.",
                     },
                     "output": {
-                        "execution_control": "Final control commands per target.",
-                        "effect_assessment": "Damage probabilities and situation labels.",
-                        "closed_loop_optimization": "Cycle history and mission completion improvement.",
-                        "requirement_report": "Requirement check result.",
+                        "closed_loop_result": "Structured closed-loop optimization result envelope.",
                     },
                 }
             ],
         )
 
-    def _build_closed_loop_arguments(self, payload: dict) -> dict:
-        arguments = payload.get("input") if isinstance(payload.get("input"), dict) else {}
-        for passthrough_key in ("targets", "results", "previous_results", "dataset_paths", "cycles", "seed", "target_count"):
-            if passthrough_key in payload and passthrough_key not in arguments:
-                arguments[passthrough_key] = payload[passthrough_key]
-        return arguments
-
     def execute_task(self, payload: dict):
-        command = payload.get("command") or "closed_loop_optimization"
-        if command != "closed_loop_optimization":
+        command = payload.get("command") or CLOSED_LOOP_COMMAND
+        if command != CLOSED_LOOP_COMMAND:
             raise ValueError(f"Unsupported command: {command}")
 
-        result = _closed_loop_optimization(self._build_closed_loop_arguments(payload))
+        result = _closed_loop_optimization(build_closed_loop_arguments(payload))
         output_hint = payload.get("output_hint") or "closed_loop_result"
         output_data = result.get("output_data", {}) if isinstance(result, dict) else {}
         meets_requirements = output_data.get("meets_requirements")
@@ -62,28 +73,30 @@ class ClosedLoopAgent(A2ABaseAgent):
         )
         return {output_hint: result}, message
 
-    async def handle_message(self, payload: dict):
-        output, message = self.execute_task(payload)
-        return {
-            "task_id": self._work_item_from_payload(payload),
-            "status": "Completed",
-            "role": self.role,
-            "command": payload.get("command") or "closed_loop_optimization",
-            "result": next(iter(output.values()), None),
-            "message": message,
-        }
-
     async def execute_stream(self, payload):
-        yield f"data: {json.dumps({'status': 'Working', 'progress': '10%', 'message': 'closed loop optimization started'}, ensure_ascii=False)}\n\n"
-        output, message = self.execute_task(payload)
+        yield (
+            "data: "
+            + json.dumps(
+                {
+                    "status": "Working",
+                    "progress": "10%",
+                    "message": "closed loop optimization started",
+                },
+                ensure_ascii=False,
+            )
+            + "\n\n"
+        )
+        output, message = await asyncio.to_thread(self.execute_task, payload)
         result = next(iter(output.values()), {})
         summary = {
             "status": "Completed",
             "progress": "100%",
             "message": message,
-            "meets_requirements": result.get("output_data", {}).get("meets_requirements") if isinstance(result, dict) else None,
+            "meets_requirements": result.get("output_data", {}).get("meets_requirements")
+            if isinstance(result, dict)
+            else None,
         }
-        yield f"data: {json.dumps(summary, ensure_ascii=False)}\n\n"
+        yield "data: " + json.dumps(summary, ensure_ascii=False) + "\n\n"
 
 
 if __name__ == "__main__":
