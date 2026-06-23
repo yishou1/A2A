@@ -1,9 +1,9 @@
-"""Lightweight ST-GNN-inspired trajectory prediction refinement.
+"""ST-GNN trajectory prediction contract with a baseline runtime provider.
 
-This module is intentionally demo-safe: it does not claim to be a trained
-spatio-temporal graph neural network. It mirrors the idea from the project plan
-by treating tracks as graph nodes and nearby/co-moving tracks as weighted edges,
-then using neighbor motion as a small correction to short-term predictions.
+This module exposes the project-plan ST-GNN trajectory prediction interface.
+Until trained weights or the shared algorithm library are loaded, it uses a
+baseline graph-neighbor message-passing provider so the A2A/Nacos Agent remains
+fully runnable.
 """
 
 from __future__ import annotations
@@ -14,8 +14,8 @@ from .models import TrackState
 from .utils import clamp, haversine_m, heading_difference_deg, project_position
 
 
-class STGNNInspiredPredictor:
-    """Refine `predicted_path` with simple graph-neighbor motion messages."""
+class STGNNTrajectoryPredictor:
+    """Refine `predicted_path` through the ST-GNN provider contract."""
 
     def __init__(self, max_neighbor_distance_m: float = 8_000.0, max_adjustment_ratio: float = 0.18) -> None:
         self.max_neighbor_distance_m = max_neighbor_distance_m
@@ -113,3 +113,6 @@ class STGNNInspiredPredictor:
             "graph_influence": 0.0,
             "note": "No nearby co-moving neighbors found for graph refinement.",
         }
+
+
+STGNNInspiredPredictor = STGNNTrajectoryPredictor

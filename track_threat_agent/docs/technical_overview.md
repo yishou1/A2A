@@ -71,7 +71,7 @@ flowchart LR
 - `medium` 使用简化 Kalman-like 更新。
 - `large` 是接口占位，当前回退到 `medium` 并写入 `metadata.large_mock=true`。
 - 为每条 track 预测未来 10/20/30/60/120 秒位置。
-- 预测模块升级为 IMM-inspired 多模型融合：同时生成 `constant_velocity`、`constant_acceleration`、`coordinated_turn` 三条假设线，并按模型概率融合成兼容旧接口的 `predicted_path`。
+- 预测模块升级为计划书 ST-GNN 动态实体跟踪与轨迹预测契约；训练版 ST-GNN 或公共算法库未加载时，由 `baseline_motion_provider` 同时生成 `constant_velocity`、`constant_acceleration`、`coordinated_turn` 三条假设线，并按模型概率融合成兼容旧接口的 `predicted_path`。
 - 每个预测点输出 `model_used=imm_fused`、`primary_model`、`model_probabilities`、`prediction_confidence`、`uncertainty_radius_m` 和 `horizon_type`。
 - 每条 track 的 `metadata.prediction.prediction_hypotheses` 保留三类模型的多假设预测线，便于后续 AMOS 或算法评估模块展示。
 - 下一帧更新时会对上一帧预测做 ADE/FDE 回看评估，并写入 `metadata.prediction_eval`；artifact summary 会聚合输出 `prediction_eval`。

@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from a2a_protocol.messages import build_task_error_response, build_task_response
 
 from .a2a_runtime import A2ARuntimeState
-from .algorithm_provider import LocalBuiltInAlgorithmProvider
+from .algorithm_provider import PlanAlgorithmProvider
 from .amos_adapter import build_integration_events
 from .asset_impact_analyzer import AssetImpactAnalyzer
 from .group_detector import GroupDetector
@@ -31,7 +31,7 @@ from .intelligence_adapter import (
 from .models import Detection, ProtectedAsset
 from .nacos_register import NacosRegistrar
 from .scenario_generator import generate_auto_demo_frame
-from .st_gnn_predictor import STGNNInspiredPredictor
+from .st_gnn_predictor import STGNNTrajectoryPredictor
 from .state_store import FileStateStore
 from .threat_ranker import ThreatRanker
 from .tracker import MultiTargetTracker
@@ -69,8 +69,8 @@ tracker = MultiTargetTracker()
 ranker = ThreatRanker()
 group_detector = GroupDetector()
 impact_analyzer = AssetImpactAnalyzer()
-graph_predictor = STGNNInspiredPredictor()
-algorithm_provider = LocalBuiltInAlgorithmProvider(tracker, graph_predictor, ranker, impact_analyzer, group_detector)
+graph_predictor = STGNNTrajectoryPredictor()
+algorithm_provider = PlanAlgorithmProvider(tracker, graph_predictor, ranker, impact_analyzer, group_detector)
 runtime = A2ARuntimeState(agent_name="track-threat-group-agent", role=registrar.settings.role)
 processing_lock = asyncio.Lock()
 auto_demo_task: asyncio.Task | None = None
@@ -235,9 +235,10 @@ def _agent_card_payload() -> Dict[str, Any]:
         "capabilities": [
             "trajectory_tracking",
             "trajectory_prediction",
-            "st_gnn_inspired_trajectory_prediction",
+            "st_gnn_dynamic_entity_tracking",
             "threat_ranking",
-            "dbn_inspired_threat_assessment",
+            "dynamic_bayesian_network_threat_assessment",
+            "kg_transformer_semantic_sitrep",
             "group_detection",
             "group_threat_ranking",
             "protected_asset_impact_analysis",
@@ -571,9 +572,9 @@ async def send_message_stream(task_payload: Dict[str, Any], token: str = Depends
             runtime.mark_idle()
             registrar.set_agent_status("idle", lease_workflow_id="", lease_work_item="")
         artifact = result["artifact"]
-        yield await emit({"status": "Working", "progress": 45, "message": "ST-GNN-inspired graph prediction refinement completed"})
+        yield await emit({"status": "Working", "progress": 45, "message": "ST-GNN trajectory prediction contract completed with baseline provider"})
         yield await emit({"status": "Working", "progress": 65, "message": "groups and protected-asset impacts analyzed"})
-        yield await emit({"status": "Working", "progress": 85, "message": "DBN-inspired ranking and XAI evidence generated"})
+        yield await emit({"status": "Working", "progress": 85, "message": "DBN threat assessment and XAI evidence generated"})
         yield await emit(
             {
                 "status": "Artifact",
@@ -708,6 +709,7 @@ def _process_payload(payload: PerceptionResultRequest) -> Dict[str, Any]:
             "highest_track_score": threats[0].score if threats else 0.0,
             "highest_group_score": max((group.group_threat_score for group in groups), default=0.0),
             "highest_asset_impact_score": asset_impacts[0].score if asset_impacts else 0.0,
+            "algorithm_provider": algorithm_provider.algorithm_contract(),
             "prediction_eval": _prediction_eval_summary(tracks),
             "safety_boundary": "Simulation-only situation-awareness priority; no weapon control or engagement advice.",
         },

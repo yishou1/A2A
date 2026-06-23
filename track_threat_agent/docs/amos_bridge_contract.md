@@ -52,7 +52,8 @@ AMOS 地图建议：
 - `predicted_path`：虚线预测航线。
 - `predicted_path[].uncertainty_radius_m`：预测误差圈或 popup 字段。
 - `predicted_path[].graph_influence`：图关系预测影响程度。
-- `metadata.st_gnn_inspired`：ST-GNN-inspired 图关系修正说明。
+- `metadata.plan_algorithms.trajectory_prediction`：ST-GNN 动态实体跟踪与轨迹预测契约说明。
+- `predicted_path[].st_gnn`：ST-GNN 预测点 metadata；`metadata.st_gnn_inspired` 为旧版兼容字段。
 
 ### 3.2 编组/编队
 

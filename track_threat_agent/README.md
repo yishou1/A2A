@@ -32,10 +32,12 @@ metadata.status=idle
 
 - 多目标航迹跟踪。
 - 未来 10 / 20 / 30 / 60 / 120 秒航线预测，并输出预测模型、置信度、不确定半径和时域类型。
-- IMM-inspired 多模型融合预测：匀速、匀加速、协调转弯三类假设按概率融合，并保留多假设预测线。
+- 计划书算法 Provider：默认使用 `PlanAlgorithmProvider` 暴露 ST-GNN、DBN、KG+Transformer、XAI 四类正式算法契约。
+- ST-GNN 动态实体跟踪与轨迹预测契约：输出 10 / 20 / 30 / 60 / 120 秒预测点、图关系影响、置信度、不确定半径和 fallback 状态。
+- baseline motion provider：在训练版 ST-GNN 或公共算法库尚未加载时，使用 IMM 多模型预测作为可运行 fallback。
 - ADE/FDE 回看评估：下一帧到达后记录上一帧预测误差，summary 中输出聚合评估。
-- ST-GNN-inspired 图关系预测修正。
-- DBN-inspired 动态风险状态平滑。
+- DBN 动态威胁状态评估：输出 low / medium / high 后验概率和 threat score；当前运行时 DBN 作为正式概率评估模块，后续可替换为公共算法库实现。
+- KG+Transformer 语义态势契约：消费 TacticalIntelligenceAgent 语义字段和 knowledge relations，输出语义态势因子与证据链；当前使用 metadata adapter 作为 fallback。
 - TacticalIntelligenceAgent 语义字段消费：`threat_level`、`affiliation`、`label`、`knowledge_graph` 参与排序和资产影响分析。
 - 疑似空中编队和海上编组识别。
 - 己方保护资产影响分析。
@@ -46,10 +48,10 @@ metadata.status=idle
 - `GET /workflows/{workflow_id}/work-list`。
 - `GET /ready`、`POST /lifecycle/ready`、`GET /metrics`，适配 Commander 宕机恢复/ready=false 切换规范。
 - Nacos role/status metadata 和 heartbeat_ts 心跳；心跳会保留 Commander 写入的 busy/unavailable/lease_* 状态。
-- `AlgorithmProvider` 预留接口。
+- `AlgorithmProvider` 预留接口，默认主线已经切换到计划书算法契约。
 - 本地 JSON 状态快照，支持演示环境重启后恢复航迹、最近 artifact、幂等缓存和 workflow work list。
 
-当前算法以内置 Demo 实现为主，暂不依赖公共算法库。后续公共算法库或 A100 训练版 GNN/ST-GNN 完成后，可替换 `app/algorithm_provider.py` 中的 provider，不改变 A2A/Nacos 对外协议。
+当前工程不再把启发式规则作为主算法口径。`PlanAlgorithmProvider` 将计划书中的 ST-GNN、DBN、KG+Transformer、XAI 作为对外算法契约；已有 IMM/图关系/metadata 逻辑降级为 baseline/fallback provider。后续公共算法库或 A100 训练版 ST-GNN 完成后，只需替换 `app/algorithm_provider.py` 后端实现，不改变 A2A/Nacos 对外协议。
 
 ## 3. 启动
 
@@ -267,15 +269,15 @@ uv run --with-requirements requirements.txt --with-requirements ../requirements.
 - 编队/编组识别。
 - 保护资产影响分析。
 - AMOS/A2A 事件适配。
-- ST-GNN-inspired 图关系修正。
-- DBN-inspired 风险状态平滑。
+- ST-GNN 动态实体跟踪与轨迹预测契约，当前由 baseline motion provider 保证可运行。
+- DBN 威胁状态后验概率评估。
 - `work_item` 幂等。
 - `work_list` 查询。
 
 ## 10. 当前限制
 
 - 当前是 Demo，不是生产系统。
-- ST-GNN 是规则式 inspired 原型，不是训练好的深度 GNN。
-- 训练版 GNN/ST-GNN 计划后续在实验室 A100 上完成。
+- 训练版 ST-GNN 权重尚未随仓库提供，当前以 baseline provider 保证 A2A/Nacos 联调可运行。
+- KG+Transformer 当前为语义 adapter 契约，后续接入知识图谱服务和 Transformer/LLM 语义模型。
 - 当前使用本地 JSON 文件做轻量状态快照，还不是生产级数据库或分布式状态存储。
 - 单实例串行处理，多并发建议通过多 Agent 实例水平扩展。

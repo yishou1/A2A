@@ -35,9 +35,9 @@ class XAIExplanationBuilder:
                 "model_trace": [
                     "prediction_gated_nearest_neighbor_tracking",
                     str((track.metadata.get("prediction") or {}).get("model", "adaptive_motion_prediction")),
-                    "st_gnn_inspired_graph_refinement" if graph_meta.get("enabled") else "st_gnn_inspired_no_neighbor_refinement",
+                    "ST-GNN trajectory prediction with baseline fallback" if graph_meta.get("enabled") else "ST-GNN trajectory prediction without active graph neighbors",
                     "weighted_multi_factor_attention_score",
-                    "dbn_inspired_state_smoothing",
+                    "DBN threat-state posterior smoothing",
                 ],
                 "safety_note": self.SAFETY_NOTE,
             }
@@ -58,6 +58,6 @@ class XAIExplanationBuilder:
             f"adaptive prediction model: {(track.metadata.get('prediction') or {}).get('model', 'unknown')}",
             f"graph refinement neighbors: {graph_meta.get('neighbor_count', 0)}, influence {graph_meta.get('graph_influence', 0.0)}",
             f"weighted score before DBN smoothing: {weighted_score:.2f}",
-            f"DBN-inspired posterior low/medium/high: {posterior.get('low', 0.0):.2f}/{posterior.get('medium', 0.0):.2f}/{posterior.get('high', 0.0):.2f}",
+            f"DBN posterior low/medium/high: {posterior.get('low', 0.0):.2f}/{posterior.get('medium', 0.0):.2f}/{posterior.get('high', 0.0):.2f}",
             self.SAFETY_NOTE,
         ]

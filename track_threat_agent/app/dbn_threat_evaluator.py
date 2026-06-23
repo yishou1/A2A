@@ -1,4 +1,4 @@
-"""DBN-inspired dynamic threat-state smoothing for demo attention ranking."""
+"""Dynamic Bayesian Network threat-state evaluation."""
 
 from __future__ import annotations
 
@@ -11,10 +11,10 @@ from .utils import clamp
 class DBNThreatEvaluator:
     """Maintains low/medium/high state probabilities per track.
 
-    This is a lightweight dynamic Bayesian network inspired layer. It uses a
-    transition prior from the previous frame and a simple observation likelihood
-    from current factors. It is designed for explainable demo behavior, not for
-    real tactical decision making.
+    The evaluator maintains low/medium/high posterior probabilities per track.
+    It uses a transition prior from the previous frame and an observation
+    likelihood from current motion, quality, anomaly, and semantic factors.
+    It only produces situation-awareness priority, not engagement decisions.
     """
 
     STATES = ("low", "medium", "high")
