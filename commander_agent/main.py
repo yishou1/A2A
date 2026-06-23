@@ -16,9 +16,11 @@ from a2a_protocol.client import A2AClient
 from a2a_protocol.messages import build_task_response
 from bpel_workflow import BPELActivatity, BPELWorkflowCatalog
 from commander_agent.agent_leases import AgentLeaseManager
+from commander_agent.circuit_breaker import AgentCircuitBreaker
+from commander_agent.distributed_lock import RedisDistributedLock
 from commander_agent.error_classification import classify_agent_error
 from local_runtime import LocalAgentRuntime
-from observability import append_trace, log_event
+from observability import append_trace, exception_diagnostics, log_event
 from workflow_state_store import WorkflowStateStore, new_workflow_id, utc_now_iso
 from workflow_payloads import attachment_snapshot, merge_attachments, normalize_attachments
 import json
@@ -92,6 +94,10 @@ class CommanderAgent:
         self.retry_backoff = float(retry_backoff if retry_backoff is not None else os.environ.get("A2A_RETRY_BACKOFF", "0.2"))
         self.request_timeout = float(request_timeout if request_timeout is not None else os.environ.get("A2A_REQUEST_TIMEOUT", "5"))
         self.lease_heartbeat_check_interval = float(os.environ.get("A2A_LEASE_HEARTBEAT_CHECK_INTERVAL", "1"))
+        self.circuit_breaker = AgentCircuitBreaker(
+            failure_threshold=int(os.environ.get("A2A_CIRCUIT_FAILURE_THRESHOLD", "3")),
+            recovery_timeout=float(os.environ.get("A2A_CIRCUIT_RECOVERY_TIMEOUT", "30")),
+        )
         self._checkpoint_lock = threading.RLock()
         self._last_task_responses = {}
         self._bpel_output_collection_writers = {}
@@ -108,7 +114,13 @@ class CommanderAgent:
         self.registry = None if self.mode == "local" else (registry or NacosRegistry())
         self.lease_manager = lease_manager
         if self.mode == "remote" and self.lease_manager is None:
-            self.lease_manager = AgentLeaseManager(self.registry)
+            self.lease_manager = AgentLeaseManager(
+                self.registry,
+                circuit_breaker=self.circuit_breaker,
+                distributed_lock=RedisDistributedLock.from_env(),
+            )
+        elif self.lease_manager is not None:
+            self.lease_manager.circuit_breaker = self.circuit_breaker
         self.local_runtime = LocalAgentRuntime() if self.mode == "local" else None
         self.mock_eval_score = mock_eval_score
         self.mock_decision = mock_decision
@@ -459,14 +471,31 @@ class CommanderAgent:
     def _release_agent_lease(self, lease, *, available: bool = True, error=None):
         try:
             if available:
-                self.lease_manager.release(lease)
+                previous_state = self.circuit_breaker.snapshot(lease.instance_key)["state"]
+                self.circuit_breaker.record_success(lease.instance_key)
+                self.lease_manager.release(
+                    lease,
+                    metadata_updates={"circuit_state": "closed", "circuit_failure_count": 0},
+                    remove_keys=["circuit_opened_at_ts", "circuit_open_until_ts"],
+                )
+                if previous_state in {"open", "half_open"}:
+                    self._trace(
+                        "agent_circuit_closed",
+                        role=lease.role,
+                        work_item=lease.work_item,
+                        target=lease.instance_key,
+                    )
                 print(f"[LEASE] Released {lease.role} at {lease.instance_key}")
                 return
             error_info = classify_agent_error(error)
+            circuit = self.circuit_breaker.record_failure(lease.instance_key)
+            circuit_metadata = self.circuit_breaker.metadata(lease.instance_key)
+            circuit_open = circuit["state"] == "open"
             self.lease_manager.release(
                 lease,
-                status="unavailable",
+                status="unavailable" if circuit_open else "idle",
                 metadata_updates={
+                    **circuit_metadata,
                     "unavailable_workflow_id": lease.workflow_id,
                     "unavailable_work_item": lease.work_item,
                     "unavailable_at": utc_now_iso(),
@@ -476,14 +505,18 @@ class CommanderAgent:
                 },
             )
             self._trace(
-                "agent_marked_unavailable",
+                "agent_circuit_opened" if circuit_open else "agent_failure_recorded",
                 role=lease.role,
                 work_item=lease.work_item,
                 target=lease.instance_key,
                 error=str(error),
+                circuit_state=circuit["state"],
+                circuit_failure_count=circuit["failure_count"],
+                circuit_open_until_ts=circuit["open_until_ts"],
                 **error_info.trace_fields(),
             )
-            print(f"[LEASE] Released {lease.role} at {lease.instance_key} as unavailable")
+            state_label = "circuit open" if circuit_open else "failure recorded"
+            print(f"[LEASE] Released {lease.role} at {lease.instance_key}; {state_label}")
         except Exception as exc:
             print(f"[WARN] Failed to mirror lease release for {lease.instance_key}: {exc}")
 
@@ -623,7 +656,7 @@ class CommanderAgent:
                     work_item=work_item,
                     target=label,
                     attempt=attempt,
-                    error=str(exc),
+                    **exception_diagnostics(exc),
                     **error_info.trace_fields(),
                 )
                 if attempt <= max_retries:
@@ -661,7 +694,7 @@ class CommanderAgent:
                 "local_agent_call_failed",
                 role=role_needed,
                 work_item=task_payload.get("work_item"),
-                error=str(e),
+                **exception_diagnostics(e),
             )
             return False
 
@@ -887,6 +920,39 @@ class CommanderAgent:
         normalized["last_error"] = normalized.get("last_error")
         return normalized
 
+    def _recover_interrupted_activities(self, context: dict):
+        if not self.bpel_definition:
+            return []
+
+        recovered = []
+        for item in context.get("work_list", []):
+            if item.get("status") != "running":
+                continue
+            item["status"] = "pending"
+            item["error"] = "Recovered interrupted running activity from checkpoint"
+            item.pop("finished_at", None)
+            item["updated_at"] = utc_now_iso()
+            recovered.append(item.get("activatity_id") or item.get("activity_id"))
+
+        if recovered:
+            context["active_activatities"] = []
+            context["active_activities"] = []
+            if (context.get("current_activatity") or {}).get("activatity_id") in recovered:
+                context["current_activatity"] = None
+                context["current_activity"] = None
+            append_trace(
+                context,
+                "interrupted_activities_recovered",
+                workflow_id=self.workflow_id,
+                activity_ids=recovered,
+            )
+            log_event(
+                "interrupted_activities_recovered",
+                workflow_id=self.workflow_id,
+                activity_ids=recovered,
+            )
+        return recovered
+
     def _default_workflow_state(self):
         context = self._normalize_context(self.initial_workflow_context())
         return {
@@ -906,6 +972,7 @@ class CommanderAgent:
         if self.resume and self.state_store.exists(self.workflow_id):
             state = self.state_store.load(self.workflow_id)
             context = self._normalize_context(state.get("context", {}))
+            self._recover_interrupted_activities(context)
             state["workflow_id"] = self.workflow_id
             state["workflow"] = self.workflow
             state["mode"] = self.mode
@@ -1515,8 +1582,37 @@ class CommanderAgent:
             input_key = self._context_key_for_bpel_variable(activatity.input_variable)
             if input_key:
                 keys.add(input_key)
+        if activatity.type in {"switch", "case"} and activatity.condition:
+            keys.update(self._condition_input_keys(activatity.condition))
         for child in activatity.children:
             keys.update(self._input_keys_for_activatity_tree(child))
+        return keys
+
+    def _condition_input_keys(self, condition: str | None):
+        if not condition:
+            return set()
+        return {
+            self._context_key_for_bpel_variable(variable)
+            for variable in re.findall(r"getVariableData\(['\"]([^'\"]+)['\"]\)", condition)
+        }
+
+    def _direct_output_keys_for_activity(self, activatity: BPELActivatity):
+        if activatity.type == "invoke":
+            output_key = self._context_key_for_bpel_variable(activatity.output_variable)
+            return {output_key} if output_key else set()
+        if activatity.type == "assign":
+            assign_key = self._context_key_for_bpel_variable(activatity.assign_to)
+            return {assign_key} if assign_key else set()
+        return set()
+
+    def _direct_input_keys_for_activity(self, activatity: BPELActivatity):
+        keys = set()
+        if activatity.type == "invoke":
+            input_key = self._context_key_for_bpel_variable(activatity.input_variable)
+            if input_key:
+                keys.add(input_key)
+        if activatity.type in {"switch", "case"}:
+            keys.update(self._condition_input_keys(activatity.condition))
         return keys
 
     def _output_writers_for_activatity_tree(self, activatity: BPELActivatity):
@@ -1567,6 +1663,38 @@ class CommanderAgent:
         with self._checkpoint_lock:
             return self._bpel_output_collection_writers.get(activatity_id)
 
+    def _resolve_dependency_reference(
+        self,
+        reference: str,
+        *,
+        scope: list[BPELActivatity] | None = None,
+        consumer: BPELActivatity = None,
+    ):
+        if not reference:
+            return None
+        if reference in self.bpel_definition.activatities_by_id:
+            return reference
+
+        candidates = scope or list(self.bpel_definition.activatities_by_id.values())
+        matches = [
+            activatity.activatity_id
+            for activatity in candidates
+            if activatity.name == reference
+            or activatity.activatity_id == reference
+            or activatity.activity_id == reference
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            consumer_name = consumer.name if consumer else "unknown"
+            raise ValueError(
+                f"Ambiguous dependsOn reference '{reference}' for activity '{consumer_name}'"
+            )
+        consumer_name = consumer.name if consumer else "unknown"
+        raise ValueError(
+            f"Unknown dependsOn reference '{reference}' for activity '{consumer_name}'"
+        )
+
     def _flow_branch_dependencies(self, flow_activatity: BPELActivatity):
         branch_io = {}
         for child in flow_activatity.children:
@@ -1592,7 +1720,211 @@ class CommanderAgent:
                         }
                     )
 
+        children = list(flow_activatity.children)
+        for consumer in children:
+            for reference in consumer.depends_on:
+                producer_id = self._resolve_dependency_reference(
+                    reference,
+                    scope=children,
+                    consumer=consumer,
+                )
+                dependencies[consumer.activatity_id].add(producer_id)
+                edges.append(
+                    {
+                        "consumer": consumer.activatity_id,
+                        "producer": producer_id,
+                        "variable": None,
+                        "source": "dependsOn",
+                        "reference": reference,
+                    }
+                )
+
         return dependencies, edges
+
+    def _bpel_dependency_graph(self):
+        graph = {
+            activatity.activatity_id: set()
+            for activatity in self.bpel_definition.activatities_by_id.values()
+        }
+
+        def add_edge(producer: str, consumer: str):
+            if producer and consumer and producer != consumer:
+                graph.setdefault(producer, set()).add(consumer)
+
+        writers_by_key = {}
+        for activatity in self.bpel_definition.activatities_by_id.values():
+            for output_key in self._direct_output_keys_for_activity(activatity):
+                writers_by_key.setdefault(output_key, set()).add(activatity.activatity_id)
+
+        for consumer in self.bpel_definition.activatities_by_id.values():
+            for input_key in self._direct_input_keys_for_activity(consumer):
+                for producer_id in writers_by_key.get(input_key, set()):
+                    add_edge(producer_id, consumer.activatity_id)
+
+        def visit(activatity: BPELActivatity):
+            for reference in activatity.depends_on:
+                producer_id = self._resolve_dependency_reference(
+                    reference,
+                    consumer=activatity,
+                )
+                add_edge(producer_id, activatity.activatity_id)
+
+            if activatity.type in {"sequence", "case", "otherwise"}:
+                previous = None
+                for child in activatity.children:
+                    if activatity.type in {"case", "otherwise"}:
+                        add_edge(activatity.activatity_id, child.activatity_id)
+                    if previous is not None:
+                        add_edge(previous.activatity_id, child.activatity_id)
+                    previous = child
+                    visit(child)
+                return
+
+            if activatity.type == "flow":
+                dependencies, _ = self._flow_branch_dependencies(activatity)
+                for consumer_id, producer_ids in dependencies.items():
+                    for producer_id in producer_ids:
+                        add_edge(producer_id, consumer_id)
+                for child in activatity.children:
+                    visit(child)
+                return
+
+            if activatity.type == "switch":
+                for child in activatity.children:
+                    add_edge(activatity.activatity_id, child.activatity_id)
+                    visit(child)
+                return
+
+            for child in activatity.children:
+                visit(child)
+
+        visit(self.bpel_definition.root_activatity)
+        return graph
+
+    @staticmethod
+    def _downstream_activity_ids(graph: dict, activity_ids: set[str]):
+        affected = set(activity_ids)
+        queue_items = list(activity_ids)
+        while queue_items:
+            current = queue_items.pop(0)
+            for child_id in graph.get(current, set()):
+                if child_id not in affected:
+                    affected.add(child_id)
+                    queue_items.append(child_id)
+        return affected
+
+    def _descendant_activity_ids(self, activity_id: str):
+        activatity = self.bpel_definition.activatities_by_id.get(activity_id)
+        if not activatity:
+            return set()
+        descendants = set()
+
+        def visit(node: BPELActivatity):
+            for child in node.children:
+                descendants.add(child.activatity_id)
+                visit(child)
+
+        visit(activatity)
+        return descendants
+
+    @staticmethod
+    def _reset_work_list_item_for_resume(item: dict, *, reason: str):
+        item["status"] = "pending"
+        item["error"] = reason
+        item.pop("started_at", None)
+        item.pop("finished_at", None)
+        item["updated_at"] = utc_now_iso()
+
+    def _remove_outputs_for_activities(self, context: dict, affected_ids: set[str]):
+        if not affected_ids:
+            return {}
+
+        affected_work_items = {
+            item.get("work_item")
+            for item in context.get("work_list", [])
+            if (item.get("activatity_id") or item.get("activity_id")) in affected_ids
+        }
+        affected_work_items.discard(None)
+        removed = {}
+
+        for key in self._result_collection_keys():
+            entries = self._context_entries(context, key)
+            kept_entries = [
+                entry
+                for entry in entries
+                if entry.get("activity_id") not in affected_ids
+                and entry.get("work_item") not in affected_work_items
+            ]
+            if len(kept_entries) != len(entries):
+                removed[key] = len(entries) - len(kept_entries)
+                context[key] = kept_entries
+
+        agent_results = context.get("agent_results", {}) or {}
+        for work_item in affected_work_items:
+            if work_item in agent_results:
+                agent_results.pop(work_item, None)
+                removed["agent_results"] = removed.get("agent_results", 0) + 1
+        context["agent_results"] = agent_results
+        return removed
+
+    def _prepare_bpel_resume_context(self, context: dict):
+        if not self.bpel_definition:
+            return
+
+        raw_failed_ids = {
+            item.get("activatity_id") or item.get("activity_id")
+            for item in context.get("work_list", [])
+            if item.get("status") == "failed"
+        }
+        raw_failed_ids.discard(None)
+        failed_ids = set()
+        for activity_id in raw_failed_ids:
+            activatity = self.bpel_definition.activatities_by_id.get(activity_id)
+            if activatity and activatity.children and self._descendant_activity_ids(activity_id) & raw_failed_ids:
+                continue
+            failed_ids.add(activity_id)
+        if not failed_ids:
+            return
+
+        graph = self._bpel_dependency_graph()
+        affected_ids = self._downstream_activity_ids(graph, failed_ids)
+        affected_ancestors = set()
+        for activity_id in affected_ids:
+            activatity = self.bpel_definition.activatities_by_id.get(activity_id)
+            while activatity and activatity.parent_activatity:
+                affected_ancestors.add(activatity.parent_activatity)
+                activatity = self.bpel_definition.activatities_by_id.get(activatity.parent_activatity)
+        reset_ids = affected_ids | affected_ancestors
+
+        reset_reason = "Reset for DAG local recovery after upstream failure"
+        for item in context.get("work_list", []):
+            activity_id = item.get("activatity_id") or item.get("activity_id")
+            if activity_id in reset_ids and item.get("status") in {"failed", "completed", "skipped", "running"}:
+                self._reset_work_list_item_for_resume(item, reason=reset_reason)
+
+        removed = self._remove_outputs_for_activities(context, affected_ids)
+        if (context.get("current_activatity") or {}).get("activatity_id") in reset_ids:
+            context["current_activatity"] = None
+            context["current_activity"] = None
+        context["active_activatities"] = []
+        context["active_activities"] = []
+        append_trace(
+            context,
+            "dag_resume_cleanup",
+            workflow_id=self.workflow_id,
+            failed_activity_ids=sorted(failed_ids),
+            affected_activity_ids=sorted(affected_ids),
+            reset_activity_ids=sorted(reset_ids),
+            removed_outputs=removed,
+        )
+        log_event(
+            "dag_resume_cleanup",
+            workflow_id=self.workflow_id,
+            failed_activity_ids=sorted(failed_ids),
+            affected_activity_ids=sorted(affected_ids),
+            reset_activity_ids=sorted(reset_ids),
+            removed_outputs=removed,
+        )
 
     def _execute_bpel_flow_activatity(self, activatity: BPELActivatity, context: dict):
         collection_groups = self._flow_output_collection_groups(activatity)
@@ -1832,8 +2164,17 @@ class CommanderAgent:
             else:
                 raise ValueError(f"Unsupported BPEL activatity type: {activatity.type}")
         except Exception as exc:
+            diagnostics = exception_diagnostics(exc)
             with self._checkpoint_lock:
                 context["last_error"] = str(exc)
+                context["last_error_details"] = diagnostics
+                self._trace(
+                    "activity_exception_captured",
+                    activity_id=activatity.activatity_id,
+                    work_item=item.get("work_item"),
+                    role=activatity.role,
+                    **diagnostics,
+                )
             if activatity.failure_policy == "skip":
                 with self._checkpoint_lock:
                     context["workflow_status"] = "running"
@@ -1878,9 +2219,11 @@ class CommanderAgent:
         print(f"\n=== BPEL WORKFLOW: {self.bpel_definition.process_name} ===")
         print(f"[WORKFLOW] Loaded from {self.bpel_definition.source_path}")
         print(f"[WORKFLOW] work_list entries={len(context.get('work_list', []))}")
+        self._prepare_bpel_resume_context(context)
         with self._checkpoint_lock:
             context["workflow_status"] = "running"
             context["last_error"] = None
+            context["last_error_details"] = None
             self._trace(
                 "workflow_started",
                 workflow_type="bpel",

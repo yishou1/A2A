@@ -15,6 +15,11 @@ from urllib import parse, request
 
 LOGGER = logging.getLogger(__name__)
 
+_LEASE_METADATA_PREFIXES = ("lease_",)
+_CIRCUIT_METADATA_PREFIXES = ("circuit_",)
+_UNAVAILABLE_METADATA_PREFIXES = ("unavailable_",)
+_SCHEDULER_STATUS_VALUES = {"busy", "unavailable"}
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -203,30 +208,52 @@ class NacosRegistrar:
         self._update_instance_metadata_http()
 
     def _build_heartbeat_metadata(self) -> Dict[str, str]:
-        """Build heartbeat metadata without clobbering Commander lease state.
+        """Build heartbeat metadata without clobbering Commander scheduler state.
 
-        Commander may mark this instance busy/unavailable directly in Nacos.
+        Commander may mark this instance busy/unavailable directly in Nacos,
+        attach lease fields, and now attach circuit-breaker fields as well.
         The heartbeat must refresh liveness fields while preserving those
-        scheduler-owned status fields.
+        scheduler-owned fields. It must also stop replaying stale lease fields
+        after Commander releases the instance back to idle.
         """
 
         metadata = dict(self.settings.metadata)
         current = self._fetch_current_instance_metadata_http()
         if current:
-            current_status = current.get("status")
-            local_status = metadata.get("status")
-            scheduler_owns_state = current_status in {"busy", "unavailable"} and local_status != current_status
-            if scheduler_owns_state:
-                metadata["status"] = str(current_status)
-            for key, value in current.items():
-                if key.startswith("lease_") or key.startswith("unavailable_"):
-                    metadata[key] = str(value)
-            if current_status in {"busy", "unavailable"}:
-                self.settings.status = str(current_status)
+            current_status = str(current.get("status", "")).lower()
+            local_status = str(metadata.get("status", "")).lower()
+            local_ready_false = (
+                local_status == "unavailable"
+                and str(metadata.get("unavailable_reason", "")) == "ready=false"
+            )
+
+            self._sync_metadata_prefixes(metadata, current, _LEASE_METADATA_PREFIXES)
+            self._sync_metadata_prefixes(metadata, current, _CIRCUIT_METADATA_PREFIXES)
+
+            if not local_ready_false:
+                self._sync_metadata_prefixes(metadata, current, _UNAVAILABLE_METADATA_PREFIXES)
+                scheduler_released_instance = current_status == "idle" and local_status in _SCHEDULER_STATUS_VALUES
+                scheduler_holds_instance = current_status in _SCHEDULER_STATUS_VALUES
+                if scheduler_holds_instance or scheduler_released_instance:
+                    metadata["status"] = current_status
+                    self.settings.status = current_status
 
         metadata["heartbeat_ts"] = str(int(time.time()))
         metadata["heartbeat_at"] = _utc_now_iso()
         return metadata
+
+    @staticmethod
+    def _sync_metadata_prefixes(
+        metadata: Dict[str, str],
+        current: Dict[str, str],
+        prefixes: tuple[str, ...],
+    ) -> None:
+        for key in list(metadata):
+            if key.startswith(prefixes):
+                metadata.pop(key, None)
+        for key, value in current.items():
+            if key.startswith(prefixes):
+                metadata[key] = str(value)
 
     def _fetch_current_instance_metadata_http(self) -> Dict[str, str]:
         params = {

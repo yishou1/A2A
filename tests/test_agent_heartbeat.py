@@ -3,6 +3,8 @@ from __future__ import annotations
 import time
 import unittest
 
+import requests
+
 from registry.nacos_manager import AgentHeartbeatSupervisor, NacosRegistry
 
 
@@ -111,6 +113,26 @@ class AgentHeartbeatTest(unittest.TestCase):
         self.assertEqual(len(filtered), 1)
         self.assertEqual(filtered[0]["ip"], "10.0.0.1")
 
+    def test_ephemeral_instance_uses_nacos_health_as_liveness_source(self):
+        registry = NacosRegistry(server_addresses="127.0.0.1:8848")
+        stale_timestamp = time.time() - 3600
+
+        healthy = {
+            "enabled": True,
+            "healthy": True,
+            "ephemeral": True,
+            "metadata": {"heartbeat_ts": stale_timestamp},
+        }
+        unhealthy = {
+            "enabled": True,
+            "healthy": False,
+            "ephemeral": True,
+            "metadata": {"heartbeat_ts": time.time()},
+        }
+
+        self.assertTrue(registry.is_instance_fresh(healthy))
+        self.assertFalse(registry.is_instance_fresh(unhealthy))
+
     def test_register_service_starts_heartbeat_and_adds_metadata(self):
         registry = NacosRegistry(server_addresses="127.0.0.1:8848")
 
@@ -171,6 +193,72 @@ class AgentHeartbeatTest(unittest.TestCase):
 
         self.assertEqual(metadata["status"], "busy")
         self.assertEqual(captured["heartbeat_metadata"]["lease_workflow_id"], "wf-1")
+
+    def test_metadata_update_normalizes_invalid_cluster_name_in_http_fallback(self):
+        registry = NacosRegistry(server_addresses="127.0.0.1:8848")
+        captured = {}
+
+        class FakeResponse:
+            def raise_for_status(self):
+                return None
+
+        def fail_sdk(*args, **kwargs):
+            raise RuntimeError("SDK unavailable")
+
+        def fake_put(url, params, timeout):
+            captured["url"] = url
+            captured["params"] = params
+            captured["timeout"] = timeout
+            return FakeResponse()
+
+        registry.client.modify_naming_instance = fail_sdk
+        registry.http.put = fake_put
+        instance = {
+            "ip": "10.0.0.1",
+            "port": 8012,
+            "clusterName": "None",
+            "metadata": {"role": "recon", "status": "idle"},
+        }
+
+        registry.update_instance_metadata(
+            "A2A-Agent",
+            instance,
+            metadata_updates={"status": "busy"},
+        )
+
+        self.assertEqual(captured["params"]["clusterName"], "DEFAULT")
+        self.assertEqual(captured["params"]["groupName"], "DEFAULT_GROUP")
+
+    def test_metadata_update_reregisters_when_nacos_metadata_raft_is_unavailable(self):
+        registry = NacosRegistry(server_addresses="127.0.0.1:8848")
+        captured = {}
+
+        class FailedResponse:
+            def raise_for_status(self):
+                raise requests.HTTPError("metadata Raft leader unavailable")
+
+        class SuccessfulResponse:
+            def raise_for_status(self):
+                return None
+
+        registry.http.put = lambda *args, **kwargs: FailedResponse()
+
+        def fake_post(url, params, timeout):
+            captured["url"] = url
+            captured["params"] = params
+            return SuccessfulResponse()
+
+        registry.http.post = fake_post
+        registry._update_instance_metadata_http(
+            "A2A-Agent",
+            "10.0.0.1",
+            8012,
+            {"role": "recon", "status": "busy"},
+            cluster_name="DEFAULT",
+        )
+
+        self.assertEqual(captured["params"]["metadata"], '{"role":"recon","status":"busy"}')
+        self.assertEqual(captured["params"]["clusterName"], "DEFAULT")
 
 
 if __name__ == "__main__":

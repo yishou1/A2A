@@ -33,6 +33,8 @@ def load_env_file(path=os.path.join(PROJECT_ROOT, ".env")):
 
 
 class NacosRegistry:
+    DEFAULT_CLUSTER_NAME = "DEFAULT"
+
     def __init__(self, server_addresses=None, namespace=None):
         load_env_file()
         if server_addresses is None:
@@ -67,6 +69,7 @@ class NacosRegistry:
         cluster_name=None,
         group_name="DEFAULT_GROUP",
     ):
+        cluster_name = self._normalize_cluster_name(cluster_name)
         if metadata is None:
             metadata = {}
         metadata = dict(metadata)
@@ -177,10 +180,20 @@ class NacosRegistry:
             return {"namespaceId": self.namespace}
         return {}
 
+    @staticmethod
+    def _normalize_cluster_name(value):
+        if value is None:
+            return NacosRegistry.DEFAULT_CLUSTER_NAME
+        normalized = str(value).strip()
+        if not normalized or normalized.lower() in {"none", "null"}:
+            return NacosRegistry.DEFAULT_CLUSTER_NAME
+        return normalized
+
     def _heartbeat_key(self, service_name, ip, port):
         return f"{service_name}#{ip}#{port}"
 
     def _register_service_http(self, service_name, ip, port, metadata, ephemeral=True, cluster_name=None, group_name="DEFAULT_GROUP"):
+        cluster_name = self._normalize_cluster_name(cluster_name)
         params = {
             "serviceName": service_name,
             "ip": ip,
@@ -206,7 +219,9 @@ class NacosRegistry:
     ):
         ip = instance.get("ip")
         port = instance.get("port")
-        cluster_name = instance.get("clusterName") or instance.get("cluster_name")
+        cluster_name = self._normalize_cluster_name(
+            instance.get("clusterName") or instance.get("cluster_name")
+        )
         group_name = instance.get("groupName") or instance.get("group_name") or "DEFAULT_GROUP"
         ephemeral = instance.get("ephemeral", True)
         metadata = dict(instance.get("metadata", {}) or {})
@@ -255,6 +270,7 @@ class NacosRegistry:
         cluster_name=None,
         group_name="DEFAULT_GROUP",
     ):
+        cluster_name = self._normalize_cluster_name(cluster_name)
         params = {
             "serviceName": service_name,
             "ip": ip,
@@ -267,7 +283,21 @@ class NacosRegistry:
         if cluster_name is not None:
             params["clusterName"] = cluster_name
         response = self.http.put(f"{self._base_url()}/instance", params=params, timeout=5)
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.RequestException as update_error:
+            # Some standalone Nacos 2.x deployments have no leader for the
+            # naming_instance_metadata Raft group. Registering the same
+            # instance is idempotent and updates its metadata without that path.
+            register_response = self.http.post(
+                f"{self._base_url()}/instance",
+                params=params,
+                timeout=5,
+            )
+            try:
+                register_response.raise_for_status()
+            except requests.RequestException:
+                raise update_error
 
     def _update_heartbeat_metadata(self, service_name, ip, port, metadata):
         heartbeat_key = self._heartbeat_key(service_name, ip, port)
@@ -277,6 +307,7 @@ class NacosRegistry:
             supervisor.update_metadata(metadata)
 
     def _send_heartbeat_http(self, service_name, ip, port, cluster_name=None, weight=1.0, metadata=None, ephemeral=True, group_name="DEFAULT_GROUP"):
+        cluster_name = self._normalize_cluster_name(cluster_name)
         beat_data = {
             "serviceName": service_name,
             "ip": ip,
@@ -300,6 +331,7 @@ class NacosRegistry:
         return response.json()
 
     def send_heartbeat(self, service_name, ip, port, cluster_name=None, weight=1.0, metadata=None, ephemeral=True, group_name="DEFAULT_GROUP"):
+        cluster_name = self._normalize_cluster_name(cluster_name)
         heartbeat_metadata = dict(metadata or {})
         heartbeat_metadata["heartbeat_ts"] = int(time.time())
         heartbeat_metadata["heartbeat_at"] = utc_now_iso()
@@ -378,6 +410,10 @@ class NacosRegistry:
                 return None
 
     def _is_instance_fresh(self, instance):
+        if instance.get("ephemeral") is True:
+            return bool(instance.get("enabled", True)) and bool(
+                instance.get("healthy", False)
+            )
         metadata = instance.get("metadata", {}) or {}
         heartbeat_ts = self._parse_heartbeat_ts(metadata)
         if heartbeat_ts is None:
