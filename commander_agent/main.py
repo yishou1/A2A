@@ -1192,10 +1192,10 @@ class CommanderAgent:
                 "target_count": int(os.environ.get("CLOSED_LOOP_TARGET_COUNT", "50")),
                 "cycles": int(os.environ.get("CLOSED_LOOP_CYCLES", "3")),
                 "results": {
-                    "recon": {"output_data": {"report": context.get("recon_report")}},
-                    "artillery": {"output_data": {"result": context.get("strike_result")}},
-                    "evaluator": {"output_data": {"eval_score": context.get("eval_score")}},
-                    "assault": {"output_data": {"result": context.get("assault_result")}},
+                    "recon": {"output_data": {"report": self._latest_context_value(context, "recon_report")}},
+                    "artillery": {"output_data": {"result": self._latest_context_value(context, "strike_result")}},
+                    "evaluator": {"output_data": {"eval_score": self._latest_context_value(context, "eval_score")}},
+                    "assault": {"output_data": {"result": self._latest_context_value(context, "assault_result")}},
                 },
             }
             if dataset_paths:
@@ -1264,6 +1264,7 @@ class CommanderAgent:
             "evaluator": "eval_score",
             "commander": "commander_decision",
             "assault": "assault_result",
+            "closed_loop": "closed_loop_result",
         }.get(role)
 
     @staticmethod
