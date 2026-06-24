@@ -1860,7 +1860,23 @@ def _train_models(seed: int, paths: Optional[dict] = None) -> dict:
         damage_metrics["decision_threshold"] = decision_threshold
         damage_accuracy = float(damage_metrics["damage_accuracy"])
     else:
-        xbd_x, xbd_y = _generate_xbd_like_damage_data(780, seed)
+        raw_x, raw_y = _generate_xbd_like_damage_data(780, seed)
+        xbd_x = []
+        xbd_y = []
+        for idx, (raw, label) in enumerate(zip(raw_x, raw_y)):
+            row_dict = {
+                "sample_id": f"sim-{idx}",
+                "pre_area": raw[0],
+                "spectral_delta": raw[1],
+                "texture_delta": raw[2],
+                "heat_signature": raw[3],
+                "crater_density": raw[4],
+                "normalized_distance": raw[5],
+                "detection_confidence": raw[6],
+                "threat_score": raw[7],
+            }
+            xbd_x.append(_build_xbd_model_features(row_dict))
+            xbd_y.append(int(label))
         x_train, y_train, x_test, y_test = _split(xbd_x, xbd_y, 180)
         damage_model = LogisticRegressionGD().fit(x_train, [int(y) for y in y_train])
         test_probs = damage_model.predict_proba(x_test)
@@ -1870,14 +1886,20 @@ def _train_models(seed: int, paths: Optional[dict] = None) -> dict:
         disaster_score_thresholds = {}
         disaster_strategies = {}
 
-    cluster_x = [
-        [row[14], 1.0 - row[12], row[13], row[1], row[8]]
-        for row in xbd_x[: min(360, len(xbd_x))]
-    ]
-    kmeans = KMeans(k=3, seed=seed + 1).fit(cluster_x)
-
     sc2_path = str(paths.get("sc2le_task_csv") or "").strip()
     sc2_x, sc2_y = _load_sc2le_feature_rows(sc2_path) if sc2_path else ([], [])
+
+    if xbd_x and len(xbd_x[0]) > 14:
+        cluster_x = [
+            [row[14], 1.0 - row[12], row[13], row[1], row[8]]
+            for row in xbd_x[: min(360, len(xbd_x))]
+        ]
+    elif sc2_x:
+        cluster_x = [row[:5] for row in sc2_x[: min(360, len(sc2_x))]]
+    else:
+        cluster_x = [[0.5, 0.5, 0.5, 0.5, 0.5] for _ in range(30)]
+    kmeans = KMeans(k=3, seed=seed + 1).fit(cluster_x)
+
     if len(sc2_x) >= 50:
         data_sources["mission_evaluation"] = {"kind": "real_feature_table", "path": sc2_path, "samples": len(sc2_x)}
         sc_train_x, sc_train_y, sc_test_x, sc_test_y = _split_shuffled(sc2_x, sc2_y, max(1, len(sc2_x) // 5), seed + 2)
