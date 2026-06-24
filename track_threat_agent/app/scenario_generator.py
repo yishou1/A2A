@@ -267,6 +267,38 @@ def generate_auto_demo_frame(frame_index: int) -> Dict[str, object]:
     return payload
 
 
+def generate_long_operation_sequence(frame_count: int = 90) -> Dict[str, object]:
+    """Generate the complete deterministic landing-demo sequence.
+
+    The sequence is intentionally returned as data rather than written to disk so
+    tests, evaluation scripts, and A2A smoke scripts can all use the exact same
+    scenario source.
+    """
+
+    frames = [generate_auto_demo_frame(index) for index in range(frame_count)]
+    return {
+        "scenario_id": "coastal_joint_operation_90_frames",
+        "scenario_name": "Fictional Coastal Joint Operation Situation-Awareness Sequence",
+        "frame_count": frame_count,
+        "frame_interval_s": 1,
+        "description": (
+            "Simulation-only long sequence for validating track maintenance, "
+            "trajectory prediction, group detection, protected-asset impact, "
+            "and unified attention-priority ranking."
+        ),
+        "phases": [
+            {"name": "phase_1_initial_detection", "frame_start": 0, "frame_end": 14},
+            {"name": "phase_2_track_stabilization", "frame_start": 15, "frame_end": 34},
+            {"name": "phase_3_protected_asset_monitoring", "frame_start": 35, "frame_end": 44},
+            {"name": "phase_4_anomaly_escalation", "frame_start": 45, "frame_end": 74},
+            {"name": "phase_5_continuing_surveillance", "frame_start": 75, "frame_end": frame_count - 1},
+        ],
+        "protected_assets": default_protected_assets(),
+        "frames": frames,
+        "safety_boundary": "Simulation-only situation awareness; no weapon control, no engagement advice.",
+    }
+
+
 def _project_demo_position(
     spec: Dict[str, object],
     frame_index: int,

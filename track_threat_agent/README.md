@@ -62,6 +62,13 @@ PYTHONPATH=.. uv run --with-requirements ../requirements.txt --with-requirements
   uvicorn app.main:app --host 0.0.0.0 --port 8102
 ```
 
+也可以使用落地演示脚本：
+
+```bash
+cd track_threat_agent
+./scripts/start_track_threat_agent.sh
+```
+
 健康检查：
 
 ```bash
@@ -233,6 +240,38 @@ curl -X POST http://127.0.0.1:8102/a2a/perception-result \
   --data @sample_data/group_scene.json
 ```
 
+发送 A2A `sendMessage` 演示任务：
+
+```bash
+cd track_threat_agent
+PYTHONPATH=.. uv run --with-requirements requirements.txt --with-requirements ../requirements.txt \
+  python scripts/send_track_threat_demo_task.py --frame 45
+```
+
+检查健康、ready 和 Agent Card：
+
+```bash
+cd track_threat_agent
+PYTHONPATH=.. uv run --with-requirements requirements.txt --with-requirements ../requirements.txt \
+  python scripts/check_track_threat_agent.py
+```
+
+导出 90 帧长序列场景：
+
+```bash
+cd track_threat_agent
+PYTHONPATH=.. uv run --with-requirements requirements.txt --with-requirements ../requirements.txt \
+  python scripts/export_long_sequence.py --frames 90 --output sample_data/coastal_operation_90_frames.json
+```
+
+运行预测评估，对比 `Kalman+IMM` 与 `Kalman+IMM+ST-GNN`：
+
+```bash
+cd track_threat_agent
+PYTHONPATH=.. uv run --with-requirements requirements.txt --with-requirements ../requirements.txt \
+  python -m eval.prediction_eval --frames 90 --output eval/reports/prediction_eval_90_frames.json
+```
+
 ## 8. 输出
 
 返回 `track_threat_group_artifact`，包含：
@@ -273,6 +312,8 @@ uv run --with-requirements requirements.txt --with-requirements ../requirements.
 - ST-GNN 动态实体跟踪与轨迹预测，本地 NumPy 消息传递运行时会输出 embedding 和 edge attention。
 - KG+Transformer 本地自注意力语义推理。
 - DBN+COA 威胁状态后验概率评估。
+- 90 帧长序列仿真场景。
+- 预测评估脚本和 baseline / enhanced 对比报告。
 - `work_item` 幂等。
 - `work_list` 查询。
 
