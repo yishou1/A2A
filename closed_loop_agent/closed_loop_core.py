@@ -1956,26 +1956,64 @@ def _extract_upstream_results(arguments: dict) -> dict:
     return _safe_dict(memory.get("results_by_task"))
 
 
+def _result_block(results: dict, *keys: str) -> dict:
+    for key in keys:
+        block = _safe_dict(results.get(key))
+        if block:
+            return block
+    return {}
+
+
+def _normalize_upstream_score(value: Any, default: float) -> float:
+    if value is None or value == "":
+        return default
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return default
+    if score > 1.0:
+        score = score / 100.0
+    return _clamp(score)
+
+
 def _base_from_upstream(results: dict) -> dict:
-    perception = _safe_dict(results.get("perception_detection"))
+    perception = _result_block(results, "perception_detection", "recon")
     recognition = _safe_dict(results.get("recognition"))
     fusion = _safe_dict(results.get("data_fusion"))
-    threat = _safe_dict(results.get("threat_evaluation"))
+    threat = _result_block(results, "threat_evaluation", "evaluator")
 
     perception_out = _safe_dict(perception.get("output_data"))
     recognition_out = _safe_dict(recognition.get("output_data"))
     fusion_out = _safe_dict(fusion.get("output_data"))
     threat_out = _safe_dict(threat.get("output_data"))
     detections = _safe_list(perception_out.get("detections"))
+    if not detections and perception_out.get("report_text"):
+        detections = [{"conf": 0.82}]
+    if not detections and perception_out.get("report"):
+        detections = [{"conf": 0.82}]
     first_det = _safe_dict(detections[0]) if detections else {}
     fused_track = _safe_dict(fusion_out.get("fused_track"))
+
+    threat_score = 0.70
+    for key in ("priority_score", "eval_score", "threat_score"):
+        if threat_out.get(key) is not None and threat_out.get(key) != "":
+            threat_score = _normalize_upstream_score(threat_out.get(key), threat_score)
+            break
+
+    resource = _result_block(results, "resource_allocation")
+    resource_out = _safe_dict(resource.get("output_data"))
+    default_ammo = _normalize_upstream_score(
+        resource_out.get("supply_pressure") or resource_out.get("ammo_pressure"),
+        0.5,
+    )
 
     return {
         "det_conf": float(first_det.get("conf") or fused_track.get("det_conf") or 0.82),
         "class_conf": float(recognition_out.get("confidence") or fused_track.get("class_confidence") or 0.86),
-        "threat_score": float(threat_out.get("priority_score") or 0.70),
+        "threat_score": float(threat_score),
         "target_class": str(recognition_out.get("target_class") or fused_track.get("target_class") or "Unknown"),
         "track_id": str(fused_track.get("track_id") or perception_out.get("frame_id") or "track"),
+        "default_ammo_need": float(default_ammo),
     }
 
 
@@ -2010,7 +2048,9 @@ def _build_live_targets(arguments: dict, seed: int) -> Tuple[List[dict], dict]:
             "threat_score": threat_score,
             "velocity_norm": _clamp(float(explicit.get("velocity_norm", rng.random()))),
             "uncertainty": _clamp(float(explicit.get("uncertainty", 0.42 - 0.25 * det_conf + rng.random() * 0.25))),
-            "ammo_need": _clamp(float(explicit.get("ammo_need", 0.25 + 0.55 * threat_score + rng.gauss(0, 0.08)))),
+            "ammo_need": _clamp(
+                float(explicit.get("ammo_need", base.get("default_ammo_need", 0.5) + 0.55 * threat_score + rng.gauss(0, 0.08)))
+            ),
         }
         targets.append(target)
     return targets, {"source_results_present": bool(results), "upstream_summary": base}
@@ -2040,15 +2080,26 @@ def _cluster_profiles(targets: List[dict], labels: List[int], probs: List[float]
     return {label: names[min(idx, len(names) - 1)] for idx, label in enumerate(ranked)}
 
 
-def _mission_features(targets: List[dict], probs: List[float], control_latency_ms: float) -> List[float]:
-    damage_rate = _mean(probs)
-    asset_readiness = _clamp(0.92 - 0.18 * _mean([float(t.get("ammo_need", 0.5)) for t in targets]))
-    control_timeliness = _clamp(1.0 - control_latency_ms / 1000.0)
-    intel_confidence = _mean([float(t.get("detection_confidence", 0.7)) for t in targets])
-    threat_pressure = _mean([float(t.get("threat_score", 0.5)) * (1.0 - p) for t, p in zip(targets, probs)])
-    ammo_pressure = _mean([float(t.get("ammo_need", 0.5)) for t in targets])
-    comm_quality = 0.88
-    return [damage_rate, asset_readiness, control_timeliness, intel_confidence, threat_pressure, ammo_pressure, comm_quality]
+def _mission_features(
+    targets: List[dict],
+    probs: List[float],
+    results: Optional[dict] = None,
+    *,
+    control_latency_sla_ms: float = 2000.0,
+) -> List[float]:
+    from closed_loop_agent.agent_results_mapping import mission_vector_from_results
+
+    enriched_targets = []
+    for target, prob in zip(targets, probs):
+        item = dict(target)
+        item.setdefault("damage_probability", prob)
+        enriched_targets.append(item)
+    return mission_vector_from_results(
+        results,
+        damage_probs=probs,
+        targets=enriched_targets,
+        control_latency_sla_ms=control_latency_sla_ms,
+    )
 
 
 def _choose_action(target: dict, damage_prob: float, situation: str, mission_completion: float) -> Tuple[str, float]:
@@ -2100,6 +2151,7 @@ def _closed_loop_optimization(arguments: dict) -> dict:
     mission_model: RandomForestRegressor = trained["mission_model"]
     metrics = dict(trained["metrics"])
     targets, source_info = _build_live_targets(arguments, seed)
+    upstream_results = _extract_upstream_results(arguments)
 
     history: List[dict] = []
     final_commands: List[dict] = []
@@ -2121,7 +2173,7 @@ def _closed_loop_optimization(arguments: dict) -> dict:
         situation_rows = [_situation_features(target, prob) for target, prob in zip(targets, probs)]
         cluster_labels = kmeans.predict(situation_rows)
         profiles = _cluster_profiles(targets, cluster_labels, probs)
-        mission_features = _mission_features(targets, probs, control_latency_ms=0.0)
+        mission_features = _mission_features(targets, probs, upstream_results)
         mission_completion = mission_model.predict_one(mission_features)
         if cycle == 1:
             initial_completion = mission_completion

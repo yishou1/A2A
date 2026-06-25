@@ -70,8 +70,17 @@ class ClosedLoopIntegrationTest(unittest.TestCase):
             self.assertEqual(payload["output_hint"], "closed_loop_result")
             self.assertIn("work_list", payload)
             self.assertIn("context", payload)
+            results = payload["input"]["results"]
+            self.assertIn("perception_detection", results)
+            self.assertIn("threat_evaluation", results)
+            self.assertIn("execution_control", results)
+            self.assertIn("communication", results)
             self.assertEqual(
-                payload["input"]["results"]["assault"]["output_data"]["result"],
+                results["assault"]["output_data"]["result"],
+                "Assault unit captured the beachhead.",
+            )
+            self.assertEqual(
+                results["execution_control"]["output_data"]["assault_summary"],
                 "Assault unit captured the beachhead.",
             )
 
@@ -240,6 +249,41 @@ class ClosedLoopIntegrationTest(unittest.TestCase):
         self.assertEqual(response["role"], "closed_loop")
         self.assertTrue(is_success_response(response))
         self.assertIn("closed_loop_result", response["output"])
+
+
+class AgentResultsMappingTest(unittest.TestCase):
+    def test_mission_vector_from_results_doc_example(self):
+        from closed_loop_agent.agent_results_mapping import mission_vector_from_results
+
+        results = {
+            "perception_detection": {"output_data": {"detections": [{"conf": 0.9}, {"conf": 0.8}]}},
+            "resource_allocation": {"output_data": {"readiness": 0.75, "supply_pressure": 0.55}},
+            "execution_control": {"output_data": {"latency_ms": 300}},
+            "threat_evaluation": {"output_data": {"ranked_targets": [{"score": 0.7}, {"score": 0.6}]}},
+            "communication": {"output_data": {"delivery_rate": 0.92}},
+            "damage_confirmation": {"output_data": {"engaged_targets": 40, "confirmed_destroyed": 30}},
+        }
+        vector = mission_vector_from_results(results)
+        self.assertEqual(vector, [0.75, 0.75, 0.85, 0.85, 0.65, 0.55, 0.92])
+
+    def test_mission_features_uses_communication_and_execution_control(self):
+        from closed_loop_agent.closed_loop_core import _mission_features
+
+        targets = [
+            {
+                "detection_confidence": 0.9,
+                "threat_score": 0.7,
+                "ammo_need": 0.5,
+                "damage_probability": 0.6,
+            }
+        ]
+        results = {
+            "execution_control": {"output_data": {"latency_ms": 300}},
+            "communication": {"output_data": {"delivery_rate": 0.92}},
+        }
+        vector = _mission_features(targets, [0.6], results)
+        self.assertEqual(vector[2], 0.85)
+        self.assertEqual(vector[6], 0.92)
 
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@ from local_runtime import LocalAgentRuntime
 from observability import append_trace, exception_diagnostics, log_event
 from workflow_state_store import WorkflowStateStore, new_workflow_id, utc_now_iso
 from workflow_payloads import attachment_snapshot, merge_attachments, normalize_attachments
+from closed_loop_agent.agent_results_mapping import build_standard_results_from_context
 import json
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1086,6 +1087,13 @@ class CommanderAgent:
             "trace_tail": deepcopy(context.get("trace", [])[-20:]),
         }
 
+    @classmethod
+    def build_closed_loop_results_from_context(cls, context: dict) -> dict:
+        return build_standard_results_from_context(
+            context,
+            latest_value=cls._latest_context_value,
+        )
+
     def build_task_payload(self, role: str, context: dict, activatity_index: int = None, **legacy_kwargs):
         if activatity_index is None:
             activatity_index = legacy_kwargs.pop("step_index", None)
@@ -1191,12 +1199,7 @@ class CommanderAgent:
             input_data = {
                 "target_count": int(os.environ.get("CLOSED_LOOP_TARGET_COUNT", "50")),
                 "cycles": int(os.environ.get("CLOSED_LOOP_CYCLES", "3")),
-                "results": {
-                    "recon": {"output_data": {"report": self._latest_context_value(context, "recon_report")}},
-                    "artillery": {"output_data": {"result": self._latest_context_value(context, "strike_result")}},
-                    "evaluator": {"output_data": {"eval_score": self._latest_context_value(context, "eval_score")}},
-                    "assault": {"output_data": {"result": self._latest_context_value(context, "assault_result")}},
-                },
+                "results": self.build_closed_loop_results_from_context(context),
             }
             if dataset_paths:
                 input_data["dataset_paths"] = dataset_paths
