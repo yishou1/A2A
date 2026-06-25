@@ -10,7 +10,6 @@ python-dotenv
 click
 httpx
 pytest
-transformers
-sentence-transformers
-torch
-accelerate
+pypdf
+numpy
+onnxruntime

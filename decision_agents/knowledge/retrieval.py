@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Iterable
+
 from decision_agents.rag.documents import (
     DEFAULT_KNOWLEDGE_FILES,
     RagChunk as KnowledgeChunk,
@@ -18,9 +20,17 @@ def retrieve_evidence(
     *,
     top_k: int = 5,
     files: tuple[str, ...] = DEFAULT_KNOWLEDGE_FILES,
+    document_scope: str | Iterable[str] | None = None,
+    require_citations: bool = True,
 ) -> list[RuleEvidence]:
     """Return the highest-scoring local RAG evidence chunks for a query."""
-    return retrieve_rag_result(query, top_k=top_k, files=files).evidence
+    return retrieve_rag_result(
+        query,
+        top_k=top_k,
+        files=files,
+        document_scope=document_scope,
+        require_citations=require_citations,
+    ).evidence
 
 
 def retrieve_rag_result(
@@ -29,6 +39,15 @@ def retrieve_rag_result(
     purpose: str = "general",
     top_k: int = 5,
     files: tuple[str, ...] = DEFAULT_KNOWLEDGE_FILES,
+    document_scope: str | Iterable[str] | None = None,
+    require_citations: bool = True,
 ) -> RagResult:
     """Return evidence plus RAG answer/profile metadata."""
-    return run_rag(query, purpose=purpose, top_k=top_k, files=files)
+    return run_rag(
+        query,
+        purpose=purpose,
+        top_k=top_k,
+        files=files,
+        document_scope=document_scope,
+        require_citations=require_citations,
+    )

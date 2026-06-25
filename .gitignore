@@ -10,3 +10,5 @@ docs/
 __pycache__/
 *.py[cod]
 *.log
+data/roe_docs/*.pdf
+!data/roe_docs/.gitkeep

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterable
 
 from decision_agents.config import get_settings
 from decision_agents.rag.documents import (
@@ -39,6 +39,8 @@ class RagPipeline:
         purpose: str = "general",
         top_k: int | None = None,
         files: tuple[str, ...] = DEFAULT_KNOWLEDGE_FILES,
+        document_scope: str | Iterable[str] | None = None,
+        require_citations: bool = True,
     ) -> RagResult:
         warnings = []
         final_top_k = top_k or self.settings.rag_top_k_final
@@ -48,11 +50,14 @@ class RagPipeline:
         warnings.extend(keyword_warnings)
         keywords = _fallback_keywords(rewritten_query, model_keywords)
 
-        chunks = load_rag_chunks(files=files)
+        chunks = load_rag_chunks(files=files, document_scope=document_scope)
         candidates = self._retrieve_candidates(rewritten_query, chunks, warnings)
         reranked = self._rerank(rewritten_query, candidates, warnings)
         selected = reranked[: max(1, final_top_k)]
-        evidence = [_to_rule_evidence(score, chunk) for score, chunk in selected]
+        evidence = [
+            _to_rule_evidence(score, chunk, warnings, require_citations=require_citations)
+            for score, chunk in selected
+        ]
 
         answer, answer_warnings = self.models.generate_answer(
             purpose=purpose,
@@ -62,6 +67,12 @@ class RagPipeline:
         warnings.extend(answer_warnings)
         if not answer:
             answer = _deterministic_answer(purpose, evidence)
+        answer, evidence_check_warnings = _evidence_checked_answer(
+            answer,
+            purpose=purpose,
+            evidence=evidence,
+        )
+        warnings.extend(evidence_check_warnings)
 
         return RagResult(
             evidence=evidence,
@@ -131,11 +142,28 @@ def run_rag(
     purpose: str = "general",
     top_k: int | None = None,
     files: tuple[str, ...] = DEFAULT_KNOWLEDGE_FILES,
+    document_scope: str | Iterable[str] | None = None,
+    require_citations: bool = True,
 ) -> RagResult:
-    return RagPipeline().run(query, purpose=purpose, top_k=top_k, files=files)
+    return RagPipeline().run(
+        query,
+        purpose=purpose,
+        top_k=top_k,
+        files=files,
+        document_scope=document_scope,
+        require_citations=require_citations,
+    )
 
 
-def _to_rule_evidence(score: float, chunk: RagChunk) -> RuleEvidence:
+def _to_rule_evidence(
+    score: float,
+    chunk: RagChunk,
+    warnings: list[str],
+    *,
+    require_citations: bool,
+) -> RuleEvidence:
+    if require_citations and not chunk.citation:
+        warnings.append(f"citation_incomplete:{chunk.rule_id}")
     return RuleEvidence(
         source=chunk.source,
         rule_id=chunk.rule_id,
@@ -143,6 +171,14 @@ def _to_rule_evidence(score: float, chunk: RagChunk) -> RuleEvidence:
         text=chunk.text,
         score=round(max(score, 0.0), 3),
         tags=list(chunk.tags),
+        doc_id=chunk.doc_id,
+        doc_type=chunk.doc_type,
+        page_start=chunk.page_start,
+        page_end=chunk.page_end,
+        section=chunk.section,
+        chunk_id=chunk.chunk_id,
+        citation=chunk.citation,
+        content_hash=chunk.content_hash,
     )
 
 
@@ -154,7 +190,7 @@ def _fallback_keywords(query: str, model_keywords: list[str]) -> list[str]:
 
 def _evidence_text(evidence: list[RuleEvidence]) -> str:
     return "\n".join(
-        f"[{item.rule_id}] {item.title}: {item.text}"
+        f"[{item.rule_id}] {item.citation or item.source} {item.title}: {item.text}"
         for item in evidence
     )
 
@@ -168,3 +204,60 @@ def _deterministic_answer(purpose: str, evidence: list[RuleEvidence]) -> str:
     if purpose == "compliance":
         return f"合规审查依据参考本地知识库证据：{titles}。"
     return f"检索依据参考本地知识库证据：{titles}。"
+
+
+def _evidence_checked_answer(
+    answer: str,
+    *,
+    purpose: str,
+    evidence: list[RuleEvidence],
+) -> tuple[str, list[str]]:
+    if not answer or not evidence:
+        return answer, []
+    supported = []
+    dropped = 0
+    for sentence in _split_sentences(answer):
+        if _sentence_supported(sentence, evidence):
+            supported.append(sentence)
+        else:
+            dropped += 1
+    if not dropped:
+        return answer, []
+    if supported:
+        return "".join(supported), [f"rag_answer_sentence_dropped:{dropped}"]
+    return (
+        _deterministic_answer(purpose, evidence),
+        ["rag_answer_evidence_check_failed"],
+    )
+
+
+def _split_sentences(answer: str) -> list[str]:
+    sentences = []
+    current = ""
+    for char in answer:
+        current += char
+        if char in "。.!！？?\n":
+            if current.strip():
+                sentences.append(current.strip())
+            current = ""
+    if current.strip():
+        sentences.append(current.strip())
+    return sentences
+
+
+def _sentence_supported(sentence: str, evidence: list[RuleEvidence]) -> bool:
+    lowered_sentence = sentence.lower()
+    for item in evidence:
+        if item.rule_id and item.rule_id.lower() in lowered_sentence:
+            return True
+        if item.title and item.title.lower() in lowered_sentence:
+            return True
+        if item.citation and item.citation.lower() in lowered_sentence:
+            return True
+    sentence_tokens = {token for token in tokenize(sentence) if len(token) >= 2}
+    if not sentence_tokens:
+        return False
+    evidence_tokens = set()
+    for item in evidence:
+        evidence_tokens.update(tokenize(" ".join([item.rule_id, item.title, item.text])))
+    return bool(sentence_tokens & evidence_tokens)

@@ -224,7 +224,7 @@ def _compliance_rag_payload(
         purpose="compliance",
         top_k=6,
     )
-    evidence = result.evidence or rag_result.evidence
+    evidence = _merge_evidence(result.evidence, rag_result.evidence)
     return {
         "rag_evidence": [
             item.model_dump(mode="json")
@@ -658,10 +658,7 @@ def _collect_evidence(
         purpose="compliance",
         top_k=6,
     ).evidence
-    by_rule: dict[str, RuleEvidence] = {}
-    for item in evidence:
-        by_rule.setdefault(item.rule_id, item)
-    return list(by_rule.values())
+    return _merge_evidence(evidence)
 
 
 def _bind_evidence_to_violations(
@@ -669,11 +666,35 @@ def _bind_evidence_to_violations(
     evidence: list[RuleEvidence],
 ) -> list[RuleViolation]:
     evidence_ids = {item.rule_id for item in evidence}
+    evidence_ids.update(item.section for item in evidence if item.section)
     bound = []
     for violation in violations:
-        linked = [violation.rule_id] if violation.rule_id in evidence_ids else []
+        linked = [
+            violation.rule_id
+        ] if any(
+            evidence_id == violation.rule_id
+            or str(evidence_id).startswith(f"{violation.rule_id}:")
+            for evidence_id in evidence_ids
+        ) else []
         bound.append(violation.model_copy(update={"evidence_rule_ids": linked}))
     return bound
+
+
+def _merge_evidence(*groups: list[RuleEvidence]) -> list[RuleEvidence]:
+    merged: list[RuleEvidence] = []
+    seen: set[tuple[str, str, str]] = set()
+    for group in groups:
+        for item in group:
+            key = (
+                item.chunk_id or item.rule_id,
+                item.source,
+                item.content_hash or item.text[:80],
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+    return merged
 
 
 def _plan_within_scope(plan: CandidatePlan, scope: list[str]) -> bool:

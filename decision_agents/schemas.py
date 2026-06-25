@@ -105,6 +105,14 @@ class RuleEvidence(BaseModel):
     text: str
     score: float = Field(default=0.0, ge=0.0)
     tags: list[str] = Field(default_factory=list)
+    doc_id: str | None = None
+    doc_type: str | None = None
+    page_start: int | None = None
+    page_end: int | None = None
+    section: str | None = None
+    chunk_id: str | None = None
+    citation: str | None = None
+    content_hash: str | None = None
 
 
 class RuleViolation(BaseModel):

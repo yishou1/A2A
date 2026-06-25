@@ -125,6 +125,20 @@ cd /home/yl/yl/jzz/A2A
 
 `decision_support_workflow.bpel` 只保留两步决策支持流程：`decision_planning -> compliance_authorization`。外部输入通过 `--input-json`、Manager API 的 `initial_context` 或 `CommanderAgent(initial_context=...)` 注入，字段包括 `scheduled_tasks`、`resources`、`risk_assessments`、`constraints`、`authorization`、`target_histories` 和 `planning_objectives`。方案生成侧当前提供模板生成、逻辑回归评分、轻量 LSTM 趋势预测和本地 RAG 证据增强；规则侧提供规则表/RAG 证据绑定和逻辑回归风险校准。两个 Agent 都输出 main 风格的标准 `output`，其中包含 `agent_response`、`selected_algorithms`、`warnings` 和 `rag_evidence`。
 
+本地 RAG 默认使用 SQLite/关键词检索，不依赖模型。若要启用模型增强，只加载本地 ONNX 文件，不会从 Hugging Face 下载：
+
+```bash
+python -m pip install -r requirements.txt
+export ENABLE_RAG_ONNX_MODELS=true
+export RAG_QUERY_ONNX_MODEL=models/rag/query_rewrite.onnx
+export RAG_EMBEDDING_ONNX_MODEL=models/rag/embedding.onnx
+export RAG_RERANK_ONNX_MODEL=models/rag/rerank.onnx
+export RAG_GENERATION_ONNX_MODEL=models/rag/generation.onnx
+export RAG_ONNX_PROVIDERS=CPUExecutionProvider
+```
+
+PDF ROE 文档放入 `data/roe_docs/` 后，执行 `python -m decision_agents.rag.ingest --source data/roe_docs --rebuild` 入库。`pypdf` 用于可复制文本 PDF 抽取，`numpy` 和 `onnxruntime` 只在启用 ONNX 模型增强时使用。ONNX 模型不可用或签名不匹配时，RAG 会记录 warning 并降级到关键词检索。
+
 项目中可以提前保存多套 BPEL，并在运行前选择：
 
 ```bash
