@@ -1,0 +1,993 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Integrated Demo Console</title>
+  <style>
+    :root {
+      --bg: #f6f2e8;
+      --panel: rgba(255, 252, 246, 0.94);
+      --ink: #1f2b36;
+      --muted: #667685;
+      --line: rgba(31, 43, 54, 0.12);
+      --accent: #b44c35;
+      --accent-2: #1d6b76;
+      --ok: #2c7a4b;
+      --warn: #a86b18;
+      --bad: #aa3131;
+      --shadow: 0 18px 40px rgba(61, 48, 34, 0.12);
+      --radius: 20px;
+      --chip: rgba(29, 107, 118, 0.08);
+      --hostile: #b44c35;
+      --friendly: #1d6b76;
+      --neutral: #7c8a98;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(180, 76, 53, 0.15), transparent 28%),
+        radial-gradient(circle at top right, rgba(29, 107, 118, 0.18), transparent 25%),
+        linear-gradient(180deg, #faf6ed 0%, #f1ebdf 100%);
+      min-height: 100vh;
+    }
+    .shell {
+      max-width: 1500px;
+      margin: 0 auto;
+      padding: 26px;
+    }
+    .hero {
+      display: grid;
+      grid-template-columns: 1.25fr 0.75fr;
+      gap: 18px;
+      margin-bottom: 20px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(7px);
+    }
+    .hero-main, .hero-side, .block { padding: 22px; }
+    .hero-main h1 {
+      margin: 0 0 8px;
+      font-size: 34px;
+      line-height: 1.08;
+      letter-spacing: -0.03em;
+    }
+    .hero-main p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.65;
+    }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 18px;
+    }
+    button {
+      appearance: none;
+      border: 0;
+      border-radius: 999px;
+      padding: 11px 16px;
+      cursor: pointer;
+      font-weight: 700;
+      transition: transform 120ms ease, opacity 120ms ease;
+    }
+    button:hover { transform: translateY(-1px); }
+    button.primary { background: var(--accent); color: #fff8f3; }
+    button.secondary { background: rgba(29, 107, 118, 0.12); color: var(--accent-2); }
+    button.ghost { background: rgba(31, 43, 54, 0.08); color: var(--ink); }
+    button.warn { background: rgba(170, 49, 49, 0.12); color: var(--bad); }
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .stat {
+      padding: 14px;
+      border-radius: 16px;
+      background: rgba(31, 43, 54, 0.04);
+    }
+    .stat .label {
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .stat .value {
+      margin-top: 6px;
+      font-size: 24px;
+      font-weight: 800;
+    }
+    .hint {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.65;
+    }
+    .alert {
+      margin-top: 12px;
+      padding: 12px 14px;
+      border-radius: 14px;
+      background: rgba(180, 76, 53, 0.09);
+      color: var(--accent);
+      display: none;
+    }
+    .alert.show { display: block; }
+    .layout {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: 20px;
+    }
+    .sidebar, .content {
+      display: grid;
+      gap: 18px;
+      align-content: start;
+    }
+    .block h2 {
+      margin: 0 0 14px;
+      font-size: 18px;
+    }
+    .mission-list {
+      display: grid;
+      gap: 10px;
+      max-height: 560px;
+      overflow: auto;
+    }
+    .mission-item {
+      padding: 12px 14px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.62);
+      cursor: pointer;
+    }
+    .mission-item.active {
+      border-color: rgba(180, 76, 53, 0.4);
+      background: rgba(180, 76, 53, 0.09);
+    }
+    .mission-item strong {
+      display: block;
+      font-size: 14px;
+      margin-bottom: 6px;
+    }
+    .mini {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .status-completed { background: rgba(44, 122, 75, 0.12); color: var(--ok); }
+    .status-running { background: rgba(29, 107, 118, 0.12); color: var(--accent-2); }
+    .status-paused { background: rgba(168, 107, 24, 0.14); color: var(--warn); }
+    .status-failed, .status-aborted { background: rgba(170, 49, 49, 0.12); color: var(--bad); }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+    .summary-card {
+      padding: 14px;
+      border-radius: 16px;
+      background: rgba(31, 43, 54, 0.045);
+    }
+    .summary-card .big {
+      margin-top: 8px;
+      font-size: 22px;
+      font-weight: 800;
+    }
+    .brief-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .brief-card {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 16px;
+      background: rgba(255, 255, 255, 0.66);
+      min-height: 168px;
+    }
+    .brief-card h3 {
+      margin: 0 0 10px;
+      font-size: 15px;
+    }
+    .brief-value {
+      font-size: 24px;
+      font-weight: 800;
+      margin: 10px 0 4px;
+    }
+    .brief-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .brief-line {
+      font-size: 13px;
+      line-height: 1.55;
+      color: #243440;
+    }
+    .theater-grid {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 14px;
+    }
+    .battlefield {
+      position: relative;
+      min-height: 300px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background:
+        linear-gradient(180deg, rgba(29, 107, 118, 0.06), rgba(180, 76, 53, 0.03)),
+        repeating-linear-gradient(0deg, transparent, transparent 27px, rgba(31,43,54,0.05) 28px),
+        repeating-linear-gradient(90deg, transparent, transparent 27px, rgba(31,43,54,0.05) 28px);
+      overflow: hidden;
+    }
+    .battlefield::before {
+      content: "示例任务态势";
+      position: absolute;
+      left: 14px;
+      top: 12px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+    }
+    .zone {
+      position: absolute;
+      right: 10%;
+      top: 20%;
+      width: 34%;
+      height: 52%;
+      border: 2px dashed rgba(29, 107, 118, 0.45);
+      border-radius: 999px;
+      background: rgba(29, 107, 118, 0.06);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--accent-2);
+    }
+    .entity {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      min-width: 78px;
+      max-width: 130px;
+      padding: 9px 10px;
+      border-radius: 14px;
+      font-size: 12px;
+      line-height: 1.35;
+      color: white;
+      box-shadow: 0 10px 20px rgba(31, 43, 54, 0.16);
+    }
+    .entity.hostile { background: linear-gradient(135deg, #c4573f, #94311e); }
+    .entity.friendly { background: linear-gradient(135deg, #2a7d88, #1a5560); }
+    .entity.neutral { background: linear-gradient(135deg, #8593a1, #6d7a86); }
+    .entity strong { display: block; font-size: 12px; margin-bottom: 2px; }
+    .theater-side {
+      display: grid;
+      gap: 12px;
+    }
+    .flow {
+      display: grid;
+      gap: 10px;
+    }
+    .flow-step {
+      display: grid;
+      grid-template-columns: 30px 1fr;
+      gap: 10px;
+      align-items: start;
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.6);
+    }
+    .flow-index {
+      width: 30px;
+      height: 30px;
+      border-radius: 999px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      background: rgba(31, 43, 54, 0.08);
+      color: var(--ink);
+    }
+    .flow-step.done .flow-index {
+      background: rgba(44, 122, 75, 0.14);
+      color: var(--ok);
+    }
+    .flow-step.active .flow-index {
+      background: rgba(29, 107, 118, 0.14);
+      color: var(--accent-2);
+    }
+    .flow-step.pending .flow-index {
+      background: rgba(124, 138, 152, 0.12);
+      color: var(--neutral);
+    }
+    .roster {
+      display: grid;
+      gap: 10px;
+    }
+    .roster-item {
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: rgba(31, 43, 54, 0.045);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .roster-item strong { display: block; margin-bottom: 4px; }
+    .cap-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .cap-card {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 14px;
+      background: rgba(255, 255, 255, 0.66);
+    }
+    .cap-card h3 {
+      margin: 0 0 8px;
+      font-size: 15px;
+    }
+    .cap-card pre, .json-box, .trace-box {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      color: #243440;
+      background: rgba(31, 43, 54, 0.05);
+      border-radius: 14px;
+      padding: 14px;
+      margin: 0;
+    }
+    .trace-box { max-height: 280px; overflow: auto; }
+    .json-box { max-height: 340px; overflow: auto; }
+    .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .chip {
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: var(--chip);
+      color: var(--accent-2);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .toggle-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .toggle {
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(31, 43, 54, 0.08);
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .hidden { display: none !important; }
+    @media (max-width: 1180px) {
+      .hero, .layout, .theater-grid { grid-template-columns: 1fr; }
+      .summary-grid, .brief-grid, .cap-grid, .stat-grid { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 760px) {
+      .shell { padding: 16px; }
+      .summary-grid, .brief-grid, .cap-grid, .stat-grid { grid-template-columns: 1fr; }
+      .hero-main h1 { font-size: 28px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <div class="panel hero-main">
+        <h1>Integrated Demo Console</h1>
+        <p>面向汇报演示的多智能体闭环系统。这里可以直接提交示例任务、观察能力链推进、注入人工干预，并将关键结果以更适合汇报的中文卡片形式展示出来。</p>
+        <div class="controls">
+          <button class="primary" id="submit-sample">提交示例任务</button>
+          <button class="secondary" id="refresh-all">刷新任务列表</button>
+          <button class="ghost" id="pause-selected">暂停选中任务</button>
+          <button class="ghost" id="resume-selected">恢复选中任务</button>
+          <button class="secondary" id="adjust-selected">切换为围控策略</button>
+          <button class="warn" id="abort-selected">终止选中任务</button>
+        </div>
+        <div id="alert" class="alert"></div>
+      </div>
+      <div class="panel hero-side">
+        <div class="stat-grid">
+          <div class="stat">
+            <div class="label">Service</div>
+            <div class="value" id="service-status">Checking</div>
+          </div>
+          <div class="stat">
+            <div class="label">Missions</div>
+            <div class="value" id="mission-count">0</div>
+          </div>
+          <div class="stat">
+            <div class="label">Mode</div>
+            <div class="value" id="system-mode">safe</div>
+          </div>
+        </div>
+        <div class="hint">
+          推荐演示方式：点击“提交示例任务”后，从“任务态势可视化”开始讲，再顺着“关键能力结论”讲到“闭环评估结果”。
+        </div>
+      </div>
+    </section>
+
+    <section class="layout">
+      <aside class="sidebar">
+        <div class="panel block">
+          <h2>任务列表</h2>
+          <div id="mission-list" class="mission-list"></div>
+        </div>
+      </aside>
+
+      <main class="content">
+        <div class="panel block">
+          <h2>任务概览</h2>
+          <div id="mission-overview" class="hint">请选择或提交一个任务。</div>
+          <div id="summary-grid" class="summary-grid"></div>
+        </div>
+
+        <div class="panel block">
+          <h2>任务态势可视化</h2>
+          <div class="theater-grid">
+            <div id="battlefield" class="battlefield"></div>
+            <div class="theater-side">
+              <div>
+                <div class="mini" style="margin-bottom:8px;">流程推进</div>
+                <div id="workflow-flow" class="flow"></div>
+              </div>
+              <div>
+                <div class="mini" style="margin-bottom:8px;">敌情与兵力</div>
+                <div id="mission-roster" class="roster"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel block">
+          <h2>关键能力结论</h2>
+          <div id="brief-grid" class="brief-grid"></div>
+        </div>
+
+        <div class="panel block">
+          <h2>能力链明细</h2>
+          <div class="toggle-row">
+            <div class="hint">这里保留每一步的详细结果，便于你在演示时切换到算法细节。</div>
+            <div id="toggle-detail" class="toggle">隐藏明细</div>
+          </div>
+          <div id="capability-grid" class="cap-grid"></div>
+        </div>
+
+        <div class="panel block">
+          <h2>轨迹日志</h2>
+          <pre id="trace-box" class="trace-box">暂无轨迹。</pre>
+        </div>
+
+        <div class="panel block">
+          <h2>原始 JSON</h2>
+          <pre id="json-box" class="json-box">暂无数据。</pre>
+        </div>
+      </main>
+    </section>
+  </div>
+
+  <script>
+    const capabilityOrder = [
+      "cognition",
+      "tracking",
+      "threat_assessment",
+      "decision_planning",
+      "compliance_authorization",
+      "execution_control",
+      "effect_evaluation"
+    ];
+
+    const capabilityLabels = {
+      cognition: "认知识别",
+      tracking: "航迹跟踪",
+      threat_assessment: "威胁评估",
+      decision_planning: "方案规划",
+      compliance_authorization: "合规授权",
+      execution_control: "执行控制",
+      effect_evaluation: "效果评估"
+    };
+
+    let selectedMissionId = null;
+    let selectedMissionSnapshot = null;
+    let pollTimer = null;
+    let showCapabilityDetails = true;
+
+    function showAlert(message, isError = false) {
+      const alert = document.getElementById("alert");
+      alert.textContent = message;
+      alert.className = "alert show";
+      alert.style.color = isError ? "var(--bad)" : "var(--accent)";
+      alert.style.background = isError ? "rgba(170,49,49,0.08)" : "rgba(180,76,53,0.08)";
+      window.setTimeout(() => {
+        alert.className = "alert";
+      }, 3200);
+    }
+
+    function statusClass(status) {
+      return "status-pill status-" + (status || "running");
+    }
+
+    async function api(url, options = {}) {
+      const response = await fetch(url, { cache: "no-store", ...options });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || response.statusText);
+      }
+      return response.json();
+    }
+
+    function setSubmitBusy(isBusy, label = "提交示例任务") {
+      const button = document.getElementById("submit-sample");
+      if (!button) return;
+      button.disabled = isBusy;
+      button.textContent = isBusy ? label : "提交示例任务";
+    }
+
+    async function refreshHealth() {
+      const health = await api("/health");
+      document.getElementById("service-status").textContent = health.status || "unknown";
+      document.getElementById("mission-count").textContent = String(health.mission_count || 0);
+      document.getElementById("system-mode").textContent = health.mode || "safe";
+    }
+
+    function renderMissionList(missions) {
+      const root = document.getElementById("mission-list");
+      const displayMissions = [...missions];
+      if (
+        selectedMissionSnapshot &&
+        !displayMissions.some((mission) => mission.workflow_id === selectedMissionSnapshot.workflow_id)
+      ) {
+        displayMissions.unshift(selectedMissionSnapshot);
+      }
+      root.innerHTML = "";
+      if (!displayMissions.length) {
+        root.innerHTML = '<div class="hint">还没有任务，先提交一个示例任务。</div>';
+        return;
+      }
+      displayMissions.forEach((mission) => {
+        const node = document.createElement("div");
+        node.className = "mission-item" + (mission.workflow_id === selectedMissionId ? " active" : "");
+        node.innerHTML = `
+          <strong>${mission.workflow_id}</strong>
+          <div class="${statusClass(mission.status)}">${mission.status}</div>
+          <div class="mini">提交时间: ${mission.submitted_at || "-"}</div>
+        `;
+        node.onclick = () => selectMission(mission.workflow_id);
+        root.appendChild(node);
+      });
+    }
+
+    function renderOverview(mission) {
+      const blackboard = mission.blackboard || {};
+      const missionInput = blackboard.mission_input || {};
+      const results = blackboard.results || {};
+      const summary = blackboard.summary || {};
+      const effect = (results.effect_evaluation || {}).result || {};
+      const execution = (results.execution_control || {}).result || {};
+      const overview = document.getElementById("mission-overview");
+      overview.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+          <div>
+            <div class="mini">任务目标</div>
+            <div style="font-size:20px;font-weight:800;margin-top:6px;">${missionInput.objective || "未命名任务"}</div>
+            <div class="mini" style="margin-top:8px;">任务编号: ${mission.workflow_id}</div>
+          </div>
+          <div class="${statusClass(mission.status)}">${mission.status}</div>
+        </div>
+        <div class="chip-row">
+          <div class="chip">敌方目标 ${((missionInput.contacts || []).length)}</div>
+          <div class="chip">己方平台 ${((missionInput.friendly_platforms || []).length)}</div>
+          <div class="chip">重规划上限 ${missionInput.max_replans ?? 0}</div>
+          <div class="chip">成功阈值 ${missionInput.success_threshold ?? "-"}</div>
+        </div>
+      `;
+
+      document.getElementById("summary-grid").innerHTML = `
+        <div class="summary-card">
+          <div class="mini">闭环评估分</div>
+          <div class="big">${effect.overall_score ?? "-"}</div>
+        </div>
+        <div class="summary-card">
+          <div class="mini">执行完成度</div>
+          <div class="big">${execution.completion_ratio ?? "-"}</div>
+        </div>
+        <div class="summary-card">
+          <div class="mini">已完成能力</div>
+          <div class="big">${(summary.completed_capabilities || []).length}</div>
+        </div>
+        <div class="summary-card">
+          <div class="mini">重规划次数</div>
+          <div class="big">${summary.replan_count ?? 0}</div>
+        </div>
+      `;
+    }
+
+    function summaryLines(item) {
+      if (!item) return [];
+      const result = item.result || {};
+      if (item.capability === "decision_planning") {
+        const recommended = result.recommended_plan_id || (result.recommended_plan || {}).plan_name || "未生成";
+        const candidateCount = (result.candidate_plans || []).length;
+        return [
+          `推荐方案: ${recommended}`,
+          `候选方案数: ${candidateCount}`,
+          `算法链: ${(item.meta?.agent_response?.selected_algorithms || []).join(" / ") || "分支算法"}`
+        ];
+      }
+      if (item.capability === "compliance_authorization") {
+        const decision = result.decision || (result.authorized ? "approved" : "review_required");
+        const blockedCount = (result.blocked_items || []).length;
+        return [
+          `合规结论: ${decision}`,
+          `自动授权: ${result.authorized ? "通过" : "未通过"}`,
+          `阻断项数量: ${blockedCount}`
+        ];
+      }
+      if (item.capability === "execution_control") {
+        const cmdCount = result.command_count ?? ((result.closed_loop_output || {}).execution_control || {}).commands?.length ?? 0;
+        const completion = result.completion_ratio ?? "-";
+        return [
+          `命令条数: ${cmdCount}`,
+          `任务完成度: ${completion}`,
+          `执行状态: ${result.execution_status || "completed"}`
+        ];
+      }
+      if (item.capability === "effect_evaluation") {
+        const score = result.overall_score ?? "-";
+        const meets = result.meets_requirements ? "满足" : "未满足";
+        return [
+          `闭环评估分: ${score}`,
+          `要求满足情况: ${meets}`,
+          `评估结论: ${result.assessment || "待评估"}`
+        ];
+      }
+      if (item.capability === "tracking") {
+        return [
+          `稳定航迹数: ${result.track_count ?? 0}`,
+          `编组数量: ${result.group_count ?? 0}`,
+          `最高优先目标: ${result.top_rank?.entity_id || result.top_rank?.item_id || "无"}`
+        ];
+      }
+      if (item.capability === "threat_assessment") {
+        return [
+          `威胁排序数: ${(result.ranked_threats || []).length}`,
+          `最高优先目标: ${result.top_priority || "无"}`,
+          `下一建议: ${item.next_suggestion || "continue"}`
+        ];
+      }
+      if (item.capability === "cognition") {
+        return [
+          `情报摘要: ${(result.situation_summary || "无").slice(0, 40)}`,
+          `识别目标数: ${result.target_count ?? ((result.intelligence_packet || {}).targets || []).length || 0}`,
+          `路由节点数: ${((result.routing || {}).routes || []).length}`
+        ];
+      }
+      return [`状态: ${item.status || "-"}`];
+    }
+
+    function renderBriefCards(mission) {
+      const results = ((mission.blackboard || {}).results) || {};
+      const root = document.getElementById("brief-grid");
+      root.innerHTML = "";
+      const focusKeys = [
+        "decision_planning",
+        "compliance_authorization",
+        "execution_control",
+        "effect_evaluation"
+      ];
+      focusKeys.forEach((key) => {
+        const item = results[key] || { capability: key, result: {}, next_suggestion: "-" };
+        const card = document.createElement("div");
+        card.className = "brief-card";
+        const lines = summaryLines(item);
+        const result = item.result || {};
+        const heroValue = (
+          key === "decision_planning" ? (result.recommended_plan_id || (result.recommended_plan || {}).plan_name || "未生成") :
+          key === "compliance_authorization" ? (result.decision || (result.authorized ? "approved" : "review_required") || "-") :
+          key === "execution_control" ? String(result.command_count ?? ((result.closed_loop_output || {}).execution_control || {}).commands?.length ?? 0) :
+          String(result.overall_score ?? "-")
+        );
+        card.innerHTML = `
+          <h3>${capabilityLabels[key]}</h3>
+          <div class="mini">Agent: ${item.agent || "-"}</div>
+          <div class="brief-value">${heroValue}</div>
+          <div class="brief-list">
+            ${lines.map((line) => `<div class="brief-line">${line}</div>`).join("")}
+          </div>
+        `;
+        root.appendChild(card);
+      });
+    }
+
+    function renderBattlefield(mission) {
+      const root = document.getElementById("battlefield");
+      root.innerHTML = '<div class="zone">登陆走廊 / 目标保护区</div>';
+      const missionInput = (mission.blackboard || {}).mission_input || {};
+      const contacts = missionInput.contacts || [];
+      const friendlies = missionInput.friendly_platforms || [];
+
+      contacts.forEach((contact, index) => {
+        const node = document.createElement("div");
+        node.className = "entity hostile";
+        node.style.left = `${18 + index * 18}%`;
+        node.style.top = `${24 + (index % 2) * 24}%`;
+        node.innerHTML = `
+          <strong>${contact.contact_id || "hostile"}</strong>
+          <div>${contact.kind || "unknown"}</div>
+          <div>威胁 ${contact.threat_level ?? "-"}</div>
+        `;
+        root.appendChild(node);
+      });
+
+      friendlies.forEach((platform, index) => {
+        const node = document.createElement("div");
+        node.className = "entity friendly";
+        node.style.left = `${26 + index * 22}%`;
+        node.style.top = `${78 - (index % 2) * 15}%`;
+        node.innerHTML = `
+          <strong>${platform.platform_id || "platform"}</strong>
+          <div>${platform.platform_type || "unknown"}</div>
+          <div>战备 ${platform.readiness ?? "-"}</div>
+        `;
+        root.appendChild(node);
+      });
+    }
+
+    function renderWorkflowFlow(mission) {
+      const root = document.getElementById("workflow-flow");
+      root.innerHTML = "";
+      const results = ((mission.blackboard || {}).results) || {};
+      const current = mission.current_capability;
+      capabilityOrder.forEach((capability, index) => {
+        const stateClass = results[capability] ? "done" : (current === capability ? "active" : "pending");
+        const node = document.createElement("div");
+        node.className = `flow-step ${stateClass}`;
+        node.innerHTML = `
+          <div class="flow-index">${index + 1}</div>
+          <div>
+            <div style="font-weight:700;">${capabilityLabels[capability]}</div>
+            <div class="mini">${results[capability]?.agent || (current === capability ? "执行中" : "等待执行")}</div>
+          </div>
+        `;
+        root.appendChild(node);
+      });
+    }
+
+    function renderRoster(mission) {
+      const missionInput = (mission.blackboard || {}).mission_input || {};
+      const contacts = missionInput.contacts || [];
+      const friendlies = missionInput.friendly_platforms || [];
+      const root = document.getElementById("mission-roster");
+      root.innerHTML = "";
+      root.innerHTML += contacts.map((contact) => `
+        <div class="roster-item">
+          <strong>敌方目标: ${contact.contact_id || "unknown"}</strong>
+          <div>类型: ${contact.kind || "unknown"}</div>
+          <div>位置: ${contact.location || "unknown"}</div>
+          <div>意图: ${contact.intent || "unknown"} / 威胁值: ${contact.threat_level ?? "-"}</div>
+        </div>
+      `).join("");
+      root.innerHTML += friendlies.map((platform) => `
+        <div class="roster-item">
+          <strong>己方平台: ${platform.platform_id || "unknown"}</strong>
+          <div>类型: ${platform.platform_type || "unknown"}</div>
+          <div>位置: ${platform.location || "unknown"}</div>
+          <div>战备: ${platform.readiness ?? "-"} / 弹药: ${platform.munitions ?? "-"}</div>
+        </div>
+      `).join("");
+      if (!root.innerHTML) {
+        root.innerHTML = '<div class="hint">暂无可视化任务编成。</div>';
+      }
+    }
+
+    function renderCapabilities(mission) {
+      const results = ((mission.blackboard || {}).results) || {};
+      const root = document.getElementById("capability-grid");
+      root.classList.toggle("hidden", !showCapabilityDetails);
+      root.innerHTML = "";
+      const keys = Object.keys(results);
+      if (!keys.length) {
+        root.innerHTML = '<div class="hint">任务还未产出能力结果。</div>';
+        return;
+      }
+      keys.forEach((key) => {
+        const item = results[key];
+        const card = document.createElement("div");
+        card.className = "cap-card";
+        const resultPreview = JSON.stringify(item.result || {}, null, 2);
+        const lines = summaryLines(item);
+        card.innerHTML = `
+          <h3>${capabilityLabels[key] || key}</h3>
+          <div class="mini">Agent: ${item.agent || "-"}</div>
+          <div class="mini">Confidence: ${item.confidence ?? "-"}</div>
+          <div class="chip-row">
+            ${lines.map((line) => `<div class="chip">${line}</div>`).join("")}
+          </div>
+          <div class="mini" style="margin:10px 0 10px;">下一建议: ${item.next_suggestion || "-"}</div>
+          <pre>${resultPreview}</pre>
+        `;
+        root.appendChild(card);
+      });
+    }
+
+    function renderTrace(mission) {
+      const trace = ((mission.blackboard || {}).trace) || [];
+      const root = document.getElementById("trace-box");
+      if (!trace.length) {
+        root.textContent = "暂无轨迹。";
+        return;
+      }
+      root.textContent = trace.map((item) => {
+        const fields = Object.keys(item)
+          .filter((key) => !["timestamp", "event"].includes(key))
+          .map((key) => `${key}=${JSON.stringify(item[key])}`)
+          .join(" ");
+        return `[${item.timestamp}] ${item.event}${fields ? "  " + fields : ""}`;
+      }).join("\n");
+    }
+
+    function renderRaw(mission) {
+      document.getElementById("json-box").textContent = JSON.stringify(mission, null, 2);
+    }
+
+    async function refreshMissions(refreshDetails = true) {
+      const missions = await api("/missions");
+      renderMissionList(missions);
+      if (!selectedMissionId && missions.length) {
+        selectedMissionId = missions[0].workflow_id;
+      }
+      if (refreshDetails && selectedMissionId) {
+        await refreshSelectedMission();
+      }
+    }
+
+    async function refreshSelectedMission() {
+      if (!selectedMissionId) return;
+      const mission = await api(`/missions/${selectedMissionId}`);
+      selectedMissionSnapshot = {
+        workflow_id: mission.workflow_id,
+        status: mission.status,
+        submitted_at: mission.submitted_at
+      };
+      renderOverview(mission);
+      renderBattlefield(mission);
+      renderWorkflowFlow(mission);
+      renderRoster(mission);
+      renderBriefCards(mission);
+      renderCapabilities(mission);
+      renderTrace(mission);
+      renderRaw(mission);
+    }
+
+    async function selectMission(workflowId) {
+      selectedMissionId = workflowId;
+      await refreshMissions();
+    }
+
+    async function submitSampleMission() {
+      try {
+        setSubmitBusy(true, "任务提交中...");
+        const sample = await api("/demo/sample-mission");
+        const mission = await api("/missions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(sample)
+        });
+        selectedMissionId = mission.workflow_id;
+        selectedMissionSnapshot = mission;
+        showAlert(`示例任务已提交: ${mission.workflow_id}，系统正在后台推演`);
+        await refreshHealth();
+        await refreshSelectedMission();
+        refreshMissions(false).catch(console.error);
+      } catch (error) {
+        console.error(error);
+        showAlert(`提交失败: ${error.message}`, true);
+      } finally {
+        setSubmitBusy(false);
+      }
+    }
+
+    async function missionControl(action) {
+      if (!selectedMissionId) {
+        showAlert("请先选中一个任务。", true);
+        return;
+      }
+      await api(`/missions/${selectedMissionId}/control`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action })
+      });
+      showAlert(`任务 ${selectedMissionId} 已执行 ${action}`);
+      await refreshMissions();
+    }
+
+    async function adjustSelectedMission() {
+      if (!selectedMissionId) {
+        showAlert("请先选中一个任务。", true);
+        return;
+      }
+      await api(`/missions/${selectedMissionId}/adjust`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          note: "Operator switched the plan to containment-oriented behavior.",
+          planning_focus: "containment",
+          success_threshold: 0.5
+        })
+      });
+      showAlert(`任务 ${selectedMissionId} 已注入围控策略调整`);
+      await refreshMissions();
+    }
+
+    function toggleCapabilityDetails() {
+      showCapabilityDetails = !showCapabilityDetails;
+      document.getElementById("toggle-detail").textContent = showCapabilityDetails ? "隐藏明细" : "显示明细";
+      if (selectedMissionId) {
+        refreshSelectedMission().catch(console.error);
+      }
+    }
+
+    async function boot() {
+      document.getElementById("submit-sample").onclick = submitSampleMission;
+      document.getElementById("refresh-all").onclick = async () => {
+        await refreshHealth();
+        await refreshMissions();
+      };
+      document.getElementById("pause-selected").onclick = () => missionControl("pause");
+      document.getElementById("resume-selected").onclick = () => missionControl("resume");
+      document.getElementById("abort-selected").onclick = () => missionControl("abort");
+      document.getElementById("adjust-selected").onclick = adjustSelectedMission;
+      document.getElementById("toggle-detail").onclick = toggleCapabilityDetails;
+
+      await refreshHealth();
+      await refreshMissions();
+
+      pollTimer = window.setInterval(async () => {
+        try {
+          await refreshHealth();
+          await refreshMissions();
+        } catch (error) {
+          console.error(error);
+        }
+      }, 1500);
+    }
+
+    boot().catch((error) => {
+      console.error(error);
+      showAlert(`初始化失败: ${error.message}`, true);
+    });
+  </script>
+</body>
+</html>
+

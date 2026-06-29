@@ -1,0 +1,991 @@
+{
+  "objective": "Protect the landing corridor and keep the command post and logistics pier inside the safe envelope.",
+  "scenario_name": "landing-corridor-multiframe-demo",
+  "mission_type": "integrated_demo",
+  "contacts": [
+    {
+      "contact_id": "surface-lead-1",
+      "kind": "surface_group",
+      "location": "登陆通道南口",
+      "threat_level": 0.84,
+      "velocity": 10.5,
+      "intent": "attack",
+      "metadata": {
+        "display_name": "突防舰艇 1",
+        "object_type": "ship",
+        "sensor_source": "coastal-surface-radar",
+        "scenario_role": "surface_group_lead",
+        "sea_state": 3
+      }
+    },
+    {
+      "contact_id": "surface-wing-2",
+      "kind": "surface_group",
+      "location": "登陆通道南口",
+      "threat_level": 0.79,
+      "velocity": 9.8,
+      "intent": "attack",
+      "metadata": {
+        "display_name": "突防舰艇 2",
+        "object_type": "ship",
+        "sensor_source": "coastal-surface-radar",
+        "scenario_role": "surface_group_wing",
+        "sea_state": 3
+      }
+    },
+    {
+      "contact_id": "corridor-uav-3",
+      "kind": "uav_contact",
+      "location": "登陆通道东侧",
+      "threat_level": 0.67,
+      "velocity": 22.0,
+      "intent": "probe",
+      "metadata": {
+        "display_name": "低空侦察无人机",
+        "object_type": "uav",
+        "sensor_source": "passive-rf-fusion",
+        "scenario_role": "low_altitude_probe",
+        "track_stability": "medium"
+      }
+    }
+  ],
+  "friendly_platforms": [
+    {
+      "platform_id": "uav-alpha",
+      "platform_type": "uav",
+      "readiness": 0.94,
+      "munitions": 2,
+      "location": "Blue-1"
+    },
+    {
+      "platform_id": "battery-bravo",
+      "platform_type": "artillery",
+      "readiness": 0.88,
+      "munitions": 3,
+      "location": "Blue-2"
+    },
+    {
+      "platform_id": "ew-charlie",
+      "platform_type": "ew",
+      "readiness": 0.86,
+      "munitions": 1,
+      "location": "Blue-3"
+    }
+  ],
+  "constraints": {
+    "no_real_execution": true,
+    "keep_collateral_risk_low": true
+  },
+  "environment": {
+    "weather": "clear",
+    "sea_state": "moderate",
+    "jamming_level": 0.18
+  },
+  "intelligence_text": "Recon indicates a two-ship hostile surface element approaching the landing corridor while one low-altitude UAV probes the protected zone.",
+  "success_threshold": 0.6,
+  "max_replans": 1,
+  "demo_delay_ms": 180,
+  "require_operator_approval": false,
+  "simulation_mode": "safe",
+  "scene": {
+    "protected_zone_lat": 31.2304,
+    "protected_zone_lon": 121.4737,
+    "protected_radius_m": 30000.0
+  },
+  "protected_assets": [
+    {
+      "asset_id": "landing-c2",
+      "asset_name": "登陆通道指挥节点",
+      "asset_type": "command_post",
+      "lat": 31.2304,
+      "lon": 121.4737,
+      "alt": 0.0,
+      "protection_radius_m": 9000,
+      "criticality": 0.96,
+      "status": "protected",
+      "metadata": {
+        "role": "通道指挥与协同",
+        "side": "blue"
+      }
+    },
+    {
+      "asset_id": "landing-radar",
+      "asset_name": "海岸警戒雷达站",
+      "asset_type": "radar_site",
+      "lat": 31.262,
+      "lon": 121.438,
+      "alt": 0.0,
+      "protection_radius_m": 7600,
+      "criticality": 0.89,
+      "status": "protected",
+      "metadata": {
+        "role": "前沿预警与跟踪",
+        "side": "blue"
+      }
+    },
+    {
+      "asset_id": "landing-pier",
+      "asset_name": "后装保障码头",
+      "asset_type": "logistics_node",
+      "lat": 31.218,
+      "lon": 121.529,
+      "alt": 0.0,
+      "protection_radius_m": 6800,
+      "criticality": 0.84,
+      "status": "protected",
+      "metadata": {
+        "role": "补给与装卸保障",
+        "side": "blue"
+      }
+    }
+  ],
+  "perception_frames": [
+    {
+      "task_id": "landing_corridor_multiframe-frame-00",
+      "message_type": "perception_result",
+      "algorithm_level": "medium",
+      "scene": {
+        "operation_name": "landing-corridor-multiframe-demo",
+        "operation_phase": "initial_detection",
+        "frame_index": 0,
+        "protected_zone_lat": 31.2304,
+        "protected_zone_lon": 121.4737,
+        "protected_radius_m": 30000.0,
+        "protected_assets": [
+          {
+            "asset_id": "landing-c2",
+            "asset_name": "登陆通道指挥节点",
+            "asset_type": "command_post",
+            "lat": 31.2304,
+            "lon": 121.4737,
+            "alt": 0.0,
+            "protection_radius_m": 9000,
+            "criticality": 0.96,
+            "status": "protected",
+            "metadata": {
+              "role": "通道指挥与协同",
+              "side": "blue"
+            }
+          },
+          {
+            "asset_id": "landing-radar",
+            "asset_name": "海岸警戒雷达站",
+            "asset_type": "radar_site",
+            "lat": 31.262,
+            "lon": 121.438,
+            "alt": 0.0,
+            "protection_radius_m": 7600,
+            "criticality": 0.89,
+            "status": "protected",
+            "metadata": {
+              "role": "前沿预警与跟踪",
+              "side": "blue"
+            }
+          },
+          {
+            "asset_id": "landing-pier",
+            "asset_name": "后装保障码头",
+            "asset_type": "logistics_node",
+            "lat": 31.218,
+            "lon": 121.529,
+            "alt": 0.0,
+            "protection_radius_m": 6800,
+            "criticality": 0.84,
+            "status": "protected",
+            "metadata": {
+              "role": "补给与装卸保障",
+              "side": "blue"
+            }
+          }
+        ]
+      },
+      "detections": [
+        {
+          "detection_id": "surface-lead-1-f00",
+          "object_type": "ship",
+          "timestamp": 4000.0,
+          "lat": 31.094,
+          "lon": 121.676,
+          "alt": 0.0,
+          "speed": 10.5,
+          "heading": 300.0,
+          "confidence": 0.9,
+          "source_agent": "coastal-surface-radar",
+          "metadata": {
+            "source_contact_id": "surface-lead-1",
+            "source_location": "登陆通道南口",
+            "intent": "attack",
+            "label": "hostile",
+            "affiliation": "red",
+            "threat_level": "high",
+            "knowledge_ref": "ENT-surface-lead-1",
+            "knowledge_relations": [
+              {
+                "predicate": "threatens",
+                "object": "mission_area"
+              },
+              {
+                "predicate": "observed_in",
+                "object": "landing-corridor-multiframe-demo"
+              }
+            ],
+            "scenario_role": "surface_group_lead",
+            "operation_phase": "initial_detection",
+            "simulation_only": true,
+            "sea_state": 3
+          }
+        },
+        {
+          "detection_id": "surface-wing-2-f00",
+          "object_type": "ship",
+          "timestamp": 4000.0,
+          "lat": 31.101,
+          "lon": 121.688,
+          "alt": 0.0,
+          "speed": 9.8,
+          "heading": 298.0,
+          "confidence": 0.88,
+          "source_agent": "coastal-surface-radar",
+          "metadata": {
+            "source_contact_id": "surface-wing-2",
+            "source_location": "登陆通道南口",
+            "intent": "attack",
+            "label": "hostile",
+            "affiliation": "red",
+            "threat_level": "high",
+            "knowledge_ref": "ENT-surface-wing-2",
+            "knowledge_relations": [
+              {
+                "predicate": "threatens",
+                "object": "mission_area"
+              },
+              {
+                "predicate": "observed_in",
+                "object": "landing-corridor-multiframe-demo"
+              }
+            ],
+            "scenario_role": "surface_group_wing",
+            "operation_phase": "initial_detection",
+            "simulation_only": true,
+            "sea_state": 3
+          }
+        },
+        {
+          "detection_id": "corridor-uav-3-f00",
+          "object_type": "uav",
+          "timestamp": 4000.0,
+          "lat": 31.248,
+          "lon": 121.557,
+          "alt": 980.0,
+          "speed": 22.0,
+          "heading": 256.0,
+          "confidence": 0.81,
+          "source_agent": "passive-rf-fusion",
+          "metadata": {
+            "source_contact_id": "corridor-uav-3",
+            "source_location": "登陆通道东侧",
+            "intent": "probe",
+            "label": "hostile",
+            "affiliation": "red",
+            "threat_level": "medium",
+            "knowledge_ref": "ENT-corridor-uav-3",
+            "knowledge_relations": [
+              {
+                "predicate": "threatens",
+                "object": "mission_area"
+              },
+              {
+                "predicate": "observed_in",
+                "object": "landing-corridor-multiframe-demo"
+              }
+            ],
+            "scenario_role": "low_altitude_probe",
+            "operation_phase": "initial_detection",
+            "simulation_only": true,
+            "track_stability": "medium"
+          }
+        }
+      ]
+    },
+    {
+      "task_id": "landing_corridor_multiframe-frame-01",
+      "message_type": "perception_result",
+      "algorithm_level": "medium",
+      "scene": {
+        "operation_name": "landing-corridor-multiframe-demo",
+        "operation_phase": "track_stabilization",
+        "frame_index": 1,
+        "protected_zone_lat": 31.2304,
+        "protected_zone_lon": 121.4737,
+        "protected_radius_m": 30000.0,
+        "protected_assets": [
+          {
+            "asset_id": "landing-c2",
+            "asset_name": "登陆通道指挥节点",
+            "asset_type": "command_post",
+            "lat": 31.2304,
+            "lon": 121.4737,
+            "alt": 0.0,
+            "protection_radius_m": 9000,
+            "criticality": 0.96,
+            "status": "protected",
+            "metadata": {
+              "role": "通道指挥与协同",
+              "side": "blue"
+            }
+          },
+          {
+            "asset_id": "landing-radar",
+            "asset_name": "海岸警戒雷达站",
+            "asset_type": "radar_site",
+            "lat": 31.262,
+            "lon": 121.438,
+            "alt": 0.0,
+            "protection_radius_m": 7600,
+            "criticality": 0.89,
+            "status": "protected",
+            "metadata": {
+              "role": "前沿预警与跟踪",
+              "side": "blue"
+            }
+          },
+          {
+            "asset_id": "landing-pier",
+            "asset_name": "后装保障码头",
+            "asset_type": "logistics_node",
+            "lat": 31.218,
+            "lon": 121.529,
+            "alt": 0.0,
+            "protection_radius_m": 6800,
+            "criticality": 0.84,
+            "status": "protected",
+            "metadata": {
+              "role": "补给与装卸保障",
+              "side": "blue"
+            }
+          }
+        ]
+      },
+      "detections": [
+        {
+          "detection_id": "surface-lead-1-f01",
+          "object_type": "ship",
+          "timestamp": 4012.0,
+          "lat": 31.094566,
+          "lon": 121.674855,
+          "alt": 0.0,
+          "speed": 10.5,
+          "heading": 300.0,
+          "confidence": 0.9,
+          "source_agent": "coastal-surface-radar",
+          "metadata": {
+            "source_contact_id": "surface-lead-1",
+            "source_location": "登陆通道南口",
+            "intent": "attack",
+            "label": "hostile",
+            "affiliation": "red",
+            "threat_level": "high",
+            "knowledge_ref": "ENT-surface-lead-1",
+            "knowledge_relations": [
+              {
+                "predicate": "threatens",
+                "object": "mission_area"
+              },
+              {
+                "predicate": "observed_in",
+                "object": "landing-corridor-multiframe-demo"
+              }
+            ],
+            "scenario_role": "surface_group_lead",
+            "operation_phase": "track_stabilization",
+            "simulation_only": true,
+            "sea_state": 3
+          }
+        },
+        {
+          "detection_id": "surface-wing-2-f01",
+          "object_type": "ship",
+          "timestamp": 4012.0,
+          "lat": 31.101496,
+          "lon": 121.686911,
+          "alt": 0.0,
+          "speed": 9.8,
+          "heading": 298.0,
+          "confidence": 0.88,
+          "source_agent": "coastal-surface-radar",
+          "metadata": {
+            "source_contact_id": "surface-wing-2",
+            "source_location": "登陆通道南口",
+            "intent": "attack",
+            "label": "hostile",
+            "affiliation": "red",
+            "threat_level": "high",
+            "knowledge_ref": "ENT-surface-wing-2",
+            "knowledge_relations": [
+              {
+                "predicate": "threatens",
+                "object": "mission_area"
+              },
+              {
+                "predicate": "observed_in",
+                "object": "landing-corridor-multiframe-demo"
+              }
+            ],
+            "scenario_role": "surface_group_wing",
+            "operation_phase": "track_stabilization",
+            "simulation_only": true,
+            "sea_state": 3
+          }
+        },
+        {
+          "detection_id": "corridor-uav-3-f01",
+          "object_type": "uav",
+          "timestamp": 4012.0,
+          "lat": 31.247346,
+          "lon": 121.554333,
+          "alt": 980.0,
+          "speed": 22.0,
+          "heading": 254.0,
+          "confidence": 0.81,
+          "source_agent": "passive-rf-fusion",
+          "metadata": {
+            "source_contact_id": "corridor-uav-3",
+            "source_location": "登陆通道东侧",
+            "intent": "probe",
+            "label": "hostile",
+            "affiliation": "red",
+            "threat_level": "medium",
+            "knowledge_ref": "ENT-corridor-uav-3",
+            "knowledge_relations": [
+              {
+                "predicate": "threatens",
+                "object": "mission_area"
+              },
+              {
+                "predicate": "observed_in",
+                "object": "landing-corridor-multiframe-demo"
+              }
+            ],
+            "scenario_role": "low_altitude_probe",
+            "operation_phase": "track_stabilization",
+            "simulation_only": true,
+            "track_stability": "medium"
+          }
+        }
+      ]
+    },
+    {
+      "task_id": "landing_corridor_multiframe-frame-02",
+      "message_type": "perception_result",
+      "algorithm_level": "medium",
+      "scene": {
+        "operation_name": "landing-corridor-multiframe-demo",
+        "operation_phase": "threat_refinement",
+        "frame_index": 2,
+        "protected_zone_lat": 31.2304,
+        "protected_zone_lon": 121.4737,
+        "protected_radius_m": 30000.0,
+        "protected_assets": [
+          {
+            "asset_id": "landing-c2",
+            "asset_name": "登陆通道指挥节点",
+            "asset_type": "command_post",
+            "lat": 31.2304,
+            "lon": 121.4737,
+            "alt": 0.0,
+            "protection_radius_m": 9000,
+            "criticality": 0.96,
+            "status": "protected",
+            "metadata": {
+              "role": "通道指挥与协同",
+              "side": "blue"
+            }
+          },
+          {
+            "asset_id": "landing-radar",
+            "asset_name": "海岸警戒雷达站",
+            "asset_type": "radar_site",
+            "lat": 31.262,
+            "lon": 121.438,
+            "alt": 0.0,
+            "protection_radius_m": 7600,
+            "criticality": 0.89,
+            "status": "protected",
+            "metadata": {
+              "role": "前沿预警与跟踪",
+              "side": "blue"
+            }
+          },
+          {
+            "asset_id": "landing-pier",
+            "asset_name": "后装保障码头",
+            "asset_type": "logistics_node",
+            "lat": 31.218,
+            "lon": 121.529,
+            "alt": 0.0,
+            "protection_radius_m": 6800,
+            "criticality": 0.84,
+            "status": "protected",
+            "metadata": {
+              "role": "补给与装卸保障",
+              "side": "blue"
+            }
+          }
+        ]
+      },
+      "detections": [
+        {
+          "detection_id": "surface-lead-1-f02",
+          "object_type": "ship",
+          "timestamp": 4024.0,
+          "lat": 31.095132,
+          "lon": 121.673711,
+          "alt": 0.0,
+          "speed": 10.5,
+          "heading": 300.0,
+          "confidence": 0.9,
+          "source_agent": "coastal-surface-radar",
+          "metadata": {
+            "source_contact_id": "surface-lead-1",
+            "source_location": "登陆通道南口",
+            "intent": "attack",
+            "label": "hostile",
+            "affiliation": "red",
+            "threat_level": "high",
+            "knowledge_ref": "ENT-surface-lead-1",
+            "knowledge_relations": [
+              {
+                "predicate": "threatens",
+                "object": "mission_area"
+              },
+              {
+                "predicate": "observed_in",
+                "object": "landing-corridor-multiframe-demo"
+              }
+            ],
+            "scenario_role": "surface_group_lead",
+            "operation_phase": "threat_refinement",
+            "simulation_only": true,
+            "sea_state": 3
+          }
+        },
+        {
+          "detection_id": "surface-wing-2-f02",
+          "object_type": "ship",
+          "timestamp": 4024.0,
+          "lat": 31.101992,
+          "lon": 121.685821,
+          "alt": 0.0,
+          "speed": 9.8,
+          "heading": 298.0,
+          "confidence": 0.88,
+          "source_agent": "coastal-surface-radar",
+          "metadata": {
+            "source_contact_id": "surface-wing-2",
+            "source_location": "登陆通道南口",
+            "intent": "attack",
+            "label": "hostile",
+            "affiliation": "red",
+            "threat_level": "high",
+            "knowledge_ref": "ENT-surface-wing-2",
+            "knowledge_relations": [
+              {
+                "predicate": "threatens",
+                "object": "mission_area"
+              },
+              {
+                "predicate": "observed_in",
+                "object": "landing-corridor-multiframe-demo"
+              }
+            ],
+            "scenario_role": "surface_group_wing",
+            "operation_phase": "threat_refinement",
+            "simulation_only": true,
+            "sea_state": 3
+          }
+        },
+        {
+          "detection_id": "corridor-uav-3-f02",
+          "object_type": "uav",
+          "timestamp": 4024.0,
+          "lat": 31.246613,
+          "lon": 121.551695,
+          "alt": 980.0,
+          "speed": 22.0,
+          "heading": 252.0,
+          "confidence": 0.81,
+          "source_agent": "passive-rf-fusion",
+          "metadata": {
+            "source_contact_id": "corridor-uav-3",
+            "source_location": "登陆通道东侧",
+            "intent": "probe",
+            "label": "hostile",
+            "affiliation": "red",
+            "threat_level": "medium",
+            "knowledge_ref": "ENT-corridor-uav-3",
+            "knowledge_relations": [
+              {
+                "predicate": "threatens",
+                "object": "mission_area"
+              },
+              {
+                "predicate": "observed_in",
+                "object": "landing-corridor-multiframe-demo"
+              }
+            ],
+            "scenario_role": "low_altitude_probe",
+            "operation_phase": "threat_refinement",
+            "simulation_only": true,
+            "track_stability": "medium"
+          }
+        }
+      ]
+    },
+    {
+      "task_id": "landing_corridor_multiframe-frame-03",
+      "message_type": "perception_result",
+      "algorithm_level": "medium",
+      "scene": {
+        "operation_name": "landing-corridor-multiframe-demo",
+        "operation_phase": "plan_handoff",
+        "frame_index": 3,
+        "protected_zone_lat": 31.2304,
+        "protected_zone_lon": 121.4737,
+        "protected_radius_m": 30000.0,
+        "protected_assets": [
+          {
+            "asset_id": "landing-c2",
+            "asset_name": "登陆通道指挥节点",
+            "asset_type": "command_post",
+            "lat": 31.2304,
+            "lon": 121.4737,
+            "alt": 0.0,
+            "protection_radius_m": 9000,
+            "criticality": 0.96,
+            "status": "protected",
+            "metadata": {
+              "role": "通道指挥与协同",
+              "side": "blue"
+            }
+          },
+          {
+            "asset_id": "landing-radar",
+            "asset_name": "海岸警戒雷达站",
+            "asset_type": "radar_site",
+            "lat": 31.262,
+            "lon": 121.438,
+            "alt": 0.0,
+            "protection_radius_m": 7600,
+            "criticality": 0.89,
+            "status": "protected",
+            "metadata": {
+              "role": "前沿预警与跟踪",
+              "side": "blue"
+            }
+          },
+          {
+            "asset_id": "landing-pier",
+            "asset_name": "后装保障码头",
+            "asset_type": "logistics_node",
+            "lat": 31.218,
+            "lon": 121.529,
+            "alt": 0.0,
+            "protection_radius_m": 6800,
+            "criticality": 0.84,
+            "status": "protected",
+            "metadata": {
+              "role": "补给与装卸保障",
+              "side": "blue"
+            }
+          }
+        ]
+      },
+      "detections": [
+        {
+          "detection_id": "surface-lead-1-f03",
+          "object_type": "ship",
+          "timestamp": 4036.0,
+          "lat": 31.095698,
+          "lon": 121.672566,
+          "alt": 0.0,
+          "speed": 10.5,
+          "heading": 300.0,
+          "confidence": 0.9,
+          "source_agent": "coastal-surface-radar",
+          "metadata": {
+            "source_contact_id": "surface-lead-1",
+            "source_location": "登陆通道南口",
+            "intent": "attack",
+            "label": "hostile",
+            "affiliation": "red",
+            "threat_level": "high",
+            "knowledge_ref": "ENT-surface-lead-1",
+            "knowledge_relations": [
+              {
+                "predicate": "threatens",
+                "object": "mission_area"
+              },
+              {
+                "predicate": "observed_in",
+                "object": "landing-corridor-multiframe-demo"
+              }
+            ],
+            "scenario_role": "surface_group_lead",
+            "operation_phase": "plan_handoff",
+            "simulation_only": true,
+            "sea_state": 3
+          }
+        },
+        {
+          "detection_id": "surface-wing-2-f03",
+          "object_type": "ship",
+          "timestamp": 4036.0,
+          "lat": 31.102488,
+          "lon": 121.684732,
+          "alt": 0.0,
+          "speed": 9.8,
+          "heading": 298.0,
+          "confidence": 0.88,
+          "source_agent": "coastal-surface-radar",
+          "metadata": {
+            "source_contact_id": "surface-wing-2",
+            "source_location": "登陆通道南口",
+            "intent": "attack",
+            "label": "hostile",
+            "affiliation": "red",
+            "threat_level": "high",
+            "knowledge_ref": "ENT-surface-wing-2",
+            "knowledge_relations": [
+              {
+                "predicate": "threatens",
+                "object": "mission_area"
+              },
+              {
+                "predicate": "observed_in",
+                "object": "landing-corridor-multiframe-demo"
+              }
+            ],
+            "scenario_role": "surface_group_wing",
+            "operation_phase": "plan_handoff",
+            "simulation_only": true,
+            "sea_state": 3
+          }
+        },
+        {
+          "detection_id": "corridor-uav-3-f03",
+          "object_type": "uav",
+          "timestamp": 4036.0,
+          "lat": 31.245802,
+          "lon": 121.549089,
+          "alt": 980.0,
+          "speed": 22.0,
+          "heading": 250.0,
+          "confidence": 0.81,
+          "source_agent": "passive-rf-fusion",
+          "metadata": {
+            "source_contact_id": "corridor-uav-3",
+            "source_location": "登陆通道东侧",
+            "intent": "probe",
+            "label": "hostile",
+            "affiliation": "red",
+            "threat_level": "medium",
+            "knowledge_ref": "ENT-corridor-uav-3",
+            "knowledge_relations": [
+              {
+                "predicate": "threatens",
+                "object": "mission_area"
+              },
+              {
+                "predicate": "observed_in",
+                "object": "landing-corridor-multiframe-demo"
+              }
+            ],
+            "scenario_role": "low_altitude_probe",
+            "operation_phase": "plan_handoff",
+            "simulation_only": true,
+            "track_stability": "medium"
+          }
+        }
+      ]
+    },
+    {
+      "task_id": "landing_corridor_multiframe-frame-04",
+      "message_type": "perception_result",
+      "algorithm_level": "medium",
+      "scene": {
+        "operation_name": "landing-corridor-multiframe-demo",
+        "operation_phase": "plan_review",
+        "frame_index": 4,
+        "protected_zone_lat": 31.2304,
+        "protected_zone_lon": 121.4737,
+        "protected_radius_m": 30000.0,
+        "protected_assets": [
+          {
+            "asset_id": "landing-c2",
+            "asset_name": "登陆通道指挥节点",
+            "asset_type": "command_post",
+            "lat": 31.2304,
+            "lon": 121.4737,
+            "alt": 0.0,
+            "protection_radius_m": 9000,
+            "criticality": 0.96,
+            "status": "protected",
+            "metadata": {
+              "role": "通道指挥与协同",
+              "side": "blue"
+            }
+          },
+          {
+            "asset_id": "landing-radar",
+            "asset_name": "海岸警戒雷达站",
+            "asset_type": "radar_site",
+            "lat": 31.262,
+            "lon": 121.438,
+            "alt": 0.0,
+            "protection_radius_m": 7600,
+            "criticality": 0.89,
+            "status": "protected",
+            "metadata": {
+              "role": "前沿预警与跟踪",
+              "side": "blue"
+            }
+          },
+          {
+            "asset_id": "landing-pier",
+            "asset_name": "后装保障码头",
+            "asset_type": "logistics_node",
+            "lat": 31.218,
+            "lon": 121.529,
+            "alt": 0.0,
+            "protection_radius_m": 6800,
+            "criticality": 0.84,
+            "status": "protected",
+            "metadata": {
+              "role": "补给与装卸保障",
+              "side": "blue"
+            }
+          }
+        ]
+      },
+      "detections": [
+        {
+          "detection_id": "surface-lead-1-f04",
+          "object_type": "ship",
+          "timestamp": 4048.0,
+          "lat": 31.096264,
+          "lon": 121.671421,
+          "alt": 0.0,
+          "speed": 10.5,
+          "heading": 300.0,
+          "confidence": 0.9,
+          "source_agent": "coastal-surface-radar",
+          "metadata": {
+            "source_contact_id": "surface-lead-1",
+            "source_location": "登陆通道南口",
+            "intent": "attack",
+            "label": "hostile",
+            "affiliation": "red",
+            "threat_level": "high",
+            "knowledge_ref": "ENT-surface-lead-1",
+            "knowledge_relations": [
+              {
+                "predicate": "threatens",
+                "object": "mission_area"
+              },
+              {
+                "predicate": "observed_in",
+                "object": "landing-corridor-multiframe-demo"
+              }
+            ],
+            "scenario_role": "surface_group_lead",
+            "operation_phase": "plan_review",
+            "simulation_only": true,
+            "sea_state": 3
+          }
+        },
+        {
+          "detection_id": "surface-wing-2-f04",
+          "object_type": "ship",
+          "timestamp": 4048.0,
+          "lat": 31.102984,
+          "lon": 121.683643,
+          "alt": 0.0,
+          "speed": 9.8,
+          "heading": 298.0,
+          "confidence": 0.88,
+          "source_agent": "coastal-surface-radar",
+          "metadata": {
+            "source_contact_id": "surface-wing-2",
+            "source_location": "登陆通道南口",
+            "intent": "attack",
+            "label": "hostile",
+            "affiliation": "red",
+            "threat_level": "high",
+            "knowledge_ref": "ENT-surface-wing-2",
+            "knowledge_relations": [
+              {
+                "predicate": "threatens",
+                "object": "mission_area"
+              },
+              {
+                "predicate": "observed_in",
+                "object": "landing-corridor-multiframe-demo"
+              }
+            ],
+            "scenario_role": "surface_group_wing",
+            "operation_phase": "plan_review",
+            "simulation_only": true,
+            "sea_state": 3
+          }
+        },
+        {
+          "detection_id": "corridor-uav-3-f04",
+          "object_type": "uav",
+          "timestamp": 4048.0,
+          "lat": 31.244914,
+          "lon": 121.546517,
+          "alt": 980.0,
+          "speed": 22.0,
+          "heading": 248.0,
+          "confidence": 0.81,
+          "source_agent": "passive-rf-fusion",
+          "metadata": {
+            "source_contact_id": "corridor-uav-3",
+            "source_location": "登陆通道东侧",
+            "intent": "probe",
+            "label": "hostile",
+            "affiliation": "red",
+            "threat_level": "medium",
+            "knowledge_ref": "ENT-corridor-uav-3",
+            "knowledge_relations": [
+              {
+                "predicate": "threatens",
+                "object": "mission_area"
+              },
+              {
+                "predicate": "observed_in",
+                "object": "landing-corridor-multiframe-demo"
+              }
+            ],
+            "scenario_role": "low_altitude_probe",
+            "operation_phase": "plan_review",
+            "simulation_only": true,
+            "track_stability": "medium"
+          }
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "template_id": "landing_corridor_multiframe",
+    "display_name": "登陆通道防护与突防编组压制",
+    "display_summary": "5 帧连续点迹，含 2 艘突防舰艇与 1 架低空无人机，重点演示连续航迹、保护目标影响和表面编组识别。",
+    "planning_focus": "containment",
+    "frame_count": 5,
+    "tags": [
+      "登陆通道",
+      "表面编组",
+      "低空无人机"
+    ]
+  }
+}
