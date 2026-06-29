@@ -1,0 +1,13 @@
+{
+  "title": "ONNX Text Classifier Input",
+  "type": "object",
+  "required": [
+    "text"
+  ],
+  "properties": {
+    "text": {
+      "type": "string",
+      "description": "Input text to classify."
+    }
+  }
+}

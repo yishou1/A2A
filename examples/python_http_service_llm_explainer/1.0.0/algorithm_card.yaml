@@ -1,0 +1,70 @@
+algorithm_id: llm_rule_explainer
+version: 1.0.0
+display_name: LLM Rule Explainer
+backend_type: python_http_service
+status: draft
+
+task_family: generation
+modalities:
+  input:
+    - text
+    - structured_json
+  output:
+    - structured_json
+
+capabilities:
+  - rule_explanation
+  - structured_summary
+
+agent_card:
+  summary: >
+    Generate a readable explanation from rules and structured entities.
+  when_to_use:
+    - Natural language explanation is required
+    - Structured conclusion needs extra explanation
+  when_not_to_use:
+    - Only fixed-label classification is required
+    - Millisecond-scale high-frequency inference is required
+  input_description: >
+    The request JSON must contain task_text and entities.
+  output_description: >
+    Returns explanation and confidence fields.
+  examples:
+    - input:
+        task_text: "Check whether the task follows the rule"
+        entities: []
+      output:
+        explanation: "Required fields are missing and manual review is recommended."
+        confidence: 0.82
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  runtime:
+    backend_type: python_http_service
+    endpoint: http://localhost:8080/predict
+    health_endpoint: http://localhost:8080/health
+    metadata_endpoint: http://localhost:8080/metadata
+    timeout_ms: 10000
+
+constraints:
+  max_input_chars: 20000
+  max_request_bytes: 10485760
+  batch_supported: false
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 800
+  latency_ms_p95: 1500
+  primary_metric: explanation_quality
+  primary_score: 0.87
+  time_complexity: O(n + s)
+  space_complexity: O(n + s)
+  complexity_variable: n = task_text tokens, s = serialized entity payload size
+  performance_notes: >
+    The card records end-to-end service behavior, so the practical latency also
+    includes HTTP transport and remote service queueing overhead.
+
+safety:
+  risk_level: medium
+  requires_human_review: true

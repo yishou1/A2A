@@ -1,0 +1,14 @@
+{
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "llm_rule_explainer",
+  "version": "1.0.0",
+  "inputs": {
+    "task_text": "Check whether the task follows the rule.",
+    "entities": []
+  },
+  "params": {
+    "max_tokens": 256,
+    "temperature": 0.2
+  }
+}
