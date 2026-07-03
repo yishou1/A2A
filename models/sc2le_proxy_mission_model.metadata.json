@@ -1,0 +1,98 @@
+{
+  "model_source": "sc2le_proxy",
+  "feature_version": "mission_features_v2",
+  "feature_order": [
+    "damage_rate",
+    "asset_readiness",
+    "control_timeliness",
+    "intel_confidence",
+    "threat_pressure",
+    "ammo_pressure",
+    "comm_quality"
+  ],
+  "normalization": {
+    "clip_min": 0.0,
+    "clip_max": 1.0
+  },
+  "training_ranges": {
+    "damage_rate": {
+      "min": 0.3504,
+      "max": 1.0
+    },
+    "asset_readiness": {
+      "min": 0.0,
+      "max": 1.0
+    },
+    "control_timeliness": {
+      "min": 0.0025,
+      "max": 1.0
+    },
+    "intel_confidence": {
+      "min": 0.4504,
+      "max": 1.0
+    },
+    "threat_pressure": {
+      "min": 0.35,
+      "max": 1.0
+    },
+    "ammo_pressure": {
+      "min": 0.0,
+      "max": 1.0
+    },
+    "comm_quality": {
+      "min": 0.5008,
+      "max": 1.0
+    }
+  },
+  "threshold": 0.5,
+  "split_strategy": "group_by_replay_id",
+  "split_seed": 20260412,
+  "split_counts": {
+    "replays": {
+      "train": 45076,
+      "val": 9659,
+      "test": 9660
+    },
+    "samples": {
+      "train": 90152,
+      "val": 19318,
+      "test": 19320
+    }
+  },
+  "metrics": {
+    "mae": 0.4847,
+    "r2": 0.0387,
+    "classification_accuracy": 0.5743,
+    "precision": 0.5831,
+    "recall": 0.5276,
+    "f1": 0.5539,
+    "confusion_matrix": {
+      "tp": 5107,
+      "fp": 3652,
+      "tn": 5988,
+      "fn": 4573
+    }
+  },
+  "label_leakage_check": {
+    "passed": true,
+    "win_values": {
+      "damage_rate": 0.6329,
+      "asset_readiness": 0.5,
+      "control_timeliness": 0.375,
+      "intel_confidence": 0.7063,
+      "threat_pressure": 0.6883,
+      "ammo_pressure": 0.5,
+      "comm_quality": 0.7125
+    },
+    "loss_values": {
+      "damage_rate": 0.6329,
+      "asset_readiness": 0.5,
+      "control_timeliness": 0.375,
+      "intel_confidence": 0.7063,
+      "threat_pressure": 0.6883,
+      "ammo_pressure": 0.5,
+      "comm_quality": 0.7125
+    }
+  },
+  "csv_path": "C:\\Users\\14350\\Desktop\\文档+代码\\zhangheng\\temp_study\\A2A\\data\\sc2\\processed\\sc2le_task_features.csv"
+}

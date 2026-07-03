@@ -20,6 +20,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from closed_loop_agent.mission_feature_adapter import build_features_from_sc2le_proxy, verify_sc2le_proxy_no_result_leakage
+
 OUTPUT_COLUMNS = [
     "replay_id",
     "player_id",
@@ -28,6 +30,7 @@ OUTPUT_COLUMNS = [
     "duration_sec",
     "mmr",
     "apm",
+    "opponent_mmr",
     "result",
     "race",
     "damage_rate",
@@ -39,43 +42,6 @@ OUTPUT_COLUMNS = [
     "comm_quality",
     "task_completion",
 ]
-
-
-def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
-    return max(low, min(high, float(value)))
-
-
-def _result_to_completion(result: str) -> float:
-    normalized = str(result or "").strip().lower()
-    if normalized in {"win", "victory"}:
-        return 1.0
-    if normalized in {"loss", "defeat"}:
-        return 0.0
-    if normalized in {"tie", "draw", "undecided"}:
-        return 0.5
-    return 0.5
-
-
-def _features_from_player(player: dict, *, duration_sec: float, opponent_mmr: float) -> dict:
-    mmr = float(player.get("MMR") or 3000.0)
-    apm = float(player.get("APM") or 120.0)
-    completion = _result_to_completion(player.get("Result"))
-    mmr_norm = _clamp(mmr / 6000.0)
-    apm_norm = _clamp(apm / 400.0)
-    duration_norm = _clamp(duration_sec / 1800.0)
-    opponent_norm = _clamp(opponent_mmr / 6000.0)
-    relative_mmr = _clamp((mmr - opponent_mmr + 1500.0) / 3000.0)
-
-    return {
-        "damage_rate": round(_clamp(0.25 + 0.55 * completion + 0.20 * relative_mmr), 4),
-        "asset_readiness": round(mmr_norm, 4),
-        "control_timeliness": round(apm_norm, 4),
-        "intel_confidence": round(_clamp(0.45 + 0.40 * mmr_norm + 0.15 * apm_norm), 4),
-        "threat_pressure": round(_clamp(0.35 + 0.40 * opponent_norm + 0.25 * duration_norm), 4),
-        "ammo_pressure": round(duration_norm, 4),
-        "comm_quality": round(_clamp(0.50 + 0.30 * apm_norm + 0.20 * mmr_norm), 4),
-        "task_completion": round(completion, 4),
-    }
 
 
 def _parse_replay_metadata(replay_path: Path) -> list[dict]:
@@ -92,10 +58,12 @@ def _parse_replay_metadata(replay_path: Path) -> list[dict]:
 
     for index, player in enumerate(players):
         opponent_mmr = mmrs[1 - index] if len(mmrs) > 1 else mmrs[0]
-        feature_values = _features_from_player(
-            player,
+        bundle = build_features_from_sc2le_proxy(
+            mmr=float(player.get("MMR") or 3000.0),
+            apm=float(player.get("APM") or 120.0),
             duration_sec=duration_sec,
             opponent_mmr=opponent_mmr,
+            result=str(player.get("Result") or ""),
         )
         rows.append(
             {
@@ -106,9 +74,11 @@ def _parse_replay_metadata(replay_path: Path) -> list[dict]:
                 "duration_sec": round(duration_sec, 3),
                 "mmr": round(float(player.get("MMR") or 0.0), 3),
                 "apm": round(float(player.get("APM") or 0.0), 3),
+                "opponent_mmr": round(float(opponent_mmr), 3),
                 "result": str(player.get("Result") or ""),
                 "race": str(player.get("SelectedRace") or player.get("AssignedRace") or ""),
-                **feature_values,
+                **bundle["values"],
+                "task_completion": bundle["label"]["task_completion"],
             }
         )
     return rows
@@ -140,6 +110,12 @@ def extract_features(
         writer.writeheader()
         writer.writerows(rows)
 
+    leakage = verify_sc2le_proxy_no_result_leakage(
+        mmr=3200.0,
+        apm=180.0,
+        duration_sec=900.0,
+        opponent_mmr=3000.0,
+    )
     report = {
         "replay_root": str(replay_root),
         "output_csv": str(output_csv),
@@ -147,9 +123,12 @@ def extract_features(
         "feature_rows_written": len(rows),
         "failed_replays": failed,
         "feature_columns": OUTPUT_COLUMNS,
+        "feature_version": "mission_features_v2",
+        "label_leakage_check": {"passed": bool(leakage.get("passed"))},
         "notes": (
-            "Features are derived from replay.gamemetadata.json (MMR, APM, Result, Duration). "
-            "task_completion uses Win=1.0 / Loss=0.0. Other columns are normalized proxy features."
+            "Features are derived from replay.gamemetadata.json (MMR, APM, Duration, opponent MMR). "
+            "damage_rate is proxy_damage_rate and does NOT use Result/completion. "
+            "task_completion uses Win=1.0 / Loss=0.0 as label only."
         ),
     }
     if report_json is not None:

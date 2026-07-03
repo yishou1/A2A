@@ -1,0 +1,42 @@
+{
+  "feature_version": "mission_features_v2",
+  "label_leakage_check": {
+    "passed": true
+  },
+  "split_strategy": "group_by_replay_id",
+  "model_source": "sc2le_proxy",
+  "metrics": {
+    "mae": 0.4847,
+    "r2": 0.0387,
+    "classification_accuracy": 0.5743,
+    "precision": 0.5831,
+    "recall": 0.5276,
+    "f1": 0.5539,
+    "confusion_matrix": {
+      "tp": 5107,
+      "fp": 3652,
+      "tn": 5988,
+      "fn": 4573
+    }
+  },
+  "online_agent_adapter": {
+    "passed": true
+  },
+  "split_counts": {
+    "replays": {
+      "train": 45076,
+      "val": 9659,
+      "test": 9660
+    },
+    "samples": {
+      "train": 90152,
+      "val": 19318,
+      "test": 19320
+    }
+  },
+  "model_files": {
+    "model": "C:\\Users\\14350\\Desktop\\文档+代码\\zhangheng\\temp_study\\A2A\\models\\sc2le_proxy_mission_model.pkl",
+    "metadata": "C:\\Users\\14350\\Desktop\\文档+代码\\zhangheng\\temp_study\\A2A\\models\\sc2le_proxy_mission_model.metadata.json"
+  },
+  "notes": "Proxy SC2LE model trained without Result/completion in input features. Online Agent assessment requires real standardized results in strict mode."
+}

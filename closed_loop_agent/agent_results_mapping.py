@@ -4,18 +4,11 @@ from __future__ import annotations
 import json
 from typing import Any, List, Optional, Sequence
 
-CONTROL_LATENCY_SLA_MS = 2000.0
-DEFAULT_COMM_QUALITY = 0.88
+from closed_loop_agent.mission_feature_schema import FEATURE_ORDER, LATENCY_REFERENCE_MS
 
-MISSION_FEATURE_NAMES = (
-    "damage_rate",
-    "asset_readiness",
-    "control_timeliness",
-    "intel_confidence",
-    "threat_pressure",
-    "ammo_pressure",
-    "comm_quality",
-)
+MISSION_FEATURE_NAMES = tuple(FEATURE_ORDER)
+DEFAULT_COMM_QUALITY = 0.88
+CONTROL_LATENCY_SLA_MS = LATENCY_REFERENCE_MS
 
 
 def _safe_dict(value: Any) -> dict:
@@ -169,49 +162,19 @@ def mission_vector_from_results(
     damage_probs: Optional[Sequence[float]] = None,
     targets: Optional[Sequence[dict]] = None,
     control_latency_sla_ms: float = CONTROL_LATENCY_SLA_MS,
+    mode: str = "hybrid",
 ) -> List[float]:
-    """Build the 7-d mission vector in RF column order."""
-    results = _safe_dict(results)
-    target_list = [_safe_dict(item) for item in (targets or [])]
+    """Build the 7-d mission vector in schema order."""
+    from closed_loop_agent.mission_feature_adapter import build_features_from_agent_results, legacy_mission_vector_from_bundle
 
-    if damage_probs is not None:
-        damage_rate = damage_rate_from_results(results, damage_probs=damage_probs)
-    elif target_list:
-        damage_rate = _clamp(_mean([float(item.get("damage_probability", 0.0)) for item in target_list]))
-    else:
-        damage_rate = damage_rate_from_results(results)
-
-    if target_list:
-        asset_readiness = _clamp(0.92 - 0.18 * _mean([float(item.get("ammo_need", 0.5)) for item in target_list]))
-        intel_confidence = _clamp(_mean([float(item.get("detection_confidence", 0.7)) for item in target_list]))
-        threat_pressure = _clamp(
-            _mean(
-                [
-                    float(item.get("threat_score", 0.5)) * (1.0 - float(item.get("damage_probability", 0.0)))
-                    for item in target_list
-                ]
-            )
-        )
-        ammo_pressure = _clamp(_mean([float(item.get("ammo_need", 0.5)) for item in target_list]))
-    else:
-        asset_readiness = asset_readiness_from_results(results)
-        intel_confidence = intel_confidence_from_results(results)
-        threat_pressure = threat_pressure_from_results(results)
-        ammo_pressure = ammo_pressure_from_results(results)
-
-    latency_ms = control_latency_ms_from_results(results)
-    control_timeliness = _clamp(1.0 - latency_ms / max(1.0, float(control_latency_sla_ms)))
-    comm_quality = comm_quality_from_results(results)
-
-    return [
-        round(damage_rate, 4),
-        round(asset_readiness, 4),
-        round(control_timeliness, 4),
-        round(intel_confidence, 4),
-        round(threat_pressure, 4),
-        round(ammo_pressure, 4),
-        round(comm_quality, 4),
-    ]
+    bundle = build_features_from_agent_results(
+        results,
+        damage_probs=damage_probs,
+        targets=targets,
+        mode=mode,
+        latency_reference_ms=control_latency_sla_ms,
+    )
+    return legacy_mission_vector_from_bundle(bundle)
 
 
 def _latest_collection_entry(context: dict, key: str):
