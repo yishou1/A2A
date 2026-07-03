@@ -208,7 +208,15 @@ class CommanderAgent:
             return self._delegate_task_with_lease(role_needed, task_payload, stream=stream)
 
         # Compatibility path for registries without lease support.
-        instances = self.registry.discover_service("A2A-Agent", {"role": role_needed, "status": "idle"})
+        required_skill = self._required_skill_from_payload(role_needed, task_payload)
+        if required_skill:
+            instances = self.registry.discover_service("A2A-Agent", {"status": "idle"})
+            instances = AgentLeaseManager._filter_by_skill(
+                instances,
+                required_skill,
+            )
+        else:
+            instances = self.registry.discover_service("A2A-Agent", {"role": role_needed, "status": "idle"})
         if not instances:
             print(f"[ERROR] No available agents found for role {role_needed}. Replanning needed!")
             return False
@@ -253,7 +261,15 @@ class CommanderAgent:
         if self.lease_manager:
             return self._delegate_parallel_task_with_lease(role_needed, task_payload, stream=stream)
 
-        instances = self.registry.discover_service("A2A-Agent", {"role": role_needed, "status": "idle"})
+        required_skill = self._required_skill_from_payload(role_needed, task_payload)
+        if required_skill:
+            instances = self.registry.discover_service("A2A-Agent", {"status": "idle"})
+            instances = AgentLeaseManager._filter_by_skill(
+                instances,
+                required_skill,
+            )
+        else:
+            instances = self.registry.discover_service("A2A-Agent", {"role": role_needed, "status": "idle"})
         if not instances:
             print(f"[ERROR] No available agents found for parallel role {role_needed}.")
             return False
@@ -304,6 +320,8 @@ class CommanderAgent:
 
     def _delegate_task_with_lease(self, role_needed: str, task_payload: dict, stream: bool = False):
         work_item = task_payload.get("work_item", f"{self.workflow_id}:{role_needed}")
+        required_skill = self._required_skill_from_payload(role_needed, task_payload)
+        required_skills = self._required_skills_from_payload(role_needed, task_payload)
         attempted_keys = set()
         last_error = None
         while True:
@@ -312,6 +330,8 @@ class CommanderAgent:
                 self.workflow_id,
                 work_item,
                 exclude_keys=attempted_keys,
+                required_skill=required_skill,
+                required_skills=required_skills,
             )
             if lease is None:
                 if last_error is None:
@@ -323,7 +343,7 @@ class CommanderAgent:
             target = lease.target
             attempted_keys.add(lease.instance_key)
             label = self._candidate_label(target)
-            print(f"[LEASE] {self.workflow_id} acquired {role_needed} at {label}")
+            print(f"[LEASE] {self.workflow_id} acquired {role_needed} skill={required_skill} at {label}")
             success, error = self._delegate_leased_candidate(
                 lease,
                 role_needed,
@@ -347,12 +367,20 @@ class CommanderAgent:
 
     def _delegate_parallel_task_with_lease(self, role_needed: str, task_payload: dict, stream: bool = False):
         work_item = task_payload.get("work_item", f"{self.workflow_id}:{role_needed}")
-        leases = self.lease_manager.acquire_all(role_needed, self.workflow_id, work_item)
+        required_skill = self._required_skill_from_payload(role_needed, task_payload)
+        required_skills = self._required_skills_from_payload(role_needed, task_payload)
+        leases = self.lease_manager.acquire_all(
+            role_needed,
+            self.workflow_id,
+            work_item,
+            required_skill=required_skill,
+            required_skills=required_skills,
+        )
         if not leases:
             print(f"[ERROR] No available agents found for parallel role {role_needed}.")
             return False
 
-        print(f"[PARALLEL] Dispatching {len(leases)} leased {role_needed} instance(s).")
+        print(f"[PARALLEL] Dispatching {len(leases)} leased {role_needed} skill={required_skill} instance(s).")
         with ThreadPoolExecutor(
             max_workers=min(self.max_agent_workers, len(leases)),
             thread_name_prefix=f"a2a-{role_needed}",
@@ -519,6 +547,34 @@ class CommanderAgent:
             print(f"[LEASE] Released {lease.role} at {lease.instance_key}; {state_label}")
         except Exception as exc:
             print(f"[WARN] Failed to mirror lease release for {lease.instance_key}: {exc}")
+
+    @staticmethod
+    def _required_skill_from_payload(role_needed: str, task_payload: dict) -> str:
+        explicit_skills = CommanderAgent._split_skill_values(task_payload.get("required_skills"))
+        return (
+            task_payload.get("required_skill")
+            or task_payload.get("skill")
+            or task_payload.get("capability")
+            or (explicit_skills[0] if explicit_skills else None)
+            or task_payload.get("command")
+        )
+
+    @staticmethod
+    def _required_skills_from_payload(role_needed: str, task_payload: dict) -> list[str]:
+        raw = task_payload.get("required_skills") or task_payload.get("skills") or task_payload.get("capabilities")
+        skills = CommanderAgent._split_skill_values(raw)
+        primary = CommanderAgent._required_skill_from_payload(role_needed, task_payload)
+        if primary and primary not in skills:
+            skills.insert(0, primary)
+        return skills
+
+    @staticmethod
+    def _split_skill_values(raw) -> list[str]:
+        if not raw:
+            return []
+        if isinstance(raw, str):
+            return [part.strip() for part in re.split(r"[,;\s]+", raw) if part.strip()]
+        return [str(skill) for skill in raw if skill]
 
     @staticmethod
     def _candidate_label(target: dict):
@@ -1102,6 +1158,8 @@ class CommanderAgent:
                 "activatity_index": activatity_index,
                 "activatity_role": role,
                 "command": "scan_beach_defenses",
+                "required_skill": "scan_beach_defenses",
+                "required_skills": ["scan_beach_defenses"],
                 "input": {
                     "sector": context["sector"],
                 },
@@ -1121,6 +1179,8 @@ class CommanderAgent:
                 "activatity_index": activatity_index,
                 "activatity_role": role,
                 "command": "suppress_beach_sector_A",
+                "required_skill": "suppress_beach_sector_A",
+                "required_skills": ["suppress_beach_sector_A"],
                 "input": {
                     "coordinates": context["coordinates"],
                     "intensity": "high",
@@ -1142,6 +1202,8 @@ class CommanderAgent:
                 "activatity_index": activatity_index,
                 "activatity_role": role,
                 "command": "evaluate_strike",
+                "required_skill": "evaluate_strike",
+                "required_skills": ["evaluate_strike"],
                 "input": {
                     "target_coordinates": context["coordinates"],
                     "recon_report": self._context_entries(context, "recon_report"),
@@ -1164,6 +1226,8 @@ class CommanderAgent:
                 "activatity_index": activatity_index,
                 "activatity_role": role,
                 "command": "capture_beachhead",
+                "required_skill": "capture_beachhead",
+                "required_skills": ["capture_beachhead"],
                 "input": {
                     "coordinates": context["coordinates"],
                     "recon_report": self._context_entries(context, "recon_report"),
@@ -1359,6 +1423,24 @@ class CommanderAgent:
                 duration_ms=duration_ms,
             )
             context["battle_log"].append(f"[Assault Report] {output_value}")
+        else:
+            target_key = output_key or self._default_output_key_for_role(role) or "result"
+            output_value = output.get(target_key)
+            if output_value is None:
+                output_value = self._first_output_value(output)
+            self._append_output_collection(
+                context,
+                target_key,
+                output_value,
+                activity_id=activity_id,
+                work_item=work_item,
+                role=role,
+                output=output,
+                status=response_status,
+                error=response_error,
+                duration_ms=duration_ms,
+            )
+            context["battle_log"].append(f"[{role} Result] {output_value}")
 
         if role not in context["completed_roles"]:
             context["completed_roles"].append(role)
@@ -1490,21 +1572,23 @@ class CommanderAgent:
                 "activity_index": item["activatity_index"],
                 "work_item": item["work_item"],
                 "type": activatity.type,
-                "role": activatity.role,
+                "role": self._activity_dispatch_key(activatity),
+                "required_skill": activatity.required_skill,
+                "required_skills": list(activatity.required_skills),
                 "status": status,
             }
             context["current_activatity"] = current_activatity
             context["current_activity"] = current_activatity
             if activatity.type == "invoke":
                 context["last_work_item"] = item["work_item"]
-                context["last_role"] = activatity.role
+                context["last_role"] = self._activity_dispatch_key(activatity)
             append_trace(
                 context,
                 "activity_status_changed",
                 workflow_id=self.workflow_id,
                 activity_id=activatity.activatity_id,
                 work_item=item["work_item"],
-                role=activatity.role,
+                role=self._activity_dispatch_key(activatity),
                 activity_type=activatity.type,
                 status=status,
                 error=error,
@@ -1514,7 +1598,7 @@ class CommanderAgent:
                 workflow_id=self.workflow_id,
                 activity_id=activatity.activatity_id,
                 work_item=item["work_item"],
-                role=activatity.role,
+                role=self._activity_dispatch_key(activatity),
                 activity_type=activatity.type,
                 status=status,
                 error=error,
@@ -2024,7 +2108,8 @@ class CommanderAgent:
             input_payload = {}
             if input_key:
                 input_payload[input_key] = self._context_input_value(context, input_key, activatity.input_variable)
-            if activatity.role == "evaluator":
+            dispatch_key = self._activity_dispatch_key(activatity)
+            if dispatch_key == "evaluator" or activatity.required_skill == "evaluate_strike":
                 input_payload["mock_eval_score"] = self.mock_eval_score if self.mock_eval_score is not None else 40
 
             return {
@@ -2035,8 +2120,10 @@ class CommanderAgent:
                 "parent_work_item": parent_item.get("work_item") if parent_item else None,
                 "activatity_id": activatity.activatity_id,
                 "activatity_index": item["activatity_index"],
-                "activatity_role": activatity.role,
+                "activatity_role": dispatch_key,
                 "command": activatity.command,
+                "required_skill": activatity.required_skill or activatity.command,
+                "required_skills": list(activatity.required_skills),
                 "input": input_payload,
                 "context": self._context_snapshot(context),
                 "attachments": attachment_snapshot(context.get("attachments", [])),
@@ -2047,7 +2134,7 @@ class CommanderAgent:
                     "timeout_seconds": activatity.timeout_seconds or self.request_timeout,
                     "failure_policy": activatity.failure_policy,
                 },
-            }, activatity.role == "artillery"
+            }, dispatch_key == "artillery" or activatity.required_skill == "suppress_beach_sector_A"
 
     def _evaluate_bpel_condition(self, condition: str | None, context: dict):
         if not condition:
@@ -2074,6 +2161,10 @@ class CommanderAgent:
             "!=": actual != expected,
         }[match.group("operator")]
 
+    @staticmethod
+    def _activity_dispatch_key(activatity: BPELActivatity) -> str | None:
+        return activatity.required_skill or activatity.command
+
     def _execute_bpel_invoke(self, activatity: BPELActivatity, context: dict):
         if activatity.role == "commander":
             decision = self.ask_llm(context["battle_log"])
@@ -2092,19 +2183,20 @@ class CommanderAgent:
                 context["battle_log"].append(f"[Commander Decision] {decision}")
             return True
 
-        if not activatity.role:
-            raise ValueError(f"No role mapping for partnerLink={activatity.partner_link}")
+        dispatch_key = self._activity_dispatch_key(activatity)
+        if not dispatch_key:
+            raise ValueError(f"No role or requiredSkill mapping for invoke={activatity.name}")
 
         payload, stream = self._build_bpel_task_payload(activatity, context)
         if activatity.dispatch_mode == "parallel":
-            success = self.delegate_parallel_task(activatity.role, payload, stream=stream)
+            success = self.delegate_parallel_task(dispatch_key, payload, stream=stream)
         else:
-            success = self.delegate_task(activatity.role, payload, stream=stream)
+            success = self.delegate_task(dispatch_key, payload, stream=stream)
         with self._checkpoint_lock:
             output_key = self._context_key_for_bpel_variable(activatity.output_variable)
             collection_key = self._output_collection_key_for_activity(activatity.activatity_id)
             self.apply_agent_result(
-                activatity.role,
+                dispatch_key,
                 success,
                 context,
                 work_item=payload.get("work_item"),
