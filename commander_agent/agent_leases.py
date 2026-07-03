@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import threading
 from dataclasses import asdict, dataclass
+import json
+import re
 from typing import Iterable, Optional
 
 from commander_agent.distributed_lock import DistributedLockHandle
@@ -55,10 +57,16 @@ class AgentLeaseManager:
         workflow_id: str,
         work_item: str,
         exclude_keys: Optional[Iterable[str]] = None,
+        required_skill: Optional[str] = None,
+        required_skills: Optional[Iterable[str]] = None,
     ) -> Optional[AgentLease]:
         with self._lock:
             excluded = set(exclude_keys or [])
-            for target in self._discover_idle(role):
+            for target in self._discover_idle(
+                role,
+                required_skill=required_skill,
+                required_skills=required_skills,
+            ):
                 key = self.instance_key(target)
                 if (
                     key in excluded
@@ -76,10 +84,16 @@ class AgentLeaseManager:
         workflow_id: str,
         work_item: str,
         limit: Optional[int] = None,
+        required_skill: Optional[str] = None,
+        required_skills: Optional[Iterable[str]] = None,
     ) -> list[AgentLease]:
         leases = []
         with self._lock:
-            for target in self._discover_idle(role):
+            for target in self._discover_idle(
+                role,
+                required_skill=required_skill,
+                required_skills=required_skills,
+            ):
                 key = self.instance_key(target)
                 if key in self._leases:
                     continue
@@ -190,20 +204,39 @@ class AgentLeaseManager:
         if self.distributed_lock is not None:
             self.distributed_lock.close()
 
-    def _discover_idle(self, role: str) -> list[dict]:
-        idle = self.registry.discover_service(
-            self.service_name,
-            {"role": role, "status": "idle"},
-        )
+    def _discover_idle(
+        self,
+        role: str,
+        required_skill: Optional[str] = None,
+        required_skills: Optional[Iterable[str]] = None,
+    ) -> list[dict]:
+        skill_requirements = self._skill_requirements(required_skill, required_skills)
+        tags = {"status": "idle"} if skill_requirements else {"role": role, "status": "idle"}
+        idle = self.registry.discover_service(self.service_name, tags)
+        if skill_requirements:
+            idle = self._filter_by_skill(idle, skill_requirements)
         if self.distributed_lock is not None:
-            idle.extend(self._recover_stale_busy_instances(role))
+            idle.extend(
+                self._recover_stale_busy_instances(
+                    role,
+                    required_skill=required_skill,
+                    required_skills=skill_requirements,
+                )
+            )
         if self.circuit_breaker is None:
             return idle
 
+        unavailable_tags = (
+            {"status": "unavailable"}
+            if skill_requirements
+            else {"role": role, "status": "unavailable"}
+        )
         unavailable = self.registry.discover_service(
             self.service_name,
-            {"role": role, "status": "unavailable"},
+            unavailable_tags,
         )
+        if skill_requirements:
+            unavailable = self._filter_by_skill(unavailable, skill_requirements)
         candidates = []
         seen = set()
         for target in [*idle, *unavailable]:
@@ -214,12 +247,21 @@ class AgentLeaseManager:
             candidates.append(target)
         return candidates
 
-    def _recover_stale_busy_instances(self, role: str) -> list[dict]:
+    def _recover_stale_busy_instances(
+        self,
+        role: str,
+        required_skill: Optional[str] = None,
+        required_skills: Optional[Iterable[str]] = None,
+    ) -> list[dict]:
         recovered = []
+        skill_requirements = self._skill_requirements(required_skill, required_skills)
+        tags = {"status": "busy"} if skill_requirements else {"role": role, "status": "busy"}
         busy_instances = self.registry.discover_service(
             self.service_name,
-            {"role": role, "status": "busy"},
+            tags,
         )
+        if skill_requirements:
+            busy_instances = self._filter_by_skill(busy_instances, skill_requirements)
         for target in busy_instances:
             metadata = target.get("metadata", {}) or {}
             lock_key = metadata.get("lease_lock_key")
@@ -245,6 +287,92 @@ class AgentLeaseManager:
             )
             recovered.append(target)
         return recovered
+
+    @classmethod
+    def _filter_by_skill(
+        cls,
+        instances: list[dict],
+        required_skills,
+    ) -> list[dict]:
+        requirements = cls._skill_requirements(None, required_skills)
+        return [
+            instance
+            for instance in instances
+            if cls._instance_has_skills(instance, requirements)
+        ]
+
+    @classmethod
+    def _instance_has_skill(cls, instance: dict, required_skill: str) -> bool:
+        required = cls._normalize_token(required_skill)
+        if not required:
+            return False
+        metadata = instance.get("metadata", {}) or {}
+        for token in cls._skill_tokens_from_metadata(metadata):
+            normalized = cls._normalize_token(token)
+            if normalized and (normalized == required or required in normalized):
+                return True
+        return False
+
+    @classmethod
+    def _instance_has_skills(cls, instance: dict, required_skills: Iterable[str]) -> bool:
+        requirements = cls._skill_requirements(None, required_skills)
+        if not requirements:
+            return False
+        return all(cls._instance_has_skill(instance, skill) for skill in requirements)
+
+    @classmethod
+    def _skill_tokens_from_metadata(cls, metadata: dict) -> list[str]:
+        raw_values = []
+        for key in ("skills", "skill", "capabilities", "capability"):
+            value = metadata.get(key)
+            if value:
+                raw_values.append(value)
+
+        tokens = []
+        for value in raw_values:
+            if isinstance(value, (list, tuple, set)):
+                tokens.extend(str(item) for item in value)
+                continue
+            text = str(value)
+            try:
+                parsed = json.loads(text)
+            except (TypeError, ValueError):
+                parsed = None
+            if isinstance(parsed, list):
+                for item in parsed:
+                    if isinstance(item, dict):
+                        tokens.extend(
+                            str(part)
+                            for part in [
+                                item.get("id"),
+                                item.get("name"),
+                                item.get("description"),
+                                *(item.get("tags") or []),
+                            ]
+                            if part
+                        )
+                    else:
+                        tokens.append(str(item))
+                continue
+            tokens.extend(part for part in re.split(r"[,;\s]+", text) if part)
+        return tokens
+
+    @staticmethod
+    def _normalize_token(value: str) -> str:
+        return re.sub(r"[\s_\-]+", "", str(value or "").strip().lower())
+
+    @staticmethod
+    def _skill_requirements(
+        required_skill: Optional[str],
+        required_skills: Optional[Iterable[str]],
+    ) -> list[str]:
+        if isinstance(required_skills, str):
+            values = [part.strip() for part in re.split(r"[,;\s]+", required_skills) if part.strip()]
+        else:
+            values = [str(skill) for skill in (required_skills or []) if skill]
+        if required_skill and required_skill not in values:
+            values.insert(0, required_skill)
+        return values
 
     def _circuit_allows(self, target: dict) -> bool:
         if self.circuit_breaker is None:

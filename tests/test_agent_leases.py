@@ -100,6 +100,42 @@ class AgentLeaseManagerTest(unittest.TestCase):
         )
         self.assertNotIn("lease_workflow_id", acquired.target["metadata"])
 
+    def test_acquire_matches_required_skill_without_role_fallback(self):
+        registry = FakeRegistry()
+        registry.instances = [
+            {
+                "ip": "10.0.0.10",
+                "port": 8012,
+                "metadata": {"role": "generalist", "status": "idle", "skills": "scan_beach_defenses,探测"},
+            },
+            {
+                "ip": "10.0.0.20",
+                "port": 8012,
+                "metadata": {"role": "recon", "status": "idle"},
+            },
+        ]
+        leases = AgentLeaseManager(registry)
+
+        acquired = leases.acquire_one(
+            "recon",
+            "wf-skill",
+            "wf-skill:scan",
+            required_skill="scan_beach_defenses",
+        )
+
+        self.assertEqual(acquired.instance_key, "10.0.0.10:8012")
+
+        leases.release(acquired)
+        registry.instances[0]["metadata"]["status"] = "busy"
+        no_skill_match = leases.acquire_one(
+            "recon",
+            "wf-no-skill",
+            "wf-no-skill:scan",
+            required_skill="scan_beach_defenses",
+        )
+
+        self.assertIsNone(no_skill_match)
+
 
 if __name__ == "__main__":
     unittest.main()

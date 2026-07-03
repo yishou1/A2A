@@ -25,6 +25,8 @@ class BPELWorkflowTest(unittest.TestCase):
         self.assertTrue(any(item["role"] == "artillery" for item in work_list))
         artillery = next(item for item in work_list if item["role"] == "artillery")
         self.assertEqual(artillery["dispatch_mode"], "parallel")
+        self.assertEqual(artillery["required_skill"], "suppress_beach_sector_A")
+        self.assertIn("suppress_beach_sector_A", artillery["required_skills"])
         self.assertTrue(all("work_item" in item for item in work_list))
         self.assertTrue(all("activatity_id" in item for item in work_list))
 
@@ -87,6 +89,92 @@ class BPELWorkflowTest(unittest.TestCase):
             )
             self.assertNotIn("workflow_step", context)
             self.assertNotIn("last_task_id", context)
+
+    def test_bpel_required_skill_is_passed_to_task_payload(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            commander = CommanderAgent(
+                mode="local",
+                workflow="bpel",
+                workflow_file="beachhead_workflow",
+                state_dir=temp_dir,
+            )
+            definition = commander.bpel_definition
+            recon_activity = next(
+                activity
+                for activity in definition.activatities
+                if activity.role == "recon"
+            )
+
+            payload, _ = commander._build_bpel_task_payload(
+                recon_activity,
+                commander.workflow_context,
+            )
+
+            self.assertEqual(payload["required_skill"], "scan_beach_defenses")
+            self.assertEqual(payload["required_skills"], ["scan_beach_defenses"])
+
+    def test_skill_only_bpel_can_orchestrate_without_partner_link_role(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bpel_path = Path(temp_dir) / "skill_only.bpel"
+            bpel_path.write_text(
+                """
+<process name="SkillOnlyWorkflow" targetNamespace="http://a2a.test/workflow">
+  <variables>
+    <variable name="ReconReport" type="String"/>
+  </variables>
+  <sequence>
+    <invoke name="SkillOnlyRecon"
+            requiredSkill="scan_beach_defenses"
+            operation="scanBeachDefenses"
+            inputVariable="Sector_A"
+            outputVariable="ReconReport"/>
+  </sequence>
+</process>
+""",
+                encoding="utf-8",
+            )
+            commander = CommanderAgent(
+                mode="local",
+                workflow="bpel",
+                workflow_file=str(bpel_path),
+                state_dir=temp_dir,
+            )
+            calls = []
+
+            def fake_delegate(dispatch_key, payload, stream=False):
+                calls.append(
+                    (
+                        dispatch_key,
+                        payload["required_skill"],
+                        payload["required_skills"],
+                    )
+                )
+                commander._remember_task_response(
+                    payload["work_item"],
+                    {
+                        "status": "completed",
+                        "output": {"recon_report": "skill-only recon ok"},
+                    },
+                    role=dispatch_key,
+                    target="test",
+                )
+                return True
+
+            commander.delegate_task = fake_delegate
+            context = commander.run_bpel_workflow()
+
+            self.assertEqual(
+                calls,
+                [
+                    (
+                        "scan_beach_defenses",
+                        "scan_beach_defenses",
+                        ["scan_beach_defenses"],
+                    )
+                ],
+            )
+            self.assertEqual(context["workflow_status"], "completed")
+            self.assertEqual(context["recon_report"][0]["value"], "skill-only recon ok")
 
     def test_parallel_dispatch_targets_same_role_instances_concurrently(self):
         with tempfile.TemporaryDirectory() as temp_dir:
