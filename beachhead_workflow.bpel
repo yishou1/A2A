@@ -1,62 +1,72 @@
-<process name="BeachheadAssaultWorkflow" targetNamespace="http://a2a.military.simulation/workflow">
-    
-    <variables>
-        <variable name="ReconReport" type="String"/>
-        <variable name="ExecutionControlStrikeResult" type="String"/>
-        <variable name="StrikeCoordinates" type="String"/>
-        <variable name="StrikeResult" type="String"/>
-        <variable name="EvalScore" type="Integer"/>
-        <variable name="CommanderDecision" type="String"/>
-        <variable name="ExecutionControlAssaultResult" type="String"/>
-        <variable name="AssaultResult" type="String"/>
-        <variable name="ClosedLoopResult" type="String"/>
-    </variables>
-
-    <sequence>
-        
-        <invoke partnerLink="ReconAgent" operation="scanBeachDefenses"
-                inputVariable="Sector_A" outputVariable="ReconReport"/>
-
-        <invoke partnerLink="ExecutionControlAgent" operation="planStrikeControl"
-                inputVariable="ReconReport" outputVariable="ExecutionControlStrikeResult"/>
-
-        <assign>
-            <copy>
-                <from>120.5E, 35.1N</from>
-                <to variable="StrikeCoordinates"/>
-            </copy>
-        </assign>
-        <invoke partnerLink="ArtilleryAgent" operation="suppressBeachSector"
-                inputVariable="ExecutionControlStrikeResult" outputVariable="StrikeResult"/>
-        
-        <invoke partnerLink="EvaluatorAgent" operation="evaluateStrike" 
-                inputVariable="StrikeCoordinates" outputVariable="EvalScore"/>
-
-        <switch>
-            <case condition="bpws:getVariableData('EvalScore') &lt; 60">
-                <sequence>
-                    <invoke partnerLink="LLMCommanderAgent" operation="analyzeAndReplanning" 
-                            inputVariable="ReconReport" outputVariable="CommanderDecision"/>
-                    <throw faultName="InsufficientSuppressionFault"/>
-                </sequence>
-            </case>
-            
-            <otherwise>
-                <sequence>
-                    <invoke partnerLink="LLMCommanderAgent" operation="analyzeAndReplanning"
-                            inputVariable="EvalScore" outputVariable="CommanderDecision"/>
-
-                    <invoke partnerLink="ExecutionControlAgent" operation="planAssaultControl"
-                            inputVariable="CommanderDecision" outputVariable="ExecutionControlAssaultResult"/>
-
-                    <invoke partnerLink="AssaultAgent" operation="captureBeachhead"
-                            inputVariable="ExecutionControlAssaultResult" outputVariable="AssaultResult"/>
-
-                    <invoke partnerLink="ClosedLoopAgent" operation="closedLoopOptimization"
-                            inputVariable="AssaultResult" outputVariable="ClosedLoopResult"/>
-                </sequence>
-            </otherwise>
-        </switch>
-        
-    </sequence>
-</process>
+<process name="BeachheadAssaultWorkflow" targetNamespace="http://a2a.military.simulation/workflow">
+    
+    <variables>
+        <variable name="ReconReport" type="String"/>
+        <variable name="ExecutionControlStrikeResult" type="String"/>
+        <variable name="StrikeCoordinates" type="String"/>
+        <variable name="StrikeResult" type="String"/>
+        <variable name="EvalScore" type="Integer"/>
+        <variable name="CommanderDecision" type="String"/>
+        <variable name="ExecutionControlAssaultResult" type="String"/>
+        <variable name="AssaultResult" type="String"/>
+        <variable name="ClosedLoopResult" type="String"/>
+    </variables>
+
+    <sequence>
+        
+        <invoke partnerLink="ReconAgent" operation="scanBeachDefenses"
+                requiredSkill="scan_beach_defenses"
+                inputVariable="Sector_A" outputVariable="ReconReport"/>
+
+        <invoke partnerLink="ExecutionControlAgent" operation="planStrikeControl"
+                requiredSkill="plan_strike_control"
+                inputVariable="ReconReport" outputVariable="ExecutionControlStrikeResult"/>
+
+        <assign>
+            <copy>
+                <from>120.5E, 35.1N</from>
+                <to variable="StrikeCoordinates"/>
+            </copy>
+        </assign>
+        <invoke partnerLink="ArtilleryAgent" operation="suppressBeachSector"
+                requiredSkill="suppress_beach_sector_A"
+                inputVariable="ExecutionControlStrikeResult" outputVariable="StrikeResult"/>
+        
+        <invoke partnerLink="EvaluatorAgent" operation="evaluateStrike"
+                requiredSkill="evaluate_strike"
+                inputVariable="StrikeCoordinates" outputVariable="EvalScore"/>
+
+        <switch>
+            <case condition="bpws:getVariableData('EvalScore') &lt; 60">
+                <sequence>
+                    <invoke partnerLink="LLMCommanderAgent" operation="analyzeAndReplanning"
+                            requiredSkill="analyze_and_replanning"
+                            inputVariable="ReconReport" outputVariable="CommanderDecision"/>
+                    <throw faultName="InsufficientSuppressionFault"/>
+                </sequence>
+            </case>
+            
+            <otherwise>
+                <sequence>
+                    <invoke partnerLink="LLMCommanderAgent" operation="analyzeAndReplanning"
+                            requiredSkill="analyze_and_replanning"
+                            inputVariable="EvalScore" outputVariable="CommanderDecision"/>
+
+                    <invoke partnerLink="ExecutionControlAgent" operation="planAssaultControl"
+                            requiredSkill="plan_assault_control"
+                            inputVariable="CommanderDecision" outputVariable="ExecutionControlAssaultResult"/>
+
+                    <invoke partnerLink="AssaultAgent" operation="captureBeachhead"
+                            requiredSkill="capture_beachhead"
+                            inputVariable="ExecutionControlAssaultResult" outputVariable="AssaultResult"/>
+
+                    <invoke partnerLink="ClosedLoopAgent" operation="closedLoopOptimization"
+                            requiredSkill="closed_loop_optimization"
+                            inputVariable="AssaultResult" outputVariable="ClosedLoopResult"/>
+                </sequence>
+            </otherwise>
+        </switch>
+        
+    </sequence>
+</process>
+

@@ -59,6 +59,8 @@ class BPELActivatity:
     partner_link: str | None = None
     operation: str | None = None
     command: str | None = None
+    required_skill: str | None = None
+    required_skills: list[str] = field(default_factory=list)
     dispatch_mode: str = "single"
     input_variable: str | None = None
     output_variable: str | None = None
@@ -95,6 +97,8 @@ class BPELActivatity:
             "partner_link": self.partner_link,
             "operation": self.operation,
             "command": self.command,
+            "required_skill": self.required_skill,
+            "required_skills": list(self.required_skills),
             "dispatch_mode": self.dispatch_mode,
             "input_variable": self.input_variable,
             "output_variable": self.output_variable,
@@ -116,6 +120,10 @@ class BPELWorkflowDefinition:
         self.activatities_by_id = {
             activatity.activatity_id: activatity for activatity in self._activatities
         }
+
+    @property
+    def activatities(self) -> list[BPELActivatity]:
+        return list(self._activatities)
 
     @classmethod
     def load(cls, source_path: str | Path) -> "BPELWorkflowDefinition":
@@ -161,6 +169,19 @@ class BPELWorkflowDefinition:
             partner_link = element.attrib.get("partnerLink")
             operation = element.attrib.get("operation")
             role = PARTNER_ROLE_MAP.get(partner_link)
+            command = OPERATION_COMMAND_MAP.get(operation, operation)
+            required_skills = _split_list_attribute(
+                element.attrib.get("requiredSkills")
+                or element.attrib.get("skills")
+            )
+            required_skill = (
+                element.attrib.get("requiredSkill")
+                or element.attrib.get("skill")
+                or (required_skills[0] if required_skills else None)
+                or command
+            )
+            if required_skill and required_skill not in required_skills:
+                required_skills.insert(0, required_skill)
             assign_from = None
             assign_to = None
 
@@ -191,7 +212,9 @@ class BPELWorkflowDefinition:
                 role=role,
                 partner_link=partner_link,
                 operation=operation,
-                command=OPERATION_COMMAND_MAP.get(operation, operation),
+                command=command,
+                required_skill=required_skill,
+                required_skills=required_skills,
                 dispatch_mode=element.attrib.get("dispatchMode", "single"),
                 input_variable=element.attrib.get("inputVariable"),
                 output_variable=element.attrib.get("outputVariable"),

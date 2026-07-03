@@ -1,4 +1,4 @@
-from a2a_protocol.server import A2ABaseAgent
+from a2a_protocol.server import A2ABaseAgent, skills_metadata
 from registry.nacos_manager import NacosRegistry, get_host_ip
 import asyncio
 import json
@@ -75,7 +75,7 @@ if __name__ == "__main__":
         service_name="A2A-Agent",
         ip=ip,
         port=port,
-        metadata={"role": "artillery", "firepower": "heavy", "status": "idle"},
+        metadata={"role": "artillery", "firepower": "heavy", "status": "idle", **skills_metadata(agent.skills)},
         heartbeat_interval=heartbeat_interval,
     )
     agent.start()

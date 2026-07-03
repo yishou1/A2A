@@ -17,13 +17,94 @@ def verify_token(authorization: str = Header(None)):
         raise HTTPException(status_code=401, detail="Unauthorized")
     return authorization.split("Bearer ")[1]
 
+DEFAULT_ROLE_SKILLS = {
+    "recon": [
+        {
+            "id": "scan_beach_defenses",
+            "name": "Beach Defense Reconnaissance",
+            "description": "探测/侦察滩头防御、敌方阵地和环境信息。",
+            "tags": ["recon", "reconnaissance", "detect", "探测", "侦察"],
+        }
+    ],
+    "artillery": [
+        {
+            "id": "suppress_beach_sector_A",
+            "name": "Artillery Suppression",
+            "description": "对指定区域执行火力压制并返回打击结果。",
+            "tags": ["artillery", "suppression", "firepower", "火力压制"],
+        }
+    ],
+    "evaluator": [
+        {
+            "id": "evaluate_strike",
+            "name": "Strike Evaluation",
+            "description": "评估侦察和火力压制结果，给出效果评分。",
+            "tags": ["evaluate", "assessment", "score", "评估"],
+        }
+    ],
+    "assault": [
+        {
+            "id": "capture_beachhead",
+            "name": "Beachhead Assault",
+            "description": "执行突击占领任务并返回突击结果。",
+            "tags": ["assault", "capture", "突击", "占领"],
+        }
+    ],
+    "execution_control": [
+        {
+            "id": "generate_execution_commands",
+            "name": "Execution Control Planning",
+            "description": "基于态势与规则生成可执行 strike/assault 指令。",
+            "tags": ["execution_control", "planning", "command", "执行控制"],
+        }
+    ],
+    "closed_loop": [
+        {
+            "id": "closed_loop_optimization",
+            "name": "Closed Loop Optimization",
+            "description": "执行闭环评估与优化并返回结构化结果。",
+            "tags": ["closed_loop", "optimization", "闭环", "优化"],
+        }
+    ],
+}
+
+
+def default_skills_for_role(role: str) -> list[dict]:
+    return deepcopy(DEFAULT_ROLE_SKILLS.get(role, []))
+
+
+def skill_tokens(skills: list[dict]) -> list[str]:
+    tokens = []
+    for skill in skills or []:
+        for value in [
+            skill.get("id"),
+            skill.get("name"),
+            skill.get("description"),
+            *(skill.get("tags") or []),
+        ]:
+            if value:
+                tokens.append(str(value))
+    seen = set()
+    unique = []
+    for token in tokens:
+        key = token.lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(token)
+    return unique
+
+
+def skills_metadata(skills: list[dict]) -> dict:
+    return {"skills": ",".join(skill_tokens(skills))}
+
+
 class A2ABaseAgent:
-    def __init__(self, name: str, description: str, role: str, port: int, skills: list = None):
+    def __init__(self, name: str, description: str, role: str, port: int, skills: list[dict] = None):
         self.name = name
         self.description = description
         self.role = role
         self.port = port
-        self.skills = skills or []
+        self.skills = deepcopy(skills) if skills is not None else default_skills_for_role(role)
         self.started_at = time.time()
         self.ready = True
         self._task_response_cache = {}
@@ -51,6 +132,7 @@ class A2ABaseAgent:
             "name": self.name,
             "description": self.description,
             "role": self.role,
+            "skills": deepcopy(self.skills),
             "securitySchemes": {
                 "openIdConnect": {
                     "type": "openIdConnect",

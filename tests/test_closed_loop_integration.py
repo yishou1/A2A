@@ -175,12 +175,20 @@ class ClosedLoopIntegrationTest(unittest.TestCase):
                         {
                             "ip": "10.0.0.21",
                             "port": 8016,
-                            "metadata": {"role": "closed_loop", "status": "idle"},
+                            "metadata": {
+                                "role": "closed_loop",
+                                "status": "idle",
+                                "skills": "closed_loop_optimization",
+                            },
                         },
                         {
                             "ip": "10.0.0.22",
                             "port": 8016,
-                            "metadata": {"role": "closed_loop", "status": "idle"},
+                            "metadata": {
+                                "role": "closed_loop",
+                                "status": "idle",
+                                "skills": "closed_loop_optimization",
+                            },
                         },
                     ]
 
@@ -224,6 +232,8 @@ class ClosedLoopIntegrationTest(unittest.TestCase):
                     "workflow_id": "wf-closed-loop-failover",
                     "work_item": "wf-closed-loop-failover:5:closed_loop",
                     "command": "closed_loop_optimization",
+                    "required_skill": "closed_loop_optimization",
+                    "required_skills": ["closed_loop_optimization"],
                     "output_hint": "closed_loop_result",
                 },
             )

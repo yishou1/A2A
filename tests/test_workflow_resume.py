@@ -247,6 +247,23 @@ class WorkflowResumeTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["work_list"], payload["work_list"])
 
+    def test_agent_card_exposes_skills(self):
+        agent = A2ABaseAgent(
+            name="Test_Agent",
+            description="Test skill discovery.",
+            role="recon",
+            port=9999,
+        )
+        client = TestClient(agent.app)
+
+        response = client.get("/.well-known/agent-card")
+
+        self.assertEqual(response.status_code, 200)
+        card = response.json()
+        self.assertIn("skills", card)
+        self.assertEqual(card["skills"][0]["id"], "scan_beach_defenses")
+        self.assertIn("探测", card["skills"][0]["tags"])
+
     def test_agent_not_ready_response_has_standard_error_code(self):
         agent = A2ABaseAgent(
             name="Test_Agent",
