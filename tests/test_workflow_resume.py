@@ -10,6 +10,7 @@ from attachment_uploader import upload_attachment_file
 from a2a_protocol.server import A2ABaseAgent
 from commander_agent.main import CommanderAgent
 from commander_agent.recovery_api import build_recovery_app
+from execution_control_agent.execution_control_core import run_execution_control
 from local_runtime import LocalAgentRuntime
 from workflow_payloads import build_attachment_ref, normalize_attachment_ref
 from workflow_state_store import WorkflowStateStore
@@ -78,11 +79,16 @@ class WorkflowResumeTest(unittest.TestCase):
                 resumed.workflow_context["recon_report"][0]["value"],
                 "Sector_A is heavily fortified.",
             )
-            payload, stream = resumed.build_task_payload("artillery", resumed.workflow_context, activatity_index=2)
+            payload, stream = resumed.build_task_payload(
+                "execution_control",
+                resumed.workflow_context,
+                activatity_index=2,
+            )
 
-            self.assertTrue(stream)
-            self.assertEqual(payload["work_item"], f"{workflow_id}:2:artillery")
-            self.assertEqual(payload["input"]["coordinates"], "120.5E, 35.1N")
+            self.assertFalse(stream)
+            self.assertEqual(payload["work_item"], f"{workflow_id}:2:execution_control")
+            self.assertEqual(payload["input"]["phase"], "strike")
+            self.assertIn("results", payload["input"])
             self.assertIn("attachments", payload)
             self.assertIn("context", payload)
             self.assertEqual(payload["context"]["completed_roles"], ["recon"])
@@ -135,18 +141,20 @@ class WorkflowResumeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             workflow_id = "wf-recover"
             store = WorkflowStateStore(temp_dir)
+            strike_ec = run_execution_control({"phase": "strike", "results": {}})
             context = {
                 "workflow_id": workflow_id,
                 "workflow_mode": "local",
                 "workflow_name": "dynamic",
                 "workflow_status": "paused",
-                "workflow_activatity": 2,
-                "current_activatity": {"activatity_index": 2, "type": "agent", "role": "artillery"},
-                "last_work_item": f"{workflow_id}:2:artillery",
+                "workflow_activatity": 3,
+                "current_activatity": {"activatity_index": 3, "type": "agent", "role": "artillery"},
+                "last_work_item": f"{workflow_id}:3:artillery",
                 "last_role": "artillery",
                 "sector": "Sector_A",
                 "coordinates": "120.5E, 35.1N",
                 "recon_report": "Sector_A is heavily fortified.",
+                "execution_control_result": [{"value": strike_ec, "status": "completed"}],
                 "strike_result": "Suppression barrage executed on Sector_A.",
                 "eval_score": None,
                 "commander_decision": None,
@@ -154,9 +162,10 @@ class WorkflowResumeTest(unittest.TestCase):
                 "replan_result": None,
                 "battle_log": [
                     "[Recon Report] Sector_A is heavily fortified.",
+                    "[Execution Control] phase=strike, commands=2, latency_ms=1.391",
                     "[Artillery Report] Suppression barrage executed on Sector_A.",
                 ],
-                "completed_roles": ["recon", "artillery"],
+                "completed_roles": ["recon", "execution_control", "artillery"],
                 "attachments": [],
             }
             store.save(
@@ -199,7 +208,7 @@ class WorkflowResumeTest(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             payload = response.json()
             self.assertEqual(payload["workflow_id"], workflow_id)
-            self.assertEqual(payload["context"]["workflow_activatity"], 3)
+            self.assertEqual(payload["context"]["workflow_activatity"], 4)
             self.assertEqual(payload["context"]["eval_score"][0]["value"], 75)
             self.assertEqual(payload["context"]["attachments"][0]["uri"], "s3://a2a-media/beachhead/recon-01.jpg")
             self.assertEqual(payload["context"]["attachments"][0]["checksum"]["value"], "abc123")

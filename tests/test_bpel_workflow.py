@@ -22,9 +22,10 @@ class BPELWorkflowTest(unittest.TestCase):
 
         self.assertEqual(definition.process_name, "BeachheadAssaultWorkflow")
         self.assertTrue(any(item["role"] == "recon" for item in work_list))
+        self.assertTrue(any(item["role"] == "execution_control" for item in work_list))
         self.assertTrue(any(item["role"] == "artillery" for item in work_list))
         artillery = next(item for item in work_list if item["role"] == "artillery")
-        self.assertEqual(artillery["dispatch_mode"], "parallel")
+        self.assertEqual(artillery["dispatch_mode"], "single")
         self.assertTrue(all("work_item" in item for item in work_list))
         self.assertTrue(all("activatity_id" in item for item in work_list))
 
@@ -75,7 +76,10 @@ class BPELWorkflowTest(unittest.TestCase):
             commander.delegate_parallel_task = fake_delegate
             context = commander.run_bpel_workflow()
 
-            self.assertEqual(calls, ["recon", "artillery", "evaluator", "assault"])
+            self.assertEqual(
+                calls,
+                ["recon", "execution_control", "artillery", "evaluator", "execution_control", "assault", "closed_loop"],
+            )
             self.assertEqual(context["workflow_status"], "completed")
             self.assertEqual(context["active_activatities"], [])
             self.assertTrue(context["work_list"])
@@ -1038,9 +1042,8 @@ class BPELWorkflowTest(unittest.TestCase):
             self.assertIn("BeachheadAssaultWorkflow", output)
             self.assertIn("ReinforcedBeachheadWorkflow", output)
             self.assertIn("QuickStrikeWorkflow", output)
-            self.assertIn("recon[single] -> artillery[parallel]", output)
-            self.assertIn("recon[parallel] -> artillery[parallel]", output)
-            self.assertIn("artillery[parallel] -> assault[single]", output)
+            self.assertIn("execution_control[single]", output)
+            self.assertIn("closed_loop[single]", output)
 
 
 if __name__ == "__main__":

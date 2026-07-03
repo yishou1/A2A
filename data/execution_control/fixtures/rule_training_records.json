@@ -1,0 +1,92 @@
+[
+  {
+    "items": ["phase=strike", "threat=high", "intel=good", "resource=ready"],
+    "consequent": {
+      "action": "precision_strike",
+      "executor_role": "artillery",
+      "priority": 0.92,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "items": ["phase=strike", "threat=high", "intel=good", "resource=ready"],
+    "consequent": {
+      "action": "precision_strike",
+      "executor_role": "artillery",
+      "priority": 0.9,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "items": ["phase=strike", "threat=medium", "intel=good", "resource=ready"],
+    "consequent": {
+      "action": "area_suppression",
+      "executor_role": "artillery",
+      "priority": 0.78,
+      "coordination_group": "GROUP-B"
+    }
+  },
+  {
+    "items": ["phase=strike", "threat=medium", "intel=fair", "resource=ready"],
+    "consequent": {
+      "action": "area_suppression",
+      "executor_role": "artillery",
+      "priority": 0.74,
+      "coordination_group": "GROUP-B"
+    }
+  },
+  {
+    "items": ["phase=strike", "threat=low", "intel=fair", "resource=limited"],
+    "consequent": {
+      "action": "observe_and_hold",
+      "executor_role": "artillery",
+      "priority": 0.55,
+      "coordination_group": "GROUP-C"
+    }
+  },
+  {
+    "items": ["phase=assault", "threat=high", "intel=good", "decision=assault"],
+    "consequent": {
+      "action": "coordinated_assault",
+      "executor_role": "assault",
+      "priority": 0.88,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "items": ["phase=assault", "threat=high", "intel=good", "decision=assault"],
+    "consequent": {
+      "action": "coordinated_assault",
+      "executor_role": "assault",
+      "priority": 0.9,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "items": ["phase=assault", "threat=medium", "intel=good", "decision=assault"],
+    "consequent": {
+      "action": "beachhead_capture",
+      "executor_role": "assault",
+      "priority": 0.82,
+      "coordination_group": "GROUP-B"
+    }
+  },
+  {
+    "items": ["phase=assault", "threat=medium", "intel=fair", "decision=assault"],
+    "consequent": {
+      "action": "beachhead_capture",
+      "executor_role": "assault",
+      "priority": 0.76,
+      "coordination_group": "GROUP-B"
+    }
+  },
+  {
+    "items": ["phase=assault", "threat=high", "intel=fair", "decision=replan"],
+    "consequent": {
+      "action": "hold_and_recon",
+      "executor_role": "assault",
+      "priority": 0.4,
+      "coordination_group": "GROUP-C"
+    }
+  }
+]

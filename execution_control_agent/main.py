@@ -1,0 +1,108 @@
+import asyncio
+import json
+import os
+import sys
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from a2a_protocol.server import A2ABaseAgent
+from execution_control_agent.execution_control_core import run_execution_control
+from registry.nacos_manager import NacosRegistry, get_host_ip
+
+EXECUTION_CONTROL_COMMAND = "generate_execution_commands"
+PASSTHROUGH_INPUT_KEYS = (
+    "phase",
+    "control_phase",
+    "results",
+    "context",
+    "targets",
+)
+
+
+def build_execution_control_arguments(payload: dict) -> dict:
+    arguments = dict(payload.get("input")) if isinstance(payload.get("input"), dict) else {}
+    for key in PASSTHROUGH_INPUT_KEYS:
+        if key in payload and key not in arguments:
+            arguments[key] = payload[key]
+    if "context" not in arguments and isinstance(payload.get("context"), dict):
+        arguments["context"] = payload["context"]
+    if "results" not in arguments and isinstance(payload.get("results"), dict):
+        arguments["results"] = payload["results"]
+    return arguments
+
+
+class ExecutionControlAgent(A2ABaseAgent):
+    def __init__(self, port: int):
+        super().__init__(
+            name="Execution_Control_Agent",
+            description="Generates executable strike/assault commands from upstream agent results.",
+            role="execution_control",
+            port=port,
+            skills=[
+                {
+                    "name": EXECUTION_CONTROL_COMMAND,
+                    "description": "关联规则匹配 + 线性回归运动预测，生成结构化作战指令",
+                    "input": {
+                        "phase": "strike or assault",
+                        "results": "Upstream standardized agent outputs",
+                    },
+                    "output": {
+                        "execution_control_result": "Structured commands/tracks/coordination envelope",
+                    },
+                }
+            ],
+        )
+
+    def execute_task(self, payload: dict):
+        command = payload.get("command") or EXECUTION_CONTROL_COMMAND
+        if command not in {EXECUTION_CONTROL_COMMAND, "plan_strike_control", "plan_assault_control"}:
+            raise ValueError(f"Unsupported command: {command}")
+        if command == "plan_strike_control":
+            payload = dict(payload)
+            input_data = dict(payload.get("input") or {})
+            input_data["phase"] = "strike"
+            payload["input"] = input_data
+        elif command == "plan_assault_control":
+            payload = dict(payload)
+            input_data = dict(payload.get("input") or {})
+            input_data["phase"] = "assault"
+            payload["input"] = input_data
+
+        result = run_execution_control(build_execution_control_arguments(payload))
+        output_hint = payload.get("output_hint") or "execution_control_result"
+        return {output_hint: result}, "Execution control commands generated"
+
+    async def execute_stream(self, payload):
+        yield (
+            "data: "
+            + json.dumps(
+                {"status": "Working", "progress": "10%", "message": "execution control started"},
+                ensure_ascii=False,
+            )
+            + "\n\n"
+        )
+        output, message = await asyncio.to_thread(self.execute_task, payload)
+        summary = {
+            "status": "Completed",
+            "progress": "100%",
+            "message": message,
+            "command_count": len(next(iter(output.values()), {}).get("output_data", {}).get("commands", [])),
+        }
+        yield "data: " + json.dumps(summary, ensure_ascii=False) + "\n\n"
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("EXECUTION_CONTROL_AGENT_PORT", "8017"))
+    heartbeat_interval = float(os.environ.get("A2A_HEARTBEAT_INTERVAL", "5"))
+    agent = ExecutionControlAgent(port=port)
+
+    registry = NacosRegistry()
+    ip = get_host_ip()
+    registry.register_service(
+        service_name="A2A-Agent",
+        ip=ip,
+        port=port,
+        metadata={"role": "execution_control", "status": "idle"},
+        heartbeat_interval=heartbeat_interval,
+    )
+    agent.start()

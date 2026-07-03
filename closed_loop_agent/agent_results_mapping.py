@@ -214,6 +214,53 @@ def mission_vector_from_results(
     ]
 
 
+def _latest_collection_entry(context: dict, key: str):
+    entries = context.get(key)
+    if not isinstance(entries, list) or not entries:
+        return None
+    return entries[-1]
+
+
+def _entry_value(entry):
+    if isinstance(entry, dict):
+        return entry.get("value")
+    return entry
+
+
+def _execution_control_phase(value) -> str | None:
+    if not isinstance(value, dict):
+        return None
+    output_data = _safe_dict(value.get("output_data"))
+    phase = output_data.get("phase") or value.get("phase")
+    return str(phase).strip().lower() if phase else None
+
+
+def _latest_execution_control_output(context: dict, *, phase: str | None = None) -> dict:
+    entries = context.get("execution_control_result")
+    if not isinstance(entries, list):
+        return {}
+    selected = []
+    for entry in entries:
+        value = _entry_value(entry)
+        if not isinstance(value, dict):
+            continue
+        entry_phase = _execution_control_phase(value)
+        if phase and entry_phase != phase:
+            continue
+        selected.append(value)
+    if not selected:
+        return {}
+    latest = selected[-1]
+    return _safe_dict(latest.get("output_data")) or latest
+
+
+def _structured_summary(value):
+    if isinstance(value, dict):
+        output_data = _safe_dict(value.get("output_data"))
+        return output_data.get("message") or value.get("message") or value
+    return value
+
+
 def build_standard_results_from_context(
     context: dict,
     *,
@@ -227,13 +274,19 @@ def build_standard_results_from_context(
     assault_result = latest_value(context, "assault_result")
     commander_decision = latest_value(context, "commander_decision")
 
+    strike_ec_output = _latest_execution_control_output(context, phase="strike")
+    assault_ec_output = _latest_execution_control_output(context, phase="assault")
+    execution_output = assault_ec_output or strike_ec_output
+
     threat_score = _normalize_score(eval_score, 0.70)
     structured = context.get("structured_detections")
     detections = structured if isinstance(structured, list) else []
     if not detections and recon_report:
         detections = [{"track_id": "recon-001", "conf": 0.82, "summary": recon_report}]
 
-    latency_ms = float(context.get("last_strike_latency_ms") or context.get("execution_latency_ms") or 150.0)
+    latency_ms = execution_output.get("latency_ms")
+    if latency_ms is None:
+        latency_ms = float(context.get("execution_latency_ms") or context.get("last_strike_latency_ms") or 150.0)
     delivery_rate = float(context.get("comm_delivery_rate") or DEFAULT_COMM_QUALITY)
     readiness = float(context.get("resource_readiness") or 0.81)
     supply_pressure = float(context.get("supply_pressure") or 0.5)
@@ -246,12 +299,41 @@ def build_standard_results_from_context(
         elif "RE-PLAN" in decision_text or "ABORT" in decision_text:
             mission_kpi = 0.35
 
+    track_history = context.get("structured_track_history")
+    if not isinstance(track_history, list):
+        try:
+            from execution_control_agent.motion_prediction import load_track_fixture
+
+            track_history = load_track_fixture().get("default_tracks") or []
+        except Exception:
+            track_history = []
+
+    execution_payload = dict(execution_output)
+    execution_payload.setdefault("latency_ms", latency_ms)
+    execution_payload.setdefault("commands", [])
+    execution_payload.setdefault("tracks", execution_output.get("tracks") or [])
+    execution_payload.setdefault("coordination", execution_output.get("coordination") or {})
+    execution_payload.setdefault("matched_rules", execution_output.get("matched_rules") or [])
+    execution_payload.setdefault("prediction_details", execution_output.get("prediction_details") or [])
+    execution_payload["strike_summary"] = _structured_summary(strike_result)
+    execution_payload["assault_summary"] = _structured_summary(assault_result)
+
     return {
         "perception_detection": {
             "output_data": {
                 "frame_id": str(context.get("workflow_id") or "frame"),
                 "detections": detections,
                 "report_text": recon_report,
+            }
+        },
+        "recognition": {
+            "output_data": {
+                "labels": detections,
+            }
+        },
+        "data_fusion": {
+            "output_data": {
+                "track_history": track_history,
             }
         },
         "threat_evaluation": {
@@ -261,11 +343,7 @@ def build_standard_results_from_context(
             }
         },
         "execution_control": {
-            "output_data": {
-                "latency_ms": latency_ms,
-                "strike_summary": strike_result,
-                "assault_summary": assault_result,
-            }
+            "output_data": execution_payload,
         },
         "communication": {
             "output_data": {"delivery_rate": delivery_rate}

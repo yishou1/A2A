@@ -1,0 +1,593 @@
+[
+  {
+    "rule_id": "RULE-003",
+    "antecedent": [
+      "intel=good"
+    ],
+    "support": 0.6,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "precision_strike",
+      "executor_role": "artillery",
+      "priority": 0.91,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "rule_id": "RULE-004",
+    "antecedent": [
+      "phase=assault"
+    ],
+    "support": 0.5,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "coordinated_assault",
+      "executor_role": "assault",
+      "priority": 0.89,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "rule_id": "RULE-005",
+    "antecedent": [
+      "phase=strike"
+    ],
+    "support": 0.5,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "precision_strike",
+      "executor_role": "artillery",
+      "priority": 0.91,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "rule_id": "RULE-007",
+    "antecedent": [
+      "threat=high"
+    ],
+    "support": 0.5,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "precision_strike",
+      "executor_role": "artillery",
+      "priority": 0.91,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "rule_id": "RULE-001",
+    "antecedent": [
+      "decision=assault"
+    ],
+    "support": 0.4,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "coordinated_assault",
+      "executor_role": "assault",
+      "priority": 0.89,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "rule_id": "RULE-002",
+    "antecedent": [
+      "intel=fair"
+    ],
+    "support": 0.4,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "area_suppression",
+      "executor_role": "artillery",
+      "priority": 0.74,
+      "coordination_group": "GROUP-B"
+    }
+  },
+  {
+    "rule_id": "RULE-006",
+    "antecedent": [
+      "resource=ready"
+    ],
+    "support": 0.4,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "precision_strike",
+      "executor_role": "artillery",
+      "priority": 0.91,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "rule_id": "RULE-008",
+    "antecedent": [
+      "threat=medium"
+    ],
+    "support": 0.4,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "area_suppression",
+      "executor_role": "artillery",
+      "priority": 0.76,
+      "coordination_group": "GROUP-B"
+    }
+  },
+  {
+    "rule_id": "RULE-010",
+    "antecedent": [
+      "decision=assault",
+      "phase=assault"
+    ],
+    "support": 0.4,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "coordinated_assault",
+      "executor_role": "assault",
+      "priority": 0.89,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "rule_id": "RULE-019",
+    "antecedent": [
+      "intel=good",
+      "threat=high"
+    ],
+    "support": 0.4,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "precision_strike",
+      "executor_role": "artillery",
+      "priority": 0.91,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "rule_id": "RULE-023",
+    "antecedent": [
+      "phase=strike",
+      "resource=ready"
+    ],
+    "support": 0.4,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "precision_strike",
+      "executor_role": "artillery",
+      "priority": 0.91,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "rule_id": "RULE-009",
+    "antecedent": [
+      "decision=assault",
+      "intel=good"
+    ],
+    "support": 0.3,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "coordinated_assault",
+      "executor_role": "assault",
+      "priority": 0.89,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "rule_id": "RULE-016",
+    "antecedent": [
+      "intel=good",
+      "phase=assault"
+    ],
+    "support": 0.3,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "coordinated_assault",
+      "executor_role": "assault",
+      "priority": 0.89,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "rule_id": "RULE-017",
+    "antecedent": [
+      "intel=good",
+      "phase=strike"
+    ],
+    "support": 0.3,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "precision_strike",
+      "executor_role": "artillery",
+      "priority": 0.91,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "rule_id": "RULE-018",
+    "antecedent": [
+      "intel=good",
+      "resource=ready"
+    ],
+    "support": 0.3,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "precision_strike",
+      "executor_role": "artillery",
+      "priority": 0.91,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "rule_id": "RULE-021",
+    "antecedent": [
+      "phase=assault",
+      "threat=high"
+    ],
+    "support": 0.3,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "coordinated_assault",
+      "executor_role": "assault",
+      "priority": 0.89,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "rule_id": "RULE-028",
+    "antecedent": [
+      "decision=assault",
+      "intel=good",
+      "phase=assault"
+    ],
+    "support": 0.3,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "coordinated_assault",
+      "executor_role": "assault",
+      "priority": 0.89,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "rule_id": "RULE-033",
+    "antecedent": [
+      "intel=good",
+      "phase=strike",
+      "resource=ready"
+    ],
+    "support": 0.3,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "precision_strike",
+      "executor_role": "artillery",
+      "priority": 0.91,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "rule_id": "RULE-011",
+    "antecedent": [
+      "decision=assault",
+      "threat=high"
+    ],
+    "support": 0.2,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "coordinated_assault",
+      "executor_role": "assault",
+      "priority": 0.89,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "rule_id": "RULE-012",
+    "antecedent": [
+      "decision=assault",
+      "threat=medium"
+    ],
+    "support": 0.2,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "beachhead_capture",
+      "executor_role": "assault",
+      "priority": 0.79,
+      "coordination_group": "GROUP-B"
+    }
+  },
+  {
+    "rule_id": "RULE-013",
+    "antecedent": [
+      "intel=fair",
+      "phase=assault"
+    ],
+    "support": 0.2,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "beachhead_capture",
+      "executor_role": "assault",
+      "priority": 0.76,
+      "coordination_group": "GROUP-B"
+    }
+  },
+  {
+    "rule_id": "RULE-014",
+    "antecedent": [
+      "intel=fair",
+      "phase=strike"
+    ],
+    "support": 0.2,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "area_suppression",
+      "executor_role": "artillery",
+      "priority": 0.74,
+      "coordination_group": "GROUP-B"
+    }
+  },
+  {
+    "rule_id": "RULE-015",
+    "antecedent": [
+      "intel=fair",
+      "threat=medium"
+    ],
+    "support": 0.2,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "area_suppression",
+      "executor_role": "artillery",
+      "priority": 0.74,
+      "coordination_group": "GROUP-B"
+    }
+  },
+  {
+    "rule_id": "RULE-020",
+    "antecedent": [
+      "intel=good",
+      "threat=medium"
+    ],
+    "support": 0.2,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "area_suppression",
+      "executor_role": "artillery",
+      "priority": 0.78,
+      "coordination_group": "GROUP-B"
+    }
+  },
+  {
+    "rule_id": "RULE-022",
+    "antecedent": [
+      "phase=assault",
+      "threat=medium"
+    ],
+    "support": 0.2,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "beachhead_capture",
+      "executor_role": "assault",
+      "priority": 0.79,
+      "coordination_group": "GROUP-B"
+    }
+  },
+  {
+    "rule_id": "RULE-024",
+    "antecedent": [
+      "phase=strike",
+      "threat=high"
+    ],
+    "support": 0.2,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "precision_strike",
+      "executor_role": "artillery",
+      "priority": 0.91,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "rule_id": "RULE-025",
+    "antecedent": [
+      "phase=strike",
+      "threat=medium"
+    ],
+    "support": 0.2,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "area_suppression",
+      "executor_role": "artillery",
+      "priority": 0.76,
+      "coordination_group": "GROUP-B"
+    }
+  },
+  {
+    "rule_id": "RULE-026",
+    "antecedent": [
+      "resource=ready",
+      "threat=high"
+    ],
+    "support": 0.2,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "precision_strike",
+      "executor_role": "artillery",
+      "priority": 0.91,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "rule_id": "RULE-027",
+    "antecedent": [
+      "resource=ready",
+      "threat=medium"
+    ],
+    "support": 0.2,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "area_suppression",
+      "executor_role": "artillery",
+      "priority": 0.76,
+      "coordination_group": "GROUP-B"
+    }
+  },
+  {
+    "rule_id": "RULE-029",
+    "antecedent": [
+      "decision=assault",
+      "intel=good",
+      "threat=high"
+    ],
+    "support": 0.2,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "coordinated_assault",
+      "executor_role": "assault",
+      "priority": 0.89,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "rule_id": "RULE-030",
+    "antecedent": [
+      "decision=assault",
+      "phase=assault",
+      "threat=high"
+    ],
+    "support": 0.2,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "coordinated_assault",
+      "executor_role": "assault",
+      "priority": 0.89,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "rule_id": "RULE-031",
+    "antecedent": [
+      "decision=assault",
+      "phase=assault",
+      "threat=medium"
+    ],
+    "support": 0.2,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "beachhead_capture",
+      "executor_role": "assault",
+      "priority": 0.79,
+      "coordination_group": "GROUP-B"
+    }
+  },
+  {
+    "rule_id": "RULE-032",
+    "antecedent": [
+      "intel=good",
+      "phase=assault",
+      "threat=high"
+    ],
+    "support": 0.2,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "coordinated_assault",
+      "executor_role": "assault",
+      "priority": 0.89,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "rule_id": "RULE-034",
+    "antecedent": [
+      "intel=good",
+      "phase=strike",
+      "threat=high"
+    ],
+    "support": 0.2,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "precision_strike",
+      "executor_role": "artillery",
+      "priority": 0.91,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "rule_id": "RULE-035",
+    "antecedent": [
+      "intel=good",
+      "resource=ready",
+      "threat=high"
+    ],
+    "support": 0.2,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "precision_strike",
+      "executor_role": "artillery",
+      "priority": 0.91,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "rule_id": "RULE-036",
+    "antecedent": [
+      "phase=strike",
+      "resource=ready",
+      "threat=high"
+    ],
+    "support": 0.2,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "precision_strike",
+      "executor_role": "artillery",
+      "priority": 0.91,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "rule_id": "RULE-037",
+    "antecedent": [
+      "phase=strike",
+      "resource=ready",
+      "threat=medium"
+    ],
+    "support": 0.2,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "area_suppression",
+      "executor_role": "artillery",
+      "priority": 0.76,
+      "coordination_group": "GROUP-B"
+    }
+  },
+  {
+    "rule_id": "RULE-038",
+    "antecedent": [
+      "decision=assault",
+      "intel=good",
+      "phase=assault",
+      "threat=high"
+    ],
+    "support": 0.2,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "coordinated_assault",
+      "executor_role": "assault",
+      "priority": 0.89,
+      "coordination_group": "GROUP-A"
+    }
+  },
+  {
+    "rule_id": "RULE-039",
+    "antecedent": [
+      "intel=good",
+      "phase=strike",
+      "resource=ready",
+      "threat=high"
+    ],
+    "support": 0.2,
+    "confidence": 1.0,
+    "consequent": {
+      "action": "precision_strike",
+      "executor_role": "artillery",
+      "priority": 0.91,
+      "coordination_group": "GROUP-A"
+    }
+  }
+]

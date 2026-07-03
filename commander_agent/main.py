@@ -770,6 +770,7 @@ class CommanderAgent:
             "sector": "Sector_A",
             "coordinates": "120.5E, 35.1N",
             "recon_report": [],
+            "execution_control_result": [],
             "strike_result": [],
             "eval_score": [],
             "commander_decision": [],
@@ -884,6 +885,7 @@ class CommanderAgent:
         normalized.update(self._migrate_legacy_context(context))
         for key in (
             "recon_report",
+            "execution_control_result",
             "strike_result",
             "eval_score",
             "commander_decision",
@@ -1070,6 +1072,7 @@ class CommanderAgent:
             "sector": context.get("sector"),
             "coordinates": context.get("coordinates"),
             "recon_report": context.get("recon_report"),
+            "execution_control_result": context.get("execution_control_result"),
             "strike_result": context.get("strike_result"),
             "eval_score": context.get("eval_score"),
             "commander_decision": context.get("commander_decision"),
@@ -1086,6 +1089,62 @@ class CommanderAgent:
             "agent_results": deepcopy(context.get("agent_results", {})),
             "trace_tail": deepcopy(context.get("trace", [])[-20:]),
         }
+
+    @classmethod
+    def _execution_control_entry_phase(cls, entry: dict):
+        value = entry.get("value") if isinstance(entry, dict) else entry
+        if isinstance(value, dict):
+            output_data = value.get("output_data") if isinstance(value.get("output_data"), dict) else {}
+            phase = output_data.get("phase") or value.get("phase")
+            if phase:
+                return str(phase).strip().lower()
+        return None
+
+    @classmethod
+    def _has_execution_control_phase(cls, context: dict, phase: str) -> bool:
+        return any(
+            cls._execution_control_entry_phase(entry) == phase
+            for entry in cls._context_entries(context, "execution_control_result")
+        )
+
+    @classmethod
+    def _execution_control_phase_for_context(cls, context: dict) -> str:
+        if not cls._has_execution_control_phase(context, "strike"):
+            return "strike"
+        return "assault"
+
+    @classmethod
+    def _latest_execution_control_value(cls, context: dict, phase: str | None = None):
+        entries = cls._context_entries(context, "execution_control_result")
+        if phase:
+            entries = [
+                entry
+                for entry in entries
+                if cls._execution_control_entry_phase(entry) == phase
+            ]
+        if not entries:
+            return None
+        return entries[-1].get("value")
+
+    @classmethod
+    def _commands_for_executor(cls, context: dict, executor_role: str, *, phase: str | None = None):
+        ec_value = cls._latest_execution_control_value(context, phase=phase)
+        if not isinstance(ec_value, dict):
+            return []
+        output_data = ec_value.get("output_data") if isinstance(ec_value.get("output_data"), dict) else ec_value
+        commands = output_data.get("commands") if isinstance(output_data.get("commands"), list) else []
+        return [
+            command
+            for command in commands
+            if isinstance(command, dict) and command.get("executor_role") == executor_role
+        ]
+
+    @staticmethod
+    def _result_display_text(value):
+        if isinstance(value, dict):
+            output_data = value.get("output_data") if isinstance(value.get("output_data"), dict) else {}
+            return output_data.get("message") or value.get("message") or str(value)
+        return value
 
     @classmethod
     def build_closed_loop_results_from_context(cls, context: dict) -> dict:
@@ -1121,7 +1180,9 @@ class CommanderAgent:
                 "output_hint": "recon_report",
             }, False
 
-        if role == "artillery":
+        if role == "execution_control":
+            phase = self._execution_control_phase_for_context(context)
+            command = "plan_strike_control" if phase == "strike" else "plan_assault_control"
             return {
                 "workflow_id": self.workflow_id,
                 "workflow": self.workflow,
@@ -1130,11 +1191,41 @@ class CommanderAgent:
                 "parent_work_item": context.get("last_work_item"),
                 "activatity_index": activatity_index,
                 "activatity_role": role,
-                "command": "suppress_beach_sector_A",
+                "command": command,
+                "input": {
+                    "phase": phase,
+                    "results": self.build_closed_loop_results_from_context(context),
+                },
+                "context": context_snapshot,
+                "attachments": attachment_snapshot(context.get("attachments", [])),
+                "work_list": deepcopy(context.get("work_list", [])),
+                "output_hint": "execution_control_result",
+            }, False
+
+        if role == "artillery":
+            commands = self._commands_for_executor(context, "artillery", phase="strike")
+            execution_command = commands[0] if commands else None
+            command_name = (
+                execution_command.get("action")
+                if isinstance(execution_command, dict)
+                else None
+            ) or "suppress_beach_sector_A"
+            return {
+                "workflow_id": self.workflow_id,
+                "workflow": self.workflow,
+                "workflow_mode": self.mode,
+                "work_item": work_item,
+                "parent_work_item": context.get("last_work_item"),
+                "activatity_index": activatity_index,
+                "activatity_role": role,
+                "command": command_name,
                 "input": {
                     "coordinates": context["coordinates"],
                     "intensity": "high",
+                    "execution_command": execution_command,
+                    "execution_commands": commands,
                     "recon_report": self._context_entries(context, "recon_report"),
+                    "execution_control_result": self._context_entries(context, "execution_control_result"),
                 },
                 "context": context_snapshot,
                 "attachments": attachment_snapshot(context.get("attachments", [])),
@@ -1165,6 +1256,13 @@ class CommanderAgent:
             }, False
 
         if role == "assault":
+            commands = self._commands_for_executor(context, "assault", phase="assault")
+            execution_command = commands[0] if commands else None
+            command_name = (
+                execution_command.get("action")
+                if isinstance(execution_command, dict)
+                else None
+            ) or "capture_beachhead"
             return {
                 "workflow_id": self.workflow_id,
                 "workflow": self.workflow,
@@ -1173,13 +1271,16 @@ class CommanderAgent:
                 "parent_work_item": context.get("last_work_item"),
                 "activatity_index": activatity_index,
                 "activatity_role": role,
-                "command": "capture_beachhead",
+                "command": command_name,
                 "input": {
                     "coordinates": context["coordinates"],
+                    "execution_command": execution_command,
+                    "execution_commands": commands,
                     "recon_report": self._context_entries(context, "recon_report"),
                     "strike_result": self._context_entries(context, "strike_result"),
                     "eval_score": self._context_entries(context, "eval_score"),
                     "commander_decision": self._context_entries(context, "commander_decision"),
+                    "execution_control_result": self._context_entries(context, "execution_control_result"),
                 },
                 "context": context_snapshot,
                 "attachments": attachment_snapshot(context.get("attachments", [])),
@@ -1264,6 +1365,7 @@ class CommanderAgent:
     def _default_output_key_for_role(role: str):
         return {
             "recon": "recon_report",
+            "execution_control": "execution_control_result",
             "artillery": "strike_result",
             "evaluator": "eval_score",
             "commander": "commander_decision",
@@ -1340,6 +1442,41 @@ class CommanderAgent:
                 duration_ms=duration_ms,
             )
             context["battle_log"].append(f"[Recon Report] {output_value}")
+        elif role == "execution_control":
+            target_key = output_key or "execution_control_result"
+            output_value = output.get(target_key)
+            if output_value is None:
+                output_value = self._first_output_value(output)
+            if output_value is None:
+                output_value = {
+                    "task_type": "execution_control",
+                    "output_data": {"commands": [], "latency_ms": 0.0},
+                }
+            self._append_output_collection(
+                context,
+                target_key,
+                output_value,
+                activity_id=activity_id,
+                work_item=work_item,
+                role=role,
+                output=output,
+                status=response_status,
+                error=response_error,
+                duration_ms=duration_ms,
+            )
+            if isinstance(output_value, dict):
+                output_data = output_value.get("output_data") if isinstance(output_value.get("output_data"), dict) else {}
+                latency_ms_value = output_data.get("latency_ms")
+                if latency_ms_value is not None:
+                    context["execution_latency_ms"] = latency_ms_value
+                commands = output_data.get("commands") if isinstance(output_data.get("commands"), list) else []
+                context["battle_log"].append(
+                    "[Execution Control] "
+                    f"phase={output_data.get('phase')}, commands={len(commands)}, "
+                    f"latency_ms={latency_ms_value}"
+                )
+            else:
+                context["battle_log"].append(f"[Execution Control] {output_value}")
         elif role == "artillery":
             target_key = output_key or "strike_result"
             output_value = output.get(target_key)
@@ -1359,7 +1496,7 @@ class CommanderAgent:
                 error=response_error,
                 duration_ms=duration_ms,
             )
-            context["battle_log"].append(f"[Artillery Report] {output_value}")
+            context["battle_log"].append(f"[Artillery Report] {self._result_display_text(output_value)}")
         elif role == "evaluator":
             target_key = output_key or "eval_score"
             raw_score = output.get(target_key)
@@ -1402,7 +1539,7 @@ class CommanderAgent:
                 error=response_error,
                 duration_ms=duration_ms,
             )
-            context["battle_log"].append(f"[Assault Report] {output_value}")
+            context["battle_log"].append(f"[Assault Report] {self._result_display_text(output_value)}")
         elif role == "closed_loop":
             target_key = output_key or "closed_loop_result"
             output_value = output.get(target_key)
@@ -1456,8 +1593,15 @@ class CommanderAgent:
         if not self._context_entries(context, "recon_report"):
             return {"type": "agent", "role": "recon", "reason": "No recon report is available."}
 
+        if not self._has_execution_control_phase(context, "strike"):
+            return {
+                "type": "agent",
+                "role": "execution_control",
+                "reason": "Recon is done; generate strike execution commands.",
+            }
+
         if not self._context_entries(context, "strike_result"):
-            return {"type": "agent", "role": "artillery", "reason": "Recon is done but suppression has not run."}
+            return {"type": "agent", "role": "artillery", "reason": "Strike commands are ready but artillery has not executed."}
 
         if not self._context_entries(context, "eval_score"):
             return {"type": "agent", "role": "evaluator", "reason": "Strike result needs evaluation."}
@@ -1466,11 +1610,18 @@ class CommanderAgent:
             return {"type": "decision", "reason": "Evaluation is available; commander must decide."}
 
         decision = str(self._latest_context_value(context, "commander_decision") or "").upper()
-        if "ASSAULT" in decision and "RE-PLAN" not in decision and not self._context_entries(context, "assault_result"):
-            return {"type": "agent", "role": "assault", "reason": "Commander decision allows assault."}
-
         if "RE-PLAN" in decision or "ABORT" in decision:
             return {"type": "end", "reason": "Commander selected re-plan or abort."}
+
+        if "ASSAULT" in decision and not self._has_execution_control_phase(context, "assault"):
+            return {
+                "type": "agent",
+                "role": "execution_control",
+                "reason": "Commander decision allows assault; generate assault execution commands.",
+            }
+
+        if "ASSAULT" in decision and not self._context_entries(context, "assault_result"):
+            return {"type": "agent", "role": "assault", "reason": "Assault commands are ready but assault has not executed."}
 
         if self._context_entries(context, "assault_result") and not self._context_entries(context, "closed_loop_result"):
             return {"type": "agent", "role": "closed_loop", "reason": "Assault is done; run final effect assessment and closed-loop optimization."}
@@ -1492,7 +1643,7 @@ class CommanderAgent:
             llm = self.build_llm()
             prompt = PromptTemplate.from_template(
                 "You are an A2A workflow planner. Choose the next action from this set only:\n"
-                "- recon\n- artillery\n- evaluator\n- assault\n- closed_loop\n- decision\n- end\n\n"
+                "- recon\n- execution_control\n- artillery\n- evaluator\n- assault\n- closed_loop\n- decision\n- end\n\n"
                 "Rules:\n"
                 "1. Return only one word from the set.\n"
                 "2. Use end if the workflow should stop.\n"
@@ -1504,7 +1655,7 @@ class CommanderAgent:
             choice = response.content.strip().lower()
             print(f"[LLM FALLBACK] Suggested next action: {choice}")
 
-            if choice in {"recon", "artillery", "evaluator", "assault", "closed_loop"}:
+            if choice in {"recon", "execution_control", "artillery", "evaluator", "assault", "closed_loop"}:
                 return {"type": "agent", "role": choice, "reason": "LLM fallback selected an agent role."}
             if choice == "decision":
                 return {"type": "decision", "reason": "LLM fallback selected commander decision."}
@@ -1617,11 +1768,14 @@ class CommanderAgent:
     def _context_key_for_bpel_variable(variable_name: str | None):
         return {
             "ReconReport": "recon_report",
+            "ExecutionControlStrikeResult": "execution_control_result",
+            "ExecutionControlAssaultResult": "execution_control_result",
             "StrikeCoordinates": "coordinates",
             "StrikeResult": "strike_result",
             "EvalScore": "eval_score",
             "CommanderDecision": "commander_decision",
             "AssaultResult": "assault_result",
+            "ClosedLoopResult": "closed_loop_result",
             "ReplanResult": "replan_result",
             "Sector_A": "sector",
         }.get(variable_name, variable_name)
@@ -1630,6 +1784,7 @@ class CommanderAgent:
     def _result_collection_keys():
         return {
             "recon_report",
+            "execution_control_result",
             "strike_result",
             "eval_score",
             "commander_decision",
@@ -2101,6 +2256,39 @@ class CommanderAgent:
                 if activatity.parent_activatity
                 else None
             )
+
+            if activatity.role in {
+                "recon",
+                "execution_control",
+                "artillery",
+                "evaluator",
+                "assault",
+                "closed_loop",
+            }:
+                payload, stream = self.build_task_payload(
+                    activatity.role,
+                    context,
+                    activatity_index=item["activatity_index"],
+                )
+                payload.update(
+                    {
+                        "activatity_id": activatity.activatity_id,
+                        "work_item": item["work_item"],
+                        "parent_work_item": parent_item.get("work_item") if parent_item else None,
+                        "activatity_index": item["activatity_index"],
+                        "activatity_role": activatity.role,
+                        "command": activatity.command or payload.get("command"),
+                        "retry_policy": {
+                            "max_retries": activatity.retry_count
+                            if activatity.retry_count is not None
+                            else self.max_retries,
+                            "timeout_seconds": activatity.timeout_seconds or self.request_timeout,
+                            "failure_policy": activatity.failure_policy,
+                        },
+                    }
+                )
+                return payload, stream
+
             input_key = self._context_key_for_bpel_variable(activatity.input_variable)
             input_payload = {}
             if input_key:

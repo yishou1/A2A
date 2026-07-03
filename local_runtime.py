@@ -26,6 +26,11 @@ class LocalAgentRuntime:
             "description": "Local reconnaissance unit.",
             "role": "recon",
         },
+        "execution_control": {
+            "name": "Local_Execution_Control_Agent",
+            "description": "Local execution control planner.",
+            "role": "execution_control",
+        },
         "artillery": {
             "name": "Local_Artillery_Agent",
             "description": "Local artillery simulation unit.",
@@ -160,6 +165,8 @@ class LocalAgentRuntime:
         command = payload.get("command", "")
         if role == "recon":
             return f"Local recon completed command={command}"
+        if role == "execution_control":
+            return f"Local execution control completed command={command}"
         if role == "artillery":
             return f"Local artillery completed command={command}"
         if role == "evaluator":
@@ -176,12 +183,23 @@ class LocalAgentRuntime:
 
         if role == "recon":
             value = "Sector_A is heavily fortified with overlapping machine gun nests."
+        elif role == "execution_control":
+            from execution_control_agent.execution_control_core import run_execution_control
+            from execution_control_agent.main import build_execution_control_arguments
+
+            value = run_execution_control(build_execution_control_arguments(payload))
         elif role == "artillery":
-            value = "Suppression barrage executed on Sector_A."
+            from artillery_agent.main import execute_artillery_command
+
+            structured, _message = execute_artillery_command(payload)
+            value = structured
         elif role == "evaluator":
             value = int(payload.get("input", {}).get("mock_eval_score", 40))
         elif role == "assault":
-            value = "Assault unit captured the beachhead."
+            from assault_agent.main import execute_assault_command
+
+            structured, _message = execute_assault_command(payload)
+            value = structured
         elif role == "closed_loop":
             from closed_loop_agent.closed_loop_core import _closed_loop_optimization
             from closed_loop_agent.main import build_closed_loop_arguments
