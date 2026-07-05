@@ -195,6 +195,7 @@ class AgentLeaseManager:
             self.service_name,
             {"role": role, "status": "idle"},
         )
+        idle = [target for target in idle if self._resource_allows(target)]
         if self.distributed_lock is not None:
             idle.extend(self._recover_stale_busy_instances(role))
         if self.circuit_breaker is None:
@@ -210,9 +211,16 @@ class AgentLeaseManager:
             key = self.instance_key(target)
             if key in seen:
                 continue
+            if not self._resource_allows(target):
+                continue
             seen.add(key)
             candidates.append(target)
         return candidates
+
+    @staticmethod
+    def _resource_allows(target: dict) -> bool:
+        metadata = target.get("metadata", {}) or {}
+        return str(metadata.get("resource_state", "ok")).lower() != "critical"
 
     def _recover_stale_busy_instances(self, role: str) -> list[dict]:
         recovered = []

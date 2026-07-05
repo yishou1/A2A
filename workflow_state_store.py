@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
@@ -45,10 +47,23 @@ class WorkflowStateStore:
             payload.setdefault("created_at", utc_now_iso())
             payload["updated_at"] = utc_now_iso()
 
-            tmp_path = path.with_suffix(path.suffix + ".tmp")
+            tmp_path = path.with_suffix(path.suffix + f".{uuid4().hex}.tmp")
             with tmp_path.open("w", encoding="utf-8") as tmp_file:
                 json.dump(payload, tmp_file, ensure_ascii=False, indent=2)
-            os.replace(tmp_path, path)
+                tmp_file.flush()
+                os.fsync(tmp_file.fileno())
+
+            last_error = None
+            for attempt in range(8):
+                try:
+                    os.replace(tmp_path, path)
+                    return
+                except PermissionError as exc:
+                    last_error = exc
+                    time.sleep(0.05 * (attempt + 1))
+            with contextlib.suppress(FileNotFoundError, PermissionError):
+                tmp_path.unlink()
+            raise last_error
 
     def delete(self, workflow_id: str) -> None:
         with self._lock:

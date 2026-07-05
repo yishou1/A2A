@@ -62,8 +62,10 @@ class CommanderAgent:
         request_timeout: float = None,
         registry=None,
         lease_manager=None,
+        details: bool = False,
     ):
         load_env_file()
+        self.details = bool(details or os.environ.get("A2A_DETAILS", "").lower() in {"1", "true", "yes", "on"})
         self.mode = (mode or os.environ.get("A2A_COMMANDER_MODE", "remote")).lower()
         if self.mode not in {"remote", "local"}:
             raise ValueError("mode must be either 'remote' or 'local'")
@@ -158,12 +160,47 @@ class CommanderAgent:
             workflow_id=self.workflow_id,
             **fields,
         )
-        log_event(
-            event_type,
-            workflow_id=self.workflow_id,
-            **fields,
-        )
+        self._log_event_if_details(event_type, **fields)
         return event
+
+    def _log_event_if_details(self, event_type: str, **fields):
+        if self.details or os.environ.get("A2A_PRINT_EVENTS", "").lower() in {"1", "true", "yes", "on"}:
+            log_event(
+                event_type,
+                workflow_id=self.workflow_id,
+                **fields,
+            )
+
+    @staticmethod
+    def _latest_entry_value(value):
+        if isinstance(value, list):
+            if not value:
+                return None
+            latest = value[-1]
+            if isinstance(latest, dict):
+                return latest.get("value")
+            return latest
+        return value
+
+    def _print_context_result(self, context: dict, *, title: str = "WORKFLOW SUMMARY"):
+        if self.details:
+            print(f"\n================= {title.replace('SUMMARY', 'CONTEXT')} =================")
+            print(json.dumps(context, ensure_ascii=False, indent=2))
+            print("====================================================")
+            return
+
+        print(f"\n=== {title} ===")
+        print(f"workflow_id={context.get('workflow_id')}")
+        print(f"status={context.get('workflow_status')} activity={context.get('workflow_activatity')}")
+        print(f"completed_roles={context.get('completed_roles', [])}")
+        if context.get("last_error"):
+            print(f"last_error={context.get('last_error')}")
+        for key in ["recon_report", "strike_result", "eval_score", "commander_decision", "assault_result", "replan_result"]:
+            value = self._latest_entry_value(context.get(key))
+            if value not in (None, [], ""):
+                print(f"{key}={value}")
+        print(f"checkpoint={self.state_store.state_path(self.workflow_id)}")
+        print("========================")
 
     def _remember_task_response(self, work_item: str, response: dict, *, role: str = None, target: str = None):
         if not work_item:
@@ -644,7 +681,10 @@ class CommanderAgent:
                 metrics = res.setdefault("metrics", {})
                 metrics.setdefault("duration_ms", round((time.perf_counter() - call_started) * 1000, 3))
                 self._remember_task_response(work_item, res, role=role_needed, target=label)
-                print(f"[SEND] {label} Task Response: {res}")
+                if self.details:
+                    print(f"[SEND] {label} Task Response: {res}")
+                else:
+                    print(f"[SEND] {label} role={role_needed} status={res.get('status')} work_item={work_item}")
                 self._trace("agent_call_completed", role=role_needed, work_item=work_item, target=label, attempt=attempt)
                 return True, None
             except Exception as exc:
@@ -680,7 +720,14 @@ class CommanderAgent:
                 for data in events:
                     print(f"   -> [{data.get('status')}] {data.get('progress', '')} {data.get('message', '')}")
             else:
-                print(f"[LOCAL SEND] Task Response: {response}")
+                if self.details:
+                    print(f"[LOCAL SEND] Task Response: {response}")
+                else:
+                    print(
+                        f"[LOCAL SEND] role={role_needed} "
+                        f"status={response.get('status')} "
+                        f"output={response.get('output')}"
+                    )
             self._trace(
                 "local_agent_call_completed",
                 role=role_needed,
@@ -946,9 +993,8 @@ class CommanderAgent:
                 workflow_id=self.workflow_id,
                 activity_ids=recovered,
             )
-            log_event(
+            self._log_event_if_details(
                 "interrupted_activities_recovered",
-                workflow_id=self.workflow_id,
                 activity_ids=recovered,
             )
         return recovered
@@ -1509,9 +1555,8 @@ class CommanderAgent:
                 status=status,
                 error=error,
             )
-            log_event(
+            self._log_event_if_details(
                 "activity_status_changed",
-                workflow_id=self.workflow_id,
                 activity_id=activatity.activatity_id,
                 work_item=item["work_item"],
                 role=activatity.role,
@@ -1917,9 +1962,8 @@ class CommanderAgent:
             reset_activity_ids=sorted(reset_ids),
             removed_outputs=removed,
         )
-        log_event(
+        self._log_event_if_details(
             "dag_resume_cleanup",
-            workflow_id=self.workflow_id,
             failed_activity_ids=sorted(failed_ids),
             affected_activity_ids=sorted(affected_ids),
             reset_activity_ids=sorted(reset_ids),
@@ -2248,9 +2292,7 @@ class CommanderAgent:
                 last_error=context.get("last_error"),
             )
 
-        print("\n================= WORKFLOW CONTEXT =================")
-        print(json.dumps(context, ensure_ascii=False, indent=2))
-        print("====================================================")
+        self._print_context_result(context)
         return context
 
     def run_dynamic_battle_scenario(self, max_steps: int = 10):
@@ -2258,9 +2300,7 @@ class CommanderAgent:
 
         if context.get("workflow_status") == "completed":
             print(f"[WORKFLOW] Workflow {self.workflow_id} already completed. Nothing to resume.")
-            print("\n================= WORKFLOW CONTEXT =================")
-            print(json.dumps(context, ensure_ascii=False, indent=2))
-            print("====================================================")
+            self._print_context_result(context)
             return context
 
         print("\n=== DYNAMIC WORKFLOW: RULE STATE MACHINE + LLM FALLBACK ===")
@@ -2376,9 +2416,7 @@ class CommanderAgent:
             self._save_workflow_checkpoint(context, status="paused")
             print(f"[WORKFLOW] Reached max_steps={max_steps}. Stop current workflow.")
 
-        print("\n================= WORKFLOW CONTEXT =================")
-        print(json.dumps(context, ensure_ascii=False, indent=2))
-        print("====================================================")
+        self._print_context_result(context)
         return context
 
     def run_battle_scenario(self):
@@ -2543,6 +2581,11 @@ def parse_args():
         default=None,
         help="Force commander decision in local/mock runs.",
     )
+    parser.add_argument(
+        "--details",
+        action="store_true",
+        help="Print full A2A trace events and workflow context JSON.",
+    )
     return parser.parse_args()
 
 
@@ -2598,6 +2641,7 @@ if __name__ == "__main__":
         max_retries=args.max_retries,
         retry_backoff=args.retry_backoff,
         request_timeout=args.request_timeout,
+        details=args.details,
     )
 
     if args.workflow == "legacy":

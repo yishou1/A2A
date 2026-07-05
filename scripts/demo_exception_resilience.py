@@ -145,6 +145,22 @@ def parse_args():
     )
     parser.add_argument("--startup-timeout", type=float, default=30.0)
     parser.add_argument("--details", action="store_true")
+    parser.add_argument(
+        "--show-nacos-ui",
+        action="store_true",
+        help="Pause at key Nacos metadata states so the web console can be inspected.",
+    )
+    parser.add_argument(
+        "--ui-hold-seconds",
+        type=float,
+        default=8.0,
+        help="Seconds to pause for each Nacos UI inspection point.",
+    )
+    parser.add_argument(
+        "--ui-wait-enter",
+        action="store_true",
+        help="Wait for Enter at each Nacos UI inspection point instead of only sleeping.",
+    )
     parser.add_argument("--agent", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--agent-name", help=argparse.SUPPRESS)
     parser.add_argument("--agent-role", help=argparse.SUPPRESS)
@@ -162,6 +178,24 @@ def no_proxy_session():
 def nacos_base_url(address):
     address = address.split(",", 1)[0].strip().rstrip("/")
     return address if address.startswith(("http://", "https://")) else f"http://{address}"
+
+
+def progress(message):
+    print(message, file=sys.__stdout__, flush=True)
+
+
+def hold_nacos_ui(args, label):
+    if not args.show_nacos_ui:
+        return
+    progress(f"\n[NACOS UI] {label}")
+    progress(f"[NACOS UI] Console: {nacos_base_url(args.nacos_addr)}/nacos/")
+    progress(f"[NACOS UI] Service: DEFAULT_GROUP -> {SERVICE_NAME}")
+    progress("[NACOS UI] Open service details and refresh the instance list/metadata.")
+    if args.ui_wait_enter:
+        input("[NACOS UI] Press Enter here after you finish inspecting the frontend...")
+    else:
+        progress(f"[NACOS UI] Holding {args.ui_hold_seconds:.0f}s for frontend inspection...")
+        time.sleep(args.ui_hold_seconds)
 
 
 def run_agent(args):
@@ -332,7 +366,16 @@ def task_payload(workflow_id, name):
     }
 
 
-def new_commander(registry, state_dir, workflow_id, *, retries=0, circuit_threshold=3, circuit_timeout=2):
+def new_commander(
+    registry,
+    state_dir,
+    workflow_id,
+    *,
+    retries=0,
+    circuit_threshold=3,
+    circuit_timeout=2,
+    request_timeout=4,
+):
     os.environ["A2A_CIRCUIT_FAILURE_THRESHOLD"] = str(circuit_threshold)
     os.environ["A2A_CIRCUIT_RECOVERY_TIMEOUT"] = str(circuit_timeout)
     commander = CommanderAgent(
@@ -342,7 +385,7 @@ def new_commander(registry, state_dir, workflow_id, *, retries=0, circuit_thresh
         registry=registry,
         max_retries=retries,
         retry_backoff=0.1,
-        request_timeout=4,
+        request_timeout=request_timeout,
     )
     commander.lease_manager.service_name = SERVICE_NAME
     commander.lease_heartbeat_check_interval = 0.1
@@ -395,6 +438,7 @@ def run_demo(args):
     try:
         agents.start()
         print(f"[READY] {len(AGENT_SPECS)} controllable Agents registered in Nacos")
+        hold_nacos_ui(args, "All demo Agents are registered and idle")
         redirect = contextlib.nullcontext() if args.details else contextlib.redirect_stdout(commander_log)
         with redirect:
             print("\n=== 1. AUTOMATIC RETRY ===")
@@ -429,6 +473,10 @@ def run_demo(args):
                 "backup_metadata": metadata_for_port(registry, 18214),
                 "events": failover_events,
             }
+            hold_nacos_ui(
+                args,
+                "Same-role failover: inspect demo_name=failover-primary port=18213 and failover-backup port=18214",
+            )
 
             print("\n=== 3. CIRCUIT BREAKER AND HALF-OPEN RECOVERY ===")
             control(18215, "http_fail_always")
@@ -450,6 +498,7 @@ def run_demo(args):
                 "demo_circuit", task_payload("demo-circuit", "blocked-while-open")
             )
             after_attempts = len(trace_events(circuit, "agent_call_attempt"))
+            hold_nacos_ui(args, "Circuit breaker: inspect demo_name=circuit-primary port=18215, circuit_state=open")
             control(18215, "success")
             time.sleep(1.2)
             recovered = circuit.delegate_task(
@@ -473,9 +522,21 @@ def run_demo(args):
             }
 
             print("\n=== 4. LEASE BUSY STATE, HEARTBEAT LOSS, AND LATE RESPONSE ===")
-            control(18216, "slow_success", delay_seconds=2.0)
+            if args.show_nacos_ui and args.ui_wait_enter:
+                heartbeat_delay_seconds = 3600.0
+            elif args.show_nacos_ui:
+                heartbeat_delay_seconds = max(2.0, args.ui_hold_seconds + 4.0)
+            else:
+                heartbeat_delay_seconds = 2.0
+            control(18216, "slow_success", delay_seconds=heartbeat_delay_seconds)
             control(18217, "success")
-            heartbeat = new_commander(registry, state_dir, "demo-heartbeat", retries=0)
+            heartbeat = new_commander(
+                registry,
+                state_dir,
+                "demo-heartbeat",
+                retries=0,
+                request_timeout=heartbeat_delay_seconds + 2.0,
+            )
             heartbeat_result = {}
 
             no_proxy_session().post(
@@ -490,6 +551,7 @@ def run_demo(args):
             worker = threading.Thread(target=invoke_heartbeat_demo, daemon=True)
             worker.start()
             busy_metadata = wait_for_metadata_status(registry, 18216, "busy")
+            hold_nacos_ui(args, "Lease state: inspect demo_name=heartbeat-primary port=18216, status=busy")
             registry.forced_stale_ports.add(18216)
             worker.join(timeout=8)
             time.sleep(2.2)
@@ -505,6 +567,10 @@ def run_demo(args):
                 "busy_metadata": busy_metadata,
                 "events": heartbeat_events,
             }
+            hold_nacos_ui(
+                args,
+                "Heartbeat loss: inspect heartbeat-primary port=18216 unavailable and heartbeat-backup port=18217",
+            )
 
             print("\n=== 5. AGENT BUSINESS ERROR AND TRACEBACK ===")
             control(18218, "business_error")

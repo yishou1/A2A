@@ -100,6 +100,16 @@ class AgentLeaseManagerTest(unittest.TestCase):
         )
         self.assertNotIn("lease_workflow_id", acquired.target["metadata"])
 
+    def test_critical_resource_agent_is_not_leased(self):
+        registry = FakeRegistry()
+        registry.instances[0]["metadata"]["resource_state"] = "critical"
+        leases = AgentLeaseManager(registry)
+
+        acquired = leases.acquire_one("recon", "wf-1", "wf-1:1:recon")
+
+        self.assertEqual(acquired.instance_key, "10.0.0.2:8013")
+        self.assertEqual(registry.instances[0]["metadata"]["status"], "idle")
+
 
 if __name__ == "__main__":
     unittest.main()

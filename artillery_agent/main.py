@@ -33,7 +33,13 @@ if __name__ == "__main__":
         service_name="A2A-Agent",
         ip=ip,
         port=port,
-        metadata={"role": "artillery", "firepower": "heavy", "status": "idle"},
+        metadata={
+            "role": "artillery",
+            "firepower": "heavy",
+            "status": "idle",
+            **agent.heartbeat_metadata(),
+        },
         heartbeat_interval=heartbeat_interval,
+        metadata_provider=agent.heartbeat_metadata,
     )
     agent.start()
