@@ -13,7 +13,12 @@ scripts/simulation/_cache/
 .a2a_state/
 logs/
 .pytest_cache/
-docs/
 __pycache__/
 *.py[cod]
 *.log
+
+# Training run artifacts (bulky binaries; keep csv/yaml/meta in runs/)
+runs/**/weights/
+runs/**/*.jpg
+runs/**/*.png
+runs/model_profile/
