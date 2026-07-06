@@ -195,6 +195,10 @@ Result<AlgorithmCard> ParseAlgorithmCard(const YAML::Node& root) {
             card.machine_spec.output_schema_ref =
                 machine_spec_node["output_schema_ref"].as<std::string>();
         }
+        if (machine_spec_node["tensor_contract_ref"]) {
+            card.machine_spec.tensor_contract_ref =
+                machine_spec_node["tensor_contract_ref"].as<std::string>();
+        }
         if (machine_spec_node["runtime"] && machine_spec_node["runtime"].IsMap()) {
             const YAML::Node& runtime_node = machine_spec_node["runtime"];
             if (!runtime_node["backend_type"]) {
@@ -433,6 +437,15 @@ Status ValidateBackendSpecificFields(const AlgorithmCard& card,
                                                               card.machine_spec.postprocess->config_uri),
                                   ErrorCode::kPostprocessFailed,
                                   "machine_spec.postprocess.config_uri"));
+            if (!card.machine_spec.tensor_contract_ref.empty()) {
+                status = AppendStatus(
+                    std::move(status),
+                    RequireFileExists(FileUtils::ResolveReference(
+                                          package_root,
+                                          card.machine_spec.tensor_contract_ref),
+                                      ErrorCode::kInvalidAlgorithmCard,
+                                      "machine_spec.tensor_contract_ref"));
+            }
             if (card.machine_spec.tokenizer.has_value() &&
                 !card.machine_spec.tokenizer->tokenizer_uri.empty()) {
                 status = AppendStatus(

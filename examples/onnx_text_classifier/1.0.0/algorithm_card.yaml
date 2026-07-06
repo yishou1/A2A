@@ -38,6 +38,7 @@ agent_card:
 machine_spec:
   input_schema_ref: input.schema.json
   output_schema_ref: output.schema.json
+  tensor_contract_ref: tensor_contract.yaml
   runtime:
     backend_type: onnx
     model_uri: model.onnx

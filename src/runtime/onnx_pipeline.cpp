@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <numeric>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -43,6 +44,150 @@ std::vector<std::string> SplitWhitespaceTokens(const std::string& text) {
         tokens.push_back(current);
     }
     return tokens;
+}
+
+Result<TensorDataType> ParseTensorDataTypeString(const std::string& value) {
+    if (value == "float32" || value == "float") {
+        return TensorDataType::kFloat32;
+    }
+    if (value == "int64" || value == "long") {
+        return TensorDataType::kInt64;
+    }
+    if (value == "string") {
+        return TensorDataType::kString;
+    }
+    return Status::Error(ErrorCode::kInvalidAlgorithmCard,
+                         "Unsupported tensor dtype: " + value + ".");
+}
+
+Result<std::vector<std::int64_t>> ParseShapeNode(const YAML::Node& node,
+                                                 const std::string& field_name,
+                                                 ErrorCode error_code) {
+    if (!node || !node.IsSequence()) {
+        return Status::Error(error_code, field_name + " must be an array.");
+    }
+
+    std::vector<std::int64_t> shape;
+    for (const auto& item : node) {
+        if (!item.IsScalar()) {
+            return Status::Error(error_code, field_name + " must contain integer dimensions.");
+        }
+        shape.push_back(item.as<std::int64_t>());
+    }
+    return shape;
+}
+
+Result<TensorContractTensor> ParseTensorContractTensor(const YAML::Node& node,
+                                                       const std::string& field_name) {
+    if (!node || !node.IsMap()) {
+        return Status::Error(ErrorCode::kInvalidAlgorithmCard,
+                             field_name + " item must be a map.");
+    }
+    if (!node["name"] || !node["name"].IsScalar()) {
+        return Status::Error(ErrorCode::kInvalidAlgorithmCard,
+                             field_name + " item must contain scalar name.");
+    }
+    if (!node["dtype"] || !node["dtype"].IsScalar()) {
+        return Status::Error(ErrorCode::kInvalidAlgorithmCard,
+                             field_name + " item must contain scalar dtype.");
+    }
+    if (!node["shape"]) {
+        return Status::Error(ErrorCode::kInvalidAlgorithmCard,
+                             field_name + " item must contain shape.");
+    }
+
+    auto dtype_result = ParseTensorDataTypeString(node["dtype"].as<std::string>());
+    if (!dtype_result.ok()) {
+        return dtype_result.status();
+    }
+    auto shape_result = ParseShapeNode(node["shape"], field_name + ".shape",
+                                       ErrorCode::kInvalidAlgorithmCard);
+    if (!shape_result.ok()) {
+        return shape_result.status();
+    }
+
+    TensorContractTensor tensor;
+    tensor.name = node["name"].as<std::string>();
+    tensor.dtype = dtype_result.value();
+    tensor.shape = shape_result.value();
+    return tensor;
+}
+
+const TensorContractTensor* FindTensorSpec(const std::vector<TensorContractTensor>& tensors,
+                                           const std::string& tensor_name) {
+    auto it = std::find_if(tensors.begin(), tensors.end(),
+                           [&tensor_name](const TensorContractTensor& tensor) {
+                               return tensor.name == tensor_name;
+                           });
+    return it == tensors.end() ? nullptr : &(*it);
+}
+
+Result<const json*> ResolveJsonPath(const json& root, const std::string& json_path) {
+    if (json_path.empty() || json_path == "$") {
+        return &root;
+    }
+    if (json_path.rfind("$.", 0) != 0) {
+        return Status::Error(ErrorCode::kPreprocessFailed,
+                             "json_path must be `$` or start with `$.`: " + json_path + ".");
+    }
+
+    const json* current = &root;
+    std::size_t start = 2;
+    while (start <= json_path.size()) {
+        const std::size_t dot = json_path.find('.', start);
+        const std::string field =
+            json_path.substr(start, dot == std::string::npos ? std::string::npos : dot - start);
+        if (field.empty()) {
+            return Status::Error(ErrorCode::kPreprocessFailed,
+                                 "json_path contains an empty field: " + json_path + ".");
+        }
+        if (!current->is_object() || !current->contains(field)) {
+            return Status::Error(ErrorCode::kPreprocessFailed,
+                                 "json_path was not found in request inputs: " + json_path + ".");
+        }
+        current = &current->at(field);
+        if (dot == std::string::npos) {
+            break;
+        }
+        start = dot + 1;
+    }
+    return current;
+}
+
+Status SetJsonPath(json* root, const std::string& json_path, const json& value) {
+    if (json_path.empty() || json_path == "$") {
+        *root = value;
+        return Status::Ok();
+    }
+    if (json_path.rfind("$.", 0) != 0) {
+        return Status::Error(ErrorCode::kPostprocessFailed,
+                             "json_path must be `$` or start with `$.`: " + json_path + ".");
+    }
+    if (!root->is_object()) {
+        *root = json::object();
+    }
+
+    json* current = root;
+    std::size_t start = 2;
+    while (start <= json_path.size()) {
+        const std::size_t dot = json_path.find('.', start);
+        const std::string field =
+            json_path.substr(start, dot == std::string::npos ? std::string::npos : dot - start);
+        if (field.empty()) {
+            return Status::Error(ErrorCode::kPostprocessFailed,
+                                 "json_path contains an empty field: " + json_path + ".");
+        }
+        if (dot == std::string::npos) {
+            (*current)[field] = value;
+            return Status::Ok();
+        }
+        if (!(*current)[field].is_object()) {
+            (*current)[field] = json::object();
+        }
+        current = &(*current)[field];
+        start = dot + 1;
+    }
+    return Status::Ok();
 }
 
 std::int64_t HashToken(const std::string& token) {
@@ -157,6 +302,95 @@ Result<TensorBlob> BuildTensorFromJsonValue(const std::string& tensor_name,
     return tensor;
 }
 
+std::size_t ElementCountFromShape(const std::vector<std::int64_t>& shape) {
+    if (shape.empty()) {
+        return 1;
+    }
+
+    std::size_t count = 1;
+    for (std::int64_t dimension : shape) {
+        if (dimension <= 0) {
+            return 0;
+        }
+        count *= static_cast<std::size_t>(dimension);
+    }
+    return count;
+}
+
+Result<std::vector<std::int64_t>> ResolveTensorShape(
+    const std::vector<std::int64_t>& configured_shape,
+    const std::vector<std::int64_t>& inferred_shape,
+    const std::string& tensor_name) {
+    if (configured_shape.empty()) {
+        return inferred_shape;
+    }
+
+    std::vector<std::int64_t> resolved_shape = configured_shape;
+    if (std::find(resolved_shape.begin(), resolved_shape.end(), -1) != resolved_shape.end()) {
+        if (resolved_shape.size() != inferred_shape.size()) {
+            return Status::Error(
+                ErrorCode::kPreprocessFailed,
+                "Tensor `" + tensor_name + "` uses wildcard shape but inferred rank does not match.");
+        }
+        for (std::size_t index = 0; index < resolved_shape.size(); ++index) {
+            if (resolved_shape.at(index) == -1) {
+                resolved_shape.at(index) = inferred_shape.at(index);
+            }
+        }
+    }
+
+    if (ElementCountFromShape(resolved_shape) == 0) {
+        return Status::Error(ErrorCode::kPreprocessFailed,
+                             "Tensor `" + tensor_name + "` shape must contain positive dimensions.");
+    }
+    return resolved_shape;
+}
+
+Result<TensorBlob> BuildMappedTensorFromJsonValue(
+    const JsonToTensorMapping& mapping,
+    const json& source_value,
+    const std::optional<TensorContract>& tensor_contract) {
+    auto inferred_tensor_result = BuildTensorFromJsonValue(mapping.tensor_name, source_value);
+    if (!inferred_tensor_result.ok()) {
+        return inferred_tensor_result.status();
+    }
+
+    TensorBlob tensor = inferred_tensor_result.value();
+    const TensorContractTensor* contract_tensor =
+        tensor_contract.has_value()
+            ? FindTensorSpec(tensor_contract->inputs, mapping.tensor_name)
+            : nullptr;
+
+    if (mapping.dtype.has_value()) {
+        tensor.dtype = *mapping.dtype;
+    } else if (contract_tensor != nullptr) {
+        tensor.dtype = contract_tensor->dtype;
+    }
+
+    std::vector<std::int64_t> configured_shape;
+    if (mapping.has_shape) {
+        configured_shape = mapping.shape;
+    } else if (contract_tensor != nullptr) {
+        configured_shape = contract_tensor->shape;
+    }
+
+    auto shape_result =
+        ResolveTensorShape(configured_shape, inferred_tensor_result.value().shape, mapping.tensor_name);
+    if (!shape_result.ok()) {
+        return shape_result.status();
+    }
+    tensor.shape = shape_result.value();
+
+    const std::size_t expected_count = ElementCountFromShape(tensor.shape);
+    const std::size_t inferred_count = ElementCountFromShape(inferred_tensor_result.value().shape);
+    if (expected_count != inferred_count) {
+        return Status::Error(ErrorCode::kPreprocessFailed,
+                             "Tensor `" + mapping.tensor_name +
+                                 "` shape does not match JSON value count.");
+    }
+    return tensor;
+}
+
 Result<std::vector<std::string>> LoadLabels(const std::filesystem::path& label_map_path) {
     auto label_map_result = JsonUtils::ReadJsonFile(label_map_path);
     if (!label_map_result.ok()) {
@@ -251,6 +485,52 @@ std::string ToString(TensorDataType dtype) {
     return "unknown";
 }
 
+Result<TensorContract> OnnxPipeline::LoadTensorContract(
+    const std::filesystem::path& config_path) const {
+    auto yaml_result = YamlUtils::LoadYamlFile(config_path);
+    if (!yaml_result.ok()) {
+        return Status::Error(
+            ErrorCode::kInvalidAlgorithmCard,
+            "Failed to load tensor contract " + config_path.generic_string() + ": " +
+                yaml_result.status().ToString());
+    }
+
+    const YAML::Node& root = yaml_result.value();
+    if (!root || !root.IsMap()) {
+        return Status::Error(ErrorCode::kInvalidAlgorithmCard,
+                             "tensor_contract.yaml root must be a map.");
+    }
+    if (!root["inputs"] || !root["inputs"].IsSequence()) {
+        return Status::Error(ErrorCode::kInvalidAlgorithmCard,
+                             "tensor_contract.yaml must contain inputs array.");
+    }
+    if (!root["outputs"] || !root["outputs"].IsSequence()) {
+        return Status::Error(ErrorCode::kInvalidAlgorithmCard,
+                             "tensor_contract.yaml must contain outputs array.");
+    }
+
+    TensorContract contract;
+    for (const auto& input_node : root["inputs"]) {
+        auto tensor_result = ParseTensorContractTensor(input_node, "inputs");
+        if (!tensor_result.ok()) {
+            return tensor_result.status();
+        }
+        contract.inputs.push_back(tensor_result.value());
+    }
+    for (const auto& output_node : root["outputs"]) {
+        auto tensor_result = ParseTensorContractTensor(output_node, "outputs");
+        if (!tensor_result.ok()) {
+            return tensor_result.status();
+        }
+        contract.outputs.push_back(tensor_result.value());
+    }
+    if (contract.inputs.empty() || contract.outputs.empty()) {
+        return Status::Error(ErrorCode::kInvalidAlgorithmCard,
+                             "tensor_contract.yaml inputs and outputs must be non-empty.");
+    }
+    return contract;
+}
+
 Result<PreprocessConfig> OnnxPipeline::LoadPreprocessConfig(
     const std::filesystem::path& config_path) const {
     auto yaml_result = YamlUtils::LoadYamlFile(config_path);
@@ -280,16 +560,62 @@ Result<PreprocessConfig> OnnxPipeline::LoadPreprocessConfig(
     if (root["tensor_name"]) {
         config.tensor_name = root["tensor_name"].as<std::string>();
     }
+    if (root["mappings"]) {
+        if (!root["mappings"].IsSequence()) {
+            return Status::Error(ErrorCode::kPreprocessFailed,
+                                 "preprocess.mappings must be an array.");
+        }
+        for (const auto& mapping_node : root["mappings"]) {
+            if (!mapping_node.IsMap()) {
+                return Status::Error(ErrorCode::kPreprocessFailed,
+                                     "preprocess.mappings items must be maps.");
+            }
+            if (!mapping_node["tensor_name"] || !mapping_node["tensor_name"].IsScalar()) {
+                return Status::Error(ErrorCode::kPreprocessFailed,
+                                     "json_to_tensor_map mapping requires tensor_name.");
+            }
+
+            JsonToTensorMapping mapping;
+            mapping.tensor_name = mapping_node["tensor_name"].as<std::string>();
+            if (mapping_node["json_path"]) {
+                mapping.json_path = mapping_node["json_path"].as<std::string>();
+            }
+            if (mapping_node["dtype"]) {
+                auto dtype_result =
+                    ParseTensorDataTypeString(mapping_node["dtype"].as<std::string>());
+                if (!dtype_result.ok()) {
+                    return Status::Error(ErrorCode::kPreprocessFailed,
+                                         dtype_result.status().message());
+                }
+                mapping.dtype = dtype_result.value();
+            }
+            if (mapping_node["shape"]) {
+                auto shape_result = ParseShapeNode(mapping_node["shape"], "preprocess.shape",
+                                                   ErrorCode::kPreprocessFailed);
+                if (!shape_result.ok()) {
+                    return shape_result.status();
+                }
+                mapping.shape = shape_result.value();
+                mapping.has_shape = true;
+            }
+            config.tensor_mappings.push_back(std::move(mapping));
+        }
+    }
 
     static const std::vector<std::string> kSupportedTypes = {
         "no_op",
         "tensor_from_json",
         "text_tokenization",
+        "json_to_tensor_map",
     };
     if (std::find(kSupportedTypes.begin(), kSupportedTypes.end(), config.type) ==
         kSupportedTypes.end()) {
         return Status::Error(ErrorCode::kPreprocessFailed,
                              "Unsupported preprocess type: " + config.type + ".");
+    }
+    if (config.type == "json_to_tensor_map" && config.tensor_mappings.empty()) {
+        return Status::Error(ErrorCode::kPreprocessFailed,
+                             "json_to_tensor_map requires at least one mapping.");
     }
     return config;
 }
@@ -322,10 +648,33 @@ Result<PostprocessConfig> OnnxPipeline::LoadPostprocessConfig(
     } else if (config.type == "classification_postprocess") {
         config.tensor_name = "logits";
     }
+    if (root["outputs"]) {
+        if (!root["outputs"].IsSequence()) {
+            return Status::Error(ErrorCode::kPostprocessFailed,
+                                 "postprocess.outputs must be an array.");
+        }
+        for (const auto& output_node : root["outputs"]) {
+            if (!output_node.IsMap()) {
+                return Status::Error(ErrorCode::kPostprocessFailed,
+                                     "postprocess.outputs items must be maps.");
+            }
+            if (!output_node["tensor_name"] || !output_node["tensor_name"].IsScalar()) {
+                return Status::Error(ErrorCode::kPostprocessFailed,
+                                     "raw_tensor_to_json output requires tensor_name.");
+            }
+            RawTensorOutputMapping mapping;
+            mapping.tensor_name = output_node["tensor_name"].as<std::string>();
+            if (output_node["json_path"]) {
+                mapping.json_path = output_node["json_path"].as<std::string>();
+            }
+            config.output_mappings.push_back(std::move(mapping));
+        }
+    }
 
     static const std::vector<std::string> kSupportedTypes = {
         "no_op",
         "classification_postprocess",
+        "raw_tensor_to_json",
     };
     if (std::find(kSupportedTypes.begin(), kSupportedTypes.end(), config.type) ==
         kSupportedTypes.end()) {
@@ -336,11 +685,32 @@ Result<PostprocessConfig> OnnxPipeline::LoadPostprocessConfig(
         return Status::Error(ErrorCode::kPostprocessFailed,
                              "top_k must be greater than 0.");
     }
+    if (config.type == "raw_tensor_to_json" && config.output_mappings.empty()) {
+        return Status::Error(ErrorCode::kPostprocessFailed,
+                             "raw_tensor_to_json requires at least one output mapping.");
+    }
     return config;
 }
 
 std::vector<std::string> OnnxPipeline::ExpectedInputTensorNames(
-    const PreprocessConfig& config) const {
+    const PreprocessConfig& config,
+    const std::optional<TensorContract>& tensor_contract) const {
+    if (tensor_contract.has_value()) {
+        std::vector<std::string> names;
+        names.reserve(tensor_contract->inputs.size());
+        for (const auto& tensor : tensor_contract->inputs) {
+            names.push_back(tensor.name);
+        }
+        return names;
+    }
+    if (config.type == "json_to_tensor_map") {
+        std::vector<std::string> names;
+        names.reserve(config.tensor_mappings.size());
+        for (const auto& mapping : config.tensor_mappings) {
+            names.push_back(mapping.tensor_name);
+        }
+        return names;
+    }
     if (config.type == "text_tokenization") {
         return {"input_ids", "attention_mask"};
     }
@@ -348,15 +718,34 @@ std::vector<std::string> OnnxPipeline::ExpectedInputTensorNames(
 }
 
 std::vector<std::string> OnnxPipeline::ExpectedOutputTensorNames(
-    const PostprocessConfig& config) const {
+    const PostprocessConfig& config,
+    const std::optional<TensorContract>& tensor_contract) const {
+    if (tensor_contract.has_value()) {
+        std::vector<std::string> names;
+        names.reserve(tensor_contract->outputs.size());
+        for (const auto& tensor : tensor_contract->outputs) {
+            names.push_back(tensor.name);
+        }
+        return names;
+    }
+    if (config.type == "raw_tensor_to_json") {
+        std::vector<std::string> names;
+        names.reserve(config.output_mappings.size());
+        for (const auto& mapping : config.output_mappings) {
+            names.push_back(mapping.tensor_name);
+        }
+        return names;
+    }
     if (config.type == "classification_postprocess") {
         return {config.tensor_name};
     }
     return {config.tensor_name};
 }
 
-Result<std::vector<TensorBlob>> OnnxPipeline::RunPreprocess(const PreprocessConfig& config,
-                                                            const AlgorithmRequest& request) const {
+Result<std::vector<TensorBlob>> OnnxPipeline::RunPreprocess(
+    const PreprocessConfig& config,
+    const AlgorithmRequest& request,
+    const std::optional<TensorContract>& tensor_contract) const {
     if (config.type == "no_op") {
         TensorBlob tensor;
         tensor.name = config.tensor_name;
@@ -378,6 +767,34 @@ Result<std::vector<TensorBlob>> OnnxPipeline::RunPreprocess(const PreprocessConf
         }
         tensor_result.value().metadata = {{"source_json", request.inputs}};
         return std::vector<TensorBlob>{tensor_result.value()};
+    }
+
+    if (config.type == "json_to_tensor_map") {
+        if (!request.inputs.is_object()) {
+            return Status::Error(ErrorCode::kPreprocessFailed,
+                                 "json_to_tensor_map requires object inputs.");
+        }
+
+        std::vector<TensorBlob> tensors;
+        tensors.reserve(config.tensor_mappings.size());
+        for (const auto& mapping : config.tensor_mappings) {
+            auto source_result = ResolveJsonPath(request.inputs, mapping.json_path);
+            if (!source_result.ok()) {
+                return source_result.status();
+            }
+
+            auto tensor_result =
+                BuildMappedTensorFromJsonValue(mapping, *source_result.value(), tensor_contract);
+            if (!tensor_result.ok()) {
+                return tensor_result.status();
+            }
+            tensor_result.value().metadata = {
+                {"source_json", request.inputs},
+                {"json_path", mapping.json_path},
+            };
+            tensors.push_back(std::move(tensor_result.value()));
+        }
+        return tensors;
     }
 
     if (config.type == "text_tokenization") {
@@ -434,6 +851,29 @@ Result<json> OnnxPipeline::RunPostprocess(const PostprocessConfig& config,
     if (output_tensors.empty()) {
         return Status::Error(ErrorCode::kPostprocessFailed,
                              "ONNX session did not return any output tensor.");
+    }
+
+    if (config.type == "raw_tensor_to_json") {
+        std::unordered_map<std::string, const TensorBlob*> output_lookup;
+        output_lookup.reserve(output_tensors.size());
+        for (const auto& tensor : output_tensors) {
+            output_lookup[tensor.name] = &tensor;
+        }
+
+        json output = json::object();
+        for (const auto& mapping : config.output_mappings) {
+            auto it = output_lookup.find(mapping.tensor_name);
+            if (it == output_lookup.end()) {
+                return Status::Error(ErrorCode::kPostprocessFailed,
+                                     "Expected output tensor was not found: " +
+                                         mapping.tensor_name + ".");
+            }
+            auto set_status = SetJsonPath(&output, mapping.json_path, it->second->values);
+            if (!set_status.ok()) {
+                return set_status;
+            }
+        }
+        return output;
     }
 
     auto tensor_it = std::find_if(output_tensors.begin(), output_tensors.end(),

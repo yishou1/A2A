@@ -26,10 +26,21 @@ Status OnnxRunner::Load(const AlgorithmEntry& entry) {
         return postprocess_result.status();
     }
 
+    std::optional<TensorContract> tensor_contract;
+    if (!entry.card.machine_spec.tensor_contract_ref.empty()) {
+        const auto tensor_contract_path = FileUtils::ResolveReference(
+            entry.package_root, entry.card.machine_spec.tensor_contract_ref);
+        auto tensor_contract_result = pipeline_.LoadTensorContract(tensor_contract_path);
+        if (!tensor_contract_result.ok()) {
+            return tensor_contract_result.status();
+        }
+        tensor_contract = tensor_contract_result.value();
+    }
+
     const auto expected_input_names =
-        pipeline_.ExpectedInputTensorNames(preprocess_result.value());
+        pipeline_.ExpectedInputTensorNames(preprocess_result.value(), tensor_contract);
     const auto expected_output_names =
-        pipeline_.ExpectedOutputTensorNames(postprocess_result.value());
+        pipeline_.ExpectedOutputTensorNames(postprocess_result.value(), tensor_contract);
 
     auto load_status = session_.LoadModel(model_path,
                                           entry.card.machine_spec.runtime.execution_provider,
@@ -51,6 +62,7 @@ Status OnnxRunner::Load(const AlgorithmEntry& entry) {
 
     preprocess_config_ = preprocess_result.value();
     postprocess_config_ = postprocess_result.value();
+    tensor_contract_ = std::move(tensor_contract);
     loaded_ = true;
     return Status::Ok();
 }
@@ -63,7 +75,8 @@ AlgorithmResult OnnxRunner::Run(const AlgorithmRequest& request) {
                           "ONNX runner must be loaded before Run()."));
     }
 
-    auto preprocess_result = pipeline_.RunPreprocess(*preprocess_config_, request);
+    auto preprocess_result =
+        pipeline_.RunPreprocess(*preprocess_config_, request, tensor_contract_);
     if (!preprocess_result.ok()) {
         return BuildErrorResult(request, preprocess_result.status());
     }

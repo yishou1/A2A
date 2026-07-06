@@ -21,6 +21,7 @@
 #include "algolib/runtime/algorithm_request.h"
 #include "algolib/runtime/algorithm_result.h"
 #include "algolib/runtime/execution_coordinator.h"
+#include "algolib/runtime/runtime_runner_cache.h"
 
 namespace algolib {
 namespace {
@@ -272,6 +273,7 @@ private:
                 {"status", "ready"},
                 {"registry_path", config_.registry_path.generic_string()},
                 {"execution_log_path", config_.execution_log_path.generic_string()},
+                {"runner_cache_size", runner_cache_.Size()},
             };
             WriteJson(&response, 200, payload);
         });
@@ -283,6 +285,7 @@ private:
                 WriteJson(&response, HttpStatusForStatus(status), ErrorPayload(status));
                 return;
             }
+            runner_cache_.Clear();
             WriteJson(&response, 200, json{{"ok", true}, {"status", "reloaded"}});
         });
 
@@ -370,6 +373,7 @@ private:
                                        ErrorPayload(register_result.status()));
                              return;
                          }
+                         runner_cache_.Clear();
                          WriteJson(&response, 201, EntrySummaryPayload(register_result.value()));
                      });
 
@@ -406,6 +410,7 @@ private:
                                          ErrorPayload(delete_result.status()));
                                return;
                            }
+                           runner_cache_.Invalidate(key_result.value());
                            WriteJson(&response, 200, EntrySummaryPayload(delete_result.value()));
                        });
 
@@ -434,7 +439,7 @@ private:
             }
 
             // 中文注释：先保持一次请求内 registry 与 runner 创建串行，后续可替换为共享锁和 runner 缓存。
-            ExecutionCoordinator coordinator(registry_, config_.execution_log_path);
+            ExecutionCoordinator coordinator(registry_, config_.execution_log_path, &runner_cache_);
             const AlgorithmResult run_result = coordinator.Run(request_result.value());
             const json payload = ToJson(run_result);
             const int status_code = run_result.ok
@@ -496,12 +501,14 @@ private:
                           ErrorPayload(result.status()));
                 return;
             }
+            runner_cache_.Invalidate(key_result.value());
             WriteJson(&response, 200, EntrySummaryPayload(result.value()));
         });
     }
 
     HttpServerConfig config_;
     AlgorithmRegistry registry_;
+    RuntimeRunnerCache runner_cache_;
     httplib::Server server_;
     mutable std::mutex mutex_;
     Status startup_error_ = Status::Ok();

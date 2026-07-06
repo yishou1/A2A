@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -92,9 +93,11 @@ void EnsureLatency(AlgorithmResult* result, std::int64_t latency_ms) {
 }  // namespace
 
 ExecutionCoordinator::ExecutionCoordinator(const AlgorithmRegistry& registry,
-                                           std::filesystem::path execution_log_path)
+                                           std::filesystem::path execution_log_path,
+                                           RuntimeRunnerCache* runner_cache)
     : registry_(registry),
-      execution_logger_(ResolveExecutionLogPath(registry, execution_log_path)) {}
+      execution_logger_(ResolveExecutionLogPath(registry, execution_log_path)),
+      runner_cache_(runner_cache) {}
 
 AlgorithmResult ExecutionCoordinator::Run(const AlgorithmRequest& request) {
     AlgorithmRequest effective_request = request;
@@ -138,19 +141,32 @@ AlgorithmResult ExecutionCoordinator::Run(const AlgorithmRequest& request) {
         return finalize(BuildFailureResult(effective_request, input_status));
     }
 
-    auto runner = runtime_factory_.Create(effective_request.backend_type);
-    if (!runner) {
-        return finalize(BuildFailureResult(
-            effective_request,
-            Status::Error(
-                ErrorCode::kUnsupportedBackendType,
-                "No runtime runner is registered for backend_type=" +
-                    ToString(effective_request.backend_type) + ".")));
-    }
+    std::unique_ptr<IAlgorithmRunner> owned_runner;
+    std::shared_ptr<IAlgorithmRunner> cached_runner;
+    IAlgorithmRunner* runner = nullptr;
+    if (runner_cache_ != nullptr) {
+        auto runner_result = runner_cache_->GetOrLoad(entry, runtime_factory_);
+        if (!runner_result.ok()) {
+            return finalize(BuildFailureResult(effective_request, runner_result.status()));
+        }
+        cached_runner = runner_result.value();
+        runner = cached_runner.get();
+    } else {
+        owned_runner = runtime_factory_.Create(effective_request.backend_type);
+        if (!owned_runner) {
+            return finalize(BuildFailureResult(
+                effective_request,
+                Status::Error(
+                    ErrorCode::kUnsupportedBackendType,
+                    "No runtime runner is registered for backend_type=" +
+                        ToString(effective_request.backend_type) + ".")));
+        }
 
-    auto load_status = runner->Load(entry);
-    if (!load_status.ok()) {
-        return finalize(BuildFailureResult(effective_request, load_status));
+        auto load_status = owned_runner->Load(entry);
+        if (!load_status.ok()) {
+            return finalize(BuildFailureResult(effective_request, load_status));
+        }
+        runner = owned_runner.get();
     }
 
     AlgorithmResult result = runner->Run(effective_request);

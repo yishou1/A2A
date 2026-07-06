@@ -120,6 +120,9 @@ json ToJson(const AlgorithmCard& card) {
     json machine_spec_json;
     machine_spec_json["input_schema_ref"] = card.machine_spec.input_schema_ref;
     machine_spec_json["output_schema_ref"] = card.machine_spec.output_schema_ref;
+    if (!card.machine_spec.tensor_contract_ref.empty()) {
+        machine_spec_json["tensor_contract_ref"] = card.machine_spec.tensor_contract_ref;
+    }
     machine_spec_json["runtime"] = {
         {"backend_type", ToString(card.machine_spec.runtime.backend_type)},
         {"model_uri", card.machine_spec.runtime.model_uri},
@@ -255,6 +258,8 @@ Result<AlgorithmCard> AlgorithmCardFromJson(const json& json_value) {
             ReadRequiredString(machine_spec_json, "input_schema_ref");
         card.machine_spec.output_schema_ref =
             ReadRequiredString(machine_spec_json, "output_schema_ref");
+        card.machine_spec.tensor_contract_ref =
+            machine_spec_json.value("tensor_contract_ref", std::string());
 
         if (!machine_spec_json.contains("runtime") || !machine_spec_json.at("runtime").is_object()) {
             return Status::Error(ErrorCode::kInvalidAlgorithmCard,

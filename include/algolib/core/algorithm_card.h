@@ -55,6 +55,8 @@ struct ProcessSpec {
 struct MachineSpec {
     std::string input_schema_ref;
     std::string output_schema_ref;
+    // 中文注释：可选 ONNX tensor 契约文件，用于声明模型真实输入/输出 tensor 签名。
+    std::string tensor_contract_ref;
     RuntimeSpec runtime;
     std::optional<TokenizerSpec> tokenizer;
     std::optional<ProcessSpec> preprocess;

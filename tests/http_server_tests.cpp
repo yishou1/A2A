@@ -131,6 +131,8 @@ void TestHttpServerListsShowsAndRunsActiveOnnxAlgorithm() {
 
     const auto health = GetJson(server.port(), "/health", 200);
     Expect(health.value("ok", false), "Health endpoint should return ok=true.");
+    Expect(health.value("runner_cache_size", -1) == 0,
+           "Runner cache should be empty before the first /run request.");
 
     const auto algorithms = GetJson(server.port(), "/algorithms", 200);
     Expect(algorithms.value("count", 0) == 1, "Active algorithm list should contain one entry.");
@@ -158,6 +160,16 @@ void TestHttpServerListsShowsAndRunsActiveOnnxAlgorithm() {
     Expect(run.value("ok", false), "HTTP /run should succeed for active ONNX algorithm.");
     Expect(run.at("outputs").value("label", std::string()) == "task",
            "HTTP /run should return ONNX output payload.");
+
+    const auto health_after_first_run = GetJson(server.port(), "/health", 200);
+    Expect(health_after_first_run.value("runner_cache_size", 0) == 1,
+           "HTTP server should cache the loaded ONNX runner after /run.");
+
+    const auto second_run = PostJson(server.port(), "/run", request, 200);
+    Expect(second_run.value("ok", false), "Second HTTP /run should reuse cached runner.");
+    const auto health_after_second_run = GetJson(server.port(), "/health", 200);
+    Expect(health_after_second_run.value("runner_cache_size", 0) == 1,
+           "Runner cache should keep one ONNX entry after repeated runs.");
 }
 
 void TestHttpServerLifecycleEndpointsManageRegistry() {

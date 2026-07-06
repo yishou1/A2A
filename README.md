@@ -202,6 +202,17 @@ HTTP Server 程序是：
 
 它是常驻服务：启动后会一直监听端口，等待 Agent、curl 或外部系统通过 HTTP 调用。
 
+HTTP Server 会缓存已加载的 ONNX runner/session。第一次 `/run` 会加载模型，后续同一个 `algorithm_id + version + backend_type` 的请求会复用缓存，避免每次请求都重复加载 ONNX 模型。
+
+缓存会在 `/reload`、注册、校验、激活、禁用或删除算法后清理或失效。可以通过 `/health` 查看当前缓存数量：
+
+```json
+{
+  "ok": true,
+  "runner_cache_size": 1
+}
+```
+
 ### 启动服务
 
 默认启动：
@@ -315,6 +326,7 @@ postprocess.yaml
 可选文件：
 
 ```text
+tensor_contract.yaml
 tokenizer.json
 label_map.json
 golden_cases/
@@ -328,6 +340,7 @@ golden_cases/
 no_op
 tensor_from_json
 text_tokenization
+json_to_tensor_map
 ```
 
 当前支持的 postprocess 类型：
@@ -335,6 +348,72 @@ text_tokenization
 ```text
 no_op
 classification_postprocess
+raw_tensor_to_json
+```
+
+### tensor_contract.yaml
+
+`tensor_contract.yaml` 用来显式声明 ONNX 模型真实的 tensor 输入输出签名：
+
+```yaml
+inputs:
+  - name: features
+    dtype: float32
+    shape: [1, 3]
+outputs:
+  - name: scores
+    dtype: float32
+    shape: [1, 3]
+```
+
+在 `algorithm_card.yaml` 中引用：
+
+```yaml
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  tensor_contract_ref: tensor_contract.yaml
+```
+
+### json_to_tensor_map
+
+`json_to_tensor_map` 是通用预处理适配器，用来把业务 JSON 字段映射成一个或多个 ONNX tensor：
+
+```yaml
+type: json_to_tensor_map
+mappings:
+  - json_path: $.features
+    tensor_name: features
+```
+
+如果 `tensor_contract.yaml` 中已经声明了 `features` 的 dtype 和 shape，这里可以不用重复写。也可以在 mapping 中显式覆盖：
+
+```yaml
+type: json_to_tensor_map
+mappings:
+  - json_path: $.features
+    tensor_name: features
+    dtype: float32
+    shape: [1, 3]
+```
+
+### raw_tensor_to_json
+
+`raw_tensor_to_json` 是通用后处理适配器，用来把 ONNX 输出 tensor 原样放到 JSON 输出中：
+
+```yaml
+type: raw_tensor_to_json
+outputs:
+  - tensor_name: scores
+    json_path: $.scores
+```
+
+如果模型输出 tensor 是 `[0.1, 0.7, 0.2]`，最终输出就是：
+
+```json
+{
+  "scores": [0.1, 0.7, 0.2]
+}
 ```
 
 ## 接入 Python HTTP Service 算法

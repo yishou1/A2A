@@ -114,6 +114,7 @@ add_library(
     src/runtime/onnx_pipeline.cpp
     src/runtime/python_http_runner.cpp
     src/runtime/runtime_factory.cpp
+    src/runtime/runtime_runner_cache.cpp
     src/runtime/onnx_runner.cpp
     src/runtime/onnx_session.cpp
     src/server/http_server.cpp

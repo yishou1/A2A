@@ -1,0 +1,11 @@
+inputs:
+  - name: input_ids
+    dtype: int64
+    shape: [1, -1]
+  - name: attention_mask
+    dtype: int64
+    shape: [1, -1]
+outputs:
+  - name: logits
+    dtype: float32
+    shape: [1, 3]

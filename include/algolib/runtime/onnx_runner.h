@@ -25,6 +25,7 @@ private:
     OnnxSessionWrapper session_;
     std::optional<PreprocessConfig> preprocess_config_;
     std::optional<PostprocessConfig> postprocess_config_;
+    std::optional<TensorContract> tensor_contract_;
     bool loaded_ = false;
 };
 

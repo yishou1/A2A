@@ -179,6 +179,51 @@ void TestOnnxRunnerSupportsTensorFromJsonAndNoOpPostprocess() {
            "no_op postprocess should return the session output unchanged.");
 }
 
+void TestOnnxRunnerSupportsTensorContractAndGenericMappings() {
+    fs::path temp_dir = MakeTempDir("tensor_contract_mapping");
+    CopyFixtureFile(SourceRoot() / "tests" / "fixtures" / "onnx_identity_vector.onnx",
+                    temp_dir / "model.onnx");
+    WriteTextFile(temp_dir / "tensor_contract.yaml",
+                  "inputs:\n"
+                  "  - name: features\n"
+                  "    dtype: float32\n"
+                  "    shape: [1, 3]\n"
+                  "outputs:\n"
+                  "  - name: echo\n"
+                  "    dtype: float32\n"
+                  "    shape: [1, 3]\n");
+    WriteTextFile(temp_dir / "preprocess.yaml",
+                  "type: json_to_tensor_map\n"
+                  "mappings:\n"
+                  "  - json_path: $.features\n"
+                  "    tensor_name: features\n");
+    WriteTextFile(temp_dir / "postprocess.yaml",
+                  "type: raw_tensor_to_json\n"
+                  "outputs:\n"
+                  "  - tensor_name: echo\n"
+                  "    json_path: $.result\n");
+
+    AlgorithmEntry entry = BuildTensorRoundTripEntry(temp_dir);
+    entry.card.machine_spec.tensor_contract_ref = "tensor_contract.yaml";
+
+    OnnxRunner runner;
+    auto load_status = runner.Load(entry);
+    Expect(load_status.ok(), "Tensor contract entry should load.");
+
+    AlgorithmRequest request;
+    request.request_id = "req_tensor_contract";
+    request.trace_id = "trace_tensor_contract";
+    request.algorithm_id = "tensor_round_trip";
+    request.version = "1.0.0";
+    request.backend_type = BackendType::kOnnx;
+    request.inputs = {{"features", nlohmann::json::array({1.0, 2.0, 3.0})}};
+
+    const auto result = runner.Run(request);
+    Expect(result.ok, "Generic tensor mapping run should succeed.");
+    Expect(result.outputs == nlohmann::json({{"result", nlohmann::json::array({1.0, 2.0, 3.0})}}),
+           "raw_tensor_to_json should place the output tensor at the configured JSON path.");
+}
+
 }  // namespace
 
 int RunOnnxPhase4Tests() {
@@ -193,6 +238,8 @@ int RunOnnxPhase4Tests() {
          TestOnnxValidationFailsOnUnsupportedExecutionProvider},
         {"TestOnnxRunnerSupportsTensorFromJsonAndNoOpPostprocess",
          TestOnnxRunnerSupportsTensorFromJsonAndNoOpPostprocess},
+        {"TestOnnxRunnerSupportsTensorContractAndGenericMappings",
+         TestOnnxRunnerSupportsTensorContractAndGenericMappings},
     };
 
     int failed = 0;
