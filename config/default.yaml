@@ -3,7 +3,15 @@ use_mock: false
 
 inference:
   device: auto
-  # 预训练骨干
+  # 算力档位: auto | small | medium | large
+  # auto = 按 GPU 显存自动选择（见 compute_profile_auto_thresholds）
+  # 也可用环境变量 TIA_COMPUTE_PROFILE 覆盖
+  compute_profile: auto
+  compute_profile_auto_thresholds:
+    small_max_gb: 10    # 总显存 ≤10GB → small
+    medium_max_gb: 22   # 总显存 ≤22GB → medium，否则 large
+    mps_profile: medium # Apple MPS 无法读显存时的默认档
+  # 预训练骨干（合并 profile 后会被 profiles/*.yaml 覆盖）
   detection_model: rtdetr-l.pt
   mask2former_model: facebook/mask2former-swin-tiny-ade-semantic
   semantic_comm_model: google/flan-t5-small

@@ -59,6 +59,7 @@ class TargetGeo(BaseModel):
 
 class Detection(BaseModel):
     track_id: str | None = None
+    sensor_id: str | None = None
     class_name: str
     confidence: float
     bbox: list[float] | None = None
@@ -103,3 +104,7 @@ class SemanticIntelligencePacket(BaseModel):
     routing: dict[str, Any] = Field(default_factory=dict)
     provenance: dict[str, Any] = Field(default_factory=dict)
     raw_compression_ratio: float = 1.0
+    output_attachments: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="处理后产物（如标注图）的对象存储引用，供下游 Agent 通过 URI 读取",
+    )

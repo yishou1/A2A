@@ -150,6 +150,13 @@ class A2ABaseAgent:
         if output_hint == "assault_result":
             coordinates = payload.get("input", {}).get("coordinates", "unknown coordinates")
             return f"Assault unit captured objective at {coordinates}."
+        if output_hint == "intelligence_packet":
+            return {
+                "packet_id": "mock-packet",
+                "mission_id": payload.get("workflow_id", "WF-MOCK"),
+                "summary": "mock tactical intelligence",
+                "targets": [],
+            }
         return f"{self.name} completed {payload.get('command')}"
 
     async def execute_stream(self, payload):

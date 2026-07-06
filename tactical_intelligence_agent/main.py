@@ -31,8 +31,6 @@ if __name__ == "__main__":
                 metadata={
                     "role": role,
                     "status": "idle",
-                    "capability": "semantic_intelligence",
-                    "protocol": "http+a2a-commander",
                 },
                 heartbeat_interval=heartbeat_interval,
             )

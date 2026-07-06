@@ -35,7 +35,15 @@ import requests
 
 from workflow_payloads import build_attachment_ref
 
-REQUIRED_KEYS = {"work_item", "status", "role", "message"}
+REQUIRED_KEYS = {
+    "workflow_id",
+    "work_item",
+    "agent",
+    "role",
+    "status",
+    "output",
+    "message",
+}
 
 
 def _banner(title: str, step: int, total: int) -> None:
@@ -186,7 +194,7 @@ def step3_receive_task(base_url: str, pause: bool) -> tuple[bool, dict]:
     body = r200.json()
     print("响应 JSON:\n")
     print(_pretty(body))
-    ok = r200.status_code == 200 and body.get("status") in {"Accepted", "Failed"}
+    ok = r200.status_code == 200 and body.get("status") in {"completed", "Accepted", "Failed"}
     print(f"\n[{'OK' if ok else 'FAIL'}] 任务已被接收 status={body.get('status')}")
     _pause(pause)
     return ok and r401.status_code == 401, body
@@ -202,8 +210,9 @@ def step4_response_schema(body: dict, pause: bool) -> bool:
         print(f"\n[FAIL] 缺少字段: {missing}")
         ok = False
     else:
-        print("\n[OK] work_item / status / role / message 齐全")
-        print(f"     role={body.get('role')}  work_item={body.get('work_item')}")
+        print("\n[OK] workflow_id / work_item / agent / role / status / output / message 齐全")
+        print(f"     role={body.get('role')}  status={body.get('status')}")
+        print(f"     targets={body.get('output', {}).get('target_count')}")
         ok = body.get("role") == "tactical_intelligence"
     _pause(pause)
     return ok

@@ -12,6 +12,14 @@ from agent.pipeline import agent_config_from_yaml, create_agent, load_config
 def create_engine(config: dict[str, Any] | None = None) -> TacticalIntelligenceAgent:
     if config is None:
         config = load_config()
+    inf = config.get("inference") or {}
+    profile = inf.get("compute_profile", "medium")
+    requested = inf.get("compute_profile_requested", profile)
+    if requested == "auto" or inf.get("compute_profile_auto_reason"):
+        reason = inf.get("compute_profile_auto_reason", "")
+        print(f"[TIA] compute profile: {profile} (requested={requested}, {reason})")
+    else:
+        print(f"[TIA] compute profile: {profile}")
     return create_agent(config)
 
 

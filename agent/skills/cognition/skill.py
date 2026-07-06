@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from agent.models.schemas import CognitionOutput, PerceptionOutput, SensorBatch, ThreatAssessment
+from agent.skills.base import subskill_config
 from agent.skills.cognition.imagebind_encoder import ImageBindEncoder
 from agent.skills.cognition.multimodal_mamba import MultimodalMambaFusion
 from agent.skills.cognition.supcon_meta_classifier import SupConMetaClassifier
@@ -40,10 +41,14 @@ class CognitionSkill:
 
     def __init__(self, *, use_mock: bool = True, config: dict[str, Any] | None = None):
         cfg = config or {}
-        self.encoder = ImageBindEncoder(use_mock=use_mock, config=cfg.get("imagebind"))
-        self.fusion = MultimodalMambaFusion(use_mock=use_mock, config=cfg.get("multimodal_mamba"))
-        self.classifier = SupConMetaClassifier(use_mock=use_mock, config=cfg.get("supcon_meta"))
-        self.rag = SynapseRAG(use_mock=use_mock, config=cfg.get("synapse_rag"))
+        self.encoder = ImageBindEncoder(use_mock=use_mock, config=subskill_config(cfg, "imagebind"))
+        self.fusion = MultimodalMambaFusion(
+            use_mock=use_mock, config=subskill_config(cfg, "multimodal_mamba")
+        )
+        self.classifier = SupConMetaClassifier(
+            use_mock=use_mock, config=subskill_config(cfg, "supcon_meta")
+        )
+        self.rag = SynapseRAG(use_mock=use_mock, config=subskill_config(cfg, "synapse_rag"))
 
     def execute(
         self,

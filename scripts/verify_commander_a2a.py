@@ -59,13 +59,14 @@ def main() -> int:
     print(f"[OK] sendMessage -> status={ack.get('status')} role={ack.get('role')}")
     print(f"     message={ack.get('message')}")
     assert ack.get("role") == "tactical_intelligence"
-    assert ack.get("status") in {"Accepted", "Failed"}
+    assert ack.get("status") in {"completed", "Accepted", "Failed"}
+    assert "intelligence_packet" in (ack.get("output") or {})
 
     events = list(client.send_message_stream(payload))
     print(f"[OK] sendMessageStream -> {len(events)} events")
     last = json.loads(events[-1])
     assert last.get("status") == "Completed"
-    packet = last.get("intelligence_packet") or {}
+    packet = last.get("intelligence_packet") or last.get("output", {}).get("intelligence_packet") or {}
     print(f"     targets={len(packet.get('targets', []))}")
 
     ack_repeat = client.send_message(payload)

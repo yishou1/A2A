@@ -1,4 +1,4 @@
-"""战术情报 Agent 的 Commander 协议实现（兼容 TIA 独立仓库与 A2A-main）。"""
+"""战术情报 Agent — 对齐 A2ABaseAgent 统一任务响应与宕机恢复接入规范。"""
 
 from __future__ import annotations
 
@@ -8,10 +8,7 @@ import os
 import threading
 from typing import Any, AsyncIterator
 
-try:
-    from a2a_protocol.server import A2ABaseAgent as _ServerBase
-except ImportError:  # TIA 独立仓库无 server.A2ABaseAgent
-    from a2a_protocol.commander_server import A2ABaseAgent as _ServerBase
+from a2a_protocol.server import A2ABaseAgent
 
 from agent.models.schemas import SemanticIntelligencePacket
 from agent.orchestrator import TacticalIntelligenceAgent
@@ -22,75 +19,13 @@ AGENT_NAME = "Tactical_Intelligence_Agent"
 AGENT_DESCRIPTION = (
     "Single tactical intelligence agent: perception → cognition → communication pipeline"
 )
+DEFAULT_OUTPUT_HINT = "intelligence_packet"
 
 
-class _CommanderAgentBase(_ServerBase):
+class TacticalIntelligenceCommanderAgent(A2ABaseAgent):
     """
-    扩展 A2A-main A2ABaseAgent：支持 build_send_message_response 与返回 role 字段。
-    与 recon/artillery 同级，可直接被 Commander A2AClient 调度。
-    """
-
-    def build_send_message_response(self, payload: dict, work_item: str) -> dict:
-        return {
-            "work_item": work_item,
-            "workflow_id": payload.get("workflow_id"),
-            "status": "Accepted",
-            "role": self.role,
-            "message": f"{self.name} received work item {payload.get('command')}",
-            "work_list_size": len(self.get_work_list(payload.get("workflow_id"))),
-        }
-
-    def setup_routes(self, app=None):
-        from fastapi import Depends
-        from fastapi.responses import StreamingResponse
-
-        try:
-            from a2a_protocol.server import verify_token
-        except ImportError:
-            from a2a_protocol.commander_server import verify_token
-
-        target = app if app is not None else self.app
-
-        @target.get("/.well-known/agent-card")
-        async def agent_card():
-            return self.get_agent_card()
-
-        @target.get("/workflows/{workflow_id}/work-list")
-        async def workflow_work_list(workflow_id: str):
-            return {
-                "workflow_id": workflow_id,
-                "agent": self.name,
-                "role": self.role,
-                "work_list": self.get_work_list(workflow_id),
-            }
-
-        @target.post("/sendMessage")
-        async def send_message(payload: dict, token: str = Depends(verify_token)):
-            self._capture_work_list(payload)
-            work_item = self._work_item_from_payload(payload)
-            with self._state_lock:
-                cached_response = self._task_response_cache.get(work_item)
-            if cached_response is not None:
-                return cached_response
-
-            response = self.build_send_message_response(payload, work_item)
-            with self._state_lock:
-                self._task_response_cache[work_item] = response
-            return response
-
-        @target.post("/sendMessageStream")
-        async def send_message_stream(payload: dict, token: str = Depends(verify_token)):
-            return StreamingResponse(
-                self._cached_stream(payload),
-                media_type="text/event-stream",
-            )
-
-
-class TacticalIntelligenceCommanderAgent(_CommanderAgentBase):
-    """
-    单体战术情报 Agent，对外暴露 A2A-main 标准 sendMessage / sendMessageStream。
-
-    进程内串联感知、认知、通信三技能；同一 work_item 幂等缓存由 A2ABaseAgent 提供。
+    战术情报 Agent：继承 A2ABaseAgent，自动获得
+    /health /ready /metrics /lifecycle/ready、统一任务响应信封、work_item 幂等。
     """
 
     def __init__(
@@ -134,31 +69,27 @@ class TacticalIntelligenceCommanderAgent(_CommanderAgentBase):
             self._result_cache[work_item] = packet
         return packet
 
-    def build_send_message_response(self, payload: dict, work_item: str) -> dict:
-        try:
-            packet = self._get_or_process(payload)
-            return {
-                "work_item": work_item,
-                "workflow_id": payload.get("workflow_id"),
-                "status": "Accepted",
-                "role": self.role,
-                "message": (
-                    f"Tactical intelligence completed command={payload.get('command')}; "
-                    f"targets={len(packet.targets)}; summary={packet.summary[:120]}"
-                ),
-                "intelligence_packet_id": packet.packet_id,
-                "target_count": len(packet.targets),
-                "work_list_size": len(self.get_work_list(payload.get("workflow_id"))),
-            }
-        except Exception as exc:
-            return {
-                "work_item": work_item,
-                "workflow_id": payload.get("workflow_id"),
-                "status": "Failed",
-                "role": self.role,
-                "message": f"Tactical intelligence failed: {exc}",
-                "work_list_size": len(self.get_work_list(payload.get("workflow_id"))),
-            }
+    def _build_output(self, payload: dict, packet: SemanticIntelligencePacket) -> dict[str, Any]:
+        output_hint = payload.get("output_hint") or DEFAULT_OUTPUT_HINT
+        packet_json = packet.model_dump(mode="json")
+        output: dict[str, Any] = {
+            output_hint: packet_json,
+            "target_count": len(packet.targets),
+            "summary": packet.summary,
+            "output_attachments": packet.output_attachments,
+        }
+        if output_hint != DEFAULT_OUTPUT_HINT:
+            output[DEFAULT_OUTPUT_HINT] = packet_json
+        return output
+
+    def execute_task(self, payload: dict) -> tuple[dict[str, Any], str]:
+        packet = self._get_or_process(payload)
+        output = self._build_output(payload, packet)
+        message = (
+            f"Tactical intelligence completed command={payload.get('command')}; "
+            f"targets={len(packet.targets)}; summary={packet.summary[:120]}"
+        )
+        return output, message
 
     def _sse_event(self, **fields: Any) -> str:
         return f"data: {json.dumps(fields, ensure_ascii=False)}\n\n"
@@ -206,18 +137,25 @@ class TacticalIntelligenceCommanderAgent(_CommanderAgentBase):
                 role=self.role,
                 work_item=work_item,
                 message=f"Tactical intelligence failed: {exc}",
+                error=str(exc),
             )
             return
 
+        output = self._build_output(payload, packet)
         yield self._sse_event(
             status="Completed",
             progress="100%",
             stage="done",
             role=self.role,
             work_item=work_item,
+            workflow_id=payload.get("workflow_id"),
+            command=command,
             message=(
                 f"Tactical intelligence completed command={command}; "
                 f"targets={len(packet.targets)}"
             ),
+            output=output,
             intelligence_packet=packet.model_dump(mode="json"),
+            output_attachments=packet.output_attachments,
+            target_count=len(packet.targets),
         )

@@ -37,6 +37,21 @@ def bootstrap_auxiliary_heads() -> None:
         torch.save(module.state_dict(), path)
         print(f"[OK] saved {path}")
 
+    # 小/大档 Mamba、SupCon 辅助头（维度与 profiles 对齐）
+    variants = {
+        "mamba_fusion_s.pt": MultimodalMambaBlock(256),
+        "mamba_fusion_l.pt": MultimodalMambaBlock(1536),
+        "supcon_meta_s.pt": SupConMetaNet(in_dim=256),
+        "supcon_meta_l.pt": SupConMetaNet(in_dim=1536),
+    }
+    for name, module in variants.items():
+        path = CHECKPOINT_DIR / name
+        if path.is_file():
+            print(f"[SKIP] {path} exists")
+            continue
+        torch.save(module.state_dict(), path)
+        print(f"[OK] saved {path}")
+
 
 def prefetch_pretrained() -> None:
     """预下载 HuggingFace / Ultralytics 预训练权重。"""

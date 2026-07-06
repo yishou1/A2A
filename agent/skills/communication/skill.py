@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from agent.models.schemas import CognitionOutput, PerceptionOutput, SemanticIntelligencePacket
+from agent.skills.base import subskill_config
 from agent.skills.communication.knowledge_semantic_comm import KnowledgeSemanticCommModel
 from agent.skills.communication.marl_dynamic_router import MARLDynamicRouter
 
@@ -13,10 +14,10 @@ class CommunicationSkill:
     def __init__(self, *, use_mock: bool = True, config: dict[str, Any] | None = None):
         cfg = config or {}
         self.compression = KnowledgeSemanticCommModel(
-            use_mock=use_mock, config=cfg.get("knowledge_semantic_comm")
+            use_mock=use_mock, config=subskill_config(cfg, "knowledge_semantic_comm")
         )
         self.router = MARLDynamicRouter(
-            use_mock=use_mock, config=cfg.get("marl_dynamic_router")
+            use_mock=use_mock, config=subskill_config(cfg, "marl_dynamic_router")
         )
 
     def execute(

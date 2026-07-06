@@ -1289,6 +1289,7 @@ class CommanderAgent:
             "evaluator": "eval_score",
             "commander": "commander_decision",
             "assault": "assault_result",
+            "tactical_intelligence": "intelligence_packet",
         }.get(role)
 
     @staticmethod
@@ -1423,6 +1424,32 @@ class CommanderAgent:
                 duration_ms=duration_ms,
             )
             context["battle_log"].append(f"[Assault Report] {output_value}")
+        elif role == "tactical_intelligence":
+            target_key = output_key or "intelligence_packet"
+            output_value = output.get(target_key)
+            if output_value is None:
+                output_value = output.get("intelligence_packet")
+            if output_value is None:
+                output_value = self._first_output_value(output)
+            self._append_output_collection(
+                context,
+                target_key,
+                output_value,
+                activity_id=activity_id,
+                work_item=work_item,
+                role=role,
+                output=output,
+                status=response_status,
+                error=response_error,
+                duration_ms=duration_ms,
+            )
+            target_count = output.get("target_count")
+            summary = output.get("summary") or (
+                output_value.get("summary") if isinstance(output_value, dict) else None
+            )
+            context["battle_log"].append(
+                f"[Tactical Intelligence] targets={target_count}; summary={summary}"
+            )
         else:
             target_key = output_key or self._default_output_key_for_role(role) or "result"
             output_value = output.get(target_key)

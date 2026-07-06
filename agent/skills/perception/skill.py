@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from agent.models.schemas import Detection, PerceptionOutput, SensorBatch
+from agent.skills.base import subskill_config
 from agent.skills.perception.edl import EDLEvidentialVerifier
 from agent.skills.perception.motr_neural_kalman_tracker import MOTRNeuralKalmanTracker
 from agent.skills.perception.rt_detr_odconv_detector import RTDETRODConvDetector
@@ -14,13 +15,15 @@ from agent.skills.perception.siamese_mask2former_damage import SiameseMask2Forme
 class PerceptionSkill:
     def __init__(self, *, use_mock: bool = True, config: dict[str, Any] | None = None):
         cfg = config or {}
-        self.detector = RTDETRODConvDetector(use_mock=use_mock, config=cfg.get("rt_detr_odconv"))
-        self.damage = SiameseMask2FormerDamage(
-            use_mock=use_mock, config=cfg.get("siamese_mask2former")
+        self.detector = RTDETRODConvDetector(
+            use_mock=use_mock, config=subskill_config(cfg, "rt_detr_odconv")
         )
-        self.edl = EDLEvidentialVerifier(use_mock=use_mock, config=cfg.get("edl"))
+        self.damage = SiameseMask2FormerDamage(
+            use_mock=use_mock, config=subskill_config(cfg, "siamese_mask2former")
+        )
+        self.edl = EDLEvidentialVerifier(use_mock=use_mock, config=subskill_config(cfg, "edl"))
         self.tracker = MOTRNeuralKalmanTracker(
-            use_mock=use_mock, config=cfg.get("motr_neural_kalman")
+            use_mock=use_mock, config=subskill_config(cfg, "motr_neural_kalman")
         )
 
     def execute(self, batch: SensorBatch, prior_tracks: list[dict[str, Any]] | None = None) -> PerceptionOutput:
@@ -62,6 +65,7 @@ class PerceptionSkill:
             detections.append(
                 Detection(
                     track_id=track.get("track_id"),
+                    sensor_id=det.get("sensor_id"),
                     class_name=det.get("class_name", "unknown"),
                     confidence=float(det.get("confidence", 0)),
                     bbox=det.get("bbox"),

@@ -8,6 +8,7 @@ models/checkpoints/
 *.pt
 rtdetr-l.pt
 data/output/
+datasets/
 scripts/simulation/_cache/
 .a2a_state/
 logs/

@@ -9,6 +9,7 @@ from typing import Any
 
 import yaml
 
+from agent.config_profiles import apply_compute_profile
 from agent.models.schemas import SemanticIntelligencePacket, SensorBatch, SensorModality
 from agent.orchestrator import TacticalIntelligenceAgent
 
@@ -19,8 +20,10 @@ def load_config() -> dict[str, Any]:
     path = os.environ.get("TIA_CONFIG", "config/default.yaml")
     if os.path.isfile(path):
         with open(path, encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
-    return {}
+            cfg = yaml.safe_load(f) or {}
+    else:
+        cfg = {}
+    return apply_compute_profile(cfg)
 
 
 def agent_config_from_yaml(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -31,6 +34,7 @@ def agent_config_from_yaml(cfg: dict[str, Any]) -> dict[str, Any]:
         "cognition": skills.get("cognition"),
         "communication": skills.get("communication"),
         "inference": cfg.get("inference") or {},
+        "artifact_storage": cfg.get("artifact_storage") or {},
     }
 
 
