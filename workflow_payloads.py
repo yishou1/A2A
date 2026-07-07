@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import os
 from typing import Any, Dict, Iterable, Mapping, Sequence
 from urllib.parse import urlparse
 
@@ -58,6 +59,13 @@ def _ensure_checksum(checksum: Any, sha256: Any = None) -> Dict[str, str]:
     return {"algorithm": algorithm, "value": value}
 
 
+def _allowed_schemes() -> set[str]:
+    schemes = set(SUPPORTED_ATTACHMENT_SCHEMES)
+    if os.environ.get("TIA_ALLOW_LOCAL_FILE", "0") == "1":
+        schemes.add("local")
+    return schemes
+
+
 def _ensure_object_storage_uri(uri: Any) -> str:
     if not isinstance(uri, str) or not uri.strip():
         raise ValueError("attachment requires a non-empty uri")
@@ -68,10 +76,10 @@ def _ensure_object_storage_uri(uri: Any) -> str:
         raise ValueError("attachment uri must be an object storage URI or signed URL")
     if parsed.scheme == "file":
         raise ValueError("attachment uri must not use the file:// scheme")
-    if parsed.scheme not in SUPPORTED_ATTACHMENT_SCHEMES:
+    if parsed.scheme not in _allowed_schemes():
         raise ValueError(
             f"unsupported attachment uri scheme: {parsed.scheme}. "
-            f"Expected one of: {', '.join(sorted(SUPPORTED_ATTACHMENT_SCHEMES))}"
+            f"Expected one of: {', '.join(sorted(_allowed_schemes()))}"
         )
     if parsed.scheme in {"http", "https"} and not parsed.netloc:
         raise ValueError("http(s) attachment uri must include a network location")
