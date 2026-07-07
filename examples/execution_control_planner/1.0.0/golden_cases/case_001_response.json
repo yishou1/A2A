@@ -1,0 +1,299 @@
+{
+  "ok": true,
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "execution_control_planner",
+  "version": "1.0.0",
+  "outputs": {
+    "phase": "strike",
+    "commands": [
+      {
+        "command_id": "CMD-STR-001",
+        "executor_role": "artillery",
+        "action": "precision_strike",
+        "target_id": "T-001",
+        "aim_point": {
+          "x": 38.8,
+          "y": 53.2
+        },
+        "execute_at": 2.4,
+        "priority": 0.91,
+        "rule_id": "RULE-003",
+        "coordination_group": "GROUP-A"
+      }
+    ],
+    "tracks": [
+      {
+        "track_id": "T-001",
+        "current_point": {
+          "x": 11.8,
+          "y": 20.2,
+          "t": 0.4
+        },
+        "velocity": {
+          "vx": 4.5,
+          "vy": 5.5
+        },
+        "history_points": 2
+      }
+    ],
+    "coordination": {
+      "groups": [
+        {
+          "group_id": "GROUP-A",
+          "command_ids": [
+            "CMD-STR-001"
+          ],
+          "joint_strike": false
+        }
+      ]
+    },
+    "matched_rules": [
+      {
+        "rule_id": "RULE-003",
+        "support": 0.6,
+        "confidence": 1.0,
+        "antecedent": [
+          "intel=good"
+        ],
+        "consequent": {
+          "action": "precision_strike",
+          "executor_role": "artillery",
+          "priority": 0.91,
+          "coordination_group": "GROUP-A"
+        }
+      },
+      {
+        "rule_id": "RULE-005",
+        "support": 0.5,
+        "confidence": 1.0,
+        "antecedent": [
+          "phase=strike"
+        ],
+        "consequent": {
+          "action": "precision_strike",
+          "executor_role": "artillery",
+          "priority": 0.91,
+          "coordination_group": "GROUP-A"
+        }
+      },
+      {
+        "rule_id": "RULE-006",
+        "support": 0.4,
+        "confidence": 1.0,
+        "antecedent": [
+          "resource=ready"
+        ],
+        "consequent": {
+          "action": "precision_strike",
+          "executor_role": "artillery",
+          "priority": 0.91,
+          "coordination_group": "GROUP-A"
+        }
+      },
+      {
+        "rule_id": "RULE-007",
+        "support": 0.5,
+        "confidence": 1.0,
+        "antecedent": [
+          "threat=high"
+        ],
+        "consequent": {
+          "action": "precision_strike",
+          "executor_role": "artillery",
+          "priority": 0.91,
+          "coordination_group": "GROUP-A"
+        }
+      },
+      {
+        "rule_id": "RULE-017",
+        "support": 0.3,
+        "confidence": 1.0,
+        "antecedent": [
+          "intel=good",
+          "phase=strike"
+        ],
+        "consequent": {
+          "action": "precision_strike",
+          "executor_role": "artillery",
+          "priority": 0.91,
+          "coordination_group": "GROUP-A"
+        }
+      },
+      {
+        "rule_id": "RULE-018",
+        "support": 0.3,
+        "confidence": 1.0,
+        "antecedent": [
+          "intel=good",
+          "resource=ready"
+        ],
+        "consequent": {
+          "action": "precision_strike",
+          "executor_role": "artillery",
+          "priority": 0.91,
+          "coordination_group": "GROUP-A"
+        }
+      },
+      {
+        "rule_id": "RULE-019",
+        "support": 0.4,
+        "confidence": 1.0,
+        "antecedent": [
+          "intel=good",
+          "threat=high"
+        ],
+        "consequent": {
+          "action": "precision_strike",
+          "executor_role": "artillery",
+          "priority": 0.91,
+          "coordination_group": "GROUP-A"
+        }
+      },
+      {
+        "rule_id": "RULE-023",
+        "support": 0.4,
+        "confidence": 1.0,
+        "antecedent": [
+          "phase=strike",
+          "resource=ready"
+        ],
+        "consequent": {
+          "action": "precision_strike",
+          "executor_role": "artillery",
+          "priority": 0.91,
+          "coordination_group": "GROUP-A"
+        }
+      },
+      {
+        "rule_id": "RULE-024",
+        "support": 0.2,
+        "confidence": 1.0,
+        "antecedent": [
+          "phase=strike",
+          "threat=high"
+        ],
+        "consequent": {
+          "action": "precision_strike",
+          "executor_role": "artillery",
+          "priority": 0.91,
+          "coordination_group": "GROUP-A"
+        }
+      },
+      {
+        "rule_id": "RULE-026",
+        "support": 0.2,
+        "confidence": 1.0,
+        "antecedent": [
+          "resource=ready",
+          "threat=high"
+        ],
+        "consequent": {
+          "action": "precision_strike",
+          "executor_role": "artillery",
+          "priority": 0.91,
+          "coordination_group": "GROUP-A"
+        }
+      },
+      {
+        "rule_id": "RULE-033",
+        "support": 0.3,
+        "confidence": 1.0,
+        "antecedent": [
+          "intel=good",
+          "phase=strike",
+          "resource=ready"
+        ],
+        "consequent": {
+          "action": "precision_strike",
+          "executor_role": "artillery",
+          "priority": 0.91,
+          "coordination_group": "GROUP-A"
+        }
+      },
+      {
+        "rule_id": "RULE-034",
+        "support": 0.2,
+        "confidence": 1.0,
+        "antecedent": [
+          "intel=good",
+          "phase=strike",
+          "threat=high"
+        ],
+        "consequent": {
+          "action": "precision_strike",
+          "executor_role": "artillery",
+          "priority": 0.91,
+          "coordination_group": "GROUP-A"
+        }
+      },
+      {
+        "rule_id": "RULE-035",
+        "support": 0.2,
+        "confidence": 1.0,
+        "antecedent": [
+          "intel=good",
+          "resource=ready",
+          "threat=high"
+        ],
+        "consequent": {
+          "action": "precision_strike",
+          "executor_role": "artillery",
+          "priority": 0.91,
+          "coordination_group": "GROUP-A"
+        }
+      },
+      {
+        "rule_id": "RULE-036",
+        "support": 0.2,
+        "confidence": 1.0,
+        "antecedent": [
+          "phase=strike",
+          "resource=ready",
+          "threat=high"
+        ],
+        "consequent": {
+          "action": "precision_strike",
+          "executor_role": "artillery",
+          "priority": 0.91,
+          "coordination_group": "GROUP-A"
+        }
+      },
+      {
+        "rule_id": "RULE-039",
+        "support": 0.2,
+        "confidence": 1.0,
+        "antecedent": [
+          "intel=good",
+          "phase=strike",
+          "resource=ready",
+          "threat=high"
+        ],
+        "consequent": {
+          "action": "precision_strike",
+          "executor_role": "artillery",
+          "priority": 0.91,
+          "coordination_group": "GROUP-A"
+        }
+      }
+    ],
+    "prediction_details": [
+      {
+        "track_id": "T-001",
+        "future_t": 6.4,
+        "execute_at": 2.4,
+        "aim_point": {
+          "x": 38.8,
+          "y": 53.2
+        },
+        "model": "linear_regression",
+        "history_points": 2
+      }
+    ],
+    "latency_ms": 0.523
+  },
+  "usage": {
+    "latency_ms": 1
+  },
+  "error": null
+}

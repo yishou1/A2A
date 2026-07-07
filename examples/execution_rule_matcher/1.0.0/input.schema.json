@@ -1,0 +1,51 @@
+{
+  "title": "Execution Rule Matcher Input",
+  "type": "object",
+  "required": [
+    "phase",
+    "situation"
+  ],
+  "properties": {
+    "phase": {
+      "type": "string",
+      "enum": [
+        "strike",
+        "assault"
+      ]
+    },
+    "situation": {
+      "type": "object",
+      "required": [
+        "threat_score",
+        "intel_confidence",
+        "resource_readiness"
+      ],
+      "properties": {
+        "threat_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "intel_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "resource_readiness": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "communication_quality": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "commander_decision": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,32 @@
+{
+  "title": "Mission Feature Adapter Input",
+  "type": "object",
+  "required": [
+    "source_type"
+  ],
+  "properties": {
+    "source_type": {
+      "type": "string",
+      "enum": [
+        "sc2le_proxy",
+        "agent_results"
+      ]
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "strict",
+        "fixture",
+        "hybrid",
+        "test"
+      ]
+    },
+    "sc2le_proxy": {
+      "type": "object"
+    },
+    "agent_results": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": true
+}

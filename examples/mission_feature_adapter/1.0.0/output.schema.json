@@ -1,0 +1,31 @@
+{
+  "title": "Mission Feature Adapter Output",
+  "type": "object",
+  "required": [
+    "feature_version",
+    "values",
+    "sources",
+    "warnings",
+    "assessment_status"
+  ],
+  "properties": {
+    "feature_version": {
+      "type": "string"
+    },
+    "values": {
+      "type": "object"
+    },
+    "sources": {
+      "type": "object"
+    },
+    "warnings": {
+      "type": "array"
+    },
+    "assessment_status": {
+      "type": "string"
+    },
+    "missing_fields": {
+      "type": "array"
+    }
+  }
+}

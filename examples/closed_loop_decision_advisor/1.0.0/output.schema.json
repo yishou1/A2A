@@ -1,0 +1,23 @@
+{
+  "title": "Closed Loop Decision Advisor Output",
+  "type": "object",
+  "required": [
+    "action",
+    "effect_delta",
+    "recommendation"
+  ],
+  "properties": {
+    "action": {
+      "type": "string"
+    },
+    "effect_delta": {
+      "type": "number"
+    },
+    "recommendation": {
+      "type": "string"
+    },
+    "target_id": {
+      "type": "string"
+    }
+  }
+}

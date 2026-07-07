@@ -1,0 +1,53 @@
+algorithm_id: mission_completion_scorer
+version: 1.0.0
+display_name: Mission Completion Scorer
+backend_type: python_http_service
+status: draft
+
+task_family: scoring
+modalities:
+  input:
+    - structured_json
+  output:
+    - structured_json
+
+capabilities:
+  - mission_completion_scorer
+
+agent_card:
+  summary: >
+    Mission Completion Scorer packaged for the A2A algorithm library.
+  when_to_use:
+    - Structured JSON inputs are available for this algorithm family.
+  when_not_to_use:
+    - Raw media or unstructured text without preprocessing.
+  input_description: >
+    See input.schema.json for required structured fields.
+  output_description: >
+    See output.schema.json for structured outputs.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  runtime:
+    backend_type: python_http_service
+    endpoint: http://127.0.0.1:9014/predict
+    health_endpoint: http://127.0.0.1:9014/health
+    metadata_endpoint: http://127.0.0.1:9014/metadata
+    timeout_ms: 3000
+
+constraints:
+  max_input_chars: 10000
+  max_request_bytes: 1048576
+  batch_supported: false
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 20
+  latency_ms_p95: 100
+  primary_metric: classification_accuracy
+  primary_score: 0.5743
+
+safety:
+  risk_level: medium
+  requires_human_review: true

@@ -9,7 +9,12 @@
 
 系统不负责训练模型，也不做自动后端选择、自动 fallback、Pipeline 动态编排、gRPC、嵌入式 Python、TensorRT、OpenVINO、Triton 或 LibTorch 集成。
 
-## 系统在做什么
+## A2A 执行控制与闭环评估算法包
+
+本分支已接入来自 A2A `zh` 分支的 6 个 `python_http_service` 算法包（执行控制规则匹配、轨迹线性预测、执行控制规划、任务七维特征适配、任务完成度评估、闭环策略建议）。
+
+详见：[docs/A2A_ALGORITHMS_INTEGRATION.md](docs/A2A_ALGORITHMS_INTEGRATION.md)
+
 
 这个项目把一个算法接入过程拆成三件事：
 

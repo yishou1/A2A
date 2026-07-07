@@ -1,0 +1,17 @@
+{
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "execution_rule_matcher",
+  "version": "1.0.0",
+  "backend_type": "python_http_service",
+  "inputs": {
+    "phase": "strike",
+    "situation": {
+      "threat_score": 0.75,
+      "intel_confidence": 0.82,
+      "resource_readiness": 0.81,
+      "communication_quality": 0.9
+    }
+  },
+  "params": {}
+}

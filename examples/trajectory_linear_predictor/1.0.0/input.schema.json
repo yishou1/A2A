@@ -1,0 +1,31 @@
+{
+  "title": "Trajectory Linear Predictor Input",
+  "type": "object",
+  "required": [
+    "track"
+  ],
+  "properties": {
+    "track": {
+      "type": "object",
+      "required": [
+        "history"
+      ],
+      "properties": {
+        "track_id": {
+          "type": "string"
+        },
+        "history": {
+          "type": "array",
+          "minItems": 2
+        },
+        "weapon_prep_sec": {
+          "type": "number"
+        },
+        "flight_time_sec": {
+          "type": "number"
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

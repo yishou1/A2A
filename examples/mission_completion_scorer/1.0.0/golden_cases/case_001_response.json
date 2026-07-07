@@ -1,0 +1,29 @@
+{
+  "ok": true,
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "mission_completion_scorer",
+  "version": "1.0.0",
+  "outputs": {
+    "mission_completion": 0.479,
+    "mission_result": "failure",
+    "threshold": 0.5,
+    "model_source": "sc2le_proxy",
+    "feature_version": "mission_features_v2",
+    "assessment_status": "proxy_model_estimate",
+    "warnings": [],
+    "feature_values": {
+      "damage_rate": 0.7,
+      "asset_readiness": 0.8,
+      "control_timeliness": 0.85,
+      "intel_confidence": 0.9,
+      "threat_pressure": 0.6,
+      "ammo_pressure": 0.4,
+      "comm_quality": 0.92
+    }
+  },
+  "usage": {
+    "latency_ms": 1
+  },
+  "error": null
+}

@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "closed_loop_decision_advisor",
+  "version": "1.0.0",
+  "outputs": {
+    "action": "re_attack",
+    "effect_delta": 0.18,
+    "recommendation": "Critical situation with persistent threat; recommend immediate re-attack.",
+    "target_id": "TGT-001",
+    "situation": "critical",
+    "damage_probability": 0.62,
+    "mission_completion": 0.72
+  },
+  "usage": {
+    "latency_ms": 1
+  },
+  "error": null
+}

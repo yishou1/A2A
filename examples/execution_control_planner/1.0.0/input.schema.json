@@ -1,0 +1,21 @@
+{
+  "title": "Execution Control Planner Input",
+  "type": "object",
+  "required": [
+    "phase",
+    "results"
+  ],
+  "properties": {
+    "phase": {
+      "type": "string",
+      "enum": [
+        "strike",
+        "assault"
+      ]
+    },
+    "results": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": true
+}
