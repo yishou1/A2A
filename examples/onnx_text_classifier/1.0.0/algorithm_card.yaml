@@ -1,0 +1,96 @@
+algorithm_id: onnx_text_classifier
+version: 1.0.0
+display_name: ONNX Text Classifier
+backend_type: onnx
+status: draft
+
+task_family: text_classification
+modalities:
+  input:
+    - text
+  output:
+    - structured_json
+
+capabilities:
+  - text_classification
+  - confidence_score
+
+agent_card:
+  summary: >
+    Classify a short text into a fixed label set and return confidence.
+  when_to_use:
+    - Input is a short text string
+    - Output must be a fixed label
+  when_not_to_use:
+    - Long document reasoning is required
+    - Natural language explanation is required
+  input_description: >
+    The request JSON must contain a text field.
+  output_description: >
+    Returns label and confidence fields.
+  examples:
+    - input:
+        text: "Classify this task description"
+      output:
+        label: "task"
+        confidence: 0.96
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  tensor_contract_ref: tensor_contract.yaml
+  runtime:
+    backend_type: onnx
+    model_uri: model.onnx
+    execution_provider: cpu
+  tokenizer:
+    type: wordpiece
+    tokenizer_uri: tokenizer.json
+    max_length: 256
+  preprocess:
+    config_uri: preprocess.yaml
+  postprocess:
+    config_uri: postprocess.yaml
+    label_map_uri: label_map.json
+
+constraints:
+  max_input_chars: 4096
+  max_request_bytes: 1048576
+  batch_supported: false
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 20
+  latency_ms_p95: 60
+  primary_metric: accuracy
+  primary_score: 0.92
+  time_complexity: O(n)
+  space_complexity: O(n)
+  complexity_variable: n = number of input tokens after preprocessing
+  performance_notes: >
+    End-to-end runtime grows roughly linearly with token count under the current
+    text_tokenization plus classification pipeline.
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 2
+  min_memory_mb: 512
+  recommended_memory_mb: 1024
+  min_gpu_count: 0
+  gpu_type: none
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 64
+
+model_profile:
+  parameter_count: 120000
+  parameter_count_text: 120K
+  flops: 240000
+  flops_text: 240 KFLOPs
+  flops_input_shape: [1, 256]
+  model_size_mb: 1
+  precision: fp32
+
+safety:
+  risk_level: low
+  requires_human_review: false

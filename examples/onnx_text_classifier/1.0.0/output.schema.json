@@ -1,0 +1,18 @@
+{
+  "title": "ONNX Text Classifier Output",
+  "type": "object",
+  "required": [
+    "label",
+    "confidence"
+  ],
+  "properties": {
+    "label": {
+      "type": "string",
+      "description": "Predicted label."
+    },
+    "confidence": {
+      "type": "number",
+      "description": "Prediction confidence."
+    }
+  }
+}
