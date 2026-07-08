@@ -1,0 +1,28 @@
+{
+  "ok": true,
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "battlefield_rtdetr_detector",
+  "version": "1.0.0",
+  "outputs": {
+    "detections": [
+      {
+        "sensor_id": "EO-FWD-1",
+        "class_name": "vehicle",
+        "confidence": 0.89,
+        "bbox": [
+          120.0,
+          80.0,
+          280.0,
+          220.0
+        ],
+        "odconv_refined": true
+      }
+    ],
+    "count": 1
+  },
+  "usage": {
+    "latency_ms": 1
+  },
+  "error": null
+}

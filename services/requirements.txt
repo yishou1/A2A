@@ -5,3 +5,8 @@ pillow
 scikit-learn
 torch
 torchvision
+pyyaml
+pydantic
+sentence-transformers
+transformers
+ultralytics

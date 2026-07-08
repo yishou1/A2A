@@ -1,0 +1,22 @@
+{
+  "title": "TIA Algorithm Output",
+  "type": "object",
+  "properties": {
+    "sensor_assignments": {
+      "type": "array"
+    },
+    "reattack_plan": {
+      "type": "array"
+    },
+    "covered_targets": {
+      "type": "array"
+    },
+    "reattack_targets": {
+      "type": "array"
+    },
+    "algorithm": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

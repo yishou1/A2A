@@ -1,0 +1,19 @@
+{
+  "title": "TIA Algorithm Output",
+  "type": "object",
+  "properties": {
+    "entities": {
+      "type": "array"
+    },
+    "retrieved_pages": {
+      "type": "array"
+    },
+    "rag_context": {
+      "type": "string"
+    },
+    "agent_notes": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

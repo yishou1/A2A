@@ -1,0 +1,72 @@
+algorithm_id: motr_neural_kalman_tracker
+version: 1.0.0
+display_name: MOTR Neural Kalman Tracker
+backend_type: python_http_service
+status: draft
+
+task_family: tracking
+modalities:
+  input:
+    - structured_json
+  output:
+    - structured_json
+
+capabilities:
+  - multi_object_tracking
+  - geolocation
+
+agent_card:
+  summary: >
+    MOTR Neural Kalman Tracker from the TIA tactical intelligence agent pipeline.
+  when_to_use:
+    - Verified detections need persistent tracks and geo estimation.
+  when_not_to_use:
+    - No verified detections are available.
+  input_description: >
+    See input.schema.json for required structured fields.
+  output_description: >
+    See output.schema.json for structured outputs.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  runtime:
+    backend_type: python_http_service
+    endpoint: http://127.0.0.1:9023/predict
+    health_endpoint: http://127.0.0.1:9023/health
+    metadata_endpoint: http://127.0.0.1:9023/metadata
+    timeout_ms: 8000
+
+constraints:
+  max_input_chars: 20000000
+  max_request_bytes: 33554432
+  batch_supported: false
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 50
+  latency_ms_p95: 500
+  primary_metric: track_continuity
+  primary_score: 0.83
+
+resource_requirements:
+  min_cpu_cores: 2
+  recommended_cpu_cores: 4
+  min_memory_mb: 4096
+  recommended_memory_mb: 8192
+  min_gpu_count: 0
+  gpu_type: optional
+  min_vram_mb: 0
+  recommended_vram_mb: 8192
+  disk_mb: 4096
+
+model_profile:
+  parameter_count: 0
+  parameter_count_text: varies_by_submodel
+  flops: 0
+  flops_text: varies_by_submodel
+  precision: fp32
+
+safety:
+  risk_level: medium
+  requires_human_review: true

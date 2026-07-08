@@ -1,0 +1,19 @@
+{
+  "title": "Multimodal Mamba Fusion Input",
+  "type": "object",
+  "required": [
+    "embeddings"
+  ],
+  "properties": {
+    "embeddings": {
+      "type": "object"
+    },
+    "tracks": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  "additionalProperties": true
+}

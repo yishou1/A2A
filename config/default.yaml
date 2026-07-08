@@ -1,0 +1,66 @@
+# 战术情报智能体配置 — 真实神经网络推理（use_mock: false）
+use_mock: false
+
+inference:
+  device: auto
+  # 算力档位: auto | small | medium | large
+  # auto = 按 GPU 显存自动选择（见 compute_profile_auto_thresholds）
+  # 也可用环境变量 TIA_COMPUTE_PROFILE 覆盖
+  compute_profile: auto
+  compute_profile_auto_thresholds:
+    small_max_gb: 10    # 总显存 ≤10GB → small
+    medium_max_gb: 22   # 总显存 ≤22GB → medium，否则 large
+    mps_profile: medium # Apple MPS 无法读显存时的默认档
+  # 预训练骨干（合并 profile 后会被 profiles/*.yaml 覆盖）
+  detection_model: rtdetr-l.pt
+  mask2former_model: facebook/mask2former-swin-tiny-ade-semantic
+  semantic_comm_model: google/flan-t5-small
+  page_index_model: paraphrase-MiniLM-L6-v2
+  embed_dim: 1024
+  # 门限与跟踪
+  confidence_threshold: 0.25
+  edl_min_confidence: 0.35
+  edl_max_epistemic: 0.45
+  motr_iou_threshold: 0.3
+  mask2former_gain: 4.0
+  supcon_temperature: 0.07
+  base_lat: 30.512
+  base_lon: 114.381
+  # 三维地理解算（多域：land / air / sea）
+  ground_elevation_m: 120.0
+  sea_surface_elevation_m: 0.0
+  default_platform_altitude_m: 3200.0
+  default_platform_heading_deg: 0.0
+  default_depression_angle_deg: 75.0
+  default_fov_h_deg: 45.0
+  geo_smooth_alpha: 0.7
+  geo_target_profiles:
+    land:
+      default: { vertical_offset_m: 2.0 }
+      tank: { vertical_offset_m: 2.5 }
+      person: { vertical_offset_m: 1.8 }
+    air:
+      default: { reference_height_m: 5.0 }
+      airplane: { reference_height_m: 8.0 }
+      helicopter: { reference_height_m: 4.5 }
+      drone: { reference_height_m: 1.2 }
+    sea:
+      default: { vertical_offset_m: 12.0 }
+      ship: { vertical_offset_m: 18.0 }
+  rag_top_k: 3
+  llm_model: gpt-4o-mini
+
+skills:
+  perception:
+    rt_detr_odconv: {}
+    siamese_mask2former: {}
+    edl: {}
+    motr_neural_kalman: {}
+  cognition:
+    imagebind: {}
+    multimodal_mamba: {}
+    supcon_meta: {}
+    synapse_rag: {}
+  communication:
+    knowledge_semantic_comm: {}
+    marl_dynamic_router: {}

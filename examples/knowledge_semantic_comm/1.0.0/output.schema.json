@@ -1,0 +1,22 @@
+{
+  "title": "TIA Algorithm Output",
+  "type": "object",
+  "properties": {
+    "summary": {
+      "type": "string"
+    },
+    "targets": {
+      "type": "array"
+    },
+    "semantic_vector": {
+      "type": "array"
+    },
+    "knowledge_graph": {
+      "type": "object"
+    },
+    "compression_ratio": {
+      "type": "number"
+    }
+  },
+  "additionalProperties": true
+}

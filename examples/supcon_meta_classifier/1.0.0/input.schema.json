@@ -1,0 +1,19 @@
+{
+  "title": "SupCon Meta Classifier Input",
+  "type": "object",
+  "required": [
+    "fused_embeddings"
+  ],
+  "properties": {
+    "fused_embeddings": {
+      "type": "object"
+    },
+    "support_shots": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  "additionalProperties": true
+}

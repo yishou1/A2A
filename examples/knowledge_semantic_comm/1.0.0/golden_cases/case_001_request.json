@@ -1,0 +1,38 @@
+{
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "knowledge_semantic_comm",
+  "version": "1.0.0",
+  "backend_type": "python_http_service",
+  "inputs": {
+    "perception": {
+      "detections": [
+        {
+          "track_id": "T-1",
+          "class_name": "tank",
+          "confidence": 0.9
+        }
+      ],
+      "tracks": [
+        {
+          "track_id": "T-1"
+        }
+      ]
+    },
+    "cognition": {
+      "classifications": [
+        {
+          "target_id": "T-1",
+          "label": "hostile"
+        }
+      ],
+      "threats": [
+        {
+          "target_id": "T-1",
+          "threat_level": "high"
+        }
+      ]
+    }
+  },
+  "params": {}
+}

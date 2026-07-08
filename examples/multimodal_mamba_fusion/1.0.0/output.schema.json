@@ -1,0 +1,13 @@
+{
+  "title": "TIA Algorithm Output",
+  "type": "object",
+  "properties": {
+    "fused_embeddings": {
+      "type": "object"
+    },
+    "sequence_length": {
+      "type": "number"
+    }
+  },
+  "additionalProperties": true
+}

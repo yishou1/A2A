@@ -1,0 +1,19 @@
+{
+  "title": "Battlefield RT-DETR Detector Input",
+  "type": "object",
+  "properties": {
+    "frames": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "media_refs": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  "additionalProperties": true
+}

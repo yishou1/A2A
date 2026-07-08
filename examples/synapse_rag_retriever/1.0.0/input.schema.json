@@ -1,0 +1,25 @@
+{
+  "title": "Synapse RAG Retriever Input",
+  "type": "object",
+  "required": [
+    "classifications"
+  ],
+  "properties": {
+    "classifications": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "knowledge_base": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "query": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

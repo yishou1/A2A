@@ -1,0 +1,28 @@
+{
+  "ok": true,
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "supcon_meta_classifier",
+  "version": "1.0.0",
+  "outputs": {
+    "classifications": [
+      {
+        "target_id": "T-1",
+        "label": "friendly",
+        "confidence": 0.5900000000000001,
+        "support_shots": 5
+      },
+      {
+        "target_id": "T-2",
+        "label": "friendly",
+        "confidence": 0.5925,
+        "support_shots": 5
+      }
+    ],
+    "count": 2
+  },
+  "usage": {
+    "latency_ms": 1
+  },
+  "error": null
+}

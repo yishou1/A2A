@@ -1,0 +1,34 @@
+{
+  "ok": true,
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "synapse_rag_retriever",
+  "version": "1.0.0",
+  "outputs": {
+    "entities": [
+      {
+        "entity_id": "ENT-T-1",
+        "type": "MilitaryUnit",
+        "label": "hostile",
+        "relations": [
+          {
+            "predicate": "threat_of",
+            "object": "mission_area"
+          }
+        ]
+      }
+    ],
+    "retrieved_pages": [
+      {
+        "title": "装甲威胁规则",
+        "content": "高威胁坦克需优先分配火力"
+      }
+    ],
+    "rag_context": "[SynapseRAG] query='战场目标实体与威胁关联'; page_hits=1",
+    "agent_notes": "PageIndex 检索完成，图谱实体已对齐。"
+  },
+  "usage": {
+    "latency_ms": 1
+  },
+  "error": null
+}

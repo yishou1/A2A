@@ -1,0 +1,64 @@
+{
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "marl_ppo_task_scheduler",
+  "version": "1.0.0",
+  "backend_type": "python_http_service",
+  "inputs": {
+    "tracks": [
+      {
+        "track_id": "T-1",
+        "class_name": "tank",
+        "geo": {
+          "lat": 30.52,
+          "lon": 114.38
+        }
+      },
+      {
+        "track_id": "T-2",
+        "class_name": "vehicle",
+        "geo": {
+          "lat": 30.51,
+          "lon": 114.39
+        }
+      }
+    ],
+    "detections": [
+      {
+        "track_id": "T-1",
+        "confidence": 0.9,
+        "damage_score": 0.3,
+        "class_name": "tank"
+      },
+      {
+        "track_id": "T-2",
+        "confidence": 0.8,
+        "damage_score": 0.7,
+        "class_name": "vehicle"
+      }
+    ],
+    "batch_context": {
+      "phase": "bda",
+      "jamming_level": 0.2
+    },
+    "frames": [
+      {
+        "sensor_id": "EO-FWD-1",
+        "modality": "eo_ir",
+        "metadata": {
+          "platform_lat": 30.5,
+          "platform_lon": 114.37
+        }
+      },
+      {
+        "sensor_id": "SAR-1",
+        "modality": "sar",
+        "metadata": {
+          "platform_lat": 30.5,
+          "platform_lon": 114.37
+        }
+      }
+    ]
+  },
+  "params": {}
+}

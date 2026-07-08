@@ -1,0 +1,16 @@
+{
+  "title": "ImageBind Multimodal Encoder Input",
+  "type": "object",
+  "required": [
+    "frames"
+  ],
+  "properties": {
+    "frames": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  "additionalProperties": true
+}

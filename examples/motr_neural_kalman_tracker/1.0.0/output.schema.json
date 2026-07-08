@@ -1,0 +1,13 @@
+{
+  "title": "TIA Algorithm Output",
+  "type": "object",
+  "properties": {
+    "tracks": {
+      "type": "array"
+    },
+    "associations": {
+      "type": "number"
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,13 @@
+{
+  "title": "TIA Algorithm Output",
+  "type": "object",
+  "properties": {
+    "verified_detections": {
+      "type": "array"
+    },
+    "count": {
+      "type": "number"
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,26 @@
+{
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "imagebind_multimodal_encoder",
+  "version": "1.0.0",
+  "backend_type": "python_http_service",
+  "inputs": {
+    "frames": [
+      {
+        "sensor_id": "EO-FWD-1",
+        "modality": "eo_ir",
+        "payload": {
+          "scene_tag": "contact"
+        }
+      },
+      {
+        "sensor_id": "FO-1",
+        "modality": "text_report",
+        "payload": {
+          "report_text": "前沿发现装甲目标"
+        }
+      }
+    ]
+  },
+  "params": {}
+}
