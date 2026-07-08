@@ -13,3 +13,4 @@ pytest
 pypdf
 numpy
 onnxruntime
+psutil>=5.9,<8.0

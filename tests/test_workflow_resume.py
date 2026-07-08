@@ -236,6 +236,18 @@ class WorkflowResumeTest(unittest.TestCase):
         response = asyncio.run(work_list("wf-work-list"))
         self.assertEqual(response["work_list"], payload["work_list"])
 
+    def test_agent_card_exposes_skills(self):
+        agent = A2ABaseAgent(
+            name="Test_Agent",
+            description="Test skill discovery.",
+            role="recon",
+            port=9999,
+        )
+        card = agent.get_agent_card()
+        self.assertIn("skills", card)
+        self.assertEqual(card["skills"][0]["id"], "scan_beach_defenses")
+        self.assertIn("探测", card["skills"][0]["tags"])
+
     def test_agent_not_ready_response_has_standard_error_code(self):
         agent = A2ABaseAgent(
             name="Test_Agent",
