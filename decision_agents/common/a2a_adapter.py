@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from a2a_protocol.server import A2ABaseAgent
-from decision_agents.a2a_payloads import (
+from decision_agents.common.a2a_payloads import (
     agent_response_to_a2a_response,
     agent_response_to_output,
     run_agent_payload,

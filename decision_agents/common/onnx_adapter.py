@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from decision_agents.schemas import AgentRequest
+from decision_agents.common.schemas import AgentRequest
 
 
 PreprocessFn = Callable[[AgentRequest], dict[str, Any]]

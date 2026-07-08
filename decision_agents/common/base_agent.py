@@ -9,13 +9,13 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from decision_agents.llm.client import LLMClientError
-from decision_agents.llm.enhancer import (
+from decision_agents.common.llm_enhancer import (
     explain_response,
     llm_enabled,
     parse_natural_language,
 )
-from decision_agents.schemas import AgentRequest, AgentResponse
+from decision_agents.common.schemas import AgentRequest, AgentResponse
+from llm.client import LLMClientError
 
 
 class AlgorithmAgent:

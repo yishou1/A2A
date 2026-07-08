@@ -22,6 +22,10 @@ class Settings:
     tool_llm_name: str
     api_key: str
     llm_timeout_seconds: float
+    decision_agent_backend: str
+    algolib_base_url: str
+    algolib_timeout_seconds: float
+    tool_llm_allowed_models: tuple[str, ...]
     default_compute_budget: str
     default_risk_policy: str
     enable_local_rag_models: bool
@@ -52,6 +56,14 @@ def get_settings() -> Settings:
         tool_llm_name=os.getenv("TOOL_LLM_NAME", ""),
         api_key=os.getenv("API_KEY", "EMPTY"),
         llm_timeout_seconds=float(os.getenv("LLM_TIMEOUT_SECONDS", "30")),
+        decision_agent_backend=os.getenv("DECISION_AGENT_BACKEND", "local").lower(),
+        algolib_base_url=os.getenv("ALGOLIB_BASE_URL", "http://127.0.0.1:8088"),
+        algolib_timeout_seconds=float(os.getenv("ALGOLIB_TIMEOUT_SECONDS", "10")),
+        tool_llm_allowed_models=tuple(
+            item.strip()
+            for item in os.getenv("TOOL_LLM_ALLOWED_MODELS", "").split(",")
+            if item.strip()
+        ),
         default_compute_budget=os.getenv("DEFAULT_COMPUTE_BUDGET", "small"),
         default_risk_policy=os.getenv("DEFAULT_RISK_POLICY", "balanced"),
         enable_local_rag_models=os.getenv("ENABLE_LOCAL_RAG_MODELS", "false").lower()

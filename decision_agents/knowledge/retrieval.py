@@ -12,7 +12,7 @@ from decision_agents.rag.documents import (
     tokenize as _tokens,
 )
 from decision_agents.rag.pipeline import RagResult, run_rag
-from decision_agents.schemas import RuleEvidence
+from decision_agents.common.schemas import RuleEvidence
 
 
 def retrieve_evidence(

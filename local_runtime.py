@@ -4,11 +4,9 @@ from copy import deepcopy
 from typing import Dict, Iterable, Tuple
 
 from a2a_protocol.messages import build_task_response
-from decision_agents.a2a_payloads import agent_response_to_a2a_response, run_agent_payload
-from decision_agents.agents import (
-    ComplianceAuthorizationAgent,
-    DecisionPlanningAgent,
-)
+from decision_agents.common.a2a_payloads import agent_response_to_a2a_response, run_agent_payload
+from decision_agents.compliance_authorization.agent import ComplianceAuthorizationAgent
+from decision_agents.decision_planning.agent import DecisionPlanningAgent
 
 
 class LocalAgentRuntime:

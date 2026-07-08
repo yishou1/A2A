@@ -3,8 +3,8 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from decision_agents.a2a_adapter import DecisionAlgorithmA2AAgent
-from decision_agents.agents import ComplianceAuthorizationAgent
+from decision_agents.common.a2a_adapter import DecisionAlgorithmA2AAgent
+from decision_agents.compliance_authorization.agent import ComplianceAuthorizationAgent
 from registry.nacos_manager import NacosRegistry, get_host_ip
 
 

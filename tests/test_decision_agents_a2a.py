@@ -8,8 +8,9 @@ from pathlib import Path
 
 from bpel_workflow import BPELWorkflowCatalog
 from commander_agent.main import CommanderAgent
-from decision_agents.a2a_adapter import DecisionAlgorithmA2AAgent
-from decision_agents.agents import ComplianceAuthorizationAgent, DecisionPlanningAgent
+from decision_agents.common.a2a_adapter import DecisionAlgorithmA2AAgent
+from decision_agents.compliance_authorization.agent import ComplianceAuthorizationAgent
+from decision_agents.decision_planning.agent import DecisionPlanningAgent
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]

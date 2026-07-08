@@ -12,12 +12,10 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from decision_agents.agents import (
-    ComplianceAuthorizationAgent,
-    DecisionPlanningAgent,
-)
-from decision_agents.agents.base import AlgorithmAgent
-from decision_agents.config import get_settings
+from decision_agents.common.base_agent import AlgorithmAgent
+from decision_agents.common.config import get_settings
+from decision_agents.compliance_authorization.agent import ComplianceAuthorizationAgent
+from decision_agents.decision_planning.agent import DecisionPlanningAgent
 
 
 AGENT_DEFINITIONS = {

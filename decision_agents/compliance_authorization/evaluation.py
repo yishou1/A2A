@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from decision_agents.agents import ComplianceAuthorizationAgent
+from decision_agents.compliance_authorization.agent import ComplianceAuthorizationAgent
 
 
 def evaluate_compliance_jsonl(path: str | Path) -> dict[str, Any]:

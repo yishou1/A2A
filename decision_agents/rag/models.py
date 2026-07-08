@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from decision_agents.config import Settings, get_settings
+from decision_agents.common.config import Settings, get_settings
 
 
 class RagModelUnavailable(RuntimeError):

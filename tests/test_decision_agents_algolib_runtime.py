@@ -1,0 +1,138 @@
+import json
+import os
+import unittest
+
+from pathlib import Path
+from unittest.mock import patch
+
+from decision_agents.compliance_authorization.agent import ComplianceAuthorizationAgent
+from decision_agents.decision_planning.agent import DecisionPlanningAgent
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def sample_payload(name: str) -> dict:
+    return json.loads((PROJECT_ROOT / "data" / "samples" / name).read_text())
+
+
+class FakeResponse:
+    def __init__(self, payload: dict):
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict:
+        return self._payload
+
+
+class FakeLLM:
+    calls = []
+
+    def __init__(self, *_args, **_kwargs):
+        pass
+
+    def chat_json(self, *, system_prompt: str, user_prompt: str) -> dict:
+        self.calls.append({"system_prompt": system_prompt, "user_prompt": user_prompt})
+        if "decision_planning_agent" in system_prompt:
+            algorithm_id = "decision_planning_core"
+        else:
+            algorithm_id = "compliance_authorization_core"
+        request = json.loads(user_prompt.split("AgentRequest JSON:\n", 1)[1])
+        return {
+            "intent": "test",
+            "algorithm_calls": [
+                {
+                    "algorithm_id": algorithm_id,
+                    "version": "1.0.0",
+                    "backend_type": "python_http_service",
+                    "inputs": request,
+                    "params": {},
+                    "reason": "agent-specific prompt selected the core algorithm",
+                }
+            ],
+            "missing_fields": [],
+            "explanation": "ok",
+        }
+
+
+class DecisionAgentsAlgolibRuntimeTest(unittest.TestCase):
+    def setUp(self):
+        self._env = os.environ.copy()
+        os.environ["DECISION_AGENT_BACKEND"] = "algolib"
+        os.environ["ENABLE_LLM"] = "true"
+        os.environ["TOOL_LLM_URL"] = "http://llm.local/v1"
+        os.environ["TOOL_LLM_NAME"] = "qwen3-bb"
+        FakeLLM.calls = []
+
+    def tearDown(self):
+        os.environ.clear()
+        os.environ.update(self._env)
+
+    def test_decision_planning_uses_planning_prompt_and_algolib(self):
+        response = self._run_with_algolib(
+            DecisionPlanningAgent(),
+            sample_payload("decision_planning_input.json"),
+            {
+                "candidate_plans": [{"id": "PLAN-1"}],
+                "recommended_plan_id": "PLAN-1",
+                "method": "template_generation_logistic_lstm_scoring",
+            },
+        )
+
+        self.assertEqual(response.status, "completed")
+        self.assertEqual(response.selected_algorithms, ["decision_planning_core"])
+        self.assertIn("decision_planning_agent", FakeLLM.calls[0]["system_prompt"])
+        self.assertNotIn("compliance_authorization_agent", FakeLLM.calls[0]["system_prompt"])
+
+    def test_compliance_authorization_uses_compliance_prompt_and_algolib(self):
+        response = self._run_with_algolib(
+            ComplianceAuthorizationAgent(),
+            sample_payload("compliance_authorization_input.json"),
+            {
+                "decision": "approved",
+                "requires_human_approval": False,
+                "selected_plan_id": "PLAN-1",
+                "per_plan_results": [],
+                "risk_probability": 0.1,
+                "compliance_probability": 0.9,
+            },
+        )
+
+        self.assertEqual(response.status, "completed")
+        self.assertEqual(response.selected_algorithms, ["compliance_authorization_core"])
+        self.assertIn("compliance_authorization_agent", FakeLLM.calls[0]["system_prompt"])
+        self.assertNotIn("decision_planning_agent", FakeLLM.calls[0]["system_prompt"])
+
+    def _run_with_algolib(self, agent, request_payload: dict, outputs: dict):
+        algorithms = {
+            "ok": True,
+            "algorithms": [
+                {
+                    "algorithm_id": "decision_planning_core",
+                    "version": "1.0.0",
+                    "backend_type": "python_http_service",
+                },
+                {
+                    "algorithm_id": "compliance_authorization_core",
+                    "version": "1.0.0",
+                    "backend_type": "python_http_service",
+                },
+            ],
+        }
+        run_result = {
+            "ok": True,
+            "algorithm_id": agent.agent_name.replace("_agent", "_core"),
+            "version": "1.0.0",
+            "outputs": outputs,
+            "usage": {"latency_ms": 1.0},
+        }
+        with patch("decision_agents.common.algolib_client.httpx.get", return_value=FakeResponse(algorithms)):
+            with patch("decision_agents.common.algolib_client.httpx.post", return_value=FakeResponse(run_result)):
+                with patch("decision_agents.common.algolib_runtime.OpenAICompatibleClient", FakeLLM):
+                    return agent.handle_query(json.dumps(request_payload, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    unittest.main()

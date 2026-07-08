@@ -7,15 +7,10 @@ from typing import Any, Protocol
 
 from pydantic import ValidationError
 
-from decision_agents.config import get_settings
-from decision_agents.llm.client import LLMClientError, OpenAICompatibleClient
-from decision_agents.llm.prompts import (
-    EXPLAIN_SYSTEM_PROMPT,
-    PARSE_SYSTEM_PROMPT,
-    explain_user_prompt,
-    parse_user_prompt,
-)
-from decision_agents.schemas import AgentRequest, AgentResponse
+from decision_agents.common.config import get_settings
+from decision_agents.common.prompt_loader import get_prompt_module
+from decision_agents.common.schemas import AgentRequest, AgentResponse
+from llm.client import LLMClientError, OpenAICompatibleClient
 
 
 class ChatJSONClient(Protocol):
@@ -40,9 +35,10 @@ def parse_natural_language(
     client: ChatJSONClient | None = None,
 ) -> ParsedLLMRequest:
     client = client or OpenAICompatibleClient(get_settings())
+    prompts = get_prompt_module(agent_name)
     payload = client.chat_json(
-        system_prompt=PARSE_SYSTEM_PROMPT,
-        user_prompt=parse_user_prompt(agent_name, query),
+        system_prompt=prompts.PARSE_SYSTEM_PROMPT,
+        user_prompt=prompts.parse_user_prompt(query),
     )
     request_payload = payload.get("request")
     if not isinstance(request_payload, dict):
@@ -72,10 +68,10 @@ def explain_response(
 ) -> AgentResponse:
     del query
     client = client or OpenAICompatibleClient(get_settings())
+    prompts = get_prompt_module(agent_name)
     payload = client.chat_json(
-        system_prompt=EXPLAIN_SYSTEM_PROMPT,
-        user_prompt=explain_user_prompt(
-            agent_name,
+        system_prompt=prompts.EXPLAIN_SYSTEM_PROMPT,
+        user_prompt=prompts.explain_user_prompt(
             request.model_dump_json(indent=2),
             response.model_dump_json(indent=2),
         ),
@@ -110,4 +106,3 @@ def _string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item) for item in value]
-

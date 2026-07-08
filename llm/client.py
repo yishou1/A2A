@@ -1,4 +1,4 @@
-"""Small OpenAI-compatible chat client used by the optional LLM layer."""
+"""OpenAI-compatible chat client shared by A2A agents."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from decision_agents.config import Settings
+from decision_agents.common.config import Settings
 
 
 class LLMClientError(RuntimeError):
@@ -16,13 +16,14 @@ class LLMClientError(RuntimeError):
 
 
 class OpenAICompatibleClient:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, *, model: str | None = None) -> None:
         if not settings.tool_llm_url:
             raise LLMClientError("TOOL_LLM_URL is required when ENABLE_LLM=true.")
-        if not settings.tool_llm_name:
+        resolved_model = model or settings.tool_llm_name
+        if not resolved_model:
             raise LLMClientError("TOOL_LLM_NAME is required when ENABLE_LLM=true.")
         self.base_url = settings.tool_llm_url.rstrip("/")
-        self.model = settings.tool_llm_name
+        self.model = resolved_model
         self.api_key = settings.api_key or "EMPTY"
         self.timeout = settings.llm_timeout_seconds
 
@@ -78,4 +79,3 @@ def _strip_json_fence(content: str) -> str:
             lines = lines[:-1]
         text = "\n".join(lines).strip()
     return text
-

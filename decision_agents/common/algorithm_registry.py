@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from decision_agents.schemas import AgentRequest
+from decision_agents.common.schemas import AgentRequest
 
 
 ParameterSize = Literal["small", "medium", "large"]

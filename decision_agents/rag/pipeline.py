@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-from decision_agents.config import get_settings
+from decision_agents.common.config import get_settings
 from decision_agents.rag.documents import (
     DEFAULT_KNOWLEDGE_FILES,
     RagChunk,
@@ -14,7 +14,7 @@ from decision_agents.rag.documents import (
 )
 from decision_agents.rag.index import merge_rankings, rank_keyword, rank_vector
 from decision_agents.rag.models import LocalRagModels, RagModelUnavailable
-from decision_agents.schemas import RuleEvidence
+from decision_agents.common.schemas import RuleEvidence
 
 
 @dataclass(frozen=True)

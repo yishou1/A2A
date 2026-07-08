@@ -20,11 +20,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from a2a_protocol.client import A2AClient  # noqa: E402
 from commander_agent.main import CommanderAgent  # noqa: E402
-from decision_agents.a2a_adapter import DecisionAlgorithmA2AAgent  # noqa: E402
-from decision_agents.agents import (  # noqa: E402
-    ComplianceAuthorizationAgent,
-    DecisionPlanningAgent,
-)
+from decision_agents.common.a2a_adapter import DecisionAlgorithmA2AAgent  # noqa: E402
+from decision_agents.compliance_authorization.agent import ComplianceAuthorizationAgent  # noqa: E402
+from decision_agents.decision_planning.agent import DecisionPlanningAgent  # noqa: E402
 from registry.nacos_manager import NacosRegistry  # noqa: E402
 
 

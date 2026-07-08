@@ -7,20 +7,14 @@ import os
 from math import exp
 from typing import Any
 
-from decision_agents.algorithms.onnx_adapter import OnnxAlgorithmSpec, run_onnx_or_fallback
-from decision_agents.algorithms.registry import (
+from decision_agents.common.algorithm_registry import (
     AlgorithmSpec,
     UnknownAlgorithmError,
     missing_required_fields,
     select_algorithm,
 )
-from decision_agents.knowledge.retrieval import retrieve_rag_result
-from decision_agents.knowledge.rule_tables import (
-    BLOCKING_ACTION_TERMS,
-    REVIEW_TERMS,
-    load_rule_table,
-)
-from decision_agents.schemas import (
+from decision_agents.common.onnx_adapter import OnnxAlgorithmSpec, run_onnx_or_fallback
+from decision_agents.common.schemas import (
     AgentRequest,
     AgentResponse,
     CandidatePlan,
@@ -28,6 +22,12 @@ from decision_agents.schemas import (
     PlanComplianceResult,
     RuleEvidence,
     RuleViolation,
+)
+from decision_agents.knowledge.retrieval import retrieve_rag_result
+from decision_agents.knowledge.rule_tables import (
+    BLOCKING_ACTION_TERMS,
+    REVIEW_TERMS,
+    load_rule_table,
 )
 
 

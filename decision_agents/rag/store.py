@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from decision_agents.config import get_settings
+from decision_agents.common.config import get_settings
 from decision_agents.rag.documents import RagChunk
 
 

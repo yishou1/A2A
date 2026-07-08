@@ -7,7 +7,7 @@ import json
 from typing import Any
 
 from a2a_protocol.messages import build_task_error_response, build_task_response
-from decision_agents.schemas import AgentResponse
+from decision_agents.common.schemas import AgentResponse
 
 
 AGENT_REQUEST_FIELDS = {
