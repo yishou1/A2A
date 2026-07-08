@@ -1,0 +1,52 @@
+{
+  "request_id": "ca-core-case-001",
+  "trace_id": "trace-ca-core-case-001",
+  "algorithm_id": "compliance_authorization_core",
+  "version": "1.0.0",
+  "backend_type": "python_http_service",
+  "inputs": {
+    "request_id": "ca-core-case-001",
+    "agent_profile": {
+      "compute_budget": "medium",
+      "risk_policy": "conservative"
+    },
+    "candidate_plans": [
+      {
+        "id": "PLAN-1",
+        "name": "Simulation-only monitoring handoff",
+        "status": "recommended",
+        "target_ids": [
+          "TGT-1"
+        ],
+        "assigned_resources": [
+          "UAV-1"
+        ],
+        "actions": [
+          "maintain monitoring and report updated risk"
+        ],
+        "expected_effects": [
+          "keeps the plan in decision-support mode"
+        ],
+        "score": 88.0,
+        "rationale": "simulation-only decision-support",
+        "assumptions": [
+          "human approval remains required"
+        ],
+        "risk_notes": []
+      }
+    ],
+    "constraints": [
+      "simulation-only decision-support"
+    ],
+    "authorization": {
+      "status": "approved",
+      "scope": [
+        "simulation-only decision-support"
+      ],
+      "approved_plan_ids": [
+        "PLAN-1"
+      ]
+    }
+  },
+  "params": {}
+}

@@ -1,0 +1,42 @@
+{
+  "title": "Compliance Authorization Core Output",
+  "type": "object",
+  "required": [
+    "decision",
+    "selected_plan_id",
+    "authorization_status",
+    "per_plan_results",
+    "risk_probability",
+    "compliance_probability"
+  ],
+  "properties": {
+    "decision": {
+      "type": "string"
+    },
+    "selected_plan_id": {
+      "type": "string"
+    },
+    "authorization_status": {
+      "type": "object"
+    },
+    "per_plan_results": {
+      "type": "array"
+    },
+    "risk_probability": {
+      "type": "number"
+    },
+    "compliance_probability": {
+      "type": "number"
+    },
+    "violations": {
+      "type": "array"
+    },
+    "algorithm_stages": {
+      "type": "array"
+    },
+    "model_runtime": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": true
+}
