@@ -10,6 +10,7 @@ from .mission_feature_adapter import build_features_from_agent_results, build_fe
 from .mission_feature_schema import DEFAULT_MODEL_METADATA_PATH, DEFAULT_MODEL_PATH
 from .mission_scorer import score_mission
 from .motion_prediction import predict_single_track
+from .xbd_damage_classifier import assess_damage, damage_model_loaded
 
 
 def _repo_root() -> Path:
@@ -19,6 +20,10 @@ def _repo_root() -> Path:
 def mission_model_loaded() -> bool:
     root = _repo_root()
     return (root / DEFAULT_MODEL_PATH).exists() and (root / DEFAULT_MODEL_METADATA_PATH).exists()
+
+
+def xbd_damage_model_loaded() -> bool:
+    return damage_model_loaded()
 
 
 def predict_execution_rule_matcher(inputs: dict, params: dict) -> dict:
@@ -124,3 +129,8 @@ def predict_closed_loop_decision_advisor(inputs: dict, params: dict) -> dict:
         str(inputs.get("situation") or "watch"),
         float(inputs.get("mission_completion", 0.0)),
     )
+
+
+def predict_xbd_damage_assessor(inputs: dict, params: dict) -> dict:
+    device = str(params.get("device") or inputs.get("device") or "cpu")
+    return assess_damage(inputs, device=device)

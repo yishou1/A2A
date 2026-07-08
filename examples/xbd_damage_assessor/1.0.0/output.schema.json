@@ -1,0 +1,55 @@
+{
+  "title": "xBD Damage Assessor Output",
+  "type": "object",
+  "required": [
+    "assessment_status"
+  ],
+  "properties": {
+    "damage_probability": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "damage_label": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "enum": [
+        0,
+        1,
+        null
+      ]
+    },
+    "damage_result": {
+      "type": "string"
+    },
+    "decision_threshold": {
+      "type": "number"
+    },
+    "model_source": {
+      "type": "string"
+    },
+    "feature_version": {
+      "type": "string"
+    },
+    "assessment_status": {
+      "type": "string"
+    },
+    "input_mode": {
+      "type": "string"
+    },
+    "missing_fields": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "additionalProperties": true
+}

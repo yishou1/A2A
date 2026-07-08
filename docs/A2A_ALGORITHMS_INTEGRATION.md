@@ -12,6 +12,7 @@ This branch packages algorithms from the A2A `zh` branch as standalone `python_h
 | `mission_feature_adapter` | 9013 | mission_features_v2 seven-dimensional adapter |
 | `mission_completion_scorer` | 9014 | Frozen SC2LE proxy random forest scorer |
 | `closed_loop_decision_advisor` | 9015 | Rule-based closed-loop action advisor |
+| `xbd_damage_assessor` | 9016 | Frozen xBD damage assessor (features or images + polygon) |
 
 ## Start services
 
@@ -43,5 +44,6 @@ pytest tests/python/test_a2a_algorithm_services.py -q
 ## Notes
 
 - `models/sc2le_proxy_mission_model.pkl` is a frozen proxy model trained without Result/completion leakage.
+- `models/xbd_damage_classifier.pkl` is a frozen xBD damage classifier trained offline from handcrafted features plus ResNet18 embeddings.
 - `data/execution_control/processed/mined_rules.json` is mined from fixture training records, not from TigerClaw or VisDrone datasets.
 - Services do not depend on Commander, BPEL, Nacos, or A2A Agent runtime.

@@ -1,0 +1,32 @@
+{
+  "model_source": "xbd_handcrafted_plus_resnet18_lr",
+  "feature_version": "xbd_damage_v1",
+  "handcrafted_dim": 31,
+  "cnn_dim": 1536,
+  "input_dim": 1567,
+  "use_cnn": true,
+  "decision_threshold": 0.645,
+  "split_seed": 20260623,
+  "split_counts": {
+    "fit": 100000,
+    "val": 25567,
+    "test": 31958,
+    "total": 159794
+  },
+  "metrics": {
+    "damage_accuracy": 0.7937918518054947,
+    "damage_f1": 0.6185901145965969,
+    "damage_balanced_accuracy": 0.7416693249036295,
+    "damage_precision": 0.6069278818852925,
+    "damage_recall": 0.6307093119320194,
+    "decision_threshold": 0.645,
+    "confusion_matrix": {
+      "tp": 5344,
+      "fp": 3461,
+      "tn": 20024,
+      "fn": 3129
+    }
+  },
+  "feature_csv": "data/xbd/processed/xbd_damage_features_train.csv",
+  "cnn_npz": "data/xbd/processed/xbd_cnn_embeddings_train.npz"
+}

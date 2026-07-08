@@ -1,0 +1,27 @@
+{
+  "algorithm_id": "xbd_damage_assessor",
+  "version": "1.0.0",
+  "inputs": {
+    "input_mode": "images",
+    "pre_image": "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAgUlEQVR4nNXOQREAIAzAsFL/chCBCMQgYg+uUZB1z6ZM4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iRO4iTO34GpB1kLAtj/m4DTAAAAAElFTkSuQmCC",
+    "post_image": "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAgUlEQVR4nNXOMREAIBDAsFJJzIjAvxpE/MA1CrLu2ZRJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMT5OzD1ABEyAT6ZvJi2AAAAAElFTkSuQmCC",
+    "polygon": [
+      [
+        8,
+        8
+      ],
+      [
+        56,
+        8
+      ],
+      [
+        56,
+        56
+      ],
+      [
+        8,
+        56
+      ]
+    ]
+  }
+}

@@ -22,6 +22,8 @@ from a2a_algorithms_common.service_predictors import (  # noqa: E402
     predict_mission_completion_scorer,
     predict_mission_feature_adapter,
     predict_trajectory_linear_predictor,
+    predict_xbd_damage_assessor,
+    xbd_damage_model_loaded,
 )
 
 @pytest.fixture(scope="session")
@@ -37,6 +39,8 @@ def service_clients():
         predict_mission_completion_scorer,
         predict_mission_feature_adapter,
         predict_trajectory_linear_predictor,
+        predict_xbd_damage_assessor,
+        xbd_damage_model_loaded,
     )
 
     specs = [
@@ -46,6 +50,7 @@ def service_clients():
         ("mission_feature_adapter", "feature_engineering", predict_mission_feature_adapter, lambda: True),
         ("mission_completion_scorer", "scoring", predict_mission_completion_scorer, mission_model_loaded),
         ("closed_loop_decision_advisor", "decision", predict_closed_loop_decision_advisor, lambda: True),
+        ("xbd_damage_assessor", "scoring", predict_xbd_damage_assessor, xbd_damage_model_loaded),
     ]
     clients = {}
     for algorithm_id, task_family, predict_fn, loaded_fn in specs:
