@@ -29,13 +29,16 @@ def _model_loaded() -> bool:
 
 app = FastAPI(title="track_threat_algorithms", version=VERSION)
 
-for algorithm_id, task_family, predict_fn in (
-    ("target_type_classifier", "classification", predict_target_type_classifier),
-    ("trajectory_predictor", "forecasting", predict_trajectory_predictor),
-    ("multimodal_feature_fuser", "feature_engineering", predict_multimodal_feature_fuser),
-    ("track_state_updater", "tracking", predict_track_state_updater),
-    ("graph_relation_reasoner", "graph_reasoning", predict_graph_relation_reasoner),
-):
+TRACK_THREAT_ALGORITHMS = (
+    ("multimodal_feature_fuser", "feature_engineering", "M03", "多模态融合", predict_multimodal_feature_fuser),
+    ("target_type_classifier", "classification", "M04", "特征编码与分类", predict_target_type_classifier),
+    ("track_state_updater", "tracking", "M05", "多目标跟踪与定位", predict_track_state_updater),
+    ("trajectory_predictor", "forecasting", "M06", "时间序列预测", predict_trajectory_predictor),
+    ("graph_relation_reasoner", "graph_reasoning", "M07", "图神经网络", predict_graph_relation_reasoner),
+)
+
+
+for algorithm_id, task_family, algorithm_class, algorithm_class_name, predict_fn in TRACK_THREAT_ALGORITHMS:
     app.mount(
         f"/{algorithm_id}",
         create_algorithm_app(
@@ -44,6 +47,12 @@ for algorithm_id, task_family, predict_fn in (
             task_family,
             predict_fn,
             model_loaded_callable=_model_loaded,
+            extra_metadata={
+                "algorithm_class": algorithm_class,
+                "algorithm_class_name": algorithm_class_name,
+                "owner_scope": "track_threat_agent",
+                "safety_boundary": "simulation situation awareness only; no weapon control or engagement advice",
+            },
         ),
     )
 
@@ -54,13 +63,11 @@ def service_health() -> dict:
         "ok": True,
         "status": "ready",
         "service": "track_threat_algorithms",
-        "mounted_algorithms": [
-            "target_type_classifier",
-            "trajectory_predictor",
-            "multimodal_feature_fuser",
-            "track_state_updater",
-            "graph_relation_reasoner",
-        ],
+        "mounted_algorithms": [item[0] for item in TRACK_THREAT_ALGORITHMS],
+        "algorithm_classes": {
+            item[0]: {"algorithm_class": item[2], "algorithm_class_name": item[3]}
+            for item in TRACK_THREAT_ALGORITHMS
+        },
     }
 
 

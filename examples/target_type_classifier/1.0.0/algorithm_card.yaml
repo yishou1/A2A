@@ -3,6 +3,9 @@ version: 1.0.0
 display_name: Target Type Classifier
 backend_type: python_http_service
 status: draft
+algorithm_class: M04
+algorithm_class_name: 特征编码与分类
+owner_scope: track_threat_agent
 
 task_family: classification
 modalities:
@@ -14,14 +17,16 @@ modalities:
 capabilities:
   - target_type_classifier
   - structured_track_feature_classification
+  - object_type_completion
 
 agent_card:
   summary: >
-    Classifies or completes target object type from structured detection and track fields.
+    M04 package for the Track Threat Agent. Classifies or completes target object type from structured detection and track fields.
   when_to_use:
     - Detection or track records contain object_type, kinematic features, and confidence.
   when_not_to_use:
     - Raw image or radar signal classification is required.
+    - Friendly/hostile identification or engagement decision is required.
   input_description: >
     Structured observations, detections, or tracks.
   output_description: >

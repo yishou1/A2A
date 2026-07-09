@@ -13,8 +13,18 @@ Default port: `9022`.
 
 Mounted algorithm endpoints:
 
-- `/target_type_classifier/health`, `/target_type_classifier/metadata`, `/target_type_classifier/predict`
-- `/trajectory_predictor/health`, `/trajectory_predictor/metadata`, `/trajectory_predictor/predict`
-- `/multimodal_feature_fuser/health`, `/multimodal_feature_fuser/metadata`, `/multimodal_feature_fuser/predict`
-- `/track_state_updater/health`, `/track_state_updater/metadata`, `/track_state_updater/predict`
-- `/graph_relation_reasoner/health`, `/graph_relation_reasoner/metadata`, `/graph_relation_reasoner/predict`
+- `multimodal_feature_fuser` - M03 多模态融合
+- `target_type_classifier` - M04 特征编码与分类
+- `track_state_updater` - M05 多目标跟踪与定位
+- `trajectory_predictor` - M06 时间序列预测
+- `graph_relation_reasoner` - M07 图神经网络
+
+Each mounted algorithm exposes:
+
+```text
+/<algorithm_id>/health
+/<algorithm_id>/metadata
+/<algorithm_id>/predict
+```
+
+Boundary: these packages are for simulation situation awareness only. KG/RAG, compliance authorization, planning, Enemy COA, weapon control, guidance, and engagement advice are outside this service.

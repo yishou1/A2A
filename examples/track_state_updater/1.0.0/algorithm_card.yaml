@@ -3,6 +3,9 @@ version: 1.0.0
 display_name: Track State Updater
 backend_type: python_http_service
 status: draft
+algorithm_class: M05
+algorithm_class_name: 多目标跟踪与定位
+owner_scope: track_threat_agent
 
 task_family: tracking
 modalities:
@@ -15,10 +18,11 @@ capabilities:
   - track_state_updater
   - multi_target_tracking
   - track_filtering
+  - nearest_neighbor_association
 
 agent_card:
   summary: >
-    Updates track states from structured detections using nearest-neighbor association and lightweight filtering.
+    M05 package for the Track Threat Agent. Updates track states from structured detections using nearest-neighbor association and lightweight filtering.
   when_to_use:
     - A frame of detections must be associated with existing tracks.
   when_not_to_use:
