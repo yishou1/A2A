@@ -1,15 +1,16 @@
-# 中档 (M)：默认战场部署；RT-DETR-L @640 + embed 1024
-description: 精度与速度平衡（推荐）
-target_device: "12–16GB GPU（如 RTX 4060/4070）"
+# 离线部署档：所有模型引用本地 models/pretrained 与 models/checkpoints
+description: 内网/无外网环境；须先在有网机器运行 scripts/package_offline_models.py
+target_device: 与 medium 档相同，模型全部本地化
 
 inference:
+  compute_profile: offline
   detection_model: models/checkpoints/battlefield_rtdetr.pt
   detection_imgsz: 640
   embed_dim: 1024
-  mask2former_model: facebook/mask2former-swin-tiny-ade-semantic
-  semantic_comm_model: google/flan-t5-small
-  page_index_model: paraphrase-MiniLM-L6-v2
-  odconv_crop_size: 128
+  mask2former_model: models/pretrained/mask2former-swin-tiny-ade-semantic
+  semantic_comm_model: models/pretrained/flan-t5-small
+  page_index_model: models/pretrained/paraphrase-MiniLM-L6-v2
+  clip_fallback_model: models/pretrained/clip-vit-base-patch32
   odconv_checkpoint: models/checkpoints/odconv_refiner.pt
   edl_checkpoint: models/checkpoints/edl_head.pt
   motr_checkpoint: models/checkpoints/motr_tracker_battlefield.pt

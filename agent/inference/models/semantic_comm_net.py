@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import torch
@@ -14,8 +15,12 @@ class KnowledgeSemanticCommNet:
     def __init__(self, model_id: str = "google/flan-t5-small"):
         from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
-        self.tokenizer = AutoTokenizer.from_pretrained(model_id)
-        self.model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
+        from agent.inference.offline import is_offline_mode, resolve_model_ref
+
+        path = resolve_model_ref(model_id)
+        local_only = is_offline_mode() or Path(path).is_dir()
+        self.tokenizer = AutoTokenizer.from_pretrained(path, local_files_only=local_only)
+        self.model = AutoModelForSeq2SeqLM.from_pretrained(path, local_files_only=local_only)
         self.model.eval()
 
     @property

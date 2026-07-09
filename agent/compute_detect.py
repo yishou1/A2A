@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-VALID_PROFILES = frozenset({"small", "medium", "large"})
+VALID_PROFILES = frozenset({"small", "medium", "large", "offline"})
 AUTO_ALIASES = frozenset({"auto", "detect", "automatic"})
 
 # 默认显存阈值（GB，按设备总显存）

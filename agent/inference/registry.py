@@ -157,14 +157,15 @@ def get_motr_tracker(config: dict[str, Any]):
 
 
 def get_imagebind(config: dict[str, Any]):
-    key = f"imagebind:{_profile_tag(config)}"
+    key = f"imagebind:{_profile_tag(config)}:{config.get('clip_fallback_model', 'clip')}"
     if key in _CACHE:
         return _CACHE[key]
 
     from agent.inference.models.imagebind_model import ImageBindEmbedder
 
     device = get_device(config)
-    embedder = ImageBindEmbedder(device)
+    clip_id = str(config.get("clip_fallback_model", "openai/clip-vit-base-patch32"))
+    embedder = ImageBindEmbedder(device, clip_model_id=clip_id)
     _CACHE[key] = embedder
     return embedder
 
@@ -242,14 +243,44 @@ def get_marl_policy(config: dict[str, Any]):
     return model
 
 
+def get_marl_ppo_scheduler(config: dict[str, Any]):
+    ckpt = str(config.get("marl_ppo_checkpoint", "marl_ppo_scheduler.pt"))
+    key = f"marl_ppo:{ckpt}:{_profile_tag(config)}"
+    if key in _CACHE:
+        return _CACHE[key]
+
+    from agent.inference.models.marl_ppo_scheduler import MARLPPOSchedulerNet
+    from agent.training.battlefield_scheduling_env import BattlefieldSchedulingEnv
+
+    env = BattlefieldSchedulingEnv()
+    device = get_device(config)
+    model = MARLPPOSchedulerNet(
+        obs_dim=env.obs_dim,
+        n_actions=env.n_actions,
+        n_agents=env.n_agents,
+    )
+    path = _checkpoint_path(config, "marl_ppo_checkpoint", "marl_ppo_scheduler.pt")
+    if path.is_file():
+        _load_state_dict(model, path)
+    model.eval().to(device)
+    _CACHE[key] = model
+    return model
+
+
 def get_page_encoder(config: dict[str, Any]):
     model_id = config.get("page_index_model", "paraphrase-MiniLM-L6-v2")
     key = f"page_encoder:{model_id}:{_profile_tag(config)}"
     if key in _CACHE:
         return _CACHE[key]
 
+    from agent.inference.offline import is_offline_mode, resolve_model_ref
     from sentence_transformers import SentenceTransformer
 
-    model = SentenceTransformer(model_id)
+    path = resolve_model_ref(model_id)
+    local_only = is_offline_mode() or Path(path).is_dir()
+    try:
+        model = SentenceTransformer(path, local_files_only=local_only)
+    except TypeError:
+        model = SentenceTransformer(path)
     _CACHE[key] = model
     return model
