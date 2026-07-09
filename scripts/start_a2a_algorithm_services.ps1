@@ -14,7 +14,9 @@ $LegacyAlgorithms = @(
     @{ Id = "mission_feature_adapter"; Port = 9013 },
     @{ Id = "mission_completion_scorer"; Port = 9014 },
     @{ Id = "closed_loop_decision_advisor"; Port = 9015 },
-    @{ Id = "xbd_damage_assessor"; Port = 9016 }
+    @{ Id = "xbd_damage_assessor"; Port = 9016 },
+    @{ Id = "decision_planning_core"; Port = 9020 },
+    @{ Id = "compliance_authorization_core"; Port = 9021 }
 )
 
 $TiaAlgorithms = @(

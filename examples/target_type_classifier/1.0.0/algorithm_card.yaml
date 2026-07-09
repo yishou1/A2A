@@ -1,0 +1,71 @@
+algorithm_id: target_type_classifier
+version: 1.0.0
+display_name: Target Type Classifier
+backend_type: python_http_service
+status: draft
+
+task_family: classification
+modalities:
+  input:
+    - structured_json
+  output:
+    - structured_json
+
+capabilities:
+  - target_type_classifier
+  - structured_track_feature_classification
+
+agent_card:
+  summary: >
+    Classifies or completes target object type from structured detection and track fields.
+  when_to_use:
+    - Detection or track records contain object_type, kinematic features, and confidence.
+  when_not_to_use:
+    - Raw image or radar signal classification is required.
+  input_description: >
+    Structured observations, detections, or tracks.
+  output_description: >
+    Per-item object_type, confidence, type_scores, and evidence.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  runtime:
+    backend_type: python_http_service
+    endpoint: http://127.0.0.1:9022/target_type_classifier/predict
+    health_endpoint: http://127.0.0.1:9022/target_type_classifier/health
+    metadata_endpoint: http://127.0.0.1:9022/target_type_classifier/metadata
+    timeout_ms: 3000
+
+constraints:
+  max_input_chars: 200000
+  max_request_bytes: 1048576
+  batch_supported: true
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 10
+  latency_ms_p95: 50
+  primary_metric: classification_confidence
+  primary_score: 0.8
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 2
+  min_memory_mb: 256
+  recommended_memory_mb: 512
+  min_gpu_count: 0
+  gpu_type: none
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 10
+
+model_profile:
+  parameter_count: 0
+  parameter_count_text: rule-based
+  model_size_mb: 0
+  precision: fp32
+
+safety:
+  risk_level: low
+  requires_human_review: true

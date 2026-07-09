@@ -1,0 +1,72 @@
+algorithm_id: track_state_updater
+version: 1.0.0
+display_name: Track State Updater
+backend_type: python_http_service
+status: draft
+
+task_family: tracking
+modalities:
+  input:
+    - structured_json
+  output:
+    - structured_json
+
+capabilities:
+  - track_state_updater
+  - multi_target_tracking
+  - track_filtering
+
+agent_card:
+  summary: >
+    Updates track states from structured detections using nearest-neighbor association and lightweight filtering.
+  when_to_use:
+    - A frame of detections must be associated with existing tracks.
+  when_not_to_use:
+    - Raw sensor-level tracking or production-grade radar processing is required.
+  input_description: >
+    detections and optional existing_tracks.
+  output_description: >
+    updated tracks, updates, and summary.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  runtime:
+    backend_type: python_http_service
+    endpoint: http://127.0.0.1:9022/track_state_updater/predict
+    health_endpoint: http://127.0.0.1:9022/track_state_updater/health
+    metadata_endpoint: http://127.0.0.1:9022/track_state_updater/metadata
+    timeout_ms: 3000
+
+constraints:
+  max_input_chars: 500000
+  max_request_bytes: 2097152
+  batch_supported: true
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 20
+  latency_ms_p95: 100
+  primary_metric: association_success
+  primary_score: 0.9
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 2
+  min_memory_mb: 512
+  recommended_memory_mb: 1024
+  min_gpu_count: 0
+  gpu_type: none
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 10
+
+model_profile:
+  parameter_count: 0
+  parameter_count_text: nearest-neighbor plus lightweight filter
+  model_size_mb: 0
+  precision: fp32
+
+safety:
+  risk_level: low
+  requires_human_review: true

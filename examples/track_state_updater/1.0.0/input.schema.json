@@ -1,0 +1,13 @@
+{
+  "title": "Track State Updater Input",
+  "type": "object",
+  "properties": {
+    "detections": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+    "existing_tracks": { "type": "array", "items": { "type": "object", "additionalProperties": true } }
+  },
+  "anyOf": [
+    { "required": ["detections"] },
+    { "required": ["existing_tracks"] }
+  ],
+  "additionalProperties": false
+}

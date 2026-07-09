@@ -1,0 +1,73 @@
+{
+  "request_id": "dp-core-case-001",
+  "trace_id": "trace-dp-core-case-001",
+  "algorithm_id": "decision_planning_core",
+  "version": "1.0.0",
+  "backend_type": "python_http_service",
+  "inputs": {
+    "request_id": "dp-core-case-001",
+    "agent_profile": {
+      "compute_budget": "medium",
+      "risk_policy": "balanced"
+    },
+    "risk_assessments": [
+      {
+        "target_id": "TGT-1",
+        "priority": 1,
+        "risk": "high",
+        "threat_score": 82.0,
+        "probability": 0.74,
+        "rationale": "High-priority monitoring target."
+      }
+    ],
+    "scheduled_tasks": [
+      {
+        "id": "TASK-1",
+        "target_id": "TGT-1",
+        "priority": 1,
+        "task_type": "monitor",
+        "required_resource_types": [
+          "uav"
+        ]
+      }
+    ],
+    "resources": [
+      {
+        "id": "UAV-1",
+        "type": "uav",
+        "status": "available",
+        "capacity": 1.0
+      }
+    ],
+    "target_histories": [
+      {
+        "target_id": "TGT-1",
+        "steps": [
+          {
+            "risk_score": 65.0,
+            "probability": 0.5,
+            "priority": 1,
+            "resource_pressure": 0.3
+          },
+          {
+            "risk_score": 82.0,
+            "probability": 0.74,
+            "priority": 1,
+            "resource_pressure": 0.5
+          }
+        ]
+      }
+    ],
+    "planning_objectives": [
+      "risk_first",
+      "simulation-only decision-support"
+    ],
+    "constraints": [
+      "simulation-only decision-support"
+    ],
+    "authorization": {
+      "status": "pending_review"
+    }
+  },
+  "params": {}
+}

@@ -13,6 +13,8 @@ This branch packages algorithms from the A2A `zh` branch as standalone `python_h
 | `mission_completion_scorer` | 9014 | Frozen SC2LE proxy random forest scorer |
 | `closed_loop_decision_advisor` | 9015 | Rule-based closed-loop action advisor |
 | `xbd_damage_assessor` | 9016 | Frozen xBD damage assessor (features or images + polygon) |
+| `decision_planning_core` | 9020 | Non-RAG decision planning core for candidate generation and ranking |
+| `compliance_authorization_core` | 9021 | Non-RAG compliance and authorization core for plan checking |
 
 ## Start services
 
@@ -31,6 +33,14 @@ cmake --build build
 ./build/algolib.exe activate mission_completion_scorer 1.0.0 python_http_service
 ./build/algolib.exe show-card mission_completion_scorer 1.0.0 python_http_service
 ./build/algolib.exe run ./examples/mission_completion_scorer/1.0.0/golden_cases/case_001_request.json
+
+./build/algolib.exe register ./examples/decision_planning_core/1.0.0
+./build/algolib.exe activate decision_planning_core 1.0.0 python_http_service
+./build/algolib.exe run ./examples/decision_planning_core/1.0.0/golden_cases/case_001_request.json
+
+./build/algolib.exe register ./examples/compliance_authorization_core/1.0.0
+./build/algolib.exe activate compliance_authorization_core 1.0.0 python_http_service
+./build/algolib.exe run ./examples/compliance_authorization_core/1.0.0/golden_cases/case_001_request.json
 ```
 
 ## Python tests
@@ -41,9 +51,44 @@ pip install pytest
 pytest tests/python/test_a2a_algorithm_services.py -q
 ```
 
+## Decision agent model assets
+
+The decision-agent packages include bootstrap ONNX assets exported from the
+current A2A agent weights:
+
+| model | Purpose | Input |
+|---|---|---|
+| `models/decision_planning_lr.onnx` | Candidate-plan recommendation probability | `features` shape `[1, 8]` |
+| `models/decision_planning_lstm.onnx` | Target trend score | `sequence` shape `[1, 12, 4]` |
+| `models/compliance_authorization_lr.onnx` | Compliance risk probability | `features` shape `[1, 6]` |
+
+Regenerate them with:
+
+```powershell
+python scripts/export_decision_agent_models.py
+```
+
+The `*.metadata.json` files record feature order and bootstrap weights. These
+files are not yet trained from labeled historical data; future training scripts
+can replace them with learned model exports while keeping the same service
+contracts.
+
+At runtime, `decision_planning_core` and `compliance_authorization_core` load
+these model assets through `onnxruntime` inside their Python HTTP services:
+
+- `decision_planning_core` uses `decision_planning_lr.onnx` to score candidate
+  plans. It uses `decision_planning_lstm.onnx` for target trend scoring when a
+  target has 12 history steps; shorter histories fall back to the existing
+  Python formula and are marked in `model_runtime`.
+- `compliance_authorization_core` uses `compliance_authorization_lr.onnx` to
+  calibrate compliance risk probability.
+- If a model file or `onnxruntime` is unavailable, the services fall back to the
+  current Python formula and report the reason in `model_runtime`.
+
 ## Notes
 
 - `models/sc2le_proxy_mission_model.pkl` is a frozen proxy model trained without Result/completion leakage.
 - `models/xbd_damage_classifier.pkl` is a frozen xBD damage classifier trained offline from handcrafted features plus ResNet18 embeddings.
 - `data/execution_control/processed/mined_rules.json` is mined from fixture training records, not from TigerClaw or VisDrone datasets.
+- `decision_planning_core` and `compliance_authorization_core` intentionally exclude RAG; retrieval services should be packaged separately.
 - Services do not depend on Commander, BPEL, Nacos, or A2A Agent runtime.

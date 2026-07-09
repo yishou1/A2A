@@ -1,0 +1,41 @@
+{
+  "title": "Decision Planning Core Output",
+  "type": "object",
+  "required": [
+    "candidate_plans",
+    "recommended_plan_id",
+    "method",
+    "plan_scores",
+    "target_trends"
+  ],
+  "properties": {
+    "candidate_plans": {
+      "type": "array"
+    },
+    "recommended_plan_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "method": {
+      "type": "string"
+    },
+    "plan_scores": {
+      "type": "array"
+    },
+    "target_trends": {
+      "type": "array"
+    },
+    "algorithm_stages": {
+      "type": "array"
+    },
+    "model_runtime": {
+      "type": "object"
+    },
+    "handoff_notes": {
+      "type": "array"
+    }
+  },
+  "additionalProperties": true
+}

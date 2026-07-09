@@ -25,6 +25,10 @@ from a2a_algorithms_common.service_predictors import (  # noqa: E402
     predict_xbd_damage_assessor,
     xbd_damage_model_loaded,
 )
+from a2a_algorithms_common.decision_agent_predictors import (  # noqa: E402
+    predict_compliance_authorization_core,
+    predict_decision_planning_core,
+)
 
 @pytest.fixture(scope="session")
 def service_clients():
@@ -41,6 +45,10 @@ def service_clients():
         predict_trajectory_linear_predictor,
         predict_xbd_damage_assessor,
         xbd_damage_model_loaded,
+    )
+    from a2a_algorithms_common.decision_agent_predictors import (
+        predict_compliance_authorization_core,
+        predict_decision_planning_core,
     )
 
     specs = [
@@ -180,3 +188,54 @@ def test_closed_loop_advisor_action():
         {},
     )
     assert outputs["action"] == "confirm_effect_and_shift"
+
+
+def test_decision_planning_core_outputs_non_rag_core():
+    request_path = ROOT / "examples" / "decision_planning_core" / "1.0.0" / "golden_cases" / "case_001_request.json"
+    payload = json.loads(request_path.read_text(encoding="utf-8"))
+    outputs = predict_decision_planning_core(payload["inputs"], payload["params"])
+    assert outputs["candidate_plans"]
+    assert outputs["recommended_plan_id"]
+    assert outputs["plan_scores"]
+    assert outputs["target_trends"]
+    assert outputs["model_runtime"]["decision_planning_lr"]["plans"]
+    assert outputs["rag_warnings"] == ["rag_out_of_scope"]
+
+
+def test_compliance_authorization_core_outputs_non_rag_core():
+    request_path = ROOT / "examples" / "compliance_authorization_core" / "1.0.0" / "golden_cases" / "case_001_request.json"
+    payload = json.loads(request_path.read_text(encoding="utf-8"))
+    outputs = predict_compliance_authorization_core(payload["inputs"], payload["params"])
+    assert outputs["decision"] in {"approved", "blocked", "review_required"}
+    assert outputs["selected_plan_id"] == "PLAN-1"
+    assert "risk_probability" in outputs
+    assert outputs["model_runtime"]["compliance_authorization_lr"]["model"] == "compliance_authorization_lr.onnx"
+    assert outputs["rag_warnings"] == ["rag_out_of_scope"]
+
+
+def test_decision_agent_core_http_endpoints():
+    from a2a_algorithms_common.http_service import AlgorithmRequest, create_algorithm_app
+
+    specs = [
+        ("decision_planning_core", "planning", predict_decision_planning_core),
+        ("compliance_authorization_core", "compliance", predict_compliance_authorization_core),
+    ]
+    for algorithm_id, task_family, predict_fn in specs:
+        app = create_algorithm_app(
+            algorithm_id,
+            "1.0.0",
+            task_family,
+            predict_fn,
+            model_loaded_callable=lambda: True,
+        )
+        health = next(route.endpoint for route in app.routes if getattr(route, "path", None) == "/health")
+        metadata = next(route.endpoint for route in app.routes if getattr(route, "path", None) == "/metadata")
+        predict = next(route.endpoint for route in app.routes if getattr(route, "path", None) == "/predict")
+        payload_path = ROOT / "examples" / algorithm_id / "1.0.0" / "golden_cases" / "case_001_request.json"
+        payload = json.loads(payload_path.read_text(encoding="utf-8"))
+
+        assert health()["status"] == "ready"
+        assert metadata()["backend_type"] == "python_http_service"
+        result = predict(AlgorithmRequest(**payload))
+        assert result["ok"] is True
+        assert result["outputs"]

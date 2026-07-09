@@ -1,0 +1,25 @@
+{
+  "model_source": "a2a_compliance_authorization_bootstrap_lr",
+  "model_type": "logistic_regression",
+  "format": "onnx",
+  "input_name": "features",
+  "output_name": "probability",
+  "feature_order": [
+    "blocking_violation_count",
+    "warning_violation_count",
+    "authorization_status_score",
+    "authorization_out_of_scope",
+    "rag_evidence_count",
+    "law_of_war_rule_hit"
+  ],
+  "weights": {
+    "blocking_violation_count": 3.0,
+    "warning_violation_count": 0.85,
+    "authorization_status_score": 1.1,
+    "authorization_out_of_scope": 0.9,
+    "rag_evidence_count": 0.35,
+    "law_of_war_rule_hit": 0.8
+  },
+  "intercept": -2.2,
+  "training_status": "bootstrap_from_existing_agent_weights"
+}

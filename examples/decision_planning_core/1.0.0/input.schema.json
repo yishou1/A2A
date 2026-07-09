@@ -1,0 +1,46 @@
+{
+  "title": "Decision Planning Core Input",
+  "type": "object",
+  "required": [
+    "scheduled_tasks",
+    "resources"
+  ],
+  "properties": {
+    "request_id": {
+      "type": "string"
+    },
+    "agent_profile": {
+      "type": "object"
+    },
+    "algorithm_params": {
+      "type": "object"
+    },
+    "risk_assessments": {
+      "type": "array"
+    },
+    "scheduled_tasks": {
+      "type": "array",
+      "minItems": 1
+    },
+    "resources": {
+      "type": "array",
+      "minItems": 1
+    },
+    "target_histories": {
+      "type": "array"
+    },
+    "planning_objectives": {
+      "type": "array"
+    },
+    "candidate_plans": {
+      "type": "array"
+    },
+    "constraints": {
+      "type": "array"
+    },
+    "authorization": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,15 @@
+{
+  "ok": true,
+  "request_id": "tsu-001",
+  "trace_id": "trace-track-threat-001",
+  "algorithm_id": "track_state_updater",
+  "version": "1.0.0",
+  "outputs": {
+    "schema_version": "track_state_updater/v1",
+    "tracks": [],
+    "updates": [],
+    "summary": {}
+  },
+  "usage": { "latency_ms": 1 },
+  "error": null
+}

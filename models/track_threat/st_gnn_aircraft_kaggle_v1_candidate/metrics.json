@@ -1,0 +1,322 @@
+{
+  "schema_version": "st_gnn_evaluation/v2",
+  "test_manifest": "data/processed/v2_release/aircraft/aircraft-test-manifest.json",
+  "st_gnn": {
+    "ade_m": 336.17730712890625,
+    "fde_m": 695.3419799804688,
+    "rmse_m": 888.1160278320312,
+    "by_horizon": {
+      "10": {
+        "ade_m": 127.37349700927734,
+        "fde_m": 127.37349700927734
+      },
+      "20": {
+        "ade_m": 213.01751708984375,
+        "fde_m": 213.01751708984375
+      },
+      "30": {
+        "ade_m": 308.97625732421875,
+        "fde_m": 308.97625732421875
+      },
+      "60": {
+        "ade_m": 695.3419799804688,
+        "fde_m": 695.3419799804688
+      }
+    },
+    "sample_count": 448589,
+    "coverage_90": 0.9066445008682781,
+    "uncertainty_calibration": {
+      "schema_version": "st_gnn_uncertainty_calibration/v1",
+      "method": "global_sigma_scale_from_validation_quantile",
+      "target_coverage": 0.9,
+      "coverage_before": 0.7481674256754195,
+      "coverage_after": 0.8999998946796365,
+      "sigma_scale": 13.623958198322143,
+      "calibration_manifest": "data/processed/v2_release/aircraft/aircraft-validation-manifest.json",
+      "checkpoint": "checkpoints/aircraft-kaggle-v1/best.ckpt",
+      "sample_count": 474742,
+      "safety_boundary": "Uncertainty calibration only; trajectory coordinates are unchanged."
+    }
+  },
+  "baselines": {
+    "last_position": {
+      "ade_m": 3176.025146484375,
+      "fde_m": 6279.83056640625,
+      "rmse_m": 4712.404296875,
+      "by_horizon": {
+        "10": {
+          "ade_m": 1077.76513671875,
+          "fde_m": 1077.76513671875
+        },
+        "20": {
+          "ade_m": 2145.810791015625,
+          "fde_m": 2145.810791015625
+        },
+        "30": {
+          "ade_m": 3200.69482421875,
+          "fde_m": 3200.69482421875
+        },
+        "60": {
+          "ade_m": 6279.83056640625,
+          "fde_m": 6279.83056640625
+        }
+      },
+      "sample_count": 448589
+    },
+    "constant_velocity": {
+      "ade_m": 395.30584716796875,
+      "fde_m": 860.908447265625,
+      "rmse_m": 930.2057495117188,
+      "by_horizon": {
+        "10": {
+          "ade_m": 130.98521423339844,
+          "fde_m": 130.98521423339844
+        },
+        "20": {
+          "ade_m": 234.384521484375,
+          "fde_m": 234.384521484375
+        },
+        "30": {
+          "ade_m": 354.9453430175781,
+          "fde_m": 354.9453430175781
+        },
+        "60": {
+          "ade_m": 860.908447265625,
+          "fde_m": 860.908447265625
+        }
+      },
+      "sample_count": 448589
+    },
+    "constant_acceleration": {
+      "ade_m": 407.1766662597656,
+      "fde_m": 899.781005859375,
+      "rmse_m": 944.0618286132812,
+      "by_horizon": {
+        "10": {
+          "ade_m": 131.16209411621094,
+          "fde_m": 131.16209411621094
+        },
+        "20": {
+          "ade_m": 236.33160400390625,
+          "fde_m": 236.33160400390625
+        },
+        "30": {
+          "ade_m": 361.43182373046875,
+          "fde_m": 361.43182373046875
+        },
+        "60": {
+          "ade_m": 899.781005859375,
+          "fde_m": 899.781005859375
+        }
+      },
+      "sample_count": 448589
+    },
+    "coordinated_turn": {
+      "ade_m": 403.8358154296875,
+      "fde_m": 908.44775390625,
+      "rmse_m": 927.7028198242188,
+      "by_horizon": {
+        "10": {
+          "ade_m": 127.85302734375,
+          "fde_m": 127.85302734375
+        },
+        "20": {
+          "ade_m": 227.76649475097656,
+          "fde_m": 227.76649475097656
+        },
+        "30": {
+          "ade_m": 351.2760009765625,
+          "fde_m": 351.2760009765625
+        },
+        "60": {
+          "ade_m": 908.44775390625,
+          "fde_m": 908.44775390625
+        }
+      },
+      "sample_count": 448589
+    },
+    "imm": {
+      "ade_m": 370.39544677734375,
+      "fde_m": 801.9701538085938,
+      "rmse_m": 875.8695068359375,
+      "by_horizon": {
+        "10": {
+          "ade_m": 127.34193420410156,
+          "fde_m": 127.34193420410156
+        },
+        "20": {
+          "ade_m": 221.5245361328125,
+          "fde_m": 221.5245361328125
+        },
+        "30": {
+          "ade_m": 330.7451477050781,
+          "fde_m": 330.7451477050781
+        },
+        "60": {
+          "ade_m": 801.9701538085938,
+          "fde_m": 801.9701538085938
+        }
+      },
+      "sample_count": 448589
+    }
+  },
+  "gru_only": {
+    "status": "not_provided"
+  },
+  "stratified": {
+    "by_source": {
+      "opensky": {
+        "ade_m": 266.03948974609375,
+        "fde_m": 557.6474609375,
+        "rmse_m": 1132.635498046875,
+        "by_horizon": {
+          "10": {
+            "ade_m": 91.06317138671875,
+            "fde_m": 91.06317138671875
+          },
+          "20": {
+            "ade_m": 166.4853973388672,
+            "fde_m": 166.4853973388672
+          },
+          "30": {
+            "ade_m": 248.96188354492188,
+            "fde_m": 248.96188354492188
+          },
+          "60": {
+            "ade_m": 557.6474609375,
+            "fde_m": 557.6474609375
+          }
+        },
+        "sample_count": 110799
+      },
+      "tartanaviation_raw_adsb": {
+        "ade_m": 359.1833190917969,
+        "fde_m": 740.50732421875,
+        "rmse_m": 791.6282348632812,
+        "by_horizon": {
+          "10": {
+            "ade_m": 139.28370666503906,
+            "fde_m": 139.28370666503906
+          },
+          "20": {
+            "ade_m": 228.28057861328125,
+            "fde_m": 228.28057861328125
+          },
+          "30": {
+            "ade_m": 328.66162109375,
+            "fde_m": 328.66162109375
+          },
+          "60": {
+            "ade_m": 740.50732421875,
+            "fde_m": 740.50732421875
+          }
+        },
+        "sample_count": 337790
+      }
+    },
+    "by_graph_density": {
+      "dense": {
+        "ade_m": 257.2257385253906,
+        "fde_m": 588.741943359375,
+        "rmse_m": 614.1663208007812,
+        "by_horizon": {
+          "10": {
+            "ade_m": 73.1734390258789,
+            "fde_m": 73.1734390258789
+          },
+          "20": {
+            "ade_m": 138.2848663330078,
+            "fde_m": 138.2848663330078
+          },
+          "30": {
+            "ade_m": 228.70277404785156,
+            "fde_m": 228.70277404785156
+          },
+          "60": {
+            "ade_m": 588.741943359375,
+            "fde_m": 588.741943359375
+          }
+        },
+        "sample_count": 14311
+      },
+      "medium": {
+        "ade_m": 254.53526306152344,
+        "fde_m": 558.009765625,
+        "rmse_m": 822.9937133789062,
+        "by_horizon": {
+          "10": {
+            "ade_m": 80.8323745727539,
+            "fde_m": 80.8323745727539
+          },
+          "20": {
+            "ade_m": 148.24684143066406,
+            "fde_m": 148.24684143066406
+          },
+          "30": {
+            "ade_m": 231.0520477294922,
+            "fde_m": 231.0520477294922
+          },
+          "60": {
+            "ade_m": 558.009765625,
+            "fde_m": 558.009765625
+          }
+        },
+        "sample_count": 243343
+      },
+      "sparse": {
+        "ade_m": 446.1460876464844,
+        "fde_m": 878.3590087890625,
+        "rmse_m": 980.619140625,
+        "by_horizon": {
+          "10": {
+            "ade_m": 190.75169372558594,
+            "fde_m": 190.75169372558594
+          },
+          "20": {
+            "ade_m": 301.1678771972656,
+            "fde_m": 301.1678771972656
+          },
+          "30": {
+            "ade_m": 414.3057556152344,
+            "fde_m": 414.3057556152344
+          },
+          "60": {
+            "ade_m": 878.3590087890625,
+            "fde_m": 878.3590087890625
+          }
+        },
+        "sample_count": 190935
+      }
+    },
+    "seen_unseen_target": {
+      "status": "train_manifest_not_provided"
+    }
+  },
+  "release_gate": {
+    "passed": false,
+    "strongest_physical_baseline": "imm",
+    "strongest_ade_baseline": "imm",
+    "strongest_fde_baseline": "imm",
+    "ade_improvement": 0.09238272215858823,
+    "fde_improvement": 0.13295778318150975,
+    "coverage_90": 0.9066445008682781,
+    "failed_checks": [
+      "overall_ade_improvement"
+    ]
+  },
+  "uncertainty_calibration": {
+    "schema_version": "st_gnn_uncertainty_calibration/v1",
+    "method": "global_sigma_scale_from_validation_quantile",
+    "target_coverage": 0.9,
+    "coverage_before": 0.7481674256754195,
+    "coverage_after": 0.8999998946796365,
+    "sigma_scale": 13.623958198322143,
+    "calibration_manifest": "data/processed/v2_release/aircraft/aircraft-validation-manifest.json",
+    "checkpoint": "checkpoints/aircraft-kaggle-v1/best.ckpt",
+    "sample_count": 474742,
+    "safety_boundary": "Uncertainty calibration only; trajectory coordinates are unchanged."
+  },
+  "safety_boundary": "Trajectory prediction evaluation only; no engagement advice.",
+  "release_status": "candidate_ade_gate_pending",
+  "candidate_warning": "This model is exported for demonstration and integration testing only; release_gate.passed remains false."
+}
