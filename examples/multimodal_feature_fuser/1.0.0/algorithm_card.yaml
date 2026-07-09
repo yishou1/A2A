@@ -1,0 +1,71 @@
+algorithm_id: multimodal_feature_fuser
+version: 1.0.0
+display_name: Multimodal Feature Fuser
+backend_type: python_http_service
+status: draft
+
+task_family: feature_engineering
+modalities:
+  input:
+    - structured_json
+  output:
+    - structured_json
+
+capabilities:
+  - multimodal_feature_fuser
+  - structured_feature_fusion
+
+agent_card:
+  summary: >
+    Fuses detection, track, scene, and protected asset metadata into structured feature vectors.
+  when_to_use:
+    - Multiple structured sources need a shared feature representation.
+  when_not_to_use:
+    - Raw image, audio, or signal fusion is required.
+  input_description: >
+    detections, tracks, scene, and protected_assets.
+  output_description: >
+    feature_vectors and source counts.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  runtime:
+    backend_type: python_http_service
+    endpoint: http://127.0.0.1:9022/multimodal_feature_fuser/predict
+    health_endpoint: http://127.0.0.1:9022/multimodal_feature_fuser/health
+    metadata_endpoint: http://127.0.0.1:9022/multimodal_feature_fuser/metadata
+    timeout_ms: 3000
+
+constraints:
+  max_input_chars: 500000
+  max_request_bytes: 2097152
+  batch_supported: true
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 10
+  latency_ms_p95: 80
+  primary_metric: feature_completeness
+  primary_score: 1.0
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 2
+  min_memory_mb: 256
+  recommended_memory_mb: 512
+  min_gpu_count: 0
+  gpu_type: none
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 10
+
+model_profile:
+  parameter_count: 0
+  parameter_count_text: deterministic feature adapter
+  model_size_mb: 0
+  precision: fp32
+
+safety:
+  risk_level: low
+  requires_human_review: true

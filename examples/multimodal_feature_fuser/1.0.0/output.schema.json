@@ -1,0 +1,13 @@
+{
+  "title": "Multimodal Feature Fuser Output",
+  "type": "object",
+  "required": ["schema_version", "feature_version", "feature_vectors", "counts", "warnings"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "feature_version": { "type": "string" },
+    "feature_vectors": { "type": "array" },
+    "counts": { "type": "object" },
+    "warnings": { "type": "array" }
+  },
+  "additionalProperties": true
+}

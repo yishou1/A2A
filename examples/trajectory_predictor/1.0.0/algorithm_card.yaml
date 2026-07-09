@@ -1,0 +1,73 @@
+algorithm_id: trajectory_predictor
+version: 1.0.0
+display_name: Trajectory Predictor
+backend_type: python_http_service
+status: draft
+
+task_family: forecasting
+modalities:
+  input:
+    - structured_json
+  output:
+    - structured_json
+
+capabilities:
+  - trajectory_predictor
+  - time_series_prediction
+  - st_gnn_candidate_prediction
+  - physics_baseline_fallback
+
+agent_card:
+  summary: >
+    Predicts future trajectory points from track history using frozen ST-GNN model bundles when available and physics baselines as fallback.
+  when_to_use:
+    - Structured track states with history_path are available.
+  when_not_to_use:
+    - Weapon control, guidance, or engagement decisions are requested.
+  input_description: >
+    Tracks with object_type, timestamp, current kinematics, and history_path.
+  output_description: >
+    predicted_path points with horizon, uncertainty radius, confidence, model version, and fallback status.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  runtime:
+    backend_type: python_http_service
+    endpoint: http://127.0.0.1:9022/trajectory_predictor/predict
+    health_endpoint: http://127.0.0.1:9022/trajectory_predictor/health
+    metadata_endpoint: http://127.0.0.1:9022/trajectory_predictor/metadata
+    timeout_ms: 5000
+
+constraints:
+  max_input_chars: 500000
+  max_request_bytes: 2097152
+  batch_supported: true
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 30
+  latency_ms_p95: 200
+  primary_metric: ade_m
+  primary_score: 204.84
+
+resource_requirements:
+  min_cpu_cores: 2
+  recommended_cpu_cores: 4
+  min_memory_mb: 1024
+  recommended_memory_mb: 2048
+  min_gpu_count: 0
+  gpu_type: optional
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 20
+
+model_profile:
+  parameter_count: 0
+  parameter_count_text: frozen TorchScript bundles, see models/track_threat
+  model_size_mb: 2
+  precision: fp32
+
+safety:
+  risk_level: low
+  requires_human_review: true

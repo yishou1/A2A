@@ -10,6 +10,13 @@ from .mission_feature_adapter import build_features_from_agent_results, build_fe
 from .mission_feature_schema import DEFAULT_MODEL_METADATA_PATH, DEFAULT_MODEL_PATH
 from .mission_scorer import score_mission
 from .motion_prediction import predict_single_track
+from .track_threat_algorithms import (
+    graph_relation_reasoner,
+    multimodal_feature_fuser,
+    target_type_classifier,
+    track_state_updater,
+    trajectory_predictor,
+)
 from .xbd_damage_classifier import assess_damage, damage_model_loaded
 
 
@@ -134,3 +141,23 @@ def predict_closed_loop_decision_advisor(inputs: dict, params: dict) -> dict:
 def predict_xbd_damage_assessor(inputs: dict, params: dict) -> dict:
     device = str(params.get("device") or inputs.get("device") or "cpu")
     return assess_damage(inputs, device=device)
+
+
+def predict_target_type_classifier(inputs: dict, params: dict) -> dict:
+    return target_type_classifier(inputs, params)
+
+
+def predict_trajectory_predictor(inputs: dict, params: dict) -> dict:
+    return trajectory_predictor(inputs, params)
+
+
+def predict_multimodal_feature_fuser(inputs: dict, params: dict) -> dict:
+    return multimodal_feature_fuser(inputs, params)
+
+
+def predict_track_state_updater(inputs: dict, params: dict) -> dict:
+    return track_state_updater(inputs, params)
+
+
+def predict_graph_relation_reasoner(inputs: dict, params: dict) -> dict:
+    return graph_relation_reasoner(inputs, params)

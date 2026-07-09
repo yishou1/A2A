@@ -1,0 +1,72 @@
+algorithm_id: graph_relation_reasoner
+version: 1.0.0
+display_name: Graph Relation Reasoner
+backend_type: python_http_service
+status: draft
+
+task_family: graph_reasoning
+modalities:
+  input:
+    - structured_json
+  output:
+    - structured_json
+
+capabilities:
+  - graph_relation_reasoner
+  - spatiotemporal_graph_builder
+  - group_relation_reasoning
+
+agent_card:
+  summary: >
+    Builds target relation edges from spatial distance, heading difference, and speed difference, then returns connected groups.
+  when_to_use:
+    - Multi-target tracks need graph relations or formation/group candidates.
+  when_not_to_use:
+    - A production-grade intelligence conclusion is required without human review.
+  input_description: >
+    tracks with lat/lon/speed/heading/object_type.
+  output_description: >
+    relations, connected groups, and graph summary.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  runtime:
+    backend_type: python_http_service
+    endpoint: http://127.0.0.1:9022/graph_relation_reasoner/predict
+    health_endpoint: http://127.0.0.1:9022/graph_relation_reasoner/health
+    metadata_endpoint: http://127.0.0.1:9022/graph_relation_reasoner/metadata
+    timeout_ms: 3000
+
+constraints:
+  max_input_chars: 500000
+  max_request_bytes: 2097152
+  batch_supported: true
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 20
+  latency_ms_p95: 120
+  primary_metric: graph_edge_quality
+  primary_score: 0.8
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 2
+  min_memory_mb: 512
+  recommended_memory_mb: 1024
+  min_gpu_count: 0
+  gpu_type: optional
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 10
+
+model_profile:
+  parameter_count: 0
+  parameter_count_text: graph-rule reasoner; ST-GNN model bundles are stored separately
+  model_size_mb: 2
+  precision: fp32
+
+safety:
+  risk_level: low
+  requires_human_review: true
