@@ -17,24 +17,62 @@ def _use_mock() -> bool:
 
 
 def _load_config() -> dict[str, Any]:
-    cfg_path = ROOT / "config" / "default.yaml"
-    if not cfg_path.is_file():
-        return {}
+    """与 TIA Agent 共用 load_config + compute profile，保证 HTTP 服务与 Agent 配置一致。"""
     try:
-        import yaml
+        from agent.pipeline import agent_config_from_yaml, load_config
 
-        with open(cfg_path, encoding="utf-8") as handle:
-            raw = yaml.safe_load(handle) or {}
+        raw = load_config()
+        agent_cfg = agent_config_from_yaml(raw)
     except Exception:
-        return {}
-    inference = dict(raw.get("inference") or {})
-    skills = raw.get("skills") or {}
-    merged = {**inference}
-    for block in skills.values():
+        cfg_path = ROOT / "config" / "default.yaml"
+        if not cfg_path.is_file():
+            return {"use_mock": _use_mock()}
+        try:
+            import yaml
+
+            with open(cfg_path, encoding="utf-8") as handle:
+                raw = yaml.safe_load(handle) or {}
+        except Exception:
+            return {"use_mock": _use_mock()}
+        agent_cfg = {
+            "perception": (raw.get("skills") or {}).get("perception"),
+            "cognition": (raw.get("skills") or {}).get("cognition"),
+            "communication": (raw.get("skills") or {}).get("communication"),
+            "inference": raw.get("inference") or {},
+        }
+
+    merged = dict(agent_cfg.get("inference") or {})
+    for block_name in ("perception", "cognition", "communication"):
+        block = agent_cfg.get(block_name) or {}
         if isinstance(block, dict):
             merged.update(block)
     merged["use_mock"] = _use_mock()
     return merged
+
+
+_SUBSKILL_KEY_BY_MODULE: dict[str, str] = {
+    "agent.skills.perception.marl_ppo_scheduler": "marl_ppo_scheduler",
+    "agent.skills.perception.edl": "edl",
+    "agent.skills.perception.rt_detr_odconv_detector": "rt_detr_odconv",
+    "agent.skills.perception.siamese_mask2former_damage": "siamese_mask2former",
+    "agent.skills.perception.motr_neural_kalman_tracker": "motr_neural_kalman",
+    "agent.skills.cognition.imagebind_encoder": "imagebind",
+    "agent.skills.cognition.multimodal_mamba": "multimodal_mamba",
+    "agent.skills.cognition.supcon_meta_classifier": "supcon_meta",
+    "agent.skills.cognition.synapse_rag": "synapse_rag",
+    "agent.skills.communication.knowledge_semantic_comm": "knowledge_semantic_comm",
+    "agent.skills.communication.marl_dynamic_router": "marl_dynamic_router",
+}
+
+
+def _backend_config(module_path: str) -> dict[str, Any]:
+    from agent.skills.base import subskill_config
+
+    base = _config()
+    key = _SUBSKILL_KEY_BY_MODULE.get(module_path)
+    if not key:
+        return base
+    return subskill_config(base, key)
 
 
 @lru_cache(maxsize=1)
@@ -53,7 +91,7 @@ def _backend(module_path: str, class_name: str):
 
     module = importlib.import_module(module_path)
     cls = getattr(module, class_name)
-    return cls(use_mock=_use_mock(), config=_config())
+    return cls(use_mock=_use_mock(), config=_backend_config(module_path))
 
 
 def _run_backend(module_path: str, class_name: str, inputs: dict[str, Any]) -> Any:

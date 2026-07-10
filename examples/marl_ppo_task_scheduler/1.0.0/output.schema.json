@@ -1,18 +1,43 @@
 {
-  "title": "TIA Algorithm Output",
+  "title": "MARL-PPO Task Scheduler Output",
   "type": "object",
   "properties": {
     "sensor_assignments": {
-      "type": "array"
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "sensor_id": { "type": "string" },
+          "target_id": { "type": ["string", "null"] },
+          "task": { "type": "string" },
+          "priority": { "type": "string" },
+          "rationale": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
     },
     "reattack_plan": {
-      "type": "array"
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "asset_id": { "type": "string" },
+          "target_id": { "type": "string" },
+          "task": { "type": "string" },
+          "priority": { "type": "string" },
+          "expected_damage": { "type": "number" },
+          "rationale": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
     },
     "covered_targets": {
-      "type": "array"
+      "type": "array",
+      "items": { "type": "string" }
     },
     "reattack_targets": {
-      "type": "array"
+      "type": "array",
+      "items": { "type": "string" }
     },
     "algorithm": {
       "type": "string"

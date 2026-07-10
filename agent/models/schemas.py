@@ -68,10 +68,38 @@ class Detection(BaseModel):
     epistemic_uncertainty: float | None = None
 
 
+class SensorAssignment(BaseModel):
+    sensor_id: str
+    target_id: str | None = None
+    task: str = "surveillance"
+    priority: str = "normal"
+    rationale: str = ""
+
+
+class ReattackAssignment(BaseModel):
+    asset_id: str
+    target_id: str
+    task: str = "reattack"
+    priority: str = "critical"
+    expected_damage: float | None = None
+    rationale: str = ""
+
+
+class TaskSchedulePlan(BaseModel):
+    """MARL-PPO 传感器任务分配与重攻击规划。"""
+
+    sensor_assignments: list[SensorAssignment] = Field(default_factory=list)
+    reattack_plan: list[ReattackAssignment] = Field(default_factory=list)
+    covered_targets: list[str] = Field(default_factory=list)
+    reattack_targets: list[str] = Field(default_factory=list)
+    algorithm: str = ""
+
+
 class PerceptionOutput(BaseModel):
     detections: list[Detection] = Field(default_factory=list)
     tracks: list[dict[str, Any]] = Field(default_factory=list)
     verified_ids: list[str] = Field(default_factory=list)
+    task_schedule: TaskSchedulePlan | None = None
     algorithm_trace: dict[str, str] = Field(default_factory=dict)
 
 
@@ -104,6 +132,7 @@ class SemanticIntelligencePacket(BaseModel):
     routing: dict[str, Any] = Field(default_factory=dict)
     provenance: dict[str, Any] = Field(default_factory=dict)
     raw_compression_ratio: float = 1.0
+    task_schedule: TaskSchedulePlan | None = None
     output_attachments: list[dict[str, Any]] = Field(
         default_factory=list,
         description="处理后产物（如标注图）的对象存储引用，供下游 Agent 通过 URI 读取",

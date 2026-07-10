@@ -1,4 +1,4 @@
-"""感知探测技能：RT-DETR+ODConv → Siamese Mask2Former → EDL → MOTR+Neural Kalman。"""
+"""感知探测技能：RT-DETR+ODConv → Siamese Mask2Former → EDL → MOTR+Neural Kalman → MARL-PPO。"""
 
 from __future__ import annotations
 
@@ -7,8 +7,10 @@ from typing import Any
 from agent.models.schemas import Detection, PerceptionOutput, SensorBatch
 from agent.skills.base import subskill_config
 from agent.skills.perception.edl import EDLEvidentialVerifier
+from agent.skills.perception.marl_ppo_scheduler import MARLPPOScheduler
 from agent.skills.perception.motr_neural_kalman_tracker import MOTRNeuralKalmanTracker
 from agent.skills.perception.rt_detr_odconv_detector import RTDETRODConvDetector
+from agent.skills.perception.schedule_adapter import scheduler_result_to_plan
 from agent.skills.perception.siamese_mask2former_damage import SiameseMask2FormerDamage
 
 
@@ -24,6 +26,9 @@ class PerceptionSkill:
         self.edl = EDLEvidentialVerifier(use_mock=use_mock, config=subskill_config(cfg, "edl"))
         self.tracker = MOTRNeuralKalmanTracker(
             use_mock=use_mock, config=subskill_config(cfg, "motr_neural_kalman")
+        )
+        self.scheduler = MARLPPOScheduler(
+            use_mock=use_mock, config=subskill_config(cfg, "marl_ppo_scheduler")
         )
 
     def execute(self, batch: SensorBatch, prior_tracks: list[dict[str, Any]] | None = None) -> PerceptionOutput:
@@ -60,6 +65,20 @@ class PerceptionSkill:
         )
         trace[self.tracker.name] = f"{len(track_result.get('tracks', []))} tracks"
 
+        tracks = track_result.get("tracks", [])
+        schedule_result = self.scheduler.run(
+            {
+                "tracks": tracks,
+                "detections": verified,
+                "batch_context": batch.context,
+                "frames": frame_dicts,
+            }
+        )
+        task_schedule = scheduler_result_to_plan(schedule_result)
+        n_sensor = len(task_schedule.sensor_assignments)
+        n_reattack = len(task_schedule.reattack_plan)
+        trace[self.scheduler.name] = f"{n_sensor} sensor tasks, {n_reattack} reattack"
+
         detections: list[Detection] = []
         for det, track in zip(verified, track_result.get("tracks", [])):
             detections.append(
@@ -77,7 +96,8 @@ class PerceptionSkill:
 
         return PerceptionOutput(
             detections=detections,
-            tracks=track_result.get("tracks", []),
-            verified_ids=[t["track_id"] for t in track_result.get("tracks", []) if "track_id" in t],
+            tracks=tracks,
+            verified_ids=[t["track_id"] for t in tracks if "track_id" in t],
+            task_schedule=task_schedule,
             algorithm_trace=trace,
         )

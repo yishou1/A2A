@@ -57,4 +57,5 @@ class CommunicationSkill:
                 "communication": trace,
             },
             raw_compression_ratio=float(compressed.get("compression_ratio", 1.0)),
+            task_schedule=perception.task_schedule,
         )

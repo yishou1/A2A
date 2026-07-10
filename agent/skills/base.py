@@ -19,6 +19,7 @@ NESTED_SKILL_KEYS = frozenset(
         "synapse_rag",
         "knowledge_semantic_comm",
         "marl_dynamic_router",
+        "marl_ppo_scheduler",
     }
 )
 

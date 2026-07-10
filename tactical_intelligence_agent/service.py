@@ -12,12 +12,13 @@ from a2a_protocol.server import A2ABaseAgent
 
 from agent.models.schemas import SemanticIntelligencePacket
 from agent.orchestrator import TacticalIntelligenceAgent
+from agent.skills.perception.schedule_adapter import task_schedule_to_resource_allocation
 from tactical_intelligence_agent.bootstrap import create_engine, default_role, warmup_inference
 from tactical_intelligence_agent.payload_adapter import commander_payload_to_batch
 
 AGENT_NAME = "Tactical_Intelligence_Agent"
 AGENT_DESCRIPTION = (
-    "Single tactical intelligence agent: perception → cognition → communication pipeline"
+    "Single tactical intelligence agent: perception → scheduling → cognition → communication pipeline"
 )
 DEFAULT_OUTPUT_HINT = "intelligence_packet"
 
@@ -52,6 +53,8 @@ class TacticalIntelligenceCommanderAgent(A2ABaseAgent):
         card["capabilities"] = [
             "semantic_intelligence",
             "multimodal_fusion",
+            "sensor_task_scheduling",
+            "reattack_planning",
             "anti_jam_routing",
         ]
         return card
@@ -80,6 +83,8 @@ class TacticalIntelligenceCommanderAgent(A2ABaseAgent):
         }
         if output_hint != DEFAULT_OUTPUT_HINT:
             output[DEFAULT_OUTPUT_HINT] = packet_json
+        if packet.task_schedule is not None:
+            output["resource_allocation"] = task_schedule_to_resource_allocation(packet.task_schedule)
         return output
 
     def execute_task(self, payload: dict) -> tuple[dict[str, Any], str]:
@@ -102,7 +107,7 @@ class TacticalIntelligenceCommanderAgent(A2ABaseAgent):
             status="Working",
             progress="10%",
             stage="perception",
-            message="Perception: RT-DETR / Siamese-Mask2Former / MOTR+Kalman",
+            message="Perception: RT-DETR / Siamese-Mask2Former / EDL / MOTR+Kalman",
             work_item=work_item,
             role=self.role,
         )
@@ -110,7 +115,17 @@ class TacticalIntelligenceCommanderAgent(A2ABaseAgent):
 
         yield self._sse_event(
             status="Working",
-            progress="45%",
+            progress="30%",
+            stage="scheduling",
+            message="Scheduling: MARL-PPO sensor assignment and reattack planning",
+            work_item=work_item,
+            role=self.role,
+        )
+        await asyncio.sleep(0.05)
+
+        yield self._sse_event(
+            status="Working",
+            progress="50%",
             stage="cognition",
             message="Cognition: ImageBind / Mamba / SynapseRAG fusion",
             work_item=work_item,

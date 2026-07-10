@@ -1,5 +1,7 @@
 # TIA 战术情报 Agent 算法包接入说明
 
+> 完整架构与分层职责说明见：[TIA_ALGORITHM_PACKAGE_ARCHITECTURE.md](./TIA_ALGORITHM_PACKAGE_ARCHITECTURE.md)
+
 本分支 `feat/tia-algorithm-packages` 基于师兄算法库规范，将 TIA 三技能流水线中的 **11 个子算法** 打包为 `python_http_service` 算法包。
 
 规范来源（`origin/zsl/algorithmrepo` 分支）：

@@ -21,12 +21,14 @@ agent_card:
     MARL-PPO Task Scheduler from the TIA tactical intelligence agent pipeline.
   when_to_use:
     - Tracks and battlefield context are available for sensor coverage and reattack allocation.
+    - TIA perception pipeline has produced tracks and verified detections.
   when_not_to_use:
     - No targets or sensors in the operational picture.
+    - Trajectory prediction, fire-control commands, or communication routing is requested.
   input_description: >
-    See input.schema.json for required structured fields.
+    Tracks, verified detections, sensor frames, and batch_context (phase, jamming_level, battlefield_situation).
   output_description: >
-    See output.schema.json for structured outputs.
+    Sensor task assignments and reattack plans. resource_allocation mapping is produced by the TIA Agent layer, not this standalone package.
 
 machine_spec:
   input_schema_ref: input.schema.json
