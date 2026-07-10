@@ -1,4 +1,4 @@
-"""OpenAI-compatible chat client shared by A2A agents."""
+"""Chat client shared by A2A agents."""
 
 from __future__ import annotations
 
@@ -26,6 +26,8 @@ class OpenAICompatibleClient:
         self.model = resolved_model
         self.api_key = settings.api_key or "EMPTY"
         self.timeout = settings.llm_timeout_seconds
+        self.provider = settings.llm_provider
+        self.azure_api_version = settings.azure_openai_api_version
 
     def chat(self, *, system_prompt: str, user_prompt: str) -> str:
         payload = {
@@ -36,13 +38,11 @@ class OpenAICompatibleClient:
             ],
             "temperature": 0,
         }
+        url, headers = self._request_target()
         try:
             response = httpx.post(
-                f"{self.base_url}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
+                url,
+                headers=headers,
                 json=payload,
                 timeout=self.timeout,
             )
@@ -57,6 +57,25 @@ class OpenAICompatibleClient:
             return data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise LLMClientError("LLM response does not contain message content.") from exc
+
+    def _request_target(self) -> tuple[str, dict[str, str]]:
+        headers = {"Content-Type": "application/json"}
+        if self._is_azure_provider():
+            headers["api-key"] = self.api_key
+            if "/chat/completions" in self.base_url:
+                return self.base_url, headers
+            return (
+                f"{self.base_url}/openai/deployments/{self.model}/chat/completions"
+                f"?api-version={self.azure_api_version}",
+                headers,
+            )
+        headers["Authorization"] = f"Bearer {self.api_key}"
+        return f"{self.base_url}/chat/completions", headers
+
+    def _is_azure_provider(self) -> bool:
+        if self.provider in {"azure", "azure_openai"}:
+            return True
+        return ".openai.azure.com" in self.base_url
 
     def chat_json(self, *, system_prompt: str, user_prompt: str) -> dict[str, Any]:
         content = self.chat(system_prompt=system_prompt, user_prompt=user_prompt)

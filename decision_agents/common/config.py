@@ -18,9 +18,11 @@ class Settings:
     decision_planning_port: int
     compliance_authorization_port: int
     enable_llm: bool
+    llm_provider: str
     tool_llm_url: str
     tool_llm_name: str
     api_key: str
+    azure_openai_api_version: str
     llm_timeout_seconds: float
     decision_agent_backend: str
     algolib_base_url: str
@@ -52,9 +54,11 @@ def get_settings() -> Settings:
             os.getenv("COMPLIANCE_AUTHORIZATION_AGENT_PORT", "10203")
         ),
         enable_llm=os.getenv("ENABLE_LLM", "false").lower() == "true",
+        llm_provider=os.getenv("LLM_PROVIDER", "openai_compatible").lower(),
         tool_llm_url=os.getenv("TOOL_LLM_URL", ""),
         tool_llm_name=os.getenv("TOOL_LLM_NAME", ""),
         api_key=os.getenv("API_KEY", "EMPTY"),
+        azure_openai_api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview"),
         llm_timeout_seconds=float(os.getenv("LLM_TIMEOUT_SECONDS", "30")),
         decision_agent_backend=os.getenv("DECISION_AGENT_BACKEND", "local").lower(),
         algolib_base_url=os.getenv("ALGOLIB_BASE_URL", "http://127.0.0.1:8088"),
