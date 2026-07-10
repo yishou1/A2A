@@ -3,6 +3,9 @@ version: 1.0.0
 display_name: Graph Relation Reasoner
 backend_type: python_http_service
 status: draft
+algorithm_class: M07
+algorithm_class_name: 图神经网络
+owner_scope: track_threat_agent
 
 task_family: graph_reasoning
 modalities:
@@ -15,14 +18,15 @@ capabilities:
   - graph_relation_reasoner
   - spatiotemporal_graph_builder
   - group_relation_reasoning
+  - formation_group_detection
 
 agent_card:
   summary: >
-    Builds target relation edges from spatial distance, heading difference, and speed difference, then returns connected groups.
+    M07 package for the Track Threat Agent. Builds spatiotemporal target relation edges from spatial distance, heading difference, and speed difference, then returns connected groups.
   when_to_use:
     - Multi-target tracks need graph relations or formation/group candidates.
   when_not_to_use:
-    - A production-grade intelligence conclusion is required without human review.
+    - Knowledge-graph/RAG semantic reasoning or production-grade intelligence conclusions are required.
   input_description: >
     tracks with lat/lon/speed/heading/object_type.
   output_description: >

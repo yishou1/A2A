@@ -50,6 +50,7 @@ def create_algorithm_app(
     predict_fn: PredictFn,
     *,
     model_loaded_callable: Optional[ModelLoadedCallable] = None,
+    extra_metadata: Optional[Dict[str, Any]] = None,
 ) -> FastAPI:
     """Create a FastAPI app exposing /health, /metadata, and /predict."""
 
@@ -73,12 +74,14 @@ def create_algorithm_app(
 
     @app.get("/metadata")
     def metadata() -> dict:
-        return {
+        payload = {
             "algorithm_id": algorithm_id,
             "version": version,
             "backend_type": "python_http_service",
             "task_family": task_family,
         }
+        payload.update(extra_metadata or {})
+        return payload
 
     @app.post("/predict")
     def predict(request_body: AlgorithmRequest) -> dict:

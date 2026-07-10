@@ -6,4 +6,10 @@
 
 Port: `9022`
 
-Safety boundary: relation reasoning only supports simulation situation awareness.
+Algorithm class: `M07 图神经网络`
+
+Input: structured `tracks` with lat/lon/speed/heading/object_type.
+
+Output: graph `relations`, connected `groups`, and graph summary.
+
+Safety boundary: spatiotemporal relation graph reasoning only; no KG/RAG semantic reasoning, task planning, weapon control, or engagement advice.

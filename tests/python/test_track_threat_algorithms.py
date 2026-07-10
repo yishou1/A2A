@@ -20,6 +20,15 @@ from a2a_algorithms_common.service_predictors import (  # noqa: E402
 )
 
 
+TRACK_THREAT_CLASS_MAP = {
+    "multimodal_feature_fuser": ("M03", "多模态融合"),
+    "target_type_classifier": ("M04", "特征编码与分类"),
+    "track_state_updater": ("M05", "多目标跟踪与定位"),
+    "trajectory_predictor": ("M06", "时间序列预测"),
+    "graph_relation_reasoner": ("M07", "图神经网络"),
+}
+
+
 def _sample_track() -> dict:
     return {
         "track_id": "trk-air-001",
@@ -65,17 +74,14 @@ def test_trajectory_predictor_returns_predicted_path() -> None:
 
 
 def test_algorithm_cards_use_track_threat_port_9022() -> None:
-    for algorithm_id in (
-        "target_type_classifier",
-        "trajectory_predictor",
-        "multimodal_feature_fuser",
-        "track_state_updater",
-        "graph_relation_reasoner",
-    ):
+    for algorithm_id in TRACK_THREAT_CLASS_MAP:
         card_path = ROOT / "examples" / algorithm_id / "1.0.0" / "algorithm_card.yaml"
         card = card_path.read_text(encoding="utf-8")
         assert "127.0.0.1:9022" in card
         assert "127.0.0.1:9020" not in card
+        assert f"algorithm_class: {TRACK_THREAT_CLASS_MAP[algorithm_id][0]}" in card
+        assert "KG+Transformer" not in card
+        assert "Enemy COA" not in card
 
 
 def test_multimodal_feature_fuser_returns_feature_bundle() -> None:
@@ -115,16 +121,16 @@ def test_graph_relation_reasoner_groups_close_tracks() -> None:
 
 def test_mounted_http_apps_match_algorithm_identity() -> None:
     client = TestClient(app)
-    for algorithm_id in (
-        "target_type_classifier",
-        "trajectory_predictor",
-        "multimodal_feature_fuser",
-        "track_state_updater",
-        "graph_relation_reasoner",
-    ):
+    health_root = client.get("/health").json()
+    assert health_root["mounted_algorithms"] == list(TRACK_THREAT_CLASS_MAP)
+    for algorithm_id, (algorithm_class, algorithm_class_name) in TRACK_THREAT_CLASS_MAP.items():
         health = client.get(f"/{algorithm_id}/health").json()
         assert health["algorithm_id"] == algorithm_id
         assert health["status"] == "ready"
+        metadata = client.get(f"/{algorithm_id}/metadata").json()
+        assert metadata["algorithm_class"] == algorithm_class
+        assert metadata["algorithm_class_name"] == algorithm_class_name
+        assert metadata["owner_scope"] == "track_threat_agent"
 
         request_path = ROOT / "examples" / algorithm_id / "1.0.0" / "golden_cases" / "case_001_request.json"
         payload = json.loads(request_path.read_text(encoding="utf-8"))
