@@ -13,10 +13,7 @@
       "type": "array"
     },
     "recommended_plan_id": {
-      "type": [
-        "string",
-        "null"
-      ]
+      "type": "string"
     },
     "method": {
       "type": "string"
