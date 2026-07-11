@@ -5,3 +5,4 @@ requests
 redis>=5.0,<7.0
 nacos-sdk-python<2.0.0
 sseclient-py
+psutil>=5.9,<8.0

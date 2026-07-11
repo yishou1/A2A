@@ -19,6 +19,17 @@ from commander_agent.agent_leases import AgentLeaseManager  # noqa: E402
 from commander_agent.main import CommanderAgent  # noqa: E402
 
 
+def latest_context_value(context: dict, key: str):
+    value = context.get(key)
+    if isinstance(value, list):
+        if not value:
+            return None
+        latest = value[-1]
+        if isinstance(latest, dict):
+            return latest.get("value")
+    return value
+
+
 class DemoRegistry:
     def __init__(self):
         now = time.time()
@@ -96,6 +107,10 @@ class DemoRegistry:
                 "unavailable_reason",
                 "unavailable_error_code",
                 "unavailable_error_category",
+                "circuit_state",
+                "circuit_failure_count",
+                "circuit_opened_at_ts",
+                "circuit_open_until_ts",
             ]:
                 metadata.pop(key, None)
 
@@ -133,12 +148,44 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Delete the demo state directory before running.",
     )
+    parser.add_argument(
+        "--details",
+        action="store_true",
+        help="Show full registry snapshots and trace JSON.",
+    )
     return parser.parse_args()
 
 
-def print_json(label: str, payload) -> None:
+def print_json(label: str, payload, *, details: bool = False) -> None:
     print(f"\n{label}")
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    if details:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    if isinstance(payload, list):
+        for item in payload:
+            if isinstance(item, dict) and "event_type" in item:
+                bits = [item.get("event_type")]
+                for key in ["role", "target", "failed_target", "status", "error_code"]:
+                    if item.get(key) is not None:
+                        bits.append(f"{key}={item.get(key)}")
+                print(f"- {' '.join(bits)}")
+            elif isinstance(item, dict) and "agent" in item:
+                suffix = []
+                for key in ["status", "unavailable_reason", "unavailable_error_code"]:
+                    if item.get(key):
+                        suffix.append(f"{key}={item.get(key)}")
+                print(f"- {item.get('agent')} {item.get('address')} {' '.join(suffix)}".rstrip())
+            else:
+                print(f"- {item}")
+        return
+    if isinstance(payload, dict):
+        summary = dict(payload)
+        if "recon_report" in summary:
+            summary["recon_report"] = latest_context_value({"recon_report": summary["recon_report"]}, "recon_report")
+        for key, value in summary.items():
+            print(f"{key}={value}")
+        return
+    print(payload)
 
 
 def interesting_trace(context: dict) -> list[dict]:
@@ -187,7 +234,9 @@ def main() -> None:
         lease_manager=lease_manager,
         max_retries=0,
         request_timeout=1.0,
+        details=args.details,
     )
+    commander.circuit_breaker.failure_threshold = 1
     commander.lease_heartbeat_check_interval = 0.05
 
     def remember_backup_result(role, target, payload):
@@ -232,7 +281,7 @@ def main() -> None:
     commander._delegate_remote_candidate = simulated_remote_candidate
 
     print("\n=== A2A AGENT FAILOVER REASSIGNMENT DEMO ===")
-    print_json("[PHASE 1] Initial Agent registry", registry.snapshot())
+    print_json("[PHASE 1] Initial Agent registry", registry.snapshot(), details=args.details)
 
     context = commander.workflow_context
     payload, stream = commander.build_task_payload("recon", context, activatity_index=1)
@@ -267,7 +316,7 @@ def main() -> None:
         {"role": "recon", "status": "idle"},
     )
 
-    print_json("[PHASE 3] Registry after failover", registry.snapshot())
+    print_json("[PHASE 3] Registry after failover", registry.snapshot(), details=args.details)
     print_json(
         "[PHASE 4] Idle recon candidates for future tasks",
         [
@@ -277,8 +326,9 @@ def main() -> None:
             }
             for instance in idle_recon
         ],
+        details=args.details,
     )
-    print_json("[PHASE 5] Failover trace", interesting_trace(context))
+    print_json("[PHASE 5] Failover trace", interesting_trace(context), details=args.details)
     print_json(
         "[RESULT] Workflow context summary",
         {
@@ -289,6 +339,7 @@ def main() -> None:
             "completed_roles": context.get("completed_roles"),
             "checkpoint": str(commander.state_store.state_path(commander.workflow_id)),
         },
+        details=args.details,
     )
 
     if registry.instances[0]["metadata"].get("status") != "unavailable":
@@ -300,12 +351,14 @@ def main() -> None:
 
     print("\n=== ACTIVE HEARTBEAT WATCHER DEMO ===")
     registry.reset()
+    commander.circuit_breaker.record_success("10.0.0.11:8012")
+    commander.circuit_breaker.record_success("10.0.0.12:8012")
     commander._last_task_responses.clear()
     context["agent_results"].clear()
     context["trace"].clear()
     context["completed_roles"].clear()
     context["recon_report"] = None
-    print_json("[PHASE 1] Registry reset before active heartbeat scenario", registry.snapshot())
+    print_json("[PHASE 1] Registry reset before active heartbeat scenario", registry.snapshot(), details=args.details)
 
     def heartbeat_loss_candidate(role, target, payload, stream=False, **kwargs):
         metadata = target.get("metadata", {})
@@ -368,8 +421,8 @@ def main() -> None:
     ):
         time.sleep(0.02)
 
-    print_json("[PHASE 3] Registry after heartbeat-triggered failover", registry.snapshot())
-    print_json("[PHASE 4] Heartbeat failover trace", interesting_trace(context))
+    print_json("[PHASE 3] Registry after heartbeat-triggered failover", registry.snapshot(), details=args.details)
+    print_json("[PHASE 4] Heartbeat failover trace", interesting_trace(context), details=args.details)
     print_json(
         "[RESULT] Active heartbeat watcher summary",
         {
@@ -379,6 +432,7 @@ def main() -> None:
             "recon_report": context.get("recon_report"),
             "checkpoint": str(commander.state_store.state_path(commander.workflow_id)),
         },
+        details=args.details,
     )
     if not any(
         event.get("event_type") == "agent_late_response_ignored"

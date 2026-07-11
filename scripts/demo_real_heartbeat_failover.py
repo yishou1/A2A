@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import ctypes
 import io
 import json
 import os
+import platform
 import shutil
 import signal
 import subprocess
@@ -72,6 +74,15 @@ class RealHeartbeatAgent(A2ABaseAgent):
                 flush=True,
             )
             time.sleep(60)
+        else:
+            delay = float(payload.get("input", {}).get("backup_delay_seconds", 0) or 0)
+            if delay > 0:
+                print(
+                    f"[BACKUP_TASK_STARTED] work_item={payload.get('work_item')} "
+                    f"port={self.port} delay={delay}",
+                    flush=True,
+                )
+                time.sleep(delay)
         return (
             {"heartbeat_result": f"{self.name} completed the task"},
             f"{self.name} completed",
@@ -107,7 +118,29 @@ def parse_args():
     parser.add_argument("--auth-port", type=int, default=18380)
     parser.add_argument("--startup-timeout", type=float, default=45)
     parser.add_argument("--unhealthy-timeout", type=float, default=30)
+    parser.add_argument(
+        "--backup-delay-seconds",
+        type=float,
+        default=0.0,
+        help="Keep Backup busy for this many seconds after reassignment for Nacos UI inspection.",
+    )
     parser.add_argument("--details", action="store_true")
+    parser.add_argument(
+        "--show-nacos-ui",
+        action="store_true",
+        help="Pause at key Nacos heartbeat states so the web console can be inspected.",
+    )
+    parser.add_argument(
+        "--ui-hold-seconds",
+        type=float,
+        default=8.0,
+        help="Seconds to pause for each Nacos UI inspection point.",
+    )
+    parser.add_argument(
+        "--ui-wait-enter",
+        action="store_true",
+        help="Wait for Enter at each Nacos UI inspection point instead of only sleeping.",
+    )
     parser.add_argument("--agent", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--agent-name", help=argparse.SUPPRESS)
     parser.add_argument("--agent-port", type=int, help=argparse.SUPPRESS)
@@ -131,6 +164,20 @@ def nacos_base_url(address):
 def progress(message):
     """Write selected milestones even while Commander stdout is captured."""
     print(message, file=sys.__stdout__, flush=True)
+
+
+def hold_nacos_ui(args, label):
+    if not args.show_nacos_ui:
+        return
+    progress(f"\n[NACOS UI] {label}")
+    progress(f"[NACOS UI] Console: {nacos_base_url(args.nacos_addr)}/nacos/")
+    progress(f"[NACOS UI] Service: DEFAULT_GROUP -> {SERVICE_NAME}")
+    progress("[NACOS UI] Open service details and refresh the instance list/metadata.")
+    if args.ui_wait_enter:
+        input("[NACOS UI] Press Enter here after you finish inspecting the frontend...")
+    else:
+        progress(f"[NACOS UI] Holding {args.ui_hold_seconds:.0f}s for frontend inspection...")
+        time.sleep(args.ui_hold_seconds)
 
 
 def run_agent(args):
@@ -265,6 +312,27 @@ def wait_for_trace_event(commander, event_type, timeout, predicate=None):
     raise RuntimeError(f"Commander event not observed: {event_type}")
 
 
+def keep_backup_busy_metadata(args, stop_event: threading.Event):
+    registry = NacosRegistry(server_addresses=args.nacos_addr)
+    try:
+        while not stop_event.is_set():
+            latest = read_instance(args.nacos_addr, BACKUP_PORT)
+            if latest:
+                registry.update_instance_metadata(
+                    SERVICE_NAME,
+                    latest,
+                    metadata_updates={
+                        "status": "busy",
+                        "lease_workflow_id": "demo-real-heartbeat",
+                        "lease_work_item": "demo-real-heartbeat:long-task",
+                        "ui_demo_note": "Backup is handling reassigned task",
+                    },
+                )
+            stop_event.wait(0.5)
+    finally:
+        registry.close()
+
+
 def start_agent(args, output_dir, *, name, port, priority, primary=False):
     log_path = output_dir / f"{name}.log"
     handle = log_path.open("w", encoding="utf-8")
@@ -312,11 +380,34 @@ def delete_instance(nacos_addr, port):
         response.raise_for_status()
 
 
+def suspend_process(process):
+    if hasattr(signal, "SIGSTOP"):
+        os.kill(process.pid, signal.SIGSTOP)
+        return "SIGSTOP"
+
+    if platform.system().lower() == "windows":
+        process_suspend_resume = 0x0800
+        handle = ctypes.windll.kernel32.OpenProcess(
+            process_suspend_resume, False, process.pid
+        )
+        if not handle:
+            raise OSError(f"OpenProcess failed for pid={process.pid}")
+        try:
+            status = ctypes.windll.ntdll.NtSuspendProcess(handle)
+            if status != 0:
+                raise OSError(f"NtSuspendProcess failed with status={status}")
+        finally:
+            ctypes.windll.kernel32.CloseHandle(handle)
+        return "NtSuspendProcess"
+
+    raise RuntimeError("No supported process suspend mechanism on this platform")
+
+
 def stop_process(process, *, killed=False):
     if process.poll() is not None:
         return
     if killed:
-        os.kill(process.pid, signal.SIGKILL)
+        process.kill()
     else:
         process.terminate()
     with contextlib.suppress(subprocess.TimeoutExpired):
@@ -374,6 +465,7 @@ def run_demo(args):
             f"service={SERVICE_NAME}"
         )
         show_heartbeats(primary[2], expected_count=3, timeout=10)
+        hold_nacos_ui(args, "Primary and Backup are registered, healthy, and idle")
 
         registry = PriorityRegistry(server_addresses=args.nacos_addr)
         commander = CommanderAgent(
@@ -391,7 +483,7 @@ def run_demo(args):
             "work_item": "demo-real-heartbeat:long-task",
             "command": "run_long_task",
             "output_hint": "heartbeat_result",
-            "input": {},
+            "input": {"backup_delay_seconds": args.backup_delay_seconds},
             "work_list": [],
         }
 
@@ -420,17 +512,19 @@ def run_demo(args):
             progress(
                 f"[LEASE] Primary:{PRIMARY_PORT} status=busy; long task is running"
             )
+            hold_nacos_ui(args, "Primary is busy with lease metadata while long task is running")
             frozen_at = time.time()
-            os.kill(primary[0].pid, signal.SIGSTOP)
-            print(f"[FAULT] SIGSTOP sent to Primary pid={primary[0].pid}")
+            fault_method = suspend_process(primary[0])
+            print(f"[FAULT] {fault_method} sent to Primary pid={primary[0].pid}")
             progress(
-                f"[FAULT] SIGSTOP Primary pid={primary[0].pid}; "
+                f"[FAULT] {fault_method} Primary pid={primary[0].pid}; "
                 "HTTP task and heartbeat thread are frozen"
             )
             unhealthy = wait_for_natural_unhealthy(
                 args.nacos_addr, PRIMARY_PORT, args.unhealthy_timeout
             )
             unhealthy_at = time.time()
+            hold_nacos_ui(args, "Nacos has naturally marked Primary healthy=false after heartbeat timeout")
             print(
                 f"[NACOS] Primary became unhealthy after "
                 f"{unhealthy_at - frozen_at:.3f}s"
@@ -457,6 +551,28 @@ def run_demo(args):
             progress(
                 f"[DISPATCH] Commander -> Backup | target={backup_attempt.get('target')}"
             )
+            if args.backup_delay_seconds > 0:
+                backup_busy_keeper_stop = threading.Event()
+                backup_busy_keeper = threading.Thread(
+                    target=keep_backup_busy_metadata,
+                    args=(args, backup_busy_keeper_stop),
+                    daemon=True,
+                )
+                backup_busy_keeper.start()
+                wait_for_instance(
+                    args.nacos_addr,
+                    BACKUP_PORT,
+                    lambda host: (host.get("metadata") or {}).get("status") == "busy",
+                    10,
+                )
+                try:
+                    hold_nacos_ui(
+                        args,
+                        f"Backup is busy after reassignment for {args.backup_delay_seconds:g}s",
+                    )
+                finally:
+                    backup_busy_keeper_stop.set()
+                    backup_busy_keeper.join(timeout=2)
             backup_completed = wait_for_trace_event(
                 commander,
                 "agent_call_completed",
@@ -468,6 +584,7 @@ def run_demo(args):
             progress(
                 f"[COMPLETE] Backup finished task | target={backup_completed.get('target')}"
             )
+            hold_nacos_ui(args, "Backup completed the reassigned task; inspect final metadata before cleanup")
             worker.join(timeout=20)
             if worker.is_alive():
                 raise RuntimeError("Commander did not finish failover after Nacos marked Primary unhealthy")
@@ -505,7 +622,7 @@ def run_demo(args):
             "primary_pid": primary[0].pid,
             "primary_port": PRIMARY_PORT,
             "backup_port": BACKUP_PORT,
-            "fault": "SIGSTOP",
+            "fault": fault_method,
             "nacos_unhealthy_delay_seconds": round(unhealthy_at - frozen_at, 3),
             "checks": checks,
             "events": [

@@ -13,6 +13,7 @@
 
         <!-- 多个侦察单位同时覆盖目标区域 -->
         <invoke partnerLink="ReconAgent" operation="scanBeachDefenses"
+                requiredSkill="scan_beach_defenses"
                 dispatchMode="parallel"
                 inputVariable="Sector_A" outputVariable="ReconReport"/>
 
@@ -25,11 +26,13 @@
 
         <!-- 多个炮兵单位协同压制 -->
         <invoke partnerLink="ArtilleryAgent" operation="suppressBeachSector"
+                requiredSkill="suppress_beach_sector_A"
                 dispatchMode="parallel"
                 inputVariable="StrikeCoordinates" outputVariable="StrikeResult"/>
 
         <!-- 汇总火力结果后再进行统一评估 -->
         <invoke partnerLink="EvaluatorAgent" operation="evaluateStrike"
+                requiredSkill="evaluate_strike"
                 inputVariable="StrikeCoordinates" outputVariable="EvalScore"/>
 
         <!-- 强化登陆要求更高：毁伤率低于 80% 就进入重规划 -->
@@ -37,6 +40,7 @@
             <case condition="bpws:getVariableData('EvalScore') &lt; 80">
                 <sequence>
                     <invoke partnerLink="LLMCommanderAgent" operation="analyzeAndReplanning"
+                            requiredSkill="analyze_and_replanning"
                             inputVariable="ReconReport + StrikeResult" outputVariable="CommanderDecision"/>
                     <throw faultName="ReinforcedSuppressionInsufficientFault"/>
                 </sequence>
@@ -45,6 +49,7 @@
             <otherwise>
                 <!-- 多个突击单位同时抢占滩头 -->
                 <invoke partnerLink="AssaultAgent" operation="captureBeachhead"
+                        requiredSkill="capture_beachhead"
                         dispatchMode="parallel"
                         inputVariable="StrikeCoordinates"/>
             </otherwise>

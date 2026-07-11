@@ -14,6 +14,7 @@
         
         <!-- 阶段 1：侦察阶段 -->
         <invoke partnerLink="ReconAgent" operation="scanBeachDefenses"
+                requiredSkill="scan_beach_defenses"
                 inputVariable="Sector_A" outputVariable="ReconReport"/>
 
         <!-- 阶段 2：火力打击阶段 -->
@@ -25,11 +26,13 @@
         </assign>
         <!-- 同一个火力任务可以并发分配给多个 artillery 实例 -->
         <invoke partnerLink="ArtilleryAgent" operation="suppressBeachSector"
+                requiredSkill="suppress_beach_sector_A"
                 dispatchMode="parallel"
                 inputVariable="StrikeCoordinates" outputVariable="StrikeResult"/>
         
         <!-- 阶段 3：战果评估阶段 -->
-        <invoke partnerLink="EvaluatorAgent" operation="evaluateStrike" 
+        <invoke partnerLink="EvaluatorAgent" operation="evaluateStrike"
+                requiredSkill="evaluate_strike"
                 inputVariable="StrikeCoordinates" outputVariable="EvalScore"/>
 
         <!-- 阶段 4：大模型决策分支 (早期的 Switch / Case 业务处理节点) -->
@@ -37,7 +40,8 @@
             <!-- 条件：如果毁伤率低于预期 (例如低于 60%) -->
             <case condition="bpws:getVariableData('EvalScore') &lt; 60">
                 <sequence>
-                    <invoke partnerLink="LLMCommanderAgent" operation="analyzeAndReplanning" 
+                    <invoke partnerLink="LLMCommanderAgent" operation="analyzeAndReplanning"
+                            requiredSkill="analyze_and_replanning"
                             inputVariable="ReconReport + StrikeResult" outputVariable="CommanderDecision"/>
                     
                     <!-- 中止当前突击流程，抛出重规划事件或进行异常打断 -->
@@ -47,7 +51,8 @@
             
             <!-- 默认分支：毁伤率达标，继续突击 -->
             <otherwise>
-                <invoke partnerLink="AssaultAgent" operation="captureBeachhead" 
+                <invoke partnerLink="AssaultAgent" operation="captureBeachhead"
+                        requiredSkill="capture_beachhead"
                         inputVariable="StrikeCoordinates"/>
             </otherwise>
         </switch>

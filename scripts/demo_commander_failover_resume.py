@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import signal
@@ -42,6 +44,7 @@ def parse_args() -> argparse.Namespace:
         default="ASSAULT",
         help="Mock commander decision used during resume",
     )
+    parser.add_argument("--details", action="store_true", help="Show full JSON responses.")
     parser.add_argument("--reset", action="store_true", help="Delete any existing checkpoint before starting")
     return parser.parse_args()
 
@@ -78,7 +81,7 @@ def wait_for_health(port: int, timeout_seconds: float = 30.0) -> dict:
     raise TimeoutError(f"Health check failed for {url}: {last_error}")
 
 
-def start_recovery_api(port: int, state_dir: str) -> subprocess.Popen:
+def start_recovery_api(port: int, state_dir: str, details: bool = False) -> subprocess.Popen:
     env = os.environ.copy()
     env["A2A_STATE_DIR"] = state_dir
     command = [
@@ -97,7 +100,15 @@ def start_recovery_api(port: int, state_dir: str) -> subprocess.Popen:
         "--state-dir",
         state_dir,
     ]
-    return subprocess.Popen(command, cwd=PROJECT_ROOT, env=env)
+    if details:
+        command.append("--details")
+    return subprocess.Popen(
+        command,
+        cwd=PROJECT_ROOT,
+        env=env,
+        stdout=None if details else subprocess.DEVNULL,
+        stderr=None if details else subprocess.DEVNULL,
+    )
 
 
 def stop_process(proc: subprocess.Popen | None) -> None:
@@ -112,17 +123,31 @@ def stop_process(proc: subprocess.Popen | None) -> None:
         proc.wait(timeout=5)
 
 
-def seed_checkpoint(workflow_id: str, state_dir: str, mock_eval_score: int, mock_decision: str, seed_max_steps: int) -> dict:
-    commander = CommanderAgent(
-        mode="local",
-        workflow="dynamic",
-        workflow_id=workflow_id,
-        state_dir=state_dir,
-        resume=False,
-        mock_eval_score=mock_eval_score,
-        mock_decision=mock_decision,
-    )
-    return commander.run_dynamic_battle_scenario(max_steps=seed_max_steps)
+def seed_checkpoint(
+    workflow_id: str,
+    state_dir: str,
+    mock_eval_score: int,
+    mock_decision: str,
+    seed_max_steps: int,
+    details: bool = False,
+) -> dict:
+    def run_seed() -> dict:
+        commander = CommanderAgent(
+            mode="local",
+            workflow="dynamic",
+            workflow_id=workflow_id,
+            state_dir=state_dir,
+            resume=False,
+            mock_eval_score=mock_eval_score,
+            mock_decision=mock_decision,
+            details=details,
+        )
+        return commander.run_dynamic_battle_scenario(max_steps=seed_max_steps)
+
+    if details:
+        return run_seed()
+    with contextlib.redirect_stdout(io.StringIO()):
+        return run_seed()
 
 
 def probe_health(port: int) -> tuple[bool, str]:
@@ -152,13 +177,16 @@ def main() -> None:
         mock_eval_score=args.mock_eval_score,
         mock_decision=args.mock_decision,
         seed_max_steps=args.seed_max_steps,
+        details=args.details,
     )
-    print(json.dumps({
-        "workflow_id": workflow_id,
-        "seed_status": seed_context.get("workflow_status"),
-        "seed_activatity": seed_context.get("workflow_activatity"),
-        "checkpoint": str(store.state_path(workflow_id)),
-    }, ensure_ascii=False, indent=2))
+    print(
+        f"[SEED] workflow_id={workflow_id} "
+        f"status={seed_context.get('workflow_status')} "
+        f"activity={seed_context.get('workflow_activatity')} "
+        f"completed_roles={seed_context.get('completed_roles')} "
+        f"last_work_item={seed_context.get('last_work_item')} "
+        f"checkpoint={store.state_path(workflow_id)}"
+    )
 
     primary_port = pick_port(args.primary_port)
     secondary_port = pick_port(args.secondary_port, exclude={primary_port})
@@ -167,7 +195,7 @@ def main() -> None:
     secondary_proc = None
     try:
         print(f"\n[PHASE 1] Starting primary Commander API on port {primary_port}.")
-        primary_proc = start_recovery_api(primary_port, state_dir)
+        primary_proc = start_recovery_api(primary_port, state_dir, details=args.details)
         wait_for_health(primary_port)
         print(f"[HEARTBEAT] primary Commander on port {primary_port} is healthy.")
         print(f"[HEARTBEAT] polling every {args.heartbeat_interval:.1f}s; failover after {args.miss_threshold} misses.")
@@ -189,7 +217,10 @@ def main() -> None:
                 print(f"[HEARTBEAT] primary Commander port {primary_port} ok")
             else:
                 misses += 1
-                print(f"[HEARTBEAT] primary Commander port {primary_port} missed {misses}/{args.miss_threshold}: {detail}")
+                if args.details:
+                    print(f"[HEARTBEAT] primary Commander port {primary_port} missed {misses}/{args.miss_threshold}: {detail}")
+                else:
+                    print(f"[HEARTBEAT] primary Commander missed {misses}/{args.miss_threshold}")
 
             if crashed and misses >= args.miss_threshold:
                 print(f"[DETECT] primary Commander on port {primary_port} is down; starting failover Commander on port {secondary_port}.")
@@ -198,7 +229,7 @@ def main() -> None:
             time.sleep(args.heartbeat_interval)
 
         print(f"\n[PHASE 2] Starting failover Commander API on port {secondary_port}.")
-        secondary_proc = start_recovery_api(secondary_port, state_dir)
+        secondary_proc = start_recovery_api(secondary_port, state_dir, details=args.details)
         wait_for_health(secondary_port)
         print(f"[RECOVERY] failover Commander on port {secondary_port} is healthy.")
 
@@ -219,14 +250,27 @@ def main() -> None:
         response.raise_for_status()
         resume_result = response.json()
 
-        print("\n[RESULT] Resume response:")
-        print(json.dumps(resume_result, ensure_ascii=False, indent=2))
+        print(
+            f"\n[RESULT] resume workflow_id={resume_result.get('workflow_id')} "
+            f"workflow_status={resume_result.get('workflow_status')} "
+            f"state_path={resume_result.get('state_path')}"
+        )
+        if args.details:
+            print(json.dumps(resume_result, ensure_ascii=False, indent=2))
 
         final_url = f"http://127.0.0.1:{secondary_port}/workflows/{workflow_id}"
         final_state = requests.get(final_url, timeout=10)
         final_state.raise_for_status()
-        print("\n[RESULT] Final checkpoint state:")
-        print(json.dumps(final_state.json(), ensure_ascii=False, indent=2))
+        final_payload = final_state.json()
+        context = final_payload.get("context", {})
+        print(
+            f"[RESULT] final checkpoint workflow_id={final_payload.get('workflow_id')} "
+            f"status={final_payload.get('status')} "
+            f"workflow_status={context.get('workflow_status')} "
+            f"completed_roles={context.get('completed_roles')}"
+        )
+        if args.details:
+            print(json.dumps(final_payload, ensure_ascii=False, indent=2))
     finally:
         stop_process(secondary_proc)
         stop_process(primary_proc)

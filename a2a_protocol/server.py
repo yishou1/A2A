@@ -11,20 +11,100 @@ from urllib.parse import urljoin
 
 from a2a_protocol.messages import build_task_error_response, build_task_response
 from observability import exception_diagnostics, log_event
+from resource_monitor import ResourceMonitor
 
 def verify_token(authorization: str = Header(None)):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Unauthorized")
     return authorization.split("Bearer ")[1]
 
+DEFAULT_ROLE_SKILLS = {
+    "recon": [
+        {
+            "id": "scan_beach_defenses",
+            "name": "Beach Defense Reconnaissance",
+            "description": "探测/侦察滩头防御、敌方阵地和环境信息。",
+            "tags": ["recon", "reconnaissance", "detect", "探测", "侦察"],
+        }
+    ],
+    "artillery": [
+        {
+            "id": "suppress_beach_sector_A",
+            "name": "Artillery Suppression",
+            "description": "对指定区域执行火力压制并返回打击结果。",
+            "tags": ["artillery", "suppression", "firepower", "火力压制"],
+        }
+    ],
+    "evaluator": [
+        {
+            "id": "evaluate_strike",
+            "name": "Strike Evaluation",
+            "description": "评估侦察和火力压制结果，给出效果评分。",
+            "tags": ["evaluate", "assessment", "score", "评估"],
+        }
+    ],
+    "assault": [
+        {
+            "id": "capture_beachhead",
+            "name": "Beachhead Assault",
+            "description": "执行突击占领任务并返回突击结果。",
+            "tags": ["assault", "capture", "突击", "占领"],
+        }
+    ],
+}
+
+
+def default_skills_for_role(role: str) -> list[dict]:
+    return deepcopy(DEFAULT_ROLE_SKILLS.get(role, []))
+
+
+def skill_tokens(skills: list[dict]) -> list[str]:
+    tokens = []
+    for skill in skills or []:
+        for value in [
+            skill.get("id"),
+            skill.get("name"),
+            skill.get("description"),
+            *(skill.get("tags") or []),
+        ]:
+            if value:
+                tokens.append(str(value))
+    seen = set()
+    unique = []
+    for token in tokens:
+        key = token.lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(token)
+    return unique
+
+
+def skills_metadata(skills: list[dict]) -> dict:
+    return {"skills": ",".join(skill_tokens(skills))}
+
+
 class A2ABaseAgent:
-    def __init__(self, name: str, description: str, role: str, port: int):
+    def __init__(
+        self,
+        name: str,
+        description: str,
+        role: str,
+        port: int,
+        skills: list[dict] = None,
+        resource_monitor=None,
+    ):
         self.name = name
         self.description = description
         self.role = role
         self.port = port
+        self.skills = deepcopy(skills) if skills is not None else default_skills_for_role(role)
         self.started_at = time.time()
         self.ready = True
+        self.resource_monitor = resource_monitor or ResourceMonitor()
+        self.reject_when_resource_critical = (
+            os.environ.get("A2A_REJECT_WHEN_RESOURCE_CRITICAL", "true").lower()
+            not in {"0", "false", "no", "off"}
+        )
         self._task_response_cache = {}
         self._stream_response_cache = {}
         self._workflow_work_lists = {}
@@ -50,6 +130,7 @@ class A2ABaseAgent:
             "name": self.name,
             "description": self.description,
             "role": self.role,
+            "skills": deepcopy(self.skills),
             "securitySchemes": {
                 "openIdConnect": {
                     "type": "openIdConnect",
@@ -63,6 +144,7 @@ class A2ABaseAgent:
             "healthEndpoint": "/health",
             "readyEndpoint": "/ready",
             "metricsEndpoint": "/metrics",
+            "resourcesEndpoint": "/resources",
         }
 
     def execute_task(self, payload):
@@ -108,16 +190,35 @@ class A2ABaseAgent:
     def metrics_snapshot(self):
         with self._state_lock:
             snapshot = deepcopy(self._metrics)
+        resource_snapshot = self.resource_snapshot()
         snapshot.update(
             {
                 "agent": self.name,
                 "role": self.role,
                 "port": self.port,
                 "ready": self.ready,
+                "resource_ready": self.resource_ready(),
                 "uptime_seconds": round(time.time() - self.started_at, 3),
+                "resources": resource_snapshot,
             }
         )
         return snapshot
+
+    def resource_snapshot(self):
+        return self.resource_monitor.snapshot()
+
+    def resource_ready(self):
+        return self.resource_monitor.ready()
+
+    def heartbeat_metadata(self):
+        return self.resource_monitor.heartbeat_metadata()
+
+    def can_accept_task(self):
+        if not self.ready:
+            return False, "agent is not ready", "AGENT_NOT_READY"
+        if self.reject_when_resource_critical and not self.resource_ready():
+            return False, "agent resource state is critical", "AGENT_RESOURCE_EXHAUSTED"
+        return True, None, None
 
     def last_error_diagnostics(self):
         with self._state_lock:
@@ -147,22 +248,29 @@ class A2ABaseAgent:
     def setup_routes(self):
         @self.app.get("/health")
         async def health():
+            resources = self.resource_snapshot()
             return {
-                "status": "ok",
+                "status": "ok" if resources.get("resource_state") != "critical" else "degraded",
                 "agent": self.name,
                 "role": self.role,
                 "uptime_seconds": round(time.time() - self.started_at, 3),
+                "resource_state": resources.get("resource_state"),
+                "resource_monitor_available": resources.get("monitor_available"),
             }
 
         @self.app.get("/ready")
         async def ready():
             with self._state_lock:
                 active_tasks = self._metrics["active_tasks"]
+            resources = self.resource_snapshot()
             return {
-                "ready": self.ready,
+                "ready": self.ready and resources.get("resource_state") != "critical",
                 "agent": self.name,
                 "role": self.role,
                 "active_tasks": active_tasks,
+                "manual_ready": self.ready,
+                "resource_ready": resources.get("resource_state") != "critical",
+                "resource_state": resources.get("resource_state"),
             }
 
         @self.app.post("/lifecycle/ready")
@@ -177,6 +285,15 @@ class A2ABaseAgent:
         @self.app.get("/metrics")
         async def metrics():
             return self.metrics_snapshot()
+
+        @self.app.get("/resources")
+        async def resources():
+            return {
+                "agent": self.name,
+                "role": self.role,
+                "port": self.port,
+                **self.resource_snapshot(),
+            }
 
         @self.app.get("/.well-known/agent-card")
         async def agent_card():
@@ -193,7 +310,8 @@ class A2ABaseAgent:
 
         @self.app.post("/sendMessage")
         async def send_message(payload: dict, token: str = Depends(verify_token)):
-            if not self.ready:
+            accepted, error, error_code = self.can_accept_task()
+            if not accepted:
                 work_item = self._work_item_from_payload(payload)
                 return build_task_error_response(
                     workflow_id=payload.get("workflow_id"),
@@ -201,8 +319,8 @@ class A2ABaseAgent:
                     agent=self.name,
                     role=self.role,
                     command=payload.get("command"),
-                    error="agent is not ready",
-                    error_code="AGENT_NOT_READY",
+                    error=error,
+                    error_code=error_code,
                 )
             self._capture_work_list(payload)
             work_item = self._work_item_from_payload(payload)
@@ -278,8 +396,9 @@ class A2ABaseAgent:
         
         @self.app.post("/sendMessageStream")
         async def send_message_stream(payload: dict, token: str = Depends(verify_token)):
-            if not self.ready:
-                raise HTTPException(status_code=503, detail="agent is not ready")
+            accepted, error, _ = self.can_accept_task()
+            if not accepted:
+                raise HTTPException(status_code=503, detail=error)
             with self._state_lock:
                 self._metrics["stream_requests"] += 1
             return StreamingResponse(self._cached_stream(payload), media_type="text/event-stream")

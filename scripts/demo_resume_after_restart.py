@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import sys
@@ -46,6 +48,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Delete any existing checkpoint before running the demo",
     )
+    parser.add_argument(
+        "--details",
+        action="store_true",
+        help="Show full Commander logs and final workflow context JSON.",
+    )
     return parser.parse_args()
 
 
@@ -62,7 +69,13 @@ def summarize_state(label: str, state: dict) -> None:
         "completed_roles": context.get("completed_roles"),
         "battle_log_count": len(context.get("battle_log", [])),
     }
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    print(
+        f"[SUMMARY] {label} workflow_id={payload['workflow_id']} "
+        f"status={payload['workflow_status']} activity={payload['workflow_activatity']} "
+        f"completed_roles={payload['completed_roles']} "
+        f"last_work_item={payload['last_work_item']} "
+        f"battle_log_count={payload['battle_log_count']}"
+    )
 
 
 def main() -> None:
@@ -75,35 +88,49 @@ def main() -> None:
         print(f"[RESET] Removed existing checkpoint: {store.state_path(args.workflow_id)}")
 
     print("[PHASE 1] Start a fresh workflow and stop halfway.")
-    first = CommanderAgent(
-        mode="local",
-        workflow="dynamic",
-        workflow_id=args.workflow_id,
-        state_dir=str(state_dir),
-        resume=False,
-        mock_eval_score=args.mock_eval_score,
-        mock_decision=args.mock_decision,
-    )
-    first_context = first.run_dynamic_battle_scenario(max_steps=args.first_max_steps)
+    first_output = io.StringIO()
+    first_redirect = contextlib.nullcontext() if args.details else contextlib.redirect_stdout(first_output)
+    with first_redirect:
+        first = CommanderAgent(
+            mode="local",
+            workflow="dynamic",
+            workflow_id=args.workflow_id,
+            state_dir=str(state_dir),
+            resume=False,
+            mock_eval_score=args.mock_eval_score,
+            mock_decision=args.mock_decision,
+            details=args.details,
+        )
+        first.run_dynamic_battle_scenario(max_steps=args.first_max_steps)
     first_state = first.state_store.load(args.workflow_id)
     summarize_state("after_first_run", first_state)
 
     print("\n[PHASE 2] Simulate a process restart and resume the same workflow id.")
-    second = CommanderAgent(
-        mode="local",
-        workflow="dynamic",
-        workflow_id=args.workflow_id,
-        state_dir=str(state_dir),
-        resume=True,
-        mock_eval_score=args.mock_eval_score,
-        mock_decision=args.mock_decision,
-    )
-    second_context = second.run_dynamic_battle_scenario(max_steps=10)
+    second_output = io.StringIO()
+    second_redirect = contextlib.nullcontext() if args.details else contextlib.redirect_stdout(second_output)
+    with second_redirect:
+        second = CommanderAgent(
+            mode="local",
+            workflow="dynamic",
+            workflow_id=args.workflow_id,
+            state_dir=str(state_dir),
+            resume=True,
+            mock_eval_score=args.mock_eval_score,
+            mock_decision=args.mock_decision,
+            details=args.details,
+        )
+        second_context = second.run_dynamic_battle_scenario(max_steps=10)
     second_state = second.state_store.load(args.workflow_id)
     summarize_state("after_resume", second_state)
 
-    print("\n[RESULT] Final workflow context:")
-    print(json.dumps(second_context, ensure_ascii=False, indent=2))
+    if args.details:
+        print("\n[RESULT] Final workflow context:")
+        print(json.dumps(second_context, ensure_ascii=False, indent=2))
+    print(
+        f"\n[PASS] workflow_id={args.workflow_id} resumed_from_activity={args.first_max_steps} "
+        f"final_status={second_state.get('status')} "
+        f"checkpoint={second.state_store.state_path(args.workflow_id)}"
+    )
 
 
 if __name__ == "__main__":

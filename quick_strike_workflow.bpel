@@ -10,6 +10,7 @@
     <sequence>
 
         <invoke partnerLink="ReconAgent" operation="scanBeachDefenses"
+                requiredSkill="scan_beach_defenses"
                 inputVariable="Sector_A" outputVariable="ReconReport"/>
 
         <assign>
@@ -20,10 +21,12 @@
         </assign>
 
         <invoke partnerLink="ArtilleryAgent" operation="suppressBeachSector"
+                requiredSkill="suppress_beach_sector_A"
                 dispatchMode="parallel"
                 inputVariable="StrikeCoordinates" outputVariable="StrikeResult"/>
 
         <invoke partnerLink="AssaultAgent" operation="captureBeachhead"
+                requiredSkill="capture_beachhead"
                 inputVariable="StrikeCoordinates"/>
 
     </sequence>
