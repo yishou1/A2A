@@ -92,4 +92,3 @@ class ModelBundleLoader:
         if candidate != bundle_root and bundle_root not in candidate.parents:
             return None
         return candidate
-
