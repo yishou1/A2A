@@ -32,14 +32,14 @@ metadata.status=idle
 
 - 多目标航迹跟踪。
 - 未来 10 / 20 / 30 / 60 / 120 秒航线预测，并输出预测模型、置信度、不确定半径和时域类型。
-- 计划书算法 Provider：默认使用 `PlanAlgorithmProvider` 暴露 ST-GNN、DBN、KG+Transformer、XAI 四类正式算法契约。
-- ST-GNN 动态实体跟踪与轨迹预测：本地 NumPy 消息传递运行时会构建目标图、计算边注意力、生成节点 embedding，并修正 10 / 20 / 30 / 60 / 120 秒预测点。
+- 计划书算法 Provider：默认使用 `PlanAlgorithmProvider` 暴露 ST-GNN、DBN 风险校准、保护资产影响分析、编队识别和 XAI 证据链。
+- ST-GNN 动态实体跟踪与轨迹预测：默认先用本地 NumPy 消息传递构建目标图、计算边注意力和节点 embedding；安装 `requirements-model.txt` 后会优先加载 agent 内置 TorchScript v2 模型包，飞机更新 10 / 20 / 30 / 60 秒预测点，船舶追加 600 / 1200 秒预测点。
 - IMM 多模型运动预测：同时生成 `constant_velocity`、`constant_acceleration`、`coordinated_turn` 三类假设，并按概率融合为基础预测线。
 - 协方差 Kalman 滤波：`medium` 档使用 CV 状态空间 Kalman 更新，输出 state、covariance、innovation 和 kalman_gain。
 - ADE/FDE 回看评估：下一帧到达后记录上一帧预测误差，summary 中输出聚合评估。
-- DBN + COA 动态威胁状态评估：输出 low / medium / high 后验概率、COA 概率、dominant_coa 和 threat score。
-- KG+Transformer 语义态势推理：把 TacticalIntelligenceAgent 语义字段和 knowledge relations 转成 KG token，通过本地 Transformer 自注意力输出语义态势因子、意图类别概率与证据链。
-- TacticalIntelligenceAgent 语义字段消费：`threat_level`、`affiliation`、`label`、`knowledge_graph` 参与排序和资产影响分析。
+- DBN 动态风险状态校准：输出 low / medium / high 后验概率、观测可信度、状态转移变化、风险模式概率和 threat score。
+- XAI 可解释封装：输出 `evidence_chain`、`factor_chain`、`dbn_transition_evidence`、`safety_chain` 和 `model_trace`，用于解释排序原因并声明安全边界。
+- 下游决策 Agent 适配：artifact 中输出 `decision_risk_assessments`，字段对齐 lzh 决策规划 Agent 的 `RiskAssessment`，用于把咱们的风险排序交给下游知识/RAG/规划/合规模块。
 - 疑似空中编队和海上编组识别。
 - 己方保护资产影响分析。
 - 单体、群体、资产影响统一关注排序。
@@ -48,17 +48,59 @@ metadata.status=idle
 - `work_item` 幂等缓存。
 - `GET /workflows/{workflow_id}/work-list`。
 - `GET /ready`、`POST /lifecycle/ready`、`GET /metrics`，适配 Commander 宕机恢复/ready=false 切换规范。
+- `GET /schema/input`、`GET /schema/output`、`GET /state/summary`，用于上游/Gateway/Commander 自动读取协议版本和当前 Agent 状态。
 - Nacos role/status metadata 和 heartbeat_ts 心跳；心跳会保留 Commander 写入的 busy/unavailable/lease_* 状态。
 - `AlgorithmProvider` 作为算法边界，默认主线已经切换到本地可运行的计划书算法栈。
 - 本地 JSON 状态快照，支持演示环境重启后恢复航迹、最近 artifact、幂等缓存和 workflow work list。
+- 独立 ST-GNN 模型包发现：默认发现 `models/track_threat` 下的内置模型包，也可通过 `ST_GNN_AIRCRAFT_MODEL_DIR`、`ST_GNN_SHIP_MODEL_DIR` 或旧 `ST_GNN_MODEL_DIR` 覆盖；模型不可用时安全回退。
 
-当前工程不再只是“预留接口”。`PlanAlgorithmProvider` 会实际调用本地算法：协方差 Kalman 跟踪、IMM 多模型预测、本地 ST-GNN 消息传递、KG+Transformer 自注意力语义推理、DBN+COA 后验评估和 XAI 证据链。后续公共算法库或 A100 训练版 ST-GNN 完成后，可以替换 `app/algorithm_provider.py` 后端实现和模型权重，但 A2A/Nacos 对外协议不需要改变。
+当前工程不再只是“预留接口”。`PlanAlgorithmProvider` 会实际调用本地算法：协方差 Kalman 跟踪、IMM 多模型预测、本地 ST-GNN 消息传递、DBN 风险状态校准、保护资产影响分析、编队识别和 XAI 证据链。知识库/RAG/方案规划/合规授权不放在本 Agent 中，交由 lzh 等下游 Agent 消费 `decision_risk_assessments` 后继续处理。后续公共算法库或 A100 训练版 ST-GNN 完成后，可以替换 `app/algorithm_provider.py` 后端实现和模型权重，但 A2A/Nacos 对外协议不需要改变。
+
+## 2.1 独立 ST-GNN 训练工程
+
+离线数据准备、PyTorch ST-GNN 训练、评估和模型导出已经从在线 Agent 拆分到：
+
+```text
+/Users/mac/Desktop/st-gnn-trajectory-training
+```
+
+该目录包含约 15 GB ADS-B/AIS 数据、训练代码、飞机/船舶配置、训练测试、checkpoint 和评估报告。大型数据及 checkpoint 不进入 A2A 仓库。
+
+在线 Agent 只保留轻量推理运行时和两个兆级模型包：
+
+```text
+models/track_threat/st_gnn_aircraft_kaggle_v1_candidate
+models/track_threat/st_gnn_ship_kaggle_v1
+```
+
+其中船舶模型已通过当前 release gate；飞机模型是候选模型，FDE 和覆盖率通过，但 ADE 提升略低于 10% 门槛，适合演示和联调。若要替换为实验室服务器训练出的新模型，可以通过以下环境变量覆盖内置模型：
+
+```bash
+export ST_GNN_AIRCRAFT_MODEL_DIR=/path/to/exported_models/st_gnn_aircraft_v1
+export ST_GNN_SHIP_MODEL_DIR=/path/to/exported_models/st_gnn_ship_v1
+```
+
+模型包缺失、损坏或 schema 不兼容时，Agent 不会启动失败，而是继续使用 Kalman、IMM 和本地 NumPy 图消息传递回退链路。在线轻量序列模型仍可通过 `TRACK_THREAT_LEARNED_MODEL_PATH` 指定。
+
+训练命令、数据清单和服务器使用方法见独立工程的 `README.md` 与 `docs/`。
 
 ## 3. 启动
+
+轻量启动，不安装 PyTorch，模型链路会自动回退到 Kalman / IMM / NumPy ST-GNN：
 
 ```bash
 cd track_threat_agent
 PYTHONPATH=.. uv run --with-requirements ../requirements.txt --with-requirements requirements.txt \
+  uvicorn app.main:app --host 0.0.0.0 --port 8102
+```
+
+启用内置 TorchScript ST-GNN CPU 推理：
+
+```bash
+cd track_threat_agent
+PYTHONPATH=.. uv run --with-requirements ../requirements.txt \
+  --with-requirements requirements.txt \
+  --with-requirements requirements-model.txt \
   uvicorn app.main:app --host 0.0.0.0 --port 8102
 ```
 
@@ -111,6 +153,38 @@ export HEARTBEAT_INTERVAL=5
 完整示例见 `.env.example`。
 
 完整 Nacos 联调步骤见 `docs/nacos_smoke_test.md`。该文档覆盖 Docker Compose 启动 Nacos、Agent 注册、师兄 `NacosRegistry` 发现、以及通过发现到的 `/sendMessage` endpoint 发起 A2A 调用。
+
+### 4.1 共享算法库优先调用
+
+Agent 始终持有权威 `TrackStore`、任务幂等缓存和宕机恢复快照；共享算法库负责可替换的计算能力。启用后，Agent 会优先发现并调用 `track-threat-algorithms` 服务：
+
+```text
+M03 multimodal_feature_fuser -> 输入特征增强
+M04 target_type_classifier   -> 类型/置信度补全
+M05 track_state_updater      -> 航迹关联一致性校验
+M06 trajectory_predictor     -> 预测路径写入 TrackState
+M07 graph_relation_reasoner  -> 图关系/编队证据增强
+```
+
+远程服务超时、Nacos 不可用、模型未加载或返回异常时，对应步骤会继续使用本 Agent 的 Kalman、IMM、ST-GNN 运行时与群体检测实现，不会中断 A2A 任务。
+
+本机不使用 Nacos 时，可显式指定算法库地址：
+
+```bash
+export ALGORITHM_LIBRARY_ENABLED=true
+export ALGORITHM_LIBRARY_BASE_URL=http://127.0.0.1:9022
+export ALGORITHM_LIBRARY_TIMEOUT_S=3
+```
+
+真实联调时让 Agent 从 Nacos 发现服务：
+
+```bash
+export ALGORITHM_LIBRARY_ENABLED=true
+export ALGORITHM_LIBRARY_BASE_URL=
+export ALGORITHM_LIBRARY_SERVICE_NAME=track-threat-algorithms
+```
+
+算法库服务需注册 `owner_scope=track_threat_agent` 和 `algorithm_classes=M03,M04,M05,M06,M07`，Agent 会过滤掉不属于本职责范围的服务实例。
 
 接入 Commander 宕机恢复时，本 Agent 遵守师兄统一规范：
 
@@ -240,6 +314,36 @@ curl -X POST http://127.0.0.1:8102/a2a/perception-result \
   --data @sample_data/group_scene.json
 ```
 
+标准联调场景：
+
+```bash
+curl -X POST http://127.0.0.1:8102/a2a/perception-result \
+  -H "Content-Type: application/json" \
+  --data @sample_data/scene_01_normal_tracking.json
+
+curl -X POST http://127.0.0.1:8102/a2a/perception-result \
+  -H "Content-Type: application/json" \
+  --data @sample_data/scene_02_asset_approach.json
+
+curl -X POST http://127.0.0.1:8102/a2a/perception-result \
+  -H "Content-Type: application/json" \
+  --data @sample_data/scene_03_group_maneuver.json
+```
+
+三套场景分别用于验证：
+
+- `scene_01_normal_tracking.json`：普通多目标跟踪、预测、基础排序。
+- `scene_02_asset_approach.json`：目标预测航线接近保护资产，验证 `asset_impacts`。
+- `scene_03_group_maneuver.json`：空中编队、海上编组、unknown 高风险语义输入，验证 group 和统一排序。
+
+协议和状态查询：
+
+```bash
+curl http://127.0.0.1:8102/schema/input
+curl http://127.0.0.1:8102/schema/output
+curl http://127.0.0.1:8102/state/summary
+```
+
 发送 A2A `sendMessage` 演示任务：
 
 ```bash
@@ -254,6 +358,14 @@ PYTHONPATH=.. uv run --with-requirements requirements.txt --with-requirements ..
 cd track_threat_agent
 PYTHONPATH=.. uv run --with-requirements requirements.txt --with-requirements ../requirements.txt \
   python scripts/check_track_threat_agent.py
+```
+
+一键联调 smoke test，会检查 `/health`、`/ready`、Agent Card、输入/输出 schema，并通过 `/sendMessage` 发送一帧标准任务：
+
+```bash
+cd track_threat_agent
+PYTHONPATH=.. uv run --with-requirements requirements.txt --with-requirements ../requirements.txt \
+  python scripts/smoke_track_threat_agent.py
 ```
 
 导出 90 帧长序列场景：
@@ -276,16 +388,18 @@ PYTHONPATH=.. uv run --with-requirements requirements.txt --with-requirements ..
 
 返回 `track_threat_group_artifact`，包含：
 
+- `artifact_schema_version`：当前为 `track_threat_group_artifact/v1`。
+- `trace`：包含 `task_id`、`algorithm_level`、输入 detection 数量和处理时间。
 - `tracks`：连续航迹、历史路径、预测路径。
 - `threats`：单体关注排序。
 - `groups`：疑似编队/编组。
-- `asset_impacts`：保护资产影响分析。
-- `unified_threat_ranking`：单体、群体、资产影响统一排序。
+- `asset_impacts`：保护资产影响分析，包含预测最近距离、保护半径距离裕度、是否进入保护半径和预计进入时间。
+- `unified_threat_ranking`：单体、群体、资产影响统一排序，包含 `reason`、`evidence`、`factors`，方便前端或 Commander 解释排序原因。
 - `events`：`track.updated`、`threat.updated`、`track.group.updated`、`threat.group.updated`、`threat.ranking.updated`、`asset.impact.updated` 等事件。
 
 每个 `tracks[].predicted_path[]` 预测点包含：
 
-- `dt_s`：预测时间差，当前为 10、20、30、60、120 秒。
+- `dt_s`：飞机默认包含 10、20、30、60、120 秒；启用船舶模型后追加 600、1200 秒。
 - `horizon_type`：`short_term` 或 `medium_term`。
 - `model_used`：推荐下游读取的模型字段，例如 `adaptive_ctra_turn_graph_refined`。
 - `prediction_model`：兼容旧版本的模型字段，内容与 `model_used` 保持一致。
@@ -310,17 +424,65 @@ uv run --with-requirements requirements.txt --with-requirements ../requirements.
 - 保护资产影响分析。
 - AMOS/A2A 事件适配。
 - ST-GNN 动态实体跟踪与轨迹预测，本地 NumPy 消息传递运行时会输出 embedding 和 edge attention。
-- KG+Transformer 本地自注意力语义推理。
-- DBN+COA 威胁状态后验概率评估。
+- DBN 风险状态后验概率评估。
+- 下游 `decision_risk_assessments` 风险摘要适配。
 - 90 帧长序列仿真场景。
 - 预测评估脚本和 baseline / enhanced 对比报告。
 - `work_item` 幂等。
 - `work_list` 查询。
 
-## 10. 当前限制
+## 10. ST-GNN v2 模型交付
+
+大规模训练在独立工程 `st-gnn-trajectory-training` 完成。只有通过独立 test set 指标门禁的模型才能导出：
+
+```text
+model.ts
+model_manifest.json
+normalization.json
+metrics.json
+golden_io.json
+sha256sums.json
+```
+
+启用模型运行时：
+
+```bash
+cd track_threat_agent
+uv run --with-requirements requirements.txt \
+  --with-requirements requirements-model.txt \
+  --with-requirements ../requirements.txt \
+  uvicorn app.main:app --host 0.0.0.0 --port 8102
+```
+
+```bash
+export ST_GNN_AIRCRAFT_MODEL_DIR=/models/st_gnn_aircraft_v1
+export ST_GNN_SHIP_MODEL_DIR=/models/st_gnn_ship_v1
+export ST_GNN_REQUIRED=false
+export ST_GNN_MAX_INFERENCE_MS=200
+```
+
+这些环境变量是可选覆盖项；不配置时会使用 `models/track_threat` 的内置 bundle。Agent 会校验 schema、SHA256 和 golden I/O。飞机模型更新 10/20/30/60 秒点并保留 120 秒 IMM 点；船舶模型保留短期物理预测并追加 600/1200 秒点。历史不足、模型损坏、超时或输出异常时逐帧回退，不中断 Agent。
+
+## 11. Skill 调用
+
+Agent Card 与 Nacos 使用同一组 snake_case Skill ID：
+
+```text
+track_threat_situation_analysis
+trajectory_tracking
+trajectory_prediction
+group_detection
+threat_ranking
+group_threat_ranking
+protected_asset_impact_analysis
+```
+
+`/sendMessage` 和 `/sendMessageStream` 支持 `required_skill`、`required_skills`、`input`、`context`、`output_hint`。不支持的 Skill 返回 `UNSUPPORTED_SKILL`。
+
+## 12. 当前限制
 
 - 当前是 Demo，不是生产系统。
-- 训练版 ST-GNN 权重尚未随仓库提供，当前使用本地 NumPy ST-GNN 消息传递运行时。
-- KG+Transformer 当前使用本地 token self-attention，尚未接 Neo4j/LLM 服务。
+- 大规模 ST-GNN 权重不随 Git 仓库提供，需由独立训练工程训练、验收和部署。
+- 知识库/RAG/规划/合规能力由下游 Agent 负责，本 Agent 只输出可消费的风险摘要。
 - 当前使用本地 JSON 文件做轻量状态快照，还不是生产级数据库或分布式状态存储。
 - 单实例串行处理，多并发建议通过多 Agent 实例水平扩展。

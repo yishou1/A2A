@@ -11,6 +11,33 @@ def test_nacos_metadata_exposes_ready_and_metrics_endpoints(monkeypatch):
     assert settings.metadata["role"] == "track_threat"
     assert settings.metadata["ready_endpoint"] == "http://127.0.0.1:8102/ready"
     assert settings.metadata["metrics_endpoint"] == "http://127.0.0.1:8102/metrics"
+    assert settings.metadata["state_summary_endpoint"] == "http://127.0.0.1:8102/state/summary"
+    assert settings.metadata["input_schema_url"] == "http://127.0.0.1:8102/schema/input"
+    assert settings.metadata["output_schema_url"] == "http://127.0.0.1:8102/schema/output"
+    assert settings.metadata["capability_version"] == "track_threat_agent_v1"
+    assert settings.metadata["model_status"] in {"no_model", "model_loaded"}
+    assert settings.metadata["algorithm_profile"] == "kalman_imm_stgnn_dbn_asset_xai"
+    assert "kg_transformer" not in settings.metadata["algorithm_family"]
+    assert "kg_transformer" not in settings.metadata["runtime_providers"]
+    assert settings.metadata["object_types"] == "aircraft,ship,uav,unknown"
+    assert "tactical_intelligence_result" in settings.metadata["input_message_types"]
+    assert "asset_impact" in settings.metadata["ranking_item_types"]
+    assert "protected_assets" in settings.metadata["scene_contract"]
+    skills = set(settings.metadata["skills"].split(","))
+    assert "track_threat_situation_analysis" in skills
+    assert "trajectory_prediction" in skills
+    assert "threat_ranking" in skills
+
+
+def test_nacos_metadata_detects_embedded_st_gnn_bundles(monkeypatch):
+    monkeypatch.delenv("ST_GNN_MODEL_DIR", raising=False)
+    monkeypatch.delenv("ST_GNN_AIRCRAFT_MODEL_DIR", raising=False)
+    monkeypatch.delenv("ST_GNN_SHIP_MODEL_DIR", raising=False)
+
+    settings = NacosSettings.from_env()
+
+    assert settings.metadata["st_gnn_aircraft_model_configured"] == "true"
+    assert settings.metadata["st_gnn_ship_model_configured"] == "true"
 
 
 def test_heartbeat_metadata_preserves_commander_busy_lease_state():

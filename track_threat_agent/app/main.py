@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from a2a_protocol.messages import build_task_error_response, build_task_response
 
 from .a2a_runtime import A2ARuntimeState
+from .algorithm_library_client import AlgorithmLibraryClient
 from .algorithm_provider import PlanAlgorithmProvider
 from .amos_adapter import build_integration_events
 from .asset_impact_analyzer import AssetImpactAnalyzer
@@ -28,11 +29,14 @@ from .intelligence_adapter import (
     is_intelligence_format,
     reset_adapter_cache,
 )
+from .learned_predictor import LearnedTrajectoryPredictor
+from .model_runtime import ModelBundleLoader, TrackSTGNNRuntime
 from .models import Detection, ProtectedAsset
 from .nacos_register import NacosRegistrar
 from .scenario_generator import generate_auto_demo_frame
+from .skills import SUPPORTED_SKILLS, agent_card_skills
 from .st_gnn_predictor import STGNNTrajectoryPredictor
-from .state_store import FileStateStore
+from .state_store import FileStateStore, STATE_SCHEMA_VERSION
 from .threat_ranker import ThreatRanker
 from .tracker import MultiTargetTracker
 
@@ -41,6 +45,10 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 PROJECT_DIR = BACKEND_DIR.parent
 SAMPLE_DATA_DIR = BACKEND_DIR / "sample_data"
 DEFAULT_STATE_PATH = PROJECT_DIR / ".a2a_state" / "track_threat_agent_state.json"
+DEFAULT_LEARNED_MODEL_PATH = BACKEND_DIR / "models" / "trajectory_predictor_aircraft_short.json"
+INPUT_SCHEMA_VERSION = "perception_result/v1"
+ARTIFACT_SCHEMA_VERSION = "track_threat_group_artifact/v1"
+STATE_SUMMARY_SCHEMA_VERSION = 1
 
 
 registrar = NacosRegistrar()
@@ -70,7 +78,20 @@ ranker = ThreatRanker()
 group_detector = GroupDetector()
 impact_analyzer = AssetImpactAnalyzer()
 graph_predictor = STGNNTrajectoryPredictor()
-algorithm_provider = PlanAlgorithmProvider(tracker, graph_predictor, ranker, impact_analyzer, group_detector)
+learned_predictor = LearnedTrajectoryPredictor(os.getenv("TRACK_THREAT_LEARNED_MODEL_PATH") or DEFAULT_LEARNED_MODEL_PATH)
+st_gnn_model_bundle = ModelBundleLoader(os.getenv("ST_GNN_MODEL_DIR"))
+trained_st_gnn_runtime = TrackSTGNNRuntime.from_env(BACKEND_DIR / "models" / "track_threat")
+algorithm_library_client = AlgorithmLibraryClient()
+algorithm_provider = PlanAlgorithmProvider(
+    tracker,
+    graph_predictor,
+    ranker,
+    impact_analyzer,
+    group_detector,
+    learned_predictor=learned_predictor,
+    trained_st_gnn_runtime=trained_st_gnn_runtime,
+    algorithm_library=algorithm_library_client,
+)
 runtime = A2ARuntimeState(agent_name="track-threat-group-agent", role=registrar.settings.role)
 processing_lock = asyncio.Lock()
 auto_demo_task: asyncio.Task | None = None
@@ -146,7 +167,7 @@ def health() -> Dict[str, Any]:
     runtime_snapshot = runtime_status()
     return {
         "status": "ok",
-        "ready": runtime_snapshot["ready"],
+        "ready": _effective_ready(),
         "agent": runtime.agent_name,
         "role": runtime.role,
         "agent_status": runtime_snapshot["agent_status"],
@@ -171,13 +192,14 @@ def health() -> Dict[str, Any]:
 def ready() -> Dict[str, Any]:
     runtime_snapshot = runtime_status()
     return {
-        "ready": runtime_snapshot["ready"],
+        "ready": _effective_ready(),
         "agent": runtime.agent_name,
         "role": runtime.role,
         "agent_status": runtime_snapshot["agent_status"],
         "active_tasks": runtime_snapshot["active_task_count"],
         "current_workflow_id": runtime_snapshot["current_workflow_id"],
         "current_work_item": runtime_snapshot["current_work_item"],
+        "model_status": trained_st_gnn_runtime.status(),
     }
 
 
@@ -198,9 +220,15 @@ def metrics() -> Dict[str, Any]:
     snapshot = runtime.metrics_snapshot()
     snapshot.update(
         {
+            "total_requests": snapshot.get("processed_task_count", 0) + snapshot.get("failed_task_count", 0),
+            "successful_requests": snapshot.get("processed_task_count", 0),
+            "failed_requests": snapshot.get("failed_task_count", 0),
             "active_track_count": len(tracker.tracks),
             "active_group_count": len(group_detector.groups),
+            "active_asset_impact_count": len(last_artifact.get("asset_impacts", [])),
             "algorithm_provider": algorithm_provider.mode,
+            "model_status": _model_status(),
+            "last_task_id": last_artifact.get("task_id"),
             "state_snapshot_exists": state_store.path.exists(),
         }
     )
@@ -209,6 +237,10 @@ def metrics() -> Dict[str, Any]:
 
 def runtime_status() -> Dict[str, Any]:
     return runtime.snapshot(algorithm_provider=algorithm_provider.mode)
+
+
+def _effective_ready() -> bool:
+    return bool(runtime.ready and trained_st_gnn_runtime.ready)
 
 
 def _agent_card_payload() -> Dict[str, Any]:
@@ -232,18 +264,7 @@ def _agent_card_payload() -> Dict[str, Any]:
             "organization": "Track Threat Demo",
             "url": service_url,
         },
-        "capabilities": [
-            "trajectory_tracking",
-            "trajectory_prediction",
-            "st_gnn_dynamic_entity_tracking",
-            "threat_ranking",
-            "dynamic_bayesian_network_threat_assessment",
-            "kg_transformer_semantic_sitrep",
-            "group_detection",
-            "group_threat_ranking",
-            "protected_asset_impact_analysis",
-            "xai_evidence_generation",
-        ],
+        "capabilities": list(SUPPORTED_SKILLS),
         "a2a_capabilities": {
             "streaming": True,
             "pushNotifications": False,
@@ -254,40 +275,7 @@ def _agent_card_payload() -> Dict[str, Any]:
         "output_message_types": ["track_threat_group_artifact"],
         "defaultInputModes": ["application/json"],
         "defaultOutputModes": ["application/json"],
-        "skills": [
-            {
-                "id": "trajectory-tracking",
-                "name": "Trajectory Tracking",
-                "description": "Maintain simulated multi-target tracks and short-term predictions.",
-                "tags": ["tracking", "trajectory", "simulation"],
-                "inputModes": ["application/json"],
-                "outputModes": ["application/json"],
-            },
-            {
-                "id": "group-detection",
-                "name": "Group Detection",
-                "description": "Detect likely formations/groups from spatial, heading, and speed similarity.",
-                "tags": ["group", "formation", "asset"],
-                "inputModes": ["application/json"],
-                "outputModes": ["application/json"],
-            },
-            {
-                "id": "risk-priority-ranking",
-                "name": "Risk Priority Ranking",
-                "description": "Rank tracks and groups by simulation-only attention priority.",
-                "tags": ["ranking", "risk", "threat"],
-                "inputModes": ["application/json"],
-                "outputModes": ["application/json"],
-            },
-            {
-                "id": "protected-asset-impact-analysis",
-                "name": "Protected Asset Impact Analysis",
-                "description": "Estimate simulation-only attention priority for protected assets affected by tracked objects.",
-                "tags": ["asset", "impact", "simulation"],
-                "inputModes": ["application/json"],
-                "outputModes": ["application/json"],
-            },
-        ],
+        "skills": agent_card_skills(),
         "a2a": {
             "endpoint": "/a2a/perception-result",
             "method": "POST",
@@ -312,8 +300,11 @@ def _agent_card_payload() -> Dict[str, Any]:
         "workListEndpoint": "/workflows/{workflow_id}/work-list",
         "healthEndpoint": "/health",
         "readyEndpoint": "/ready",
-        "metricsEndpoint": "/metrics",
-        "securitySchemes": {
+            "metricsEndpoint": "/metrics",
+            "stateSummaryEndpoint": "/state/summary",
+            "inputSchemaEndpoint": "/schema/input",
+            "outputSchemaEndpoint": "/schema/output",
+            "securitySchemes": {
             "openIdConnect": {
                 "type": "openIdConnect",
                 "authorizationUrl": "http://127.0.0.1:8080/auth",
@@ -325,6 +316,12 @@ def _agent_card_payload() -> Dict[str, Any]:
             "nacos_enabled": registrar.settings.enabled,
             "nacos_metadata": registrar.settings.metadata,
         },
+        "schema": {
+            "input_schema_version": INPUT_SCHEMA_VERSION,
+            "artifact_schema_version": ARTIFACT_SCHEMA_VERSION,
+            "state_summary_schema_version": STATE_SUMMARY_SCHEMA_VERSION,
+        },
+        "model_status": _model_status(),
         "safety_boundary": [
             "no real weapon control",
             "no attack recommendation",
@@ -352,6 +349,134 @@ def well_known_a2a_agent_card() -> Dict[str, Any]:
 @app.get("/.well-known/agent.json")
 def well_known_agent_json() -> Dict[str, Any]:
     return _agent_card_payload()
+
+
+@app.get("/schema/input")
+def input_schema() -> Dict[str, Any]:
+    return {
+        "schema_version": INPUT_SCHEMA_VERSION,
+        "message_type": "perception_result",
+        "required_top_level_fields": ["task_id", "message_type", "algorithm_level", "scene", "detections"],
+        "scene_fields": [
+            "protected_zone_lat",
+            "protected_zone_lon",
+            "protected_radius_m",
+            "protected_assets",
+        ],
+        "protected_asset_fields": [
+            "asset_id",
+            "asset_name",
+            "asset_type",
+            "lat",
+            "lon",
+            "protection_radius_m",
+            "criticality",
+            "priority",
+            "vulnerability",
+        ],
+        "minimum_detection_fields": [
+            "detection_id",
+            "object_type",
+            "timestamp",
+            "lat",
+            "lon",
+            "speed",
+            "heading",
+            "confidence",
+        ],
+        "json_schema": PerceptionResultRequest.model_json_schema(),
+        "safety_boundary": "simulation-only situation-awareness input; no weapon-control command accepted",
+    }
+
+
+@app.get("/schema/output")
+def output_schema() -> Dict[str, Any]:
+    return {
+        "schema_version": ARTIFACT_SCHEMA_VERSION,
+        "message_type": "track_threat_group_artifact",
+        "artifact_fields": [
+            "task_id",
+            "artifact_schema_version",
+            "trace",
+            "protected_assets",
+            "tracks",
+            "threats",
+            "asset_impacts",
+            "groups",
+            "unified_threat_ranking",
+            "decision_risk_assessments",
+            "events",
+            "summary",
+        ],
+        "unified_threat_ranking_fields": [
+            "rank",
+            "item_type",
+            "item_id",
+            "score",
+            "level",
+            "reason",
+            "evidence",
+            "factors",
+        ],
+        "decision_risk_assessment_fields": [
+            "target_id",
+            "source_id",
+            "source_item_type",
+            "priority",
+            "risk",
+            "threat_score",
+            "probability",
+            "rationale",
+            "triggered_rules",
+            "evidence",
+        ],
+        "asset_impact_fields": [
+            "impact_id",
+            "protected_asset_id",
+            "source_track_id",
+            "score",
+            "level",
+            "closest_distance_m",
+            "predicted_closest_distance_m",
+            "eta_to_protected_radius_s",
+            "will_enter_protection_radius",
+            "predicted_min_distance_margin_m",
+        ],
+        "event_types": [
+            "asset.updated",
+            "asset.relationship.updated",
+            "track.updated",
+            "threat.updated",
+            "track.group.updated",
+            "threat.group.updated",
+            "threat.ranking.updated",
+            "protected.asset.updated",
+            "asset.impact.updated",
+        ],
+        "safety_boundary": "simulation-only situation-awareness artifact; threat/risk means attention priority only",
+    }
+
+
+@app.get("/schema/state")
+def state_schema() -> Dict[str, Any]:
+    return {
+        "schema_version": STATE_SUMMARY_SCHEMA_VERSION,
+        "state_store_schema_version": STATE_SCHEMA_VERSION,
+        "fields": [
+            "status",
+            "agent",
+            "role",
+            "runtime",
+            "tracks",
+            "groups",
+            "protected_assets",
+            "asset_impacts",
+            "last_artifact",
+            "model_status",
+            "state_snapshot",
+            "schema",
+        ],
+    }
 
 
 @app.post("/a2a/perception-result")
@@ -432,8 +557,20 @@ async def send_message(task_payload: Dict[str, Any], token: str = Depends(verify
     runtime.capture_work_list(task_payload)
     work_item = runtime.work_item_from_payload(task_payload)
     workflow_id = task_payload.get("workflow_id")
+    requested_skills = _requested_skills(task_payload)
+    unsupported_skills = sorted(set(requested_skills) - set(SUPPORTED_SKILLS))
+    if unsupported_skills:
+        return build_task_error_response(
+            workflow_id=workflow_id,
+            work_item=work_item,
+            agent=runtime.agent_name,
+            role=runtime.role,
+            command=task_payload.get("command"),
+            error=f"unsupported skill(s): {', '.join(unsupported_skills)}",
+            error_code="UNSUPPORTED_SKILL",
+        )
 
-    if not runtime.ready:
+    if not _effective_ready():
         return build_task_error_response(
             workflow_id=workflow_id,
             work_item=work_item,
@@ -452,7 +589,7 @@ async def send_message(task_payload: Dict[str, Any], token: str = Depends(verify
         cached = runtime.get_task_response(work_item)
         if cached is not None:
             return cached
-        if not runtime.ready:
+        if not _effective_ready():
             return build_task_error_response(
                 workflow_id=workflow_id,
                 work_item=work_item,
@@ -517,6 +654,8 @@ async def send_message(task_payload: Dict[str, Any], token: str = Depends(verify
             "artifact": result["artifact"],
             "safety_boundary": "simulation-only situation-awareness priority; no weapon control",
             "token_accepted": bool(token),
+            "executed_skills": requested_skills,
+            "output_hint_acknowledged": task_payload.get("output_hint"),
         },
     )
     runtime.set_task_response(work_item, response)
@@ -526,12 +665,28 @@ async def send_message(task_payload: Dict[str, Any], token: str = Depends(verify
 
 @app.post("/sendMessageStream")
 async def send_message_stream(task_payload: Dict[str, Any], token: str = Depends(verify_a2a_token)) -> StreamingResponse:
-    if not runtime.ready:
+    if not _effective_ready():
         raise HTTPException(status_code=503, detail="agent is not ready")
 
     async def event_stream():
         runtime.capture_work_list(task_payload)
         work_item = runtime.work_item_from_payload(task_payload)
+        requested_skills = _requested_skills(task_payload)
+        unsupported_skills = sorted(set(requested_skills) - set(SUPPORTED_SKILLS))
+        if unsupported_skills:
+            yield _sse(
+                {
+                    "workflow_id": task_payload.get("workflow_id"),
+                    "work_item": work_item,
+                    "status": "Failed",
+                    "progress": 100,
+                    "error": {
+                        "code": "UNSUPPORTED_SKILL",
+                        "message": f"unsupported skill(s): {', '.join(unsupported_skills)}",
+                    },
+                }
+            )
+            return
         cached_events = runtime.get_stream_events(work_item)
         if cached_events is not None:
             for event in cached_events:
@@ -592,6 +747,8 @@ async def send_message_stream(task_payload: Dict[str, Any], token: str = Depends
                 "message": "Track/threat situation analysis completed",
                 "artifact": artifact,
                 "token_accepted": bool(token),
+                "executed_skills": requested_skills,
+                "output_hint_acknowledged": task_payload.get("output_hint"),
             }
         )
         runtime.set_stream_events(work_item, buffered_events)
@@ -613,6 +770,52 @@ def workflow_work_list(workflow_id: str) -> Dict[str, Any]:
 @app.get("/demo/state")
 def demo_state() -> Dict[str, Any]:
     return {"status": "ok", "artifact": last_artifact}
+
+
+@app.get("/state/summary")
+def state_summary() -> Dict[str, Any]:
+    runtime_snapshot = runtime_status()
+    return {
+        "status": "ok",
+        "agent": runtime.agent_name,
+        "role": runtime.role,
+        "runtime": runtime_snapshot,
+        "tracks": {
+            "active_count": len(tracker.tracks),
+            "ids": sorted(tracker.tracks),
+        },
+        "groups": {
+            "active_count": len(group_detector.groups),
+            "ids": sorted(group_detector.groups),
+        },
+        "protected_assets": {
+            "count": len(last_artifact.get("protected_assets", [])),
+            "ids": [asset.get("asset_id") for asset in last_artifact.get("protected_assets", [])],
+        },
+        "asset_impacts": {
+            "count": len(last_artifact.get("asset_impacts", [])),
+            "top": (last_artifact.get("asset_impacts") or [None])[0],
+        },
+        "last_artifact": {
+            "task_id": last_artifact.get("task_id"),
+            "artifact_schema_version": last_artifact.get("artifact_schema_version"),
+            "track_count": last_artifact.get("summary", {}).get("track_count", 0),
+            "group_count": last_artifact.get("summary", {}).get("group_count", 0),
+            "asset_impact_count": last_artifact.get("summary", {}).get("asset_impact_count", 0),
+            "ranking_count": len(last_artifact.get("unified_threat_ranking", [])),
+        },
+        "model_status": _model_status(),
+        "state_snapshot": {
+            "path": str(state_store.path),
+            "exists": state_store.path.exists(),
+        },
+        "schema": {
+            "state_schema_version": STATE_SUMMARY_SCHEMA_VERSION,
+            "state_store_schema_version": STATE_SCHEMA_VERSION,
+            "artifact_schema_version": ARTIFACT_SCHEMA_VERSION,
+        },
+        "safety_boundary": "simulation-only state summary; no weapon control",
+    }
 
 
 @app.post("/demo/reset")
@@ -685,32 +888,53 @@ async def reset() -> Dict[str, Any]:
 
 def _process_payload(payload: PerceptionResultRequest) -> Dict[str, Any]:
     global last_artifact
+    processed_at = time.time()
     protected_assets = _protected_assets_from_scene(payload.scene)
     tracks = algorithm_provider.update_tracks(payload.detections, algorithm_level=payload.algorithm_level)
     threats = algorithm_provider.rank_threats(tracks, payload.scene)
     asset_impacts = algorithm_provider.analyze_asset_impacts(tracks, threats, protected_assets)
     groups = algorithm_provider.detect_groups(tracks, threats, payload.scene)
     unified_ranking = _unified_ranking(threats, groups, asset_impacts)
+    decision_risk_assessments = _decision_risk_assessments(unified_ranking)
     events = build_integration_events(tracks, threats, groups, unified_ranking, protected_assets, asset_impacts)
     artifact = {
+        "task_id": payload.task_id,
+        "artifact_schema_version": ARTIFACT_SCHEMA_VERSION,
+        "input_schema_version": INPUT_SCHEMA_VERSION,
+        "trace": {
+            "task_id": payload.task_id,
+            "message_type": payload.message_type,
+            "algorithm_level": payload.algorithm_level,
+            "detection_count": len(payload.detections),
+            "processed_at": processed_at,
+            "agent": runtime.agent_name,
+            "role": runtime.role,
+        },
         "protected_assets": [asset.model_dump() for asset in protected_assets],
         "tracks": [track.model_dump() for track in tracks],
         "threats": [threat.model_dump() for threat in threats],
         "asset_impacts": [impact.model_dump() for impact in asset_impacts],
         "groups": [group.model_dump() for group in groups],
         "unified_threat_ranking": unified_ranking,
+        "decision_risk_assessments": decision_risk_assessments,
         "events": events,
         "summary": {
             "protected_asset_count": len(protected_assets),
             "track_count": len(tracks),
             "threat_count": len(threats),
             "asset_impact_count": len(asset_impacts),
+            "decision_risk_assessment_count": len(decision_risk_assessments),
             "group_count": len(groups),
             "highest_track_score": threats[0].score if threats else 0.0,
             "highest_group_score": max((group.group_threat_score for group in groups), default=0.0),
             "highest_asset_impact_score": asset_impacts[0].score if asset_impacts else 0.0,
             "algorithm_provider": algorithm_provider.algorithm_contract(),
+            "model_status": _model_status(),
             "prediction_eval": _prediction_eval_summary(tracks),
+            "schema": {
+                "input_schema_version": INPUT_SCHEMA_VERSION,
+                "artifact_schema_version": ARTIFACT_SCHEMA_VERSION,
+            },
             "safety_boundary": "Simulation-only situation-awareness priority; no weapon control or engagement advice.",
         },
     }
@@ -721,6 +945,33 @@ def _process_payload(payload: PerceptionResultRequest) -> Dict[str, Any]:
         "message_type": "track_threat_group_artifact",
         "status": "completed",
         "artifact": artifact,
+    }
+
+
+def _model_status() -> Dict[str, Any]:
+    learned_status = (
+        learned_predictor.status()
+        if learned_predictor is not None
+        else {"loaded": False, "model_path": None, "model_type": None}
+    )
+    bundle_status = st_gnn_model_bundle.status()
+    trained_status = trained_st_gnn_runtime.status()
+    trained_loaded = any(
+        model.get("loaded") for model in trained_status.get("models", {}).values()
+    )
+    return {
+        "overall": (
+            "model_loaded"
+            if learned_status.get("loaded") or bundle_status.get("loaded") or trained_loaded
+            else trained_status["overall"]
+        ),
+        "learned_trajectory_predictor": learned_status,
+        "st_gnn_model_bundle": bundle_status,
+        "st_gnn_runtime": trained_status,
+        "local_graph_fallback": {
+            "loaded": True,
+            "provider": "local_numpy_message_passing",
+        },
     }
 
 
@@ -768,6 +1019,7 @@ def _restore_state_snapshot() -> bool:
 
 def _perception_from_a2a_task(task_payload: Dict[str, Any]) -> PerceptionResultRequest:
     input_payload = task_payload.get("payload") or task_payload.get("input") or {}
+    context = task_payload.get("context") or {}
     if "detections" not in input_payload and "perception_result" in input_payload:
         input_payload = input_payload["perception_result"]
     if "detections" not in input_payload and "artifact" in task_payload:
@@ -793,11 +1045,33 @@ def _perception_from_a2a_task(task_payload: Dict[str, Any]) -> PerceptionResultR
         {
             "task_id": task_payload.get("task_id", "a2a-track-threat-task"),
             "message_type": "perception_result",
-            "algorithm_level": input_payload.get("algorithm_level", task_payload.get("algorithm_level", "medium")),
-            "scene": input_payload.get("scene", task_payload.get("scene", {})),
+            "algorithm_level": input_payload.get(
+                "algorithm_level",
+                context.get("algorithm_level", task_payload.get("algorithm_level", "medium")),
+            ),
+            "scene": input_payload.get(
+                "scene",
+                context.get("scene", task_payload.get("scene", {})),
+            ),
             "detections": input_payload.get("detections", []),
         }
     )
+
+
+def _requested_skills(task_payload: Dict[str, Any]) -> List[str]:
+    raw_many = task_payload.get("required_skills") or task_payload.get("requiredSkills")
+    if isinstance(raw_many, str):
+        values = [item.strip() for item in raw_many.split(",") if item.strip()]
+    elif isinstance(raw_many, list):
+        values = [str(item).strip() for item in raw_many if str(item).strip()]
+    else:
+        value = str(
+            task_payload.get("required_skill")
+            or task_payload.get("requiredSkill")
+            or ""
+        ).strip()
+        values = [value] if value else ["track_threat_situation_analysis"]
+    return list(dict.fromkeys(values))
 
 
 def _sse(payload: Dict[str, Any]) -> str:
@@ -866,6 +1140,7 @@ def _unified_ranking(
 ) -> List[Dict[str, Any]]:
     rows = []
     for threat in threats:
+        reason = _ranking_reason("track", threat.level, threat.score, threat.evidence)
         rows.append(
             {
                 "entity_type": "track",
@@ -875,9 +1150,13 @@ def _unified_ranking(
                 "score": threat.score,
                 "level": threat.level,
                 "source_id": threat.threat_id,
+                "reason": reason,
+                "evidence": list(threat.evidence)[:5],
+                "factors": dict(threat.factors),
             }
         )
     for group in groups:
+        reason = _ranking_reason("group", group.group_threat_level, group.group_threat_score, group.evidence)
         rows.append(
             {
                 "entity_type": "group",
@@ -887,9 +1166,17 @@ def _unified_ranking(
                 "score": group.group_threat_score,
                 "level": group.group_threat_level,
                 "source_id": group.group_id,
+                "reason": reason,
+                "evidence": list(group.evidence)[:5],
+                "factors": {
+                    "cohesion_score": group.cohesion_score,
+                    "member_count": float(len(group.member_track_ids)),
+                    "group_threat_score": group.group_threat_score,
+                },
             }
         )
     for impact in asset_impacts or []:
+        reason = _ranking_reason("asset_impact", impact.level, impact.score, impact.evidence)
         rows.append(
             {
                 "entity_type": "asset_impact",
@@ -901,9 +1188,74 @@ def _unified_ranking(
                 "source_id": impact.source_track_id,
                 "protected_asset_name": impact.protected_asset_name,
                 "source_track_id": impact.source_track_id,
+                "reason": reason,
+                "evidence": list(impact.evidence)[:5],
+                "factors": dict(impact.factors),
+                "eta_to_protected_radius_s": impact.eta_to_protected_radius_s,
+                "will_enter_protection_radius": impact.will_enter_protection_radius,
+                "predicted_min_distance_margin_m": impact.predicted_min_distance_margin_m,
+                "predicted_closest_distance_m": impact.predicted_closest_distance_m,
             }
         )
     rows.sort(key=lambda item: item["score"], reverse=True)
     for index, row in enumerate(rows, start=1):
         row["rank"] = index
     return rows
+
+
+def _ranking_reason(item_type: str, level: str, score: float, evidence: List[str]) -> str:
+    label = {
+        "track": "单体目标",
+        "group": "疑似编组",
+        "asset_impact": "保护资产影响",
+    }.get(item_type, item_type)
+    first_evidence = evidence[0] if evidence else "由距离、接近趋势、航迹质量和异常因子综合计算"
+    return f"{label}关注等级为 {level}，综合分数 {score:.2f}；{first_evidence}"
+
+
+def _decision_risk_assessments(unified_ranking: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Adapt local ranking rows to the downstream decision-agent risk schema.
+
+    The lzh decision agents consume risk summaries rather than raw detections.
+    This adapter keeps our agent focused on situation analysis while making the
+    handoff explicit and stable.
+    """
+
+    assessments = []
+    for row in unified_ranking:
+        evidence = [str(item) for item in row.get("evidence", []) if str(item)]
+        triggered_rules = _triggered_rules(row)
+        assessments.append(
+            {
+                "target_id": str(row.get("entity_id") or row.get("item_id") or row.get("source_id")),
+                "source_id": str(row.get("source_id") or row.get("entity_id") or ""),
+                "source_item_type": str(row.get("item_type", "track")),
+                "priority": int(row.get("rank", len(assessments) + 1)),
+                "risk": str(row.get("level", "low")),
+                "threat_score": round(float(row.get("score", 0.0)) * 100.0, 2),
+                "probability": round(float(row.get("score", 0.0)), 4),
+                "rationale": str(row.get("reason") or (evidence[0] if evidence else "由航迹预测和态势关注排序生成")),
+                "triggered_rules": triggered_rules,
+                "evidence": evidence[:5],
+                "safety_note": "simulation-only risk summary for downstream planning agents; no engagement advice",
+            }
+        )
+    return assessments
+
+
+def _triggered_rules(row: Dict[str, Any]) -> List[str]:
+    rules = [f"ranking_item:{row.get('item_type', 'unknown')}"]
+    factors = row.get("factors", {}) or {}
+    if float(factors.get("distance_factor", 0.0)) > 0.55:
+        rules.append("asset_proximity")
+    if float(factors.get("closing_factor", 0.0)) > 0.55:
+        rules.append("closing_to_protected_area")
+    if float(factors.get("anomaly_factor", 0.0)) > 0.0:
+        rules.append("anomaly_detected")
+    if row.get("item_type") == "group":
+        rules.append("group_detected")
+    if row.get("item_type") == "asset_impact":
+        rules.append("protected_asset_impact")
+        if row.get("will_enter_protection_radius"):
+            rules.append("predicted_radius_entry")
+    return list(dict.fromkeys(rules))

@@ -92,3 +92,62 @@ def test_semantic_relations_raise_asset_impact_score():
     assert by_track["semantic"].score > by_track["baseline"].score
     assert by_track["semantic"].factors["semantic_asset_factor"] > 0.8
     assert any("情报" in evidence or "knowledge" in evidence.lower() for evidence in by_track["semantic"].evidence)
+
+
+def test_asset_impact_reports_closest_time_priority_and_vulnerability():
+    assets = [
+        ProtectedAsset(
+            asset_id="blue-harbor",
+            asset_name="蓝方港口补给点",
+            asset_type="harbor",
+            lat=31.2304,
+            lon=121.4737,
+            protection_radius_m=12_000,
+            priority=0.92,
+            vulnerability=0.8,
+        ),
+        ProtectedAsset(
+            asset_id="blue-radar",
+            asset_name="蓝方岸基雷达",
+            asset_type="radar_site",
+            lat=31.40,
+            lon=121.80,
+            protection_radius_m=8_000,
+            priority=0.7,
+            vulnerability=0.4,
+        ),
+    ]
+    track = make_track("trk-harbor-approach", 31.2304, 121.4300, speed=120, heading=90)
+
+    impacts = AssetImpactAnalyzer().assess([track], [make_threat(track.track_id, 0.75)], assets)
+
+    assert impacts[0].protected_asset_id == "blue-harbor"
+    assert impacts[0].closest_time_s in {10.0, 20.0, 30.0}
+    assert impacts[0].factors["asset_priority_factor"] == 0.92
+    assert impacts[0].factors["asset_vulnerability_factor"] == 0.8
+    assert impacts[0].metadata["asset_radius_m"] == 12_000
+    assert any("最近时间" in evidence for evidence in impacts[0].evidence)
+
+
+def test_asset_impact_reports_eta_and_radius_entry_status():
+    asset = ProtectedAsset(
+        asset_id="blue-command-post",
+        asset_name="蓝方指挥所",
+        asset_type="command_post",
+        lat=31.2304,
+        lon=121.4737,
+        protection_radius_m=10_000,
+        criticality=0.95,
+        vulnerability=0.85,
+    )
+    track = make_track("trk-entering-radius", 31.2304, 121.3300, speed=180, heading=90)
+
+    impacts = AssetImpactAnalyzer().assess([track], [make_threat(track.track_id, 0.8)], [asset])
+
+    assert impacts
+    impact = impacts[0]
+    assert impact.will_enter_protection_radius is True
+    assert impact.eta_to_protected_radius_s in {10.0, 20.0, 30.0}
+    assert impact.predicted_min_distance_margin_m < 0
+    assert impact.metadata["asset_radius_m"] == 10_000
+    assert any("进入保护半径" in evidence for evidence in impact.evidence)

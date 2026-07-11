@@ -19,9 +19,10 @@ def test_default_algorithm_provider_uses_project_plan_contract():
     contract = provider.algorithm_contract()
     assert contract["primary_algorithms"]["trajectory_prediction"] == "st_gnn_dynamic_entity_tracking"
     assert contract["primary_algorithms"]["threat_assessment"] == "dynamic_bayesian_network"
-    assert contract["primary_algorithms"]["semantic_reasoning"] == "kg_transformer_semantic_sitrep"
+    assert "semantic_reasoning" not in contract["primary_algorithms"]
     assert contract["primary_algorithms"]["explainability"] == "xai_evidence_chain"
     assert contract["fallback_providers"]["trajectory_prediction"] == "baseline_motion_provider"
+    assert "learned_trajectory_predictor" in contract["training_status"]
 
 
 @pytest.mark.anyio
@@ -53,7 +54,11 @@ async def test_artifact_exposes_plan_algorithm_trace_for_reporting():
     assert first_prediction["st_gnn"]["runtime_provider"] == "local_numpy_message_passing"
     assert first_prediction["st_gnn"]["runtime"] == "local_numpy_message_passing"
     assert first_threat["metadata"]["plan_algorithms"]["threat_assessment"]["algorithm"] == "DBN"
-    assert first_threat["metadata"]["plan_algorithms"]["threat_assessment"]["runtime_provider"] == "dbn_with_coa_probability_runtime"
-    assert first_threat["metadata"]["plan_algorithms"]["semantic_reasoning"]["algorithm"] == "KG+Transformer"
-    assert first_threat["metadata"]["plan_algorithms"]["semantic_reasoning"]["runtime_provider"] == "kg_transformer_self_attention_runtime"
+    assert first_threat["metadata"]["plan_algorithms"]["threat_assessment"]["runtime_provider"] == "dbn_risk_state_calibration_runtime"
+    assert "semantic_reasoning" not in first_threat["metadata"]["plan_algorithms"]
     assert first_threat["metadata"]["xai"]["algorithm"] == "XAI"
+    assert "semantic_sitrep" not in first_threat["metadata"]
+    assert first_threat["metadata"]["dbn"]["risk_pattern_model"]["algorithm"] == "DBN risk-pattern calibration"
+    assert first_threat["metadata"]["xai"]["factor_chain"]
+    assert first_threat["metadata"]["xai"]["safety_chain"]
+    assert artifact["decision_risk_assessments"]

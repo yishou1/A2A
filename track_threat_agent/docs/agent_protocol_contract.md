@@ -21,6 +21,8 @@
 SERVICE_NAME=A2A-Agent
 AGENT_ROLE=track_threat
 AGENT_STATUS=idle
+object_types=aircraft,ship,uav,unknown
+ranking_item_types=track,group,asset_impact
 ```
 
 ## 2. 上游最小输入：perception_result
@@ -92,6 +94,23 @@ detections[].metadata.affiliation
 detections[].metadata.label
 detections[].metadata.threat_level
 detections[].metadata.knowledge_relations
+```
+
+协议发现入口：
+
+```bash
+curl http://127.0.0.1:8102/schema/input
+curl http://127.0.0.1:8102/schema/output
+curl http://127.0.0.1:8102/schema/state
+curl http://127.0.0.1:8102/state/summary
+```
+
+当前协议版本：
+
+```text
+input_schema_version=perception_result/v1
+artifact_schema_version=track_threat_group_artifact/v1
+state_summary_schema_version=1
 ```
 
 `object_type` 取值：
@@ -215,17 +234,36 @@ ready=false 时返回标准失败信封：
   "message_type": "track_threat_group_artifact",
   "status": "completed",
   "artifact": {
+    "task_id": "task-001",
+    "artifact_schema_version": "track_threat_group_artifact/v1",
+    "input_schema_version": "perception_result/v1",
+    "trace": {
+      "task_id": "task-001",
+      "message_type": "perception_result",
+      "algorithm_level": "medium",
+      "detection_count": 7,
+      "processed_at": 1781233000.0,
+      "agent": "track-threat-group-agent",
+      "role": "track_threat"
+    },
     "protected_assets": [],
     "tracks": [],
     "threats": [],
     "asset_impacts": [],
     "groups": [],
     "unified_threat_ranking": [],
+    "decision_risk_assessments": [],
     "events": [],
     "summary": {}
   }
 }
 ```
+
+### 4.0 trace 与 schema
+
+`artifact.trace` 用于跨 Agent 联调排错，包含 `task_id`、输入消息类型、算法等级、输入 detection 数量、处理时间、Agent 名称和角色。
+
+`artifact.summary.schema` 会重复输出 `input_schema_version` 与 `artifact_schema_version`，方便只读取 summary 的 Gateway、Commander 或展示层快速判断兼容性。
 
 ### 4.1 tracks
 
@@ -244,6 +282,61 @@ missed_count
 history_path
 predicted_path
 metadata
+```
+
+本 Agent 不输出 `metadata.semantic_sitrep`。KG/RAG/规则推理和方案规划属于下游决策/合规 Agent；本 Agent 通过 `decision_risk_assessments` 交付它们需要的风险摘要。
+
+`metadata.dbn` 对应 DBN 风险状态校准输出：
+
+```json
+{
+  "algorithm": "DBN",
+  "contract": "dynamic_bayesian_network_risk_state_calibration",
+  "dbn_posterior": {"low": 0.12, "medium": 0.34, "high": 0.54},
+  "risk_state_probabilities": {"low": 0.12, "medium": 0.34, "high": 0.54},
+  "observation_reliability": 0.86,
+  "state_transition": {
+    "previous_high": 0.22,
+    "prior_high": 0.30,
+    "posterior_high": 0.54,
+    "high_delta": 0.32
+  },
+  "posterior_entropy": 1.21,
+  "risk_pattern_probabilities": {
+    "asset_approach": 0.46,
+    "formation_coordination": 0.21,
+    "surveillance_or_probe": 0.06,
+    "anomalous_maneuver": 0.05,
+    "transit_or_background": 0.22
+  },
+  "risk_pattern_transition": {
+    "previous_dominant_pattern": "surveillance_or_probe",
+    "dominant_pattern": "asset_approach",
+    "dominant_changed": true
+  },
+  "dominant_risk_pattern": "asset_approach",
+  "risk_pattern_model": {
+    "algorithm": "DBN risk-pattern calibration",
+    "contract": "situation_awareness_risk_pattern_probability",
+    "utility_scores": {}
+  }
+}
+```
+
+`metadata.xai` 对应计划书中的 XAI 可解释封装：
+
+```json
+{
+  "algorithm": "XAI",
+  "contract": "sitrep_explainable_evidence_chain",
+  "evidence_chain": [],
+  "factor_chain": [{"factor": "closing", "contribution": 0.18}],
+  "dbn_transition_evidence": {},
+  "safety_chain": [
+    "该结果仅表示仿真态势关注优先级",
+    "不包含武器控制、制导、交战或打击建议"
+  ]
+}
 ```
 
 `history_path` 最多保存 50 个点，防止内存无限增长。
@@ -385,12 +478,23 @@ level
 rank
 closest_distance_m
 predicted_closest_distance_m
+predicted_min_distance_margin_m
+closest_time_s
+eta_to_protected_radius_s
+will_enter_protection_radius
 factors
 evidence
 timestamp
 ```
 
-该结果表示“哪些目标更值得关注，因为它们可能影响某个保护资产”，不是攻击建议。
+字段含义：
+
+- `predicted_min_distance_margin_m`：预测最近距离相对保护半径的裕度。大于 0 表示仍在保护半径外，小于 0 表示预测路径进入保护半径。
+- `closest_time_s`：预测路径上距离保护资产最近的时间偏移。
+- `eta_to_protected_radius_s`：如果预测会进入保护半径，表示预计进入保护半径的时间偏移；如果不进入则为 `null`。
+- `will_enter_protection_radius`：布尔值，表示预测航线是否进入该保护资产的保护半径。
+
+该结果表示“哪些目标更值得关注，因为它们可能影响某个保护资产”，不是攻击建议、拦截建议或交战决策。
 
 ## 5. Events
 
@@ -439,7 +543,17 @@ threat.ranking.updated
       "item_type": "asset_impact",
       "item_id": "blue-coastal-radar",
       "score": 0.66,
-      "level": "medium"
+      "level": "medium",
+      "reason": "中等关注：预测航线接近保护资产，建议持续监视。",
+      "evidence": ["预测最近距离低于保护半径阈值"],
+      "factors": {
+        "distance_factor": 0.72,
+        "asset_priority_factor": 0.8
+      },
+      "eta_to_protected_radius_s": 60,
+      "will_enter_protection_radius": true,
+      "predicted_min_distance_margin_m": -420.5,
+      "predicted_closest_distance_m": 4580.0
     }
   ]
 }
@@ -472,12 +586,27 @@ work_list_endpoint=http://127.0.0.1:8102/workflows/{workflow_id}/work-list
 health_endpoint=http://127.0.0.1:8102/health
 ready_endpoint=http://127.0.0.1:8102/ready
 metrics_endpoint=http://127.0.0.1:8102/metrics
+state_summary_endpoint=http://127.0.0.1:8102/state/summary
+input_schema_url=http://127.0.0.1:8102/schema/input
+output_schema_url=http://127.0.0.1:8102/schema/output
+state_schema_url=http://127.0.0.1:8102/schema/state
+capability_version=track_threat_agent_v1
+artifact_schema_version=track_threat_group_artifact/v1
+input_schema_version=perception_result/v1
+algorithm_profile=kalman_imm_stgnn_dbn_asset_xai
+model_status=no_model / model_loaded / model_training / model_error
 agent_card=http://127.0.0.1:8102/.well-known/agent-card.json
-skills=trajectory_tracking,st_gnn_dynamic_entity_tracking,dynamic_bayesian_network_threat_assessment,kg_transformer_semantic_sitrep,group_detection,group_threat_ranking,protected_asset_impact_analysis,xai_evidence_generation
-algorithm_family=st_gnn,dbn,kg_transformer,xai,imm,kalman
-runtime_providers=local_numpy_st_gnn_message_passing,dbn_with_coa_probability_runtime,kg_transformer_self_attention_runtime,covariance_kalman_cv_filter
+skills=trajectory_tracking,trajectory_prediction,threat_ranking,group_detection,group_threat_ranking,protected_asset_impact_analysis
+algorithm_family=st_gnn,dbn,asset_impact,group_detection,xai,imm,kalman
+runtime_providers=local_numpy_st_gnn_message_passing,dbn_risk_state_calibration_runtime,asset_track_relation_graph,covariance_kalman_cv_filter
 fallback_providers=baseline_motion_provider
 algorithm_levels=small,medium,large
+object_types=aircraft,ship,uav,unknown
+input_message_types=perception_result,tactical_intelligence_result,a2a_task
+output_message_types=track_threat_group_artifact,track.updated,threat.updated,track.group.updated,threat.group.updated,threat.ranking.updated,asset.impact.updated
+ranking_item_types=track,group,asset_impact
+scene_contract=protected_zone_lat,protected_zone_lon,protected_radius_m,protected_assets
+minimum_detection_fields=detection_id,object_type,timestamp,lat,lon,speed,heading,confidence
 heartbeat_ts=<recent unix timestamp>
 ```
 
@@ -586,13 +715,44 @@ predicted_path[].model_used
 predicted_path[].prediction_confidence
 predicted_path[].uncertainty_radius_m
 predicted_path[].horizon_type
+predicted_path[].model_version
+predicted_path[].baseline_model
+predicted_path[].inference_latency_ms
+predicted_path[].fallback_reason
 ```
 
 ## 9. 当前限制
 
 - 当前仍是 Demo，不是生产系统。
 - 训练版 ST-GNN 权重尚未随仓库提供；当前使用本地 NumPy ST-GNN 消息传递运行时。
-- KG+Transformer 当前使用本地 token self-attention，尚未接 Neo4j/LLM 服务。
+- 知识库/RAG/规划/合规能力由下游 Agent 负责，本 Agent 只输出可消费的风险摘要。
 - 状态使用本地 JSON 快照恢复，不是生产级数据库或分布式状态存储。
 - 单实例采用串行处理；并发建议通过多个 Agent 实例注册到 Nacos。
 - `threat` / `risk` / `impact` 只表示仿真关注优先级。
+
+## 10. Commander Skill 契约
+
+Agent Card 和 Nacos metadata.skills 统一发布：
+
+```text
+track_threat_situation_analysis
+trajectory_tracking
+trajectory_prediction
+group_detection
+threat_ranking
+group_threat_ranking
+protected_asset_impact_analysis
+```
+
+Commander 可以在 `/sendMessage` 或 `/sendMessageStream` 请求中使用：
+
+```json
+{
+  "required_skills": ["trajectory_tracking", "trajectory_prediction"],
+  "input": {"detections": []},
+  "context": {"scene": {}, "algorithm_level": "medium"},
+  "output_hint": {"include": ["tracks", "unified_threat_ranking"]}
+}
+```
+
+未声明 Skill 时默认执行 `track_threat_situation_analysis` 完整流水线。不支持的 Skill 返回 `error_code=UNSUPPORTED_SKILL`。

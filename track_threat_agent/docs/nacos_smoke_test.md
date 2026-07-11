@@ -27,7 +27,40 @@ curl http://127.0.0.1:8848/nacos/v1/ns/operator/metrics
 {"status":"UP"}
 ```
 
-## 2. 启动 Track Threat Agent
+## 2. 启动共享 Track Threat 算法库
+
+在第二个终端启动算法库服务。它会把 M03-M07 作为一个可发现服务注册到 Nacos；Nacos 不可用时服务仍可单独启动。
+
+```bash
+cd /Users/mac/Desktop/多阈协同作战/yishou1-A2A-algorithmrepo
+
+NACOS_ENABLED=true \
+NACOS_SERVER=127.0.0.1:8848 \
+NACOS_NAMESPACE=public \
+ALGORITHM_LIBRARY_SERVICE_NAME=track-threat-algorithms \
+SERVICE_IP=127.0.0.1 \
+SERVICE_PORT=9022 \
+uv run --with-requirements services/requirements.txt \
+  python services/track_threat_algorithms/app/main.py
+```
+
+验证：
+
+```bash
+curl http://127.0.0.1:9022/health
+curl 'http://127.0.0.1:8848/nacos/v1/ns/instance/list?serviceName=track-threat-algorithms'
+```
+
+算法库实例 metadata 应包含：
+
+```text
+owner_scope=track_threat_agent
+algorithm_classes=M03,M04,M05,M06,M07
+algorithms=multimodal_feature_fuser,target_type_classifier,track_state_updater,trajectory_predictor,graph_relation_reasoner
+base_url=http://127.0.0.1:9022
+```
+
+## 3. 启动 Track Threat Agent
 
 ```bash
 cd /Users/mac/Desktop/yishou1-A2A/track_threat_agent
@@ -42,11 +75,15 @@ AGENT_ID=track-threat-group-agent-01 \
 AGENT_ROLE=track_threat \
 AGENT_STATUS=idle \
 HEARTBEAT_INTERVAL=5 \
+ALGORITHM_LIBRARY_ENABLED=true \
+ALGORITHM_LIBRARY_SERVICE_NAME=track-threat-algorithms \
 PYTHONPATH=.. uv run --with-requirements ../requirements.txt --with-requirements requirements.txt \
   uvicorn app.main:app --host 127.0.0.1 --port 8102
 ```
 
-## 3. 验证 Agent 健康状态
+`ALGORITHM_LIBRARY_BASE_URL` 保持为空时，Agent 将通过 Nacos 发现算法库。若只做本机快速联调，可设置为 `http://127.0.0.1:9022`，这会跳过发现但仍使用相同的 HTTP 算法接口。
+
+## 4. 验证 Agent 健康状态
 
 ```bash
 curl http://127.0.0.1:8102/health
@@ -67,7 +104,7 @@ curl http://127.0.0.1:8102/health
 }
 ```
 
-## 4. 验证 Nacos 直接注册结果
+## 5. 验证 Nacos 直接注册结果
 
 ```bash
 curl 'http://127.0.0.1:8848/nacos/v1/ns/instance/list?serviceName=A2A-Agent'
@@ -85,7 +122,7 @@ heartbeat_ts=<recent unix timestamp>
 
 `heartbeat_ts` 必须持续刷新。师兄仓库的 `NacosRegistry` 会用该字段判断实例是否新鲜。
 
-## 5. 验证师兄仓库发现逻辑
+## 6. 验证师兄仓库发现逻辑
 
 ```bash
 cd /Users/mac/Desktop/yishou1-A2A
@@ -122,7 +159,7 @@ PY
 }
 ```
 
-## 6. 通过发现到的 endpoint 调用 A2A
+## 7. 通过发现到的 endpoint 调用 A2A
 
 ```bash
 cd /Users/mac/Desktop/yishou1-A2A

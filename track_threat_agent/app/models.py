@@ -4,13 +4,24 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 ObjectType = Literal["aircraft", "ship", "uav", "unknown"]
 ThreatLevel = Literal["low", "medium", "high"]
 GroupType = Literal["air_formation", "surface_group", "mixed_group", "unknown_group"]
-ProtectedAssetType = Literal["command_post", "radar_site", "logistics_node", "harbor_facility", "medical_node", "civil_infrastructure"]
+ProtectedAssetType = Literal[
+    "command_post",
+    "radar_site",
+    "logistics_node",
+    "harbor_facility",
+    "harbor",
+    "airport",
+    "convoy",
+    "communication_node",
+    "medical_node",
+    "civil_infrastructure",
+]
 
 
 class Detection(BaseModel):
@@ -91,8 +102,16 @@ class ProtectedAsset(BaseModel):
     alt: float = 0.0
     protection_radius_m: float = Field(default=5_000.0, gt=0.0)
     criticality: float = Field(default=0.7, ge=0.0, le=1.0)
+    priority: float | None = Field(default=None, ge=0.0, le=1.0)
+    vulnerability: float = Field(default=0.5, ge=0.0, le=1.0)
     status: str = "protected"
     metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def align_priority_and_criticality(self) -> "ProtectedAsset":
+        if self.priority is None:
+            self.priority = self.criticality
+        return self
 
 
 class AssetImpactAssessment(BaseModel):
@@ -108,6 +127,11 @@ class AssetImpactAssessment(BaseModel):
     rank: int
     closest_distance_m: float
     predicted_closest_distance_m: float
+    predicted_min_distance_margin_m: float = 0.0
+    closest_time_s: float | None = None
+    eta_to_protected_radius_s: float | None = None
+    will_enter_protection_radius: bool = False
     factors: Dict[str, float] = Field(default_factory=dict)
     evidence: List[str] = Field(default_factory=list)
     timestamp: float
+    metadata: Dict[str, Any] = Field(default_factory=dict)

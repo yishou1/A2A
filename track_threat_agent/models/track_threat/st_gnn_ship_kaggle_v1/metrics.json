@@ -1,0 +1,182 @@
+{
+  "schema_version": "st_gnn_evaluation/v2",
+  "test_manifest": "data/processed/v2_release/ship/ship-test-manifest.json",
+  "st_gnn": {
+    "ade_m": 204.83795166015625,
+    "fde_m": 283.55426025390625,
+    "rmse_m": 455.7276916503906,
+    "by_horizon": {
+      "600": {
+        "ade_m": 126.12165832519531,
+        "fde_m": 126.12165832519531
+      },
+      "1200": {
+        "ade_m": 283.55426025390625,
+        "fde_m": 283.55426025390625
+      }
+    },
+    "sample_count": 60586,
+    "coverage_90": 0.9292575842603902,
+    "uncertainty_calibration": {
+      "schema_version": "st_gnn_uncertainty_calibration/v1",
+      "method": "global_sigma_scale_from_validation_quantile",
+      "target_coverage": 0.9,
+      "coverage_before": 0.9671735894217578,
+      "coverage_after": 0.9,
+      "sigma_scale": 0.4966465688284704,
+      "calibration_manifest": "data/processed/v2_release/ship/ship-validation-manifest.json",
+      "checkpoint": "checkpoints/ship-kaggle-v1/best.ckpt",
+      "sample_count": 685180,
+      "safety_boundary": "Uncertainty calibration only; trajectory coordinates are unchanged."
+    }
+  },
+  "baselines": {
+    "last_position": {
+      "ade_m": 5485.75244140625,
+      "fde_m": 7313.482421875,
+      "rmse_m": 5999.6611328125,
+      "by_horizon": {
+        "600": {
+          "ade_m": 3658.021484375,
+          "fde_m": 3658.021484375
+        },
+        "1200": {
+          "ade_m": 7313.482421875,
+          "fde_m": 7313.482421875
+        }
+      },
+      "sample_count": 60586
+    },
+    "constant_velocity": {
+      "ade_m": 438.1114807128906,
+      "fde_m": 604.7462158203125,
+      "rmse_m": 1073.21435546875,
+      "by_horizon": {
+        "600": {
+          "ade_m": 271.4766845703125,
+          "fde_m": 271.4766845703125
+        },
+        "1200": {
+          "ade_m": 604.7462158203125,
+          "fde_m": 604.7462158203125
+        }
+      },
+      "sample_count": 60586
+    },
+    "constant_acceleration": {
+      "ade_m": 453.23687744140625,
+      "fde_m": 630.5446166992188,
+      "rmse_m": 1081.3099365234375,
+      "by_horizon": {
+        "600": {
+          "ade_m": 275.9292297363281,
+          "fde_m": 275.9292297363281
+        },
+        "1200": {
+          "ade_m": 630.5446166992188,
+          "fde_m": 630.5446166992188
+        }
+      },
+      "sample_count": 60586
+    },
+    "coordinated_turn": {
+      "ade_m": 486.960693359375,
+      "fde_m": 688.413818359375,
+      "rmse_m": 1137.291015625,
+      "by_horizon": {
+        "600": {
+          "ade_m": 285.50762939453125,
+          "fde_m": 285.50762939453125
+        },
+        "1200": {
+          "ade_m": 688.413818359375,
+          "fde_m": 688.413818359375
+        }
+      },
+      "sample_count": 60586
+    },
+    "imm": {
+      "ade_m": 459.70440673828125,
+      "fde_m": 641.5557250976562,
+      "rmse_m": 1114.5455322265625,
+      "by_horizon": {
+        "600": {
+          "ade_m": 277.85302734375,
+          "fde_m": 277.85302734375
+        },
+        "1200": {
+          "ade_m": 641.5557250976562,
+          "fde_m": 641.5557250976562
+        }
+      },
+      "sample_count": 60586
+    }
+  },
+  "gru_only": {
+    "status": "not_provided"
+  },
+  "stratified": {
+    "by_source": {
+      "geotracknet_ais": {
+        "ade_m": 204.83795166015625,
+        "fde_m": 283.55426025390625,
+        "rmse_m": 455.7276916503906,
+        "by_horizon": {
+          "600": {
+            "ade_m": 126.12165832519531,
+            "fde_m": 126.12165832519531
+          },
+          "1200": {
+            "ade_m": 283.55426025390625,
+            "fde_m": 283.55426025390625
+          }
+        },
+        "sample_count": 60586
+      }
+    },
+    "by_graph_density": {
+      "dense": {
+        "ade_m": 204.83795166015625,
+        "fde_m": 283.55426025390625,
+        "rmse_m": 455.7276916503906,
+        "by_horizon": {
+          "600": {
+            "ade_m": 126.12165832519531,
+            "fde_m": 126.12165832519531
+          },
+          "1200": {
+            "ade_m": 283.55426025390625,
+            "fde_m": 283.55426025390625
+          }
+        },
+        "sample_count": 60586
+      }
+    },
+    "seen_unseen_target": {
+      "status": "train_manifest_not_provided"
+    }
+  },
+  "release_gate": {
+    "passed": true,
+    "strongest_physical_baseline": "constant_velocity",
+    "strongest_ade_baseline": "constant_velocity",
+    "strongest_fde_baseline": "constant_velocity",
+    "ade_improvement": 0.5324524449191654,
+    "fde_improvement": 0.5311185868781718,
+    "coverage_90": 0.9292575842603902,
+    "failed_checks": []
+  },
+  "uncertainty_calibration": {
+    "schema_version": "st_gnn_uncertainty_calibration/v1",
+    "method": "global_sigma_scale_from_validation_quantile",
+    "target_coverage": 0.9,
+    "coverage_before": 0.9671735894217578,
+    "coverage_after": 0.9,
+    "sigma_scale": 0.4966465688284704,
+    "calibration_manifest": "data/processed/v2_release/ship/ship-validation-manifest.json",
+    "checkpoint": "checkpoints/ship-kaggle-v1/best.ckpt",
+    "sample_count": 685180,
+    "safety_boundary": "Uncertainty calibration only; trajectory coordinates are unchanged."
+  },
+  "safety_boundary": "Trajectory prediction evaluation only; no engagement advice."
+}

@@ -1,0 +1,83 @@
+{
+  "task_id": "scene-01-normal-tracking",
+  "message_type": "perception_result",
+  "algorithm_level": "medium",
+  "scene": {
+    "operation_name": "standard_integration_normal_tracking",
+    "operation_phase": "initial_surveillance",
+    "protected_zone_lat": 31.2304,
+    "protected_zone_lon": 121.4737,
+    "protected_radius_m": 30000,
+    "protected_assets": [
+      {
+        "asset_id": "blue-command-post",
+        "asset_name": "蓝方指挥节点",
+        "asset_type": "command_post",
+        "lat": 31.2304,
+        "lon": 121.4737,
+        "alt": 35,
+        "protection_radius_m": 9000,
+        "criticality": 0.94,
+        "priority": 0.96,
+        "vulnerability": 0.45,
+        "status": "protected",
+        "metadata": {"side": "blue", "role": "command_and_coordination"}
+      },
+      {
+        "asset_id": "blue-coastal-radar",
+        "asset_name": "蓝方岸基雷达",
+        "asset_type": "radar_site",
+        "lat": 31.285,
+        "lon": 121.438,
+        "alt": 45,
+        "protection_radius_m": 7500,
+        "criticality": 0.86,
+        "priority": 0.88,
+        "vulnerability": 0.35,
+        "status": "protected",
+        "metadata": {"side": "blue", "role": "early_warning_sensor"}
+      }
+    ]
+  },
+  "detections": [
+    {
+      "detection_id": "scene01-air-001",
+      "object_type": "aircraft",
+      "timestamp": 4100,
+      "lat": 31.38,
+      "lon": 121.31,
+      "alt": 7600,
+      "speed": 210,
+      "heading": 128,
+      "confidence": 0.93,
+      "source_agent": "perception-fusion-agent",
+      "metadata": {"affiliation": "unknown", "label": "air_track", "scenario_role": "normal_air_track"}
+    },
+    {
+      "detection_id": "scene01-ship-001",
+      "object_type": "ship",
+      "timestamp": 4100,
+      "lat": 31.05,
+      "lon": 121.71,
+      "alt": 0,
+      "speed": 8.5,
+      "heading": 292,
+      "confidence": 0.88,
+      "source_agent": "surface-radar-agent",
+      "metadata": {"affiliation": "unknown", "label": "surface_track", "scenario_role": "normal_surface_track"}
+    },
+    {
+      "detection_id": "scene01-uav-001",
+      "object_type": "uav",
+      "timestamp": 4100,
+      "lat": 31.255,
+      "lon": 121.545,
+      "alt": 900,
+      "speed": 42,
+      "heading": 255,
+      "confidence": 0.82,
+      "source_agent": "rf-fusion-agent",
+      "metadata": {"affiliation": "unknown", "label": "low_altitude_uav", "scenario_role": "normal_uav_track"}
+    }
+  ]
+}

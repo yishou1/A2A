@@ -1,0 +1,228 @@
+{
+  "schema_version": "st_gnn_model_bundle/v2",
+  "model_type": "gru_edge_aware_gatv2_physics_residual",
+  "model_version": "st_gnn_aircraft_kaggle_v1_candidate",
+  "object_type": "aircraft",
+  "release_status": "candidate_ade_gate_pending",
+  "candidate_warning": "This model is exported for demonstration and integration testing only; release_gate.passed remains false.",
+  "sampling_interval_s": 10,
+  "history_points": 6,
+  "prediction_horizons_s": [
+    10,
+    20,
+    30,
+    60
+  ],
+  "node_feature_schema": [
+    "relative_east_m",
+    "relative_north_m",
+    "delta_t_s",
+    "speed_mps",
+    "heading_sin",
+    "heading_cos",
+    "altitude_delta_m",
+    "confidence",
+    "valid_mask"
+  ],
+  "edge_feature_schema": [
+    "distance_m",
+    "relative_bearing_sin",
+    "relative_bearing_cos",
+    "heading_delta_sin",
+    "heading_delta_cos",
+    "speed_delta_mps",
+    "altitude_delta_m",
+    "edge_quality"
+  ],
+  "graph_thresholds": {
+    "max_edge_distance_m": 50000.0,
+    "max_neighbors": 16
+  },
+  "normalization_schema": "st_gnn_normalization/v2",
+  "dataset_manifest_hashes": {
+    "test": "f0aead9b70c84a3352e59e2ca4d0b0d1964fdf0e24699806d38c504deaa2d6a1",
+    "train": "d783a550d467e368b550d84c322d70fa3fa3e0d731a7541e0c21a8f491527298",
+    "validation": "5975571d074ff9d2e18cb025e24e9e4787a81a8ffe2321282a256fb778937d81"
+  },
+  "test_metrics": {
+    "ade_m": 336.17730712890625,
+    "fde_m": 695.3419799804688,
+    "rmse_m": 888.1160278320312,
+    "by_horizon": {
+      "10": {
+        "ade_m": 127.37349700927734,
+        "fde_m": 127.37349700927734
+      },
+      "20": {
+        "ade_m": 213.01751708984375,
+        "fde_m": 213.01751708984375
+      },
+      "30": {
+        "ade_m": 308.97625732421875,
+        "fde_m": 308.97625732421875
+      },
+      "60": {
+        "ade_m": 695.3419799804688,
+        "fde_m": 695.3419799804688
+      }
+    },
+    "sample_count": 448589,
+    "coverage_90": 0.9066445008682781,
+    "uncertainty_calibration": {
+      "schema_version": "st_gnn_uncertainty_calibration/v1",
+      "method": "global_sigma_scale_from_validation_quantile",
+      "target_coverage": 0.9,
+      "coverage_before": 0.7481674256754195,
+      "coverage_after": 0.8999998946796365,
+      "sigma_scale": 13.623958198322143,
+      "calibration_manifest": "data/processed/v2_release/aircraft/aircraft-validation-manifest.json",
+      "checkpoint": "checkpoints/aircraft-kaggle-v1/best.ckpt",
+      "sample_count": 474742,
+      "safety_boundary": "Uncertainty calibration only; trajectory coordinates are unchanged."
+    }
+  },
+  "baseline_metrics": {
+    "last_position": {
+      "ade_m": 3176.025146484375,
+      "fde_m": 6279.83056640625,
+      "rmse_m": 4712.404296875,
+      "by_horizon": {
+        "10": {
+          "ade_m": 1077.76513671875,
+          "fde_m": 1077.76513671875
+        },
+        "20": {
+          "ade_m": 2145.810791015625,
+          "fde_m": 2145.810791015625
+        },
+        "30": {
+          "ade_m": 3200.69482421875,
+          "fde_m": 3200.69482421875
+        },
+        "60": {
+          "ade_m": 6279.83056640625,
+          "fde_m": 6279.83056640625
+        }
+      },
+      "sample_count": 448589
+    },
+    "constant_velocity": {
+      "ade_m": 395.30584716796875,
+      "fde_m": 860.908447265625,
+      "rmse_m": 930.2057495117188,
+      "by_horizon": {
+        "10": {
+          "ade_m": 130.98521423339844,
+          "fde_m": 130.98521423339844
+        },
+        "20": {
+          "ade_m": 234.384521484375,
+          "fde_m": 234.384521484375
+        },
+        "30": {
+          "ade_m": 354.9453430175781,
+          "fde_m": 354.9453430175781
+        },
+        "60": {
+          "ade_m": 860.908447265625,
+          "fde_m": 860.908447265625
+        }
+      },
+      "sample_count": 448589
+    },
+    "constant_acceleration": {
+      "ade_m": 407.1766662597656,
+      "fde_m": 899.781005859375,
+      "rmse_m": 944.0618286132812,
+      "by_horizon": {
+        "10": {
+          "ade_m": 131.16209411621094,
+          "fde_m": 131.16209411621094
+        },
+        "20": {
+          "ade_m": 236.33160400390625,
+          "fde_m": 236.33160400390625
+        },
+        "30": {
+          "ade_m": 361.43182373046875,
+          "fde_m": 361.43182373046875
+        },
+        "60": {
+          "ade_m": 899.781005859375,
+          "fde_m": 899.781005859375
+        }
+      },
+      "sample_count": 448589
+    },
+    "coordinated_turn": {
+      "ade_m": 403.8358154296875,
+      "fde_m": 908.44775390625,
+      "rmse_m": 927.7028198242188,
+      "by_horizon": {
+        "10": {
+          "ade_m": 127.85302734375,
+          "fde_m": 127.85302734375
+        },
+        "20": {
+          "ade_m": 227.76649475097656,
+          "fde_m": 227.76649475097656
+        },
+        "30": {
+          "ade_m": 351.2760009765625,
+          "fde_m": 351.2760009765625
+        },
+        "60": {
+          "ade_m": 908.44775390625,
+          "fde_m": 908.44775390625
+        }
+      },
+      "sample_count": 448589
+    },
+    "imm": {
+      "ade_m": 370.39544677734375,
+      "fde_m": 801.9701538085938,
+      "rmse_m": 875.8695068359375,
+      "by_horizon": {
+        "10": {
+          "ade_m": 127.34193420410156,
+          "fde_m": 127.34193420410156
+        },
+        "20": {
+          "ade_m": 221.5245361328125,
+          "fde_m": 221.5245361328125
+        },
+        "30": {
+          "ade_m": 330.7451477050781,
+          "fde_m": 330.7451477050781
+        },
+        "60": {
+          "ade_m": 801.9701538085938,
+          "fde_m": 801.9701538085938
+        }
+      },
+      "sample_count": 448589
+    }
+  },
+  "release_gate": {
+    "passed": false,
+    "strongest_physical_baseline": "imm",
+    "strongest_ade_baseline": "imm",
+    "strongest_fde_baseline": "imm",
+    "ade_improvement": 0.09238272215858823,
+    "fde_improvement": 0.13295778318150975,
+    "coverage_90": 0.9066445008682781,
+    "failed_checks": [
+      "overall_ade_improvement"
+    ],
+    "model_release_status": "candidate_ade_gate_pending",
+    "candidate_reason": "FDE and calibrated coverage passed, but ADE improvement is below the 10 percent release gate."
+  },
+  "torch_version": "2.12.1",
+  "python_version": "3.11.15",
+  "cuda_version": "cpu",
+  "training_commit": "kaggle-20260708-local",
+  "model_file": "model.ts",
+  "normalization_file": "normalization.json",
+  "metrics_file": "metrics.json",
+  "golden_io_file": "golden_io.json"
+}

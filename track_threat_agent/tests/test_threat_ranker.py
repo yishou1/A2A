@@ -42,26 +42,45 @@ def test_threat_ranking_is_sorted_by_score_descending():
     assert ranked[0].evidence
 
 
-def test_semantic_fields_raise_attention_score():
+def test_upstream_semantic_fields_do_not_drive_core_threat_score():
     scene = {
         "protected_zone_lat": 31.2304,
         "protected_zone_lon": 121.4737,
         "protected_radius_m": 25000,
     }
     baseline = make_track("baseline", 31.45, 121.62, "unknown")
-    semantic = make_track("semantic", 31.45, 121.62, "unknown")
-    semantic.metadata.update(
+    enriched = make_track("enriched", 31.45, 121.62, "unknown")
+    enriched.metadata.update(
         {
             "label": "hostile",
             "affiliation": "red",
             "threat_level": "high",
             "knowledge_relations": [{"predicate": "threat_of", "object": "mission_area"}],
+            "knowledge_graph": {
+                "nodes": [
+                    {"id": "enriched", "type": "track"},
+                    {"id": "recon-cell", "type": "formation"},
+                    {"id": "mission_area", "type": "asset"},
+                ],
+                "edges": [
+                    {"source": "enriched", "predicate": "member_of", "target": "recon-cell"},
+                    {"source": "recon-cell", "predicate": "threat_of", "target": "mission_area"},
+                ],
+            },
         }
     )
 
-    ranked = ThreatRanker().rank([baseline, semantic], scene)
+    ranked = ThreatRanker().rank([baseline, enriched], scene)
     by_track = {item.track_id: item for item in ranked}
 
-    assert by_track["semantic"].score > by_track["baseline"].score
-    assert by_track["semantic"].factors["semantic_factor"] > 0.8
-    assert any("semantic" in evidence.lower() or "情报" in evidence for evidence in by_track["semantic"].evidence)
+    assert by_track["enriched"].score == by_track["baseline"].score
+    assert "semantic_factor" not in by_track["enriched"].factors
+    assert "semantic_sitrep" not in by_track["enriched"].metadata
+    assert "semantic_reasoning" not in by_track["enriched"].metadata
+    assert by_track["enriched"].metadata["dbn"]["risk_state_probabilities"]
+    assert by_track["enriched"].metadata["xai"]["evidence_chain"]
+    assert by_track["enriched"].metadata["xai"]["factor_chain"]
+    assert by_track["enriched"].metadata["xai"]["safety_chain"]
+    assert by_track["enriched"].metadata["dbn"]["observation_reliability"] > 0
+    assert any("DBN high-state delta" in evidence for evidence in by_track["enriched"].metadata["xai"]["evidence_chain"])
+    assert not any("KG" in evidence or "semantic" in evidence.lower() or "语义" in evidence for evidence in by_track["enriched"].evidence)

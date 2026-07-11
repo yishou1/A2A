@@ -1,0 +1,94 @@
+{
+  "task_id": "scene-02-asset-approach",
+  "message_type": "perception_result",
+  "algorithm_level": "medium",
+  "scene": {
+    "operation_name": "standard_integration_asset_approach",
+    "operation_phase": "asset_monitoring",
+    "protected_zone_lat": 31.2304,
+    "protected_zone_lon": 121.4737,
+    "protected_radius_m": 30000,
+    "protected_assets": [
+      {
+        "asset_id": "blue-harbor",
+        "asset_name": "蓝方港口补给点",
+        "asset_type": "harbor",
+        "lat": 31.244,
+        "lon": 121.535,
+        "alt": 8,
+        "protection_radius_m": 6500,
+        "criticality": 0.84,
+        "priority": 0.92,
+        "vulnerability": 0.8,
+        "status": "protected",
+        "metadata": {"side": "blue", "role": "supply_and_sustainment"}
+      },
+      {
+        "asset_id": "blue-communication-node",
+        "asset_name": "蓝方通信枢纽",
+        "asset_type": "communication_node",
+        "lat": 31.218,
+        "lon": 121.462,
+        "alt": 25,
+        "protection_radius_m": 6000,
+        "criticality": 0.9,
+        "priority": 0.9,
+        "vulnerability": 0.55,
+        "status": "protected",
+        "metadata": {"side": "blue", "role": "communications"}
+      }
+    ]
+  },
+  "detections": [
+    {
+      "detection_id": "scene02-uav-approach",
+      "object_type": "uav",
+      "timestamp": 4200,
+      "lat": 31.255,
+      "lon": 121.565,
+      "alt": 850,
+      "speed": 55,
+      "heading": 247,
+      "confidence": 0.79,
+      "source_agent": "rf-fusion-agent",
+      "metadata": {
+        "affiliation": "unknown",
+        "label": "suspicious",
+        "threat_level": "medium",
+        "knowledge_relations": [{"predicate": "threat_of", "object": "protected_asset"}],
+        "scenario_role": "asset_approach_track"
+      }
+    },
+    {
+      "detection_id": "scene02-unknown-lowconf",
+      "object_type": "unknown",
+      "timestamp": 4200,
+      "lat": 31.198,
+      "lon": 121.438,
+      "alt": 2200,
+      "speed": 115,
+      "heading": 64,
+      "confidence": 0.42,
+      "source_agent": "multi-sensor-fusion",
+      "metadata": {
+        "affiliation": "unknown",
+        "label": "unknown",
+        "threat_level": "medium",
+        "scenario_role": "low_confidence_unknown_track"
+      }
+    },
+    {
+      "detection_id": "scene02-ship-background",
+      "object_type": "ship",
+      "timestamp": 4200,
+      "lat": 31.07,
+      "lon": 121.72,
+      "alt": 0,
+      "speed": 8,
+      "heading": 286,
+      "confidence": 0.86,
+      "source_agent": "surface-radar-agent",
+      "metadata": {"affiliation": "unknown", "label": "surface_track", "scenario_role": "background_surface_track"}
+    }
+  ]
+}

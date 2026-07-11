@@ -9,8 +9,11 @@ import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict
 from urllib import parse, request
+
+from .skills import nacos_skill_ids
 
 
 LOGGER = logging.getLogger(__name__)
@@ -23,6 +26,28 @@ _SCHEDULER_STATUS_VALUES = {"busy", "unavailable"}
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _embedded_model_dir(name: str) -> Path:
+    return Path(__file__).resolve().parents[1] / "models" / "track_threat" / name
+
+
+def _st_gnn_aircraft_configured() -> bool:
+    return bool(
+        os.getenv("ST_GNN_AIRCRAFT_MODEL_DIR")
+        or os.getenv("ST_GNN_MODEL_DIR")
+        or _embedded_model_dir("st_gnn_aircraft_kaggle_v1").is_dir()
+        or _embedded_model_dir("st_gnn_aircraft_kaggle_v1_candidate").is_dir()
+        or _embedded_model_dir("st_gnn_aircraft_v1").is_dir()
+    )
+
+
+def _st_gnn_ship_configured() -> bool:
+    return bool(
+        os.getenv("ST_GNN_SHIP_MODEL_DIR")
+        or _embedded_model_dir("st_gnn_ship_kaggle_v1").is_dir()
+        or _embedded_model_dir("st_gnn_ship_v1").is_dir()
+    )
 
 
 @dataclass
@@ -49,6 +74,7 @@ class NacosSettings:
         status = os.getenv("AGENT_STATUS", "idle")
         enabled = os.getenv("NACOS_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
         base_url = f"http://{service_ip}:{service_port}"
+        model_status = os.getenv("MODEL_STATUS", "no_model")
         metadata = {
             "agent_id": os.getenv("AGENT_ID", "track-threat-group-agent-01"),
             "role": role,
@@ -60,18 +86,35 @@ class NacosSettings:
             "health_endpoint": f"{base_url}/health",
             "ready_endpoint": f"{base_url}/ready",
             "metrics_endpoint": f"{base_url}/metrics",
+            "state_summary_endpoint": f"{base_url}/state/summary",
             "agent_card": f"{base_url}/.well-known/agent-card.json",
             "a2a_agent_card": f"{base_url}/.well-known/agent-card",
             "legacy_agent_card": f"{base_url}/agent-card",
             "work_list_endpoint": f"{base_url}/workflows/{{workflow_id}}/work-list",
+            "input_schema_url": f"{base_url}/schema/input",
+            "output_schema_url": f"{base_url}/schema/output",
+            "state_schema_url": f"{base_url}/schema/state",
+            "capability_version": "track_threat_agent_v1",
+            "artifact_schema_version": "track_threat_group_artifact/v1",
+            "input_schema_version": "perception_result/v1",
+            "algorithm_profile": "kalman_imm_stgnn_dbn_asset_xai",
+            "model_status": model_status,
             "preferred_transport": "A2A_HTTP_JSON,A2A_SSE,HTTP+JSON",
-            "skills": "trajectory_tracking,st_gnn_dynamic_entity_tracking,dynamic_bayesian_network_threat_assessment,kg_transformer_semantic_sitrep,group_detection,group_threat_ranking,protected_asset_impact_analysis,xai_evidence_generation",
-            "algorithm_family": "kalman,imm,st_gnn,dbn,kg_transformer,xai",
-            "runtime_providers": "covariance_kalman_cv_filter,imm_multi_model_motion_prediction,local_numpy_st_gnn_message_passing,dbn_with_coa_probability_runtime,kg_transformer_self_attention_runtime",
+            "skills": nacos_skill_ids(),
+            "algorithm_family": "kalman,imm,st_gnn,dbn,asset_impact,group_detection,xai",
+            "runtime_providers": "covariance_kalman_cv_filter,imm_multi_model_motion_prediction,local_numpy_st_gnn_message_passing,dbn_risk_state_calibration_runtime,asset_track_relation_graph",
             "fallback_providers": "baseline_motion_provider",
             "algorithm_levels": "small,medium,large",
-            "input_message_types": "perception_result,a2a_task",
-            "output_message_types": "track_threat_group_artifact",
+            "object_types": "aircraft,ship,uav,unknown",
+            "input_message_types": "perception_result,tactical_intelligence_result,a2a_task",
+            "output_message_types": "track_threat_group_artifact,track.updated,threat.updated,track.group.updated,threat.group.updated,threat.ranking.updated,asset.impact.updated",
+            "ranking_item_types": "track,group,asset_impact",
+            "scene_contract": "protected_zone_lat,protected_zone_lon,protected_radius_m,protected_assets",
+            "minimum_detection_fields": "detection_id,object_type,timestamp,lat,lon,speed,heading,confidence",
+            "st_gnn_aircraft_model_configured": str(_st_gnn_aircraft_configured()).lower(),
+            "st_gnn_ship_model_configured": str(_st_gnn_ship_configured()).lower(),
+            "st_gnn_required": os.getenv("ST_GNN_REQUIRED", "false"),
+            "st_gnn_max_inference_ms": os.getenv("ST_GNN_MAX_INFERENCE_MS", "200"),
             "asset_events": "asset.updated,asset.relationship.updated",
             "artifact_events": "track.updated,threat.updated,track.group.updated,threat.group.updated,threat.ranking.updated,protected.asset.updated,asset.impact.updated",
             "heartbeat_ts": str(int(time.time())),

@@ -87,12 +87,11 @@ flowchart LR
 
 ```text
 score =
-  0.22 * distance_factor
-+ 0.20 * closing_factor
-+ 0.14 * type_factor
-+ 0.14 * anomaly_factor
-+ 0.10 * quality_factor
-+ 0.20 * semantic_factor
+  0.28 * distance_factor
++ 0.24 * closing_factor
++ 0.18 * type_factor
++ 0.18 * anomaly_factor
++ 0.12 * quality_factor
 ```
 
 等级规则：
@@ -101,9 +100,35 @@ score =
 - `medium`: score >= 0.45
 - `low`: 其他
 
-`semantic_factor` 来自 `KGTransformerSemanticReasoner`。它把 `threat_level`、`affiliation`、`label`、`source_class`、`mission_hint` 和 `knowledge_graph` 关系转成 KG token，通过本地 Transformer self-attention 计算 token attention、语义态势因子和意图类别概率。输出中包含 `evidence`，用于解释分数来自距离、接近趋势、异常、类型、航迹质量和上游语义情报等因素。
+本 Agent 不再把 KG+Transformer/RAG 语义推理作为自身核心算法。知识库检索、规则推理、任务规划和合规授权由下游 lzh 决策 Agent 负责；本 Agent 只根据航迹、预测线、异常、目标类型和资产距离生成风险排序。
 
-威胁状态还会进入 `DBNThreatEvaluator`。DBN 保留每条 track 的 low/medium/high 先验，结合当前观测 likelihood 更新后验；同时计算 `asset_approach`、`surveillance_or_probe`、`formation_coordination`、`anomalous_maneuver`、`transit_or_background` 五类 COA 概率，只作为态势关注类别，不生成行动建议。
+威胁状态还会进入 `DBNThreatEvaluator`。它对应“动态贝叶斯网络风险状态校准”。DBN 保留每条 track 的 low/medium/high 先验，结合当前观测 likelihood、观测可信度和动态转移矩阵更新后验，并输出 `dbn_posterior`、`risk_state_probabilities`、`observation_reliability`、`transition_matrix`、`state_transition` 和 `posterior_entropy`；同时基于当前态势特征计算风险模式概率：
+
+```text
+risk_pattern_probabilities.asset_approach
+risk_pattern_probabilities.formation_coordination
+risk_pattern_probabilities.surveillance_or_probe
+risk_pattern_probabilities.anomalous_maneuver
+risk_pattern_probabilities.transit_or_background
+risk_pattern_model.dominant_pattern
+risk_pattern_model.utility_scores
+state_transition.high_delta
+risk_pattern_transition.dominant_changed
+```
+
+这些概率只用于排序平滑和解释，不生成任务方案、攻击、交战、制导或火控建议。
+
+`XAIExplanationBuilder` 对应计划书中的“XAI 可解释封装与高质量数据底座输出”。它会输出：
+
+```text
+xai.evidence_chain
+xai.factor_chain
+xai.dbn_transition_evidence
+xai.safety_chain
+xai.model_trace
+```
+
+其中 `evidence_chain` 说明证据来源，包含 DBN high 状态变化、观测可信度和主导风险模式；`factor_chain` 拆解分数贡献，`safety_chain` 明确安全边界。
 
 `backend/app/group_detector.py`
 
@@ -193,7 +218,7 @@ FastAPI 入口：
 adapter 的职责通常是：
 
 - 调用本 Agent 的 `/a2a/perception-result`、`/demo/frame` 或 `/demo/start`。
-- 读取返回的 `artifact.tracks`、`artifact.threats`、`artifact.groups`、`artifact.protected_assets`、`artifact.asset_impacts` 和 `artifact.unified_threat_ranking`。
+- 读取返回的 `artifact.tracks`、`artifact.threats`、`artifact.groups`、`artifact.protected_assets`、`artifact.asset_impacts`、`artifact.unified_threat_ranking` 和 `artifact.decision_risk_assessments`。
 - 将这些结果映射到 AMOS 的资产、威胁、编组、保护资产或事件总线模型。
 - 如果 AMOS 前端要展示航迹和编组，还需要读取 `history_path`、`predicted_path`、`envelope`、`centroid_prediction` 等字段。
 
@@ -206,6 +231,7 @@ TrackGroup             -> AMOS group/formation overlay
 ProtectedAsset         -> AMOS protected asset
 AssetImpactAssessment  -> AMOS protected-asset impact list/line
 artifact.events[]      -> AMOS Event Bus events
+decision_risk_assessments -> 下游 lzh 决策/合规 Agent 的 RiskAssessment 输入
 ```
 
 如果 AMOS 前端已经有地图和右侧列表，可以直接消费本 Agent 返回的 `events` 或 `artifact`；如果 AMOS 前端暂时不支持预测线和编组包络，则需要在 AMOS 前端新增对应图层。
@@ -224,6 +250,7 @@ artifact.events[]      -> AMOS Event Bus events
     "threats": [],
     "groups": [],
     "unified_threat_ranking": [],
+    "decision_risk_assessments": [],
     "events": [],
     "summary": {}
   }
