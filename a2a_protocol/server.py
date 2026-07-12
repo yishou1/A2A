@@ -11,7 +11,9 @@ from urllib.parse import urljoin
 
 from a2a_protocol.messages import build_task_error_response, build_task_response
 from observability import exception_diagnostics, log_event
-from resource_monitor import ResourceMonitor
+from resource_monitor import ResourceMonitor, utc_now_iso
+from model_registry import ModelRegistry
+from skill_catalog import professional_skills_for_role
 
 def verify_token(authorization: str = Header(None)):
     if not authorization or not authorization.startswith("Bearer "):
@@ -55,7 +57,13 @@ DEFAULT_ROLE_SKILLS = {
 
 
 def default_skills_for_role(role: str) -> list[dict]:
-    return deepcopy(DEFAULT_ROLE_SKILLS.get(role, []))
+    """Return the built-in demo skills plus the professional capability skills."""
+    skills = deepcopy(DEFAULT_ROLE_SKILLS.get(role, []))
+    known_ids = {skill.get("id") for skill in skills}
+    for professional in professional_skills_for_role(role):
+        if professional.get("id") not in known_ids:
+            skills.append(professional)
+    return skills
 
 
 def skill_tokens(skills: list[dict]) -> list[str]:
@@ -92,6 +100,7 @@ class A2ABaseAgent:
         port: int,
         skills: list[dict] = None,
         resource_monitor=None,
+        models=None,
     ):
         self.name = name
         self.description = description
@@ -101,9 +110,11 @@ class A2ABaseAgent:
         self.started_at = time.time()
         self.ready = True
         self.resource_monitor = resource_monitor or ResourceMonitor()
+        self.model_registry = models if isinstance(models, ModelRegistry) else ModelRegistry(models)
         self._task_response_cache = {}
         self._stream_response_cache = {}
         self._workflow_work_lists = {}
+        self._recovery_notices = []
         self._metrics = {
             "tasks_received": 0,
             "tasks_completed": 0,
@@ -127,6 +138,7 @@ class A2ABaseAgent:
             "description": self.description,
             "role": self.role,
             "skills": deepcopy(self.skills),
+            "models": self.model_registry.list_models(),
             "securitySchemes": {
                 "openIdConnect": {
                     "type": "openIdConnect",
@@ -141,6 +153,8 @@ class A2ABaseAgent:
             "readyEndpoint": "/ready",
             "metricsEndpoint": "/metrics",
             "resourcesEndpoint": "/resources",
+            "modelsEndpoint": "/models",
+            "recoveryEndpoint": "/recovery/notify",
         }
 
     def execute_task(self, payload):
@@ -203,7 +217,66 @@ class A2ABaseAgent:
         return self.resource_monitor.snapshot()
 
     def heartbeat_metadata(self):
-        return self.resource_monitor.heartbeat_metadata()
+        metadata = dict(self.resource_monitor.heartbeat_metadata())
+        metadata.update(self.model_registry.metadata())
+        with self._state_lock:
+            active_tasks = self._metrics["active_tasks"]
+        metadata["agent_run_state"] = "ready" if self.ready else "not_ready"
+        metadata["task_execution_status"] = "busy" if active_tasks > 0 else "idle"
+        metadata["active_tasks"] = str(active_tasks)
+        return metadata
+
+    def notify_recovery(self, notice: dict) -> dict:
+        """Handle a scheduler recovery notification after topology/plan changes.
+
+        The scheduler calls this after rebuilding the topology or re-planning
+        tasks so the Agent knows to continue executing.
+        """
+        notice = notice or {}
+        record = {
+            "received_at": utc_now_iso(),
+            "workflow_id": notice.get("workflow_id"),
+            "action": notice.get("action", "resume"),
+            "reason": notice.get("reason"),
+            "detail": deepcopy(notice.get("detail")) if notice.get("detail") else None,
+        }
+        with self._state_lock:
+            self._recovery_notices.append(record)
+            if len(self._recovery_notices) > 100:
+                self._recovery_notices = self._recovery_notices[-100:]
+            if notice.get("reset_cache"):
+                workflow_id = notice.get("workflow_id")
+                if workflow_id:
+                    self._task_response_cache = {
+                        key: value
+                        for key, value in self._task_response_cache.items()
+                        if value.get("workflow_id") != workflow_id
+                    }
+                    self._stream_response_cache.clear()
+                else:
+                    self._task_response_cache.clear()
+                    self._stream_response_cache.clear()
+        # Recovery notifications always return the Agent to a ready state so it
+        # can resume executing the re-planned workflow.
+        self.ready = True
+        log_event(
+            "agent_recovery_notified",
+            agent=self.name,
+            role=self.role,
+            workflow_id=record["workflow_id"],
+            action=record["action"],
+        )
+        return {
+            "acknowledged": True,
+            "agent": self.name,
+            "role": self.role,
+            "ready": self.ready,
+            "recovery": record,
+        }
+
+    def recovery_notices(self) -> list:
+        with self._state_lock:
+            return deepcopy(self._recovery_notices)
 
     def can_accept_task(self):
         if not self.ready:
@@ -281,6 +354,29 @@ class A2ABaseAgent:
                 "role": self.role,
                 "port": self.port,
                 **self.resource_snapshot(),
+            }
+
+        @self.app.get("/models")
+        async def models():
+            return {
+                "agent": self.name,
+                "role": self.role,
+                **self.model_registry.snapshot(),
+            }
+
+        @self.app.post("/recovery/notify")
+        async def recovery_notify(payload: dict):
+            return self.notify_recovery(payload)
+
+        @self.app.get("/recovery/status")
+        async def recovery_status():
+            notices = self.recovery_notices()
+            return {
+                "agent": self.name,
+                "role": self.role,
+                "ready": self.ready,
+                "recovery_notices": notices,
+                "last_recovery": notices[-1] if notices else None,
             }
 
         @self.app.get("/.well-known/agent-card")

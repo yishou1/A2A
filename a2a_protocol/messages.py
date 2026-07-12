@@ -41,6 +41,8 @@ def build_task_response(
     attempts: int = 1,
     cached: bool = False,
     error_code: Optional[str] = None,
+    model_result: Optional[Dict[str, Any]] = None,
+    log_id: Optional[str] = None,
     extra: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
@@ -59,6 +61,10 @@ def build_task_response(
     }
     if error_code is not None:
         payload["error_code"] = error_code
+    if model_result is not None:
+        payload["model_result"] = deepcopy(model_result)
+    if log_id is not None:
+        payload["log_id"] = log_id
     if work_list_size is not None:
         payload["work_list_size"] = work_list_size
     if extra:

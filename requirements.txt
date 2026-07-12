@@ -6,3 +6,6 @@ redis>=5.0,<7.0
 nacos-sdk-python<2.0.0
 sseclient-py
 psutil>=5.9,<8.0
+# Optional: enables GPU utilization reporting in resource_monitor. The monitor
+# degrades gracefully (gpu.available=false) when this is not installed.
+# nvidia-ml-py>=12.0

@@ -1,5 +1,6 @@
 from a2a_protocol.server import A2ABaseAgent, skills_metadata
 from registry.nacos_manager import NacosRegistry, get_host_ip
+from model_registry import build_model
 import os
 
 if __name__ == "__main__":
@@ -9,7 +10,15 @@ if __name__ == "__main__":
         name="Evaluator_Agent",
         description="Evaluates the battle outcome to trigger replanning.",
         role="evaluator",
-        port=port
+        port=port,
+        models=[
+            build_model(
+                "threat_eval_v1",
+                name="Threat & Strike Evaluation Model",
+                model_type="evaluation",
+                tags=["threat_evaluation", "strike_effect_evaluation"],
+            ),
+        ],
     )
     
     registry = NacosRegistry()

@@ -1,5 +1,6 @@
 from a2a_protocol.server import A2ABaseAgent, skills_metadata
 from registry.nacos_manager import NacosRegistry, get_host_ip
+from model_registry import build_model
 import asyncio
 import json
 import os
@@ -22,7 +23,15 @@ if __name__ == "__main__":
         name="Artillery_Agent",
         description="Assigned heavy artillery forces for beach suppression.",
         role="artillery",
-        port=port
+        port=port,
+        models=[
+            build_model(
+                "fire_control_v1",
+                name="Fire Control Model",
+                model_type="target_assignment",
+                tags=["target_assignment", "route_planning"],
+            ),
+        ],
     )
     
     registry = NacosRegistry()
