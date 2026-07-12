@@ -101,10 +101,6 @@ class A2ABaseAgent:
         self.started_at = time.time()
         self.ready = True
         self.resource_monitor = resource_monitor or ResourceMonitor()
-        self.reject_when_resource_critical = (
-            os.environ.get("A2A_REJECT_WHEN_RESOURCE_CRITICAL", "true").lower()
-            not in {"0", "false", "no", "off"}
-        )
         self._task_response_cache = {}
         self._stream_response_cache = {}
         self._workflow_work_lists = {}
@@ -197,7 +193,6 @@ class A2ABaseAgent:
                 "role": self.role,
                 "port": self.port,
                 "ready": self.ready,
-                "resource_ready": self.resource_ready(),
                 "uptime_seconds": round(time.time() - self.started_at, 3),
                 "resources": resource_snapshot,
             }
@@ -207,17 +202,12 @@ class A2ABaseAgent:
     def resource_snapshot(self):
         return self.resource_monitor.snapshot()
 
-    def resource_ready(self):
-        return self.resource_monitor.ready()
-
     def heartbeat_metadata(self):
         return self.resource_monitor.heartbeat_metadata()
 
     def can_accept_task(self):
         if not self.ready:
             return False, "agent is not ready", "AGENT_NOT_READY"
-        if self.reject_when_resource_critical and not self.resource_ready():
-            return False, "agent resource state is critical", "AGENT_RESOURCE_EXHAUSTED"
         return True, None, None
 
     def last_error_diagnostics(self):
@@ -250,11 +240,10 @@ class A2ABaseAgent:
         async def health():
             resources = self.resource_snapshot()
             return {
-                "status": "ok" if resources.get("resource_state") != "critical" else "degraded",
+                "status": "ok",
                 "agent": self.name,
                 "role": self.role,
                 "uptime_seconds": round(time.time() - self.started_at, 3),
-                "resource_state": resources.get("resource_state"),
                 "resource_monitor_available": resources.get("monitor_available"),
             }
 
@@ -264,13 +253,12 @@ class A2ABaseAgent:
                 active_tasks = self._metrics["active_tasks"]
             resources = self.resource_snapshot()
             return {
-                "ready": self.ready and resources.get("resource_state") != "critical",
+                "ready": self.ready,
                 "agent": self.name,
                 "role": self.role,
                 "active_tasks": active_tasks,
                 "manual_ready": self.ready,
-                "resource_ready": resources.get("resource_state") != "critical",
-                "resource_state": resources.get("resource_state"),
+                "resource_monitor_available": resources.get("monitor_available"),
             }
 
         @self.app.post("/lifecycle/ready")

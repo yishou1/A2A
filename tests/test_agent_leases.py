@@ -100,15 +100,16 @@ class AgentLeaseManagerTest(unittest.TestCase):
         )
         self.assertNotIn("lease_workflow_id", acquired.target["metadata"])
 
-    def test_critical_resource_agent_is_not_leased(self):
+    def test_resource_metadata_does_not_block_leasing(self):
         registry = FakeRegistry()
-        registry.instances[0]["metadata"]["resource_state"] = "critical"
+        registry.instances[0]["metadata"]["resource_cpu_percent"] = 99.0
+        registry.instances[0]["metadata"]["resource_memory_percent"] = 96.0
         leases = AgentLeaseManager(registry)
 
         acquired = leases.acquire_one("recon", "wf-1", "wf-1:1:recon")
 
-        self.assertEqual(acquired.instance_key, "10.0.0.2:8013")
-        self.assertEqual(registry.instances[0]["metadata"]["status"], "idle")
+        self.assertEqual(acquired.instance_key, "10.0.0.1:8012")
+        self.assertEqual(registry.instances[0]["metadata"]["status"], "busy")
 
     def test_acquire_matches_required_skill_without_role_fallback(self):
         registry = FakeRegistry()
