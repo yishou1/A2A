@@ -1,5 +1,6 @@
 import requests
 import sseclient
+import os
 from typing import Dict, Any
 
 from a2a_protocol.messages import is_success_response
@@ -31,6 +32,11 @@ class A2AClient:
 
     def authenticate(self, client_id="commander", client_secret="secret"):
         """2. Authentication: Parse Agent Card and request JWT"""
+        configured_token = os.environ.get("A2A_AUTH_TOKEN")
+        if configured_token:
+            self.jwt_token = configured_token
+            return self.jwt_token
+
         if not self.agent_card:
             self.discover()
             

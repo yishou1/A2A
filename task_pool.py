@@ -100,60 +100,67 @@ class _CrossProcessFileLock:
         self._handle = None
 
 
-class JsonTaskPool:
-    """
-    File-backed crowd task pool used by Commander and Agents.
+def _initial_task_pool_state() -> dict:
+    return {"version": 1, "tasks": {}, "events": []}
 
-    Supports optional Redis distributed lock for cross-machine mutual
-    exclusion, Supervisor-backed heartbeat checking during result wait,
-    and per-Agent circuit breaker recording on result submission.
+
+def _normalize_task_pool_state(state: dict | None) -> dict:
+    if not isinstance(state, dict):
+        state = _initial_task_pool_state()
+    state.setdefault("version", 1)
+    state.setdefault("tasks", {})
+    state.setdefault("events", [])
+    return state
+
+
+class TaskPoolStateStore:
+    """Storage boundary for TaskPool state.
+
+    Implementations yield a mutable state dict and persist it when the context
+    exits successfully. This keeps scheduling logic independent from JSON/DB/Redis.
     """
+
+    path: str = ""
+
+    @contextmanager
+    def locked_state(self):
+        raise NotImplementedError
+
+
+class InMemoryTaskPoolStateStore(TaskPoolStateStore):
+    """Process-local store useful for tests and embedded demos."""
+
+    def __init__(self, initial_state: dict | None = None):
+        self.path = "<memory>"
+        self._state = _normalize_task_pool_state(deepcopy(initial_state))
+        self._lock = threading.RLock()
+
+    @contextmanager
+    def locked_state(self):
+        with self._lock:
+            yield self._state
+
+
+class JsonFileTaskPoolStateStore(TaskPoolStateStore):
+    """JSON-file backed store with local file locking and optional distributed lock."""
 
     def __init__(
         self,
-        path: str | Path | None = None,
+        path: str | Path,
         *,
-        lease_seconds: float = 60.0,
-        supervisor: SupervisorStore | None = None,
-        supervisor_required: bool | None = None,
         distributed_lock: "RedisDistributedLock | None" = None,
-        heartbeat_check_interval: float | None = None,
     ):
-        default_path = Path(__file__).resolve().parent / ".a2a_state" / "task_pool.json"
-        self.path = Path(path or os.environ.get("A2A_TASK_POOL_PATH") or default_path)
-        self.lease_seconds = float(lease_seconds)
+        self.path = Path(path)
         self.lock_path = self.path.with_suffix(self.path.suffix + ".lock")
         self._thread_lock = threading.RLock()
-        self.supervisor = supervisor if supervisor is not None else supervisor_from_env()
-        self.supervisor_required = (
-            bool(supervisor_required)
-            if supervisor_required is not None
-            else os.environ.get("A2A_SUPERVISOR_REQUIRED", "false").lower()
-            in {"1", "true", "yes", "on"}
-        )
-        # ── distributed lock (optional, for cross-machine safety) ──
         self._distributed_lock = distributed_lock
         self._distributed_lock_handle: object | None = None
         self._distributed_lock_depth: int = 0
-        # ── heartbeat check during wait_for_result ──
-        self._heartbeat_check_interval = float(
-            heartbeat_check_interval
-            if heartbeat_check_interval is not None
-            else os.environ.get("A2A_CROWD_HEARTBEAT_CHECK_INTERVAL", "2")
-        )
-
-    @classmethod
-    def from_env(cls) -> "JsonTaskPool":
-        return cls(
-            os.environ.get("A2A_TASK_POOL_PATH"),
-            lease_seconds=float(os.environ.get("A2A_TASK_LEASE_SECONDS", "60")),
-        )
 
     @contextmanager
-    def _locked_state(self):
+    def locked_state(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._thread_lock:
-            # ── distributed lock path (cross-machine) ──
             if self._distributed_lock is not None:
                 if self._distributed_lock_depth == 0:
                     handle = self._distributed_lock.acquire("a2a:task-pool:state")
@@ -170,7 +177,6 @@ class JsonTaskPool:
                         self._distributed_lock_handle = None
                 return
 
-            # ── file lock path (single-machine) ──
             with _CrossProcessFileLock(self.lock_path):
                 state = self._load_unlocked()
                 yield state
@@ -178,21 +184,89 @@ class JsonTaskPool:
 
     def _load_unlocked(self) -> dict:
         if not self.path.exists():
-            return {"version": 1, "tasks": {}}
+            return _initial_task_pool_state()
         try:
             with self.path.open("r", encoding="utf-8") as handle:
                 state = json.load(handle)
         except json.JSONDecodeError:
-            state = {"version": 1, "tasks": {}}
-        state.setdefault("version", 1)
-        state.setdefault("tasks", {})
-        return state
+            state = _initial_task_pool_state()
+        return _normalize_task_pool_state(state)
 
     def _save_unlocked(self, state: dict) -> None:
         tmp_path = self.path.with_suffix(self.path.suffix + ".tmp")
         with tmp_path.open("w", encoding="utf-8") as handle:
             json.dump(state, handle, ensure_ascii=False, indent=2)
         os.replace(tmp_path, self.path)
+
+
+class JsonTaskPool:
+    """
+    File-backed crowd task pool used by Commander and Agents.
+
+    Supports optional Redis distributed lock for cross-machine mutual
+    exclusion, Supervisor-backed heartbeat checking during result wait,
+    and per-Agent circuit breaker recording on result submission.
+    """
+
+    def __init__(
+        self,
+        path: str | Path | None = None,
+        *,
+        state_store: TaskPoolStateStore | None = None,
+        lease_seconds: float = 60.0,
+        supervisor: SupervisorStore | None = None,
+        supervisor_required: bool | None = None,
+        distributed_lock: "RedisDistributedLock | None" = None,
+        heartbeat_check_interval: float | None = None,
+    ):
+        default_path = Path(__file__).resolve().parent / ".a2a_state" / "task_pool.json"
+        if state_store is None:
+            state_store = JsonFileTaskPoolStateStore(
+                path or os.environ.get("A2A_TASK_POOL_PATH") or default_path,
+                distributed_lock=distributed_lock,
+            )
+        self._state_store = state_store
+        self.path = getattr(state_store, "path", "")
+        self.lease_seconds = float(lease_seconds)
+        self.supervisor = supervisor if supervisor is not None else supervisor_from_env()
+        self.supervisor_required = (
+            bool(supervisor_required)
+            if supervisor_required is not None
+            else os.environ.get("A2A_SUPERVISOR_REQUIRED", "false").lower()
+            in {"1", "true", "yes", "on"}
+        )
+        # ── heartbeat check during wait_for_result ──
+        self._heartbeat_check_interval = float(
+            heartbeat_check_interval
+            if heartbeat_check_interval is not None
+            else os.environ.get("A2A_CROWD_HEARTBEAT_CHECK_INTERVAL", "2")
+        )
+
+    @classmethod
+    def from_env(cls):
+        task_pool_url = os.environ.get("A2A_TASK_POOL_URL")
+        if task_pool_url:
+            return TaskPoolClient.from_env()
+        return cls(
+            os.environ.get("A2A_TASK_POOL_PATH"),
+            lease_seconds=float(os.environ.get("A2A_TASK_LEASE_SECONDS", "60")),
+        )
+
+    @contextmanager
+    def _locked_state(self):
+        with self._state_store.locked_state() as state:
+            yield state
+
+    def _load_unlocked(self) -> dict:
+        if hasattr(self._state_store, "_load_unlocked"):
+            return self._state_store._load_unlocked()
+        raise RuntimeError("state store does not expose unlocked load")
+
+    def _save_unlocked(self, state: dict) -> None:
+        if hasattr(self._state_store, "_save_unlocked"):
+            self._state_store._save_unlocked(state)
+            return
+        raise RuntimeError("state store does not expose unlocked save")
 
     @staticmethod
     def _task_id_for_work_item(work_item: str) -> str:
@@ -221,6 +295,103 @@ class JsonTaskPool:
         if not available:
             return False
         return required.issubset(available)
+
+    @staticmethod
+    def _record_event(state: dict, event_type: str, task: dict, **fields) -> dict:
+        events = state.setdefault("events", [])
+        event = {
+            "event_id": f"evt-{len(events) + 1}",
+            "type": event_type,
+            "task_id": task.get("task_id"),
+            "workflow_id": task.get("workflow_id"),
+            "work_item": task.get("work_item"),
+            "created_at": utc_now_iso(),
+        }
+        event.update({key: value for key, value in fields.items() if value is not None})
+        events.append(event)
+        return event
+
+    @staticmethod
+    def _normalize_completion_policy(
+        payload: dict,
+        *,
+        max_claims: int,
+        min_results: int,
+        completion_policy: dict | str | None = None,
+    ) -> dict:
+        raw_policy = (
+            completion_policy
+            or payload.get("completionPolicy")
+            or payload.get("completion_policy")
+            or {}
+        )
+        if isinstance(raw_policy, str):
+            raw_policy = {"type": raw_policy}
+        if not isinstance(raw_policy, dict):
+            raw_policy = {}
+
+        policy_type = str(raw_policy.get("type") or "first_success").strip().lower()
+        policy_type = policy_type.replace("-", "_")
+        if policy_type in {"first", "any_success"}:
+            policy_type = "first_success"
+        if policy_type not in {
+            "first_success",
+            "wait_all",
+            "min_results",
+            "majority_vote",
+            "best_score",
+        }:
+            policy_type = "first_success"
+
+        max_claims = max(1, int(max_claims or 1))
+        configured_min = (
+            raw_policy.get("min_results")
+            or raw_policy.get("minResults")
+            or raw_policy.get("quorum")
+            or min_results
+        )
+        configured_min = max(1, int(configured_min or 1))
+        if policy_type == "first_success":
+            effective_min = 1
+        elif policy_type == "wait_all":
+            effective_min = max_claims
+        elif policy_type == "majority_vote":
+            effective_min = max_claims // 2 + 1
+        elif policy_type == "best_score":
+            effective_min = 1
+        else:
+            effective_min = min(configured_min, max_claims)
+
+        return {
+            "type": policy_type,
+            "min_results": effective_min,
+            "max_claims": max_claims,
+        }
+
+    @staticmethod
+    def _task_status_for_policy(task: dict) -> str:
+        policy = task.get("completion_policy") or {"type": "first_success"}
+        policy_type = policy.get("type") or "first_success"
+        max_claims = int(task.get("max_claims") or policy.get("max_claims") or 1)
+        min_results = int(task.get("min_results") or policy.get("min_results") or 1)
+        completed_count = sum(1 for item in task.get("results", []) if item.get("status") == "completed")
+        failed_count = sum(1 for item in task.get("results", []) if item.get("status") == "failed")
+        terminal_count = completed_count + failed_count
+
+        if policy_type == "wait_all":
+            if terminal_count < max_claims:
+                return "pending"
+            return "completed" if completed_count == max_claims else "failed"
+        if policy_type == "best_score":
+            if terminal_count < max_claims:
+                return "pending"
+            return "completed" if completed_count >= 1 else "failed"
+
+        if completed_count >= min_results:
+            return "completed"
+        if terminal_count >= max_claims:
+            return "failed"
+        return "pending"
 
     @staticmethod
     def _expire_task_claims(task: dict, now_ts: float) -> bool:
@@ -256,12 +427,21 @@ class JsonTaskPool:
         stream: bool = False,
         max_claims: int = 1,
         min_results: int = 1,
+        completion_policy: dict | str | None = None,
     ) -> dict:
         work_item = payload.get("work_item")
         if not work_item:
             raise ValueError("crowd task payload must include work_item")
         task_id = self._task_id_for_work_item(work_item)
         required_skills = self._required_skills_from_payload(payload)
+        max_claims = max(1, int(max_claims or 1))
+        completion_policy = self._normalize_completion_policy(
+            payload,
+            max_claims=max_claims,
+            min_results=min_results,
+            completion_policy=completion_policy,
+        )
+        min_results = completion_policy["min_results"]
         now = utc_now_iso()
         with self._locked_state() as state:
             tasks = state.setdefault("tasks", {})
@@ -271,8 +451,9 @@ class JsonTaskPool:
                 existing["required_skill"] = required_skills[0] if required_skills else None
                 existing["required_skills"] = list(required_skills)
                 existing["stream"] = bool(stream)
-                existing["max_claims"] = max(1, int(max_claims or 1))
-                existing["min_results"] = max(1, int(min_results or 1))
+                existing["max_claims"] = max_claims
+                existing["min_results"] = min_results
+                existing["completion_policy"] = deepcopy(completion_policy)
                 existing["resource_requirements"] = deepcopy(payload.get("resource_requirements", {}))
                 existing["updated_at"] = now
                 return deepcopy(existing)
@@ -293,14 +474,16 @@ class JsonTaskPool:
                 "payload": deepcopy(payload),
                 "stream": bool(stream),
                 "status": "pending",
-                "max_claims": max(1, int(max_claims or 1)),
-                "min_results": max(1, int(min_results or 1)),
+                "max_claims": max_claims,
+                "min_results": min_results,
+                "completion_policy": deepcopy(completion_policy),
                 "claims": [],
                 "results": [],
                 "created_at": now,
                 "updated_at": now,
             }
             tasks[task_id] = task
+            self._record_event(state, "task.created", task)
             return deepcopy(task)
 
     def list_available(self, *, agent_skills: Any = None, workflow_id: str | None = None) -> list[dict]:
@@ -401,10 +584,42 @@ class JsonTaskPool:
             task["status"] = "claimed"
             task["claimed_by"] = agent_id
             task["updated_at"] = utc_now_iso()
-            self.supervisor.task_started(
+            start_result = self.supervisor.task_started(
                 agent_id,
                 task_id=task_id,
                 work_item=task.get("work_item"),
+            )
+            start_failed = (
+                not start_result
+                or start_result.get("allowed") is False
+                or start_result.get("reason") in {"supervisor_unavailable", "agent_not_registered"}
+            )
+            if start_failed and self.supervisor_required:
+                task["claims"] = [
+                    item
+                    for item in task.get("claims", [])
+                    if item.get("claim_id") != claim_id
+                ]
+                if not [
+                    item
+                    for item in task.get("claims", [])
+                    if item.get("status") in {"claimed", "running"}
+                ]:
+                    task["status"] = "pending"
+                    task.pop("claimed_by", None)
+                task["updated_at"] = utc_now_iso()
+                return {
+                    "claimed": False,
+                    "reason": (start_result or {}).get("reason") or "supervisor_start_failed",
+                    "supervisor": start_result,
+                }
+            self._record_event(
+                state,
+                "task.claimed",
+                task,
+                claim_id=claim_id,
+                agent_id=agent_id,
+                lease_until=claim["lease_until"],
             )
             claim_payload = deepcopy(task.get("payload", {}))
             claim_payload["crowd_task_id"] = task_id
@@ -482,6 +697,22 @@ class JsonTaskPool:
                     return {"submitted": False, "reason": "claim_not_found"}
                 if matching_claim.get("agent_id") != agent_id:
                     return {"submitted": False, "reason": "agent_mismatch"}
+                existing_result = next(
+                    (
+                        item
+                        for item in task.get("results", [])
+                        if item.get("claim_id") == claim_id
+                        and item.get("agent_id") == agent_id
+                    ),
+                    None,
+                )
+                if existing_result is not None:
+                    return {
+                        "submitted": True,
+                        "idempotent": True,
+                        "result": deepcopy(existing_result),
+                        "task": deepcopy(task),
+                    }
                 if matching_claim.get("status") in TERMINAL_STATUSES:
                     return {
                         "submitted": False,
@@ -534,24 +765,35 @@ class JsonTaskPool:
                 else:
                     error_msg = (response or {}).get("error") or (response or {}).get("message") or "unknown"
                     self.supervisor.record_agent_failure(agent_id, error_message=str(error_msg))
-            completed_count = sum(1 for item in task.get("results", []) if item.get("status") == "completed")
-            failed_count = sum(1 for item in task.get("results", []) if item.get("status") == "failed")
-            min_results = int(task.get("min_results") or 1)
-            max_claims = int(task.get("max_claims") or 1)
-            if completed_count >= min_results:
-                task["status"] = "completed"
-            elif completed_count + failed_count >= max_claims:
-                task["status"] = "failed"
-            else:
-                task["status"] = "pending"
+            task["status"] = self._task_status_for_policy(task)
             task["updated_at"] = utc_now_iso()
+            self._record_event(
+                state,
+                "task.completed" if success else "task.failed",
+                task,
+                claim_id=claim_id,
+                agent_id=agent_id,
+                result_status=result["status"],
+                error_code=result.get("error_code"),
+                error_category=result.get("error_category"),
+            )
             return {"submitted": True, "task": deepcopy(task)}
 
     @staticmethod
     def _aggregate_task_response(task: dict) -> dict | None:
+        if task.get("status") != "completed":
+            return None
         results = [item for item in task.get("results", []) if item.get("status") == "completed"]
         if not results:
             return None
+        policy_type = (task.get("completion_policy") or {}).get("type")
+        if policy_type == "best_score":
+            def score_of(result: dict) -> float:
+                response = result.get("response") or {}
+                metrics = response.get("metrics") or {}
+                return float(response.get("score") or metrics.get("score") or 0)
+
+            results = sorted(results, key=score_of)
         responses = [deepcopy(item.get("response") or {}) for item in results]
         if len(responses) == 1:
             response = responses[0]
@@ -635,3 +877,310 @@ class JsonTaskPool:
             if _now_ts() >= deadline:
                 return False, None, last_task
             time.sleep(max(0.05, float(poll_interval)))
+
+    def list_events(
+        self,
+        *,
+        workflow_id: str | None = None,
+        task_id: str | None = None,
+        work_item: str | None = None,
+        event_type: str | None = None,
+    ) -> list[dict]:
+        with self._locked_state() as state:
+            events = []
+            for event in state.setdefault("events", []):
+                if workflow_id and event.get("workflow_id") != workflow_id:
+                    continue
+                if task_id and event.get("task_id") != task_id:
+                    continue
+                if work_item and event.get("work_item") != work_item:
+                    continue
+                if event_type and event.get("type") != event_type:
+                    continue
+                events.append(deepcopy(event))
+            return events
+
+
+class TaskPoolClient:
+    """HTTP client for the service-backed TaskPool."""
+
+    def __init__(self, base_url: str, *, timeout: float = 5.0, auth_token: str | None = None):
+        self.base_url = base_url.rstrip("/")
+        self.timeout = float(timeout)
+        self.auth_token = auth_token
+
+    @classmethod
+    def from_env(cls) -> "TaskPoolClient":
+        base_url = os.environ.get("A2A_TASK_POOL_URL")
+        if not base_url:
+            raise ValueError("A2A_TASK_POOL_URL is required for TaskPoolClient")
+        return cls(
+            base_url,
+            timeout=float(os.environ.get("A2A_TASK_POOL_TIMEOUT", "5")),
+            auth_token=os.environ.get("A2A_TASK_POOL_AUTH_TOKEN"),
+        )
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        payload: dict | None = None,
+        *,
+        params: dict | None = None,
+    ) -> dict:
+        import requests
+
+        headers = {}
+        if self.auth_token:
+            headers["Authorization"] = f"Bearer {self.auth_token}"
+        response = requests.request(
+            method,
+            f"{self.base_url}{path}",
+            json=payload,
+            params=params,
+            headers=headers,
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def publish(
+        self,
+        payload: dict,
+        *,
+        stream: bool = False,
+        max_claims: int = 1,
+        min_results: int = 1,
+        completion_policy: dict | str | None = None,
+    ) -> dict:
+        return self._request(
+            "POST",
+            "/tasks",
+            {
+                "payload": payload,
+                "stream": stream,
+                "max_claims": max_claims,
+                "min_results": min_results,
+                "completion_policy": completion_policy,
+            },
+        )
+
+    def claim_next(
+        self,
+        *,
+        agent_id: str,
+        agent_skills: Any,
+        workflow_id: str | None = None,
+    ) -> dict:
+        return self._request(
+            "POST",
+            "/tasks/claim-next",
+            {
+                "agent_id": agent_id,
+                "agent_skills": agent_skills,
+                "workflow_id": workflow_id,
+            },
+        )
+
+    def claim(
+        self,
+        task_id: str,
+        *,
+        agent_id: str,
+        agent_skills: Any,
+        lease_seconds: float | None = None,
+    ) -> dict:
+        return self._request(
+            "POST",
+            f"/tasks/{task_id}/claim",
+            {
+                "agent_id": agent_id,
+                "agent_skills": agent_skills,
+                "lease_seconds": lease_seconds,
+            },
+        )
+
+    def renew_claim(
+        self,
+        task_id: str,
+        *,
+        claim_id: str,
+        agent_id: str,
+        lease_seconds: float | None = None,
+    ) -> dict:
+        return self._request(
+            "POST",
+            f"/tasks/{task_id}/renew",
+            {
+                "claim_id": claim_id,
+                "agent_id": agent_id,
+                "lease_seconds": lease_seconds,
+            },
+        )
+
+    def submit_result(
+        self,
+        task_id: str,
+        *,
+        claim_id: str | None,
+        agent_id: str,
+        response: dict,
+    ) -> dict:
+        return self._request(
+            "POST",
+            f"/tasks/{task_id}/result",
+            {
+                "claim_id": claim_id,
+                "agent_id": agent_id,
+                "response": response,
+            },
+        )
+
+    def get_task(self, task_id: str) -> dict | None:
+        response = self._request("GET", f"/tasks/{task_id}")
+        return response.get("task")
+
+    def get_task_by_work_item(self, work_item: str) -> dict | None:
+        response = self._request("GET", "/tasks/by-work-item", params={"work_item": work_item})
+        return response.get("task")
+
+    def list_events(
+        self,
+        *,
+        workflow_id: str | None = None,
+        task_id: str | None = None,
+        work_item: str | None = None,
+        event_type: str | None = None,
+    ) -> list[dict]:
+        response = self._request(
+            "GET",
+            "/events",
+            params={
+                "workflow_id": workflow_id,
+                "task_id": task_id,
+                "work_item": work_item,
+                "event_type": event_type,
+            },
+        )
+        return response.get("events", [])
+
+    def wait_for_result(
+        self,
+        work_item: str,
+        *,
+        timeout_seconds: float,
+        poll_interval: float = 0.5,
+    ) -> tuple[bool, dict | None, dict | None]:
+        deadline = _now_ts() + float(timeout_seconds)
+        last_task = None
+        while True:
+            task = self.get_task_by_work_item(work_item)
+            last_task = task
+            if task:
+                response = JsonTaskPool._aggregate_task_response(task)
+                if response:
+                    return True, response, task
+                if task.get("status") in {"failed", "cancelled"}:
+                    return False, None, task
+            if _now_ts() >= deadline:
+                return False, None, last_task
+            time.sleep(max(0.05, float(poll_interval)))
+
+
+def build_task_pool_app(pool: JsonTaskPool | None = None):
+    from fastapi import Depends, FastAPI, Header, HTTPException
+
+    def verify_task_pool_token(authorization: str = Header(None)):
+        expected = os.environ.get("A2A_TASK_POOL_AUTH_TOKEN")
+        if not expected:
+            return None
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        token = authorization.split("Bearer ", 1)[1]
+        if token != expected:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        return token
+
+    pool = pool or JsonTaskPool.from_env()
+    app = FastAPI(title="A2A TaskPool", dependencies=[Depends(verify_task_pool_token)])
+
+    @app.get("/health")
+    async def health():
+        return {"status": "ok", "store": str(getattr(pool, "path", ""))}
+
+    @app.post("/tasks")
+    async def publish_task(payload: dict):
+        return pool.publish(
+            payload.get("payload") or {},
+            stream=bool(payload.get("stream", False)),
+            max_claims=int(payload.get("max_claims") or 1),
+            min_results=int(payload.get("min_results") or 1),
+            completion_policy=payload.get("completion_policy") or payload.get("completionPolicy"),
+        )
+
+    @app.post("/tasks/claim-next")
+    async def claim_next(payload: dict):
+        return pool.claim_next(
+            agent_id=payload.get("agent_id"),
+            agent_skills=payload.get("agent_skills"),
+            workflow_id=payload.get("workflow_id"),
+        )
+
+    @app.post("/tasks/{task_id}/claim")
+    async def claim_task(task_id: str, payload: dict):
+        return pool.claim(
+            task_id,
+            agent_id=payload.get("agent_id"),
+            agent_skills=payload.get("agent_skills"),
+            lease_seconds=payload.get("lease_seconds"),
+        )
+
+    @app.post("/tasks/{task_id}/renew")
+    async def renew_claim(task_id: str, payload: dict):
+        return pool.renew_claim(
+            task_id,
+            claim_id=payload.get("claim_id"),
+            agent_id=payload.get("agent_id"),
+            lease_seconds=payload.get("lease_seconds"),
+        )
+
+    @app.post("/tasks/{task_id}/result")
+    async def submit_result(task_id: str, payload: dict):
+        return pool.submit_result(
+            task_id,
+            claim_id=payload.get("claim_id"),
+            agent_id=payload.get("agent_id"),
+            response=payload.get("response") or {},
+        )
+
+    @app.get("/tasks/by-work-item")
+    async def get_task_by_work_item(work_item: str):
+        task = pool.get_task_by_work_item(work_item)
+        if not task:
+            raise HTTPException(status_code=404, detail="task not found")
+        return {"task": task}
+
+    @app.get("/events")
+    async def list_events(
+        workflow_id: str = None,
+        task_id: str = None,
+        work_item: str = None,
+        event_type: str = None,
+    ):
+        return {
+            "events": pool.list_events(
+                workflow_id=workflow_id,
+                task_id=task_id,
+                work_item=work_item,
+                event_type=event_type,
+            )
+        }
+
+    @app.get("/tasks/{task_id}")
+    async def get_task(task_id: str):
+        task = pool.get_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="task not found")
+        return {"task": task}
+
+    return app

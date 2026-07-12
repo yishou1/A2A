@@ -622,24 +622,33 @@ class SupervisorStore:
 class SupervisorClient:
     """HTTP client with the same small surface TaskPool/Agent need."""
 
-    def __init__(self, base_url: str, *, timeout: float = 3.0):
+    def __init__(self, base_url: str, *, timeout: float = 3.0, auth_token: str | None = None):
         self.base_url = base_url.rstrip("/")
         self.timeout = float(timeout)
+        self.auth_token = auth_token
 
     @classmethod
     def from_env(cls) -> "SupervisorClient | None":
         base_url = os.environ.get("A2A_SUPERVISOR_URL")
         if not base_url:
             return None
-        return cls(base_url, timeout=float(os.environ.get("A2A_SUPERVISOR_TIMEOUT", "3")))
+        return cls(
+            base_url,
+            timeout=float(os.environ.get("A2A_SUPERVISOR_TIMEOUT", "3")),
+            auth_token=os.environ.get("A2A_SUPERVISOR_AUTH_TOKEN"),
+        )
 
     def _post(self, path: str, payload: dict):
         try:
             import requests
 
+            headers = {}
+            if self.auth_token:
+                headers["Authorization"] = f"Bearer {self.auth_token}"
             response = requests.post(
                 f"{self.base_url}{path}",
                 json=payload,
+                headers=headers,
                 timeout=self.timeout,
             )
             response.raise_for_status()
@@ -686,17 +695,37 @@ class SupervisorClient:
             {"work_item": work_item},
         )
 
+    def record_agent_success(self, agent_id: str) -> dict:
+        return self._post(f"/agents/{agent_id}/record-success", {})
+
+    def record_agent_failure(self, agent_id: str, *, error_message: str = None) -> dict:
+        return self._post(
+            f"/agents/{agent_id}/record-failure",
+            {"error_message": error_message},
+        )
+
 
 def supervisor_from_env():
     return SupervisorClient.from_env() or SupervisorStore.from_env()
 
 
 def build_supervisor_app(store: SupervisorStore | None = None) -> FastAPI:
-    from fastapi import FastAPI, HTTPException
+    from fastapi import Depends, FastAPI, Header, HTTPException
     from fastapi.responses import HTMLResponse
 
+    def verify_supervisor_token(authorization: str = Header(None)):
+        expected = os.environ.get("A2A_SUPERVISOR_AUTH_TOKEN")
+        if not expected:
+            return None
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        token = authorization.split("Bearer ", 1)[1]
+        if token != expected:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        return token
+
     store = store or SupervisorStore.from_env()
-    app = FastAPI(title="A2A Supervisor")
+    app = FastAPI(title="A2A Supervisor", dependencies=[Depends(verify_supervisor_token)])
 
     @app.get("/health")
     async def health():
@@ -760,6 +789,17 @@ def build_supervisor_app(store: SupervisorStore | None = None) -> FastAPI:
         if not agent:
             raise HTTPException(status_code=404, detail="agent not found")
         return agent
+
+    @app.post("/agents/{agent_id}/record-success")
+    async def record_agent_success(agent_id: str):
+        return store.record_agent_success(agent_id)
+
+    @app.post("/agents/{agent_id}/record-failure")
+    async def record_agent_failure(agent_id: str, payload: dict):
+        return store.record_agent_failure(
+            agent_id,
+            error_message=payload.get("error_message"),
+        )
 
     return app
 

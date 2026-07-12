@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import sys
 import os
 import time
@@ -114,10 +116,13 @@ class CommanderAgent:
             if crowd_poll_interval is not None
             else os.environ.get("A2A_CROWD_POLL_INTERVAL", "0.5")
         )
-        self.task_pool = JsonTaskPool(
-            task_pool_path or os.environ.get("A2A_TASK_POOL_PATH"),
-            distributed_lock=RedisDistributedLock.from_env(),
-        )
+        if os.environ.get("A2A_TASK_POOL_URL") and not task_pool_path:
+            self.task_pool = JsonTaskPool.from_env()
+        else:
+            self.task_pool = JsonTaskPool(
+                task_pool_path or os.environ.get("A2A_TASK_POOL_PATH"),
+                distributed_lock=RedisDistributedLock.from_env(),
+            )
         self.lease_heartbeat_check_interval = float(os.environ.get("A2A_LEASE_HEARTBEAT_CHECK_INTERVAL", "1"))
         self.circuit_breaker = AgentCircuitBreaker(
             failure_threshold=int(os.environ.get("A2A_CIRCUIT_FAILURE_THRESHOLD", "3")),
@@ -2977,6 +2982,11 @@ def parse_args():
         help="Start the Agent supervisor HTTP API and dashboard.",
     )
     parser.add_argument(
+        "--serve-task-pool",
+        action="store_true",
+        help="Start the crowd TaskPool HTTP API.",
+    )
+    parser.add_argument(
         "--recovery-host",
         default="127.0.0.1",
         help="Host used by the recovery HTTP API.",
@@ -3013,6 +3023,17 @@ def parse_args():
         "--supervisor-path",
         default=os.environ.get("A2A_SUPERVISOR_PATH"),
         help="JSON file used by supervisor Agent registry. Defaults to .a2a_state/supervisor.json.",
+    )
+    parser.add_argument(
+        "--task-pool-host",
+        default=os.environ.get("A2A_TASK_POOL_HOST", "127.0.0.1"),
+        help="Host used by the crowd TaskPool HTTP API.",
+    )
+    parser.add_argument(
+        "--task-pool-port",
+        type=int,
+        default=int(os.environ.get("A2A_TASK_POOL_PORT", "8040")),
+        help="Port used by the crowd TaskPool HTTP API.",
     )
     parser.add_argument(
         "--max-workflows",
@@ -3144,6 +3165,15 @@ if __name__ == "__main__":
 
         app = build_supervisor_app(SupervisorStore(args.supervisor_path))
         uvicorn.run(app, host=args.supervisor_host, port=args.supervisor_port)
+        raise SystemExit(0)
+
+    if args.serve_task_pool:
+        import uvicorn
+
+        from task_pool import JsonTaskPool, build_task_pool_app
+
+        app = build_task_pool_app(JsonTaskPool(args.task_pool_path))
+        uvicorn.run(app, host=args.task_pool_host, port=args.task_pool_port)
         raise SystemExit(0)
 
     cmd = CommanderAgent(

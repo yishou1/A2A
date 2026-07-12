@@ -18,7 +18,11 @@ from task_pool import JsonTaskPool
 def verify_token(authorization: str = Header(None)):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Unauthorized")
-    return authorization.split("Bearer ")[1]
+    token = authorization.split("Bearer ", 1)[1]
+    expected = os.environ.get("A2A_AUTH_TOKEN")
+    if expected and token != expected:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return token
 
 DEFAULT_ROLE_SKILLS = {
     "recon": [
@@ -98,6 +102,11 @@ class A2ABaseAgent:
         agent_id: str = None,
         endpoint: str = None,
         max_concurrency: int = None,
+        supervisor_enabled: bool = None,
+        task_pool=None,
+        crowd_worker_enabled: bool = None,
+        crowd_claim_interval: float = None,
+        crowd_workflow_id: str = None,
     ):
         self.name = name
         self.description = description
@@ -112,9 +121,24 @@ class A2ABaseAgent:
         self.resource_monitor = resource_monitor or ResourceMonitor()
         self.supervisor = supervisor if supervisor is not None else supervisor_from_env()
         self.supervisor_enabled = (
-            os.environ.get("A2A_SUPERVISOR_ENABLED", "true").lower()
+            bool(supervisor_enabled)
+            if supervisor_enabled is not None
+            else os.environ.get("A2A_SUPERVISOR_ENABLED", "true").lower()
             not in {"0", "false", "no", "off"}
         )
+        self.task_pool = task_pool
+        self.crowd_worker_enabled = (
+            bool(crowd_worker_enabled)
+            if crowd_worker_enabled is not None
+            else os.environ.get("A2A_CROWD_WORKER_ENABLED", "false").lower()
+            in {"1", "true", "yes", "on"}
+        )
+        self.crowd_claim_interval = float(
+            crowd_claim_interval
+            if crowd_claim_interval is not None
+            else os.environ.get("A2A_CROWD_CLAIM_INTERVAL", "1")
+        )
+        self.crowd_workflow_id = crowd_workflow_id or os.environ.get("A2A_CROWD_WORKFLOW_ID")
         self.supervisor_heartbeat_interval = float(os.environ.get("A2A_SUPERVISOR_HEARTBEAT_INTERVAL", "5"))
         self.max_concurrency = max(
             1,
@@ -122,6 +146,8 @@ class A2ABaseAgent:
         )
         self._supervisor_stop_event = threading.Event()
         self._supervisor_thread = None
+        self._crowd_worker_stop_event = threading.Event()
+        self._crowd_worker_thread = None
         self.reject_when_resource_critical = (
             os.environ.get("A2A_REJECT_WHEN_RESOURCE_CRITICAL", "true").lower()
             not in {"0", "false", "no", "off"}
@@ -310,6 +336,39 @@ class A2ABaseAgent:
         )
         self._supervisor_thread.start()
 
+    def _task_pool(self):
+        if self.task_pool is None:
+            self.task_pool = JsonTaskPool.from_env()
+        return self.task_pool
+
+    def _crowd_worker_loop(self):
+        while not self._crowd_worker_stop_event.wait(self.crowd_claim_interval):
+            try:
+                result = self.claim_and_execute_crowd_task(workflow_id=self.crowd_workflow_id)
+                if not result.get("claimed"):
+                    time.sleep(min(self.crowd_claim_interval, 0.2))
+            except Exception as exc:
+                with self._state_lock:
+                    self._metrics["last_error"] = str(exc)
+                    self._last_error_details = exception_diagnostics(exc)
+
+    def start_crowd_worker(self):
+        if not self.crowd_worker_enabled or self._crowd_worker_thread is not None:
+            return
+        self._crowd_worker_stop_event.clear()
+        self._crowd_worker_thread = threading.Thread(
+            target=self._crowd_worker_loop,
+            name=f"a2a-crowd-worker-{self.agent_id}",
+            daemon=True,
+        )
+        self._crowd_worker_thread.start()
+
+    def stop_crowd_worker(self, timeout: float = 2.0):
+        self._crowd_worker_stop_event.set()
+        if self._crowd_worker_thread is not None:
+            self._crowd_worker_thread.join(timeout=timeout)
+            self._crowd_worker_thread = None
+
     def resource_snapshot(self):
         return self.resource_monitor.snapshot()
 
@@ -379,7 +438,7 @@ class A2ABaseAgent:
                 "role": self.role,
             }
         self.heartbeat_to_supervisor()
-        task_pool = JsonTaskPool.from_env()
+        task_pool = self._task_pool()
         claim = task_pool.claim_next(
             agent_id=self.agent_id,
             agent_skills=skill_tokens(self.skills),
@@ -614,7 +673,7 @@ class A2ABaseAgent:
             }
 
         @self.app.post("/crowd/claim-next")
-        async def crowd_claim_next(payload: dict | None = None, token: str = Depends(verify_token)):
+        async def crowd_claim_next(payload: dict = None, token: str = Depends(verify_token)):
             if not self.ready:
                 return {
                     "claimed": False,
@@ -727,4 +786,5 @@ class A2ABaseAgent:
 
     def start(self):
         self.start_supervisor_heartbeat()
+        self.start_crowd_worker()
         uvicorn.run(self.app, host="0.0.0.0", port=self.port)
