@@ -21,6 +21,7 @@ from commander_agent.distributed_lock import RedisDistributedLock
 from commander_agent.error_classification import classify_agent_error
 from local_runtime import LocalAgentRuntime
 from observability import append_trace, exception_diagnostics, log_event
+from task_pool import JsonTaskPool
 from workflow_state_store import WorkflowStateStore, new_workflow_id, utc_now_iso
 from workflow_payloads import attachment_snapshot, merge_attachments, normalize_attachments
 import json
@@ -60,6 +61,10 @@ class CommanderAgent:
         max_retries: int = None,
         retry_backoff: float = None,
         request_timeout: float = None,
+        agent_dispatch_mode: str = None,
+        task_pool_path: str = None,
+        crowd_timeout: float = None,
+        crowd_poll_interval: float = None,
         registry=None,
         lease_manager=None,
         details: bool = False,
@@ -95,6 +100,24 @@ class CommanderAgent:
         self.max_retries = max(0, int(max_retries if max_retries is not None else os.environ.get("A2A_MAX_RETRIES", "1")))
         self.retry_backoff = float(retry_backoff if retry_backoff is not None else os.environ.get("A2A_RETRY_BACKOFF", "0.2"))
         self.request_timeout = float(request_timeout if request_timeout is not None else os.environ.get("A2A_REQUEST_TIMEOUT", "5"))
+        self.agent_dispatch_mode = (
+            agent_dispatch_mode
+            or os.environ.get("A2A_AGENT_DISPATCH_MODE")
+            or os.environ.get("A2A_DISPATCH_MODE")
+            or "direct"
+        ).lower()
+        if self.agent_dispatch_mode not in {"direct", "crowd"}:
+            raise ValueError("agent_dispatch_mode must be either 'direct' or 'crowd'")
+        self.crowd_timeout = float(crowd_timeout if crowd_timeout is not None else os.environ.get("A2A_CROWD_TIMEOUT", "30"))
+        self.crowd_poll_interval = float(
+            crowd_poll_interval
+            if crowd_poll_interval is not None
+            else os.environ.get("A2A_CROWD_POLL_INTERVAL", "0.5")
+        )
+        self.task_pool = JsonTaskPool(
+            task_pool_path or os.environ.get("A2A_TASK_POOL_PATH"),
+            distributed_lock=RedisDistributedLock.from_env(),
+        )
         self.lease_heartbeat_check_interval = float(os.environ.get("A2A_LEASE_HEARTBEAT_CHECK_INTERVAL", "1"))
         self.circuit_breaker = AgentCircuitBreaker(
             failure_threshold=int(os.environ.get("A2A_CIRCUIT_FAILURE_THRESHOLD", "3")),
@@ -133,6 +156,7 @@ class CommanderAgent:
         self.workflow_context = self.workflow_state["context"]
         print("Commander Agent online. Global Orchestration initiated.")
         print(f"Execution mode: {self.mode}")
+        print(f"Agent dispatch mode: {self.agent_dispatch_mode}")
         print(f"Workflow: {self.workflow} ({self.workflow_id})")
         if self.bpel_definition:
             print(f"BPEL definition: {self.bpel_definition.source_path}")
@@ -151,6 +175,7 @@ class CommanderAgent:
             max_activity_workers=self.max_activity_workers,
             max_agent_workers=self.max_agent_workers,
             max_retries=self.max_retries,
+            agent_dispatch_mode=self.agent_dispatch_mode,
         )
 
     def _trace(self, event_type: str, **fields):
@@ -236,8 +261,18 @@ class CommanderAgent:
             or (context or {}).get("agent_results", {}).get(work_item)
         )
 
-    def delegate_task(self, role_needed: str, task_payload: dict, stream: bool = False):
+    def delegate_task(
+        self,
+        role_needed: str,
+        task_payload: dict,
+        stream: bool = False,
+        *,
+        force_dispatch_mode: str = None,
+    ):
         print(f"\n--- STEP: Resolving next unit for role: {role_needed} ---")
+        dispatch_mode = (force_dispatch_mode or task_payload.get("assignment_mode") or self.agent_dispatch_mode).lower()
+        if dispatch_mode == "crowd":
+            return self.delegate_crowd_task(role_needed, task_payload, stream=stream)
         if self.mode == "local":
             return self.delegate_local_task(role_needed, task_payload, stream=stream)
         
@@ -290,8 +325,18 @@ class CommanderAgent:
         print(f"[ERROR] A2A communication failed after trying {len(instances)} candidates: {last_error}")
         return False
 
-    def delegate_parallel_task(self, role_needed: str, task_payload: dict, stream: bool = False):
+    def delegate_parallel_task(
+        self,
+        role_needed: str,
+        task_payload: dict,
+        stream: bool = False,
+        *,
+        force_dispatch_mode: str = None,
+    ):
         print(f"\n--- PARALLEL STEP: Resolving all units for role: {role_needed} ---")
+        dispatch_mode = (force_dispatch_mode or task_payload.get("assignment_mode") or self.agent_dispatch_mode).lower()
+        if dispatch_mode == "crowd":
+            return self.delegate_crowd_task(role_needed, task_payload, stream=stream, parallel=True)
         if self.mode == "local":
             return self.delegate_local_task(role_needed, task_payload, stream=stream)
 
@@ -354,6 +399,213 @@ class CommanderAgent:
                 failed_count=len(instances) - success_count,
             )
         return success_count > 0
+
+    def delegate_crowd_task(
+        self,
+        role_needed: str,
+        task_payload: dict,
+        stream: bool = False,
+        *,
+        parallel: bool = False,
+    ):
+        work_item = task_payload.get("work_item", f"{self.workflow_id}:{role_needed}")
+        retry_policy = task_payload.get("retry_policy", {}) or {}
+        max_retries = max(0, int(retry_policy.get("max_retries", self.max_retries)))
+        attempt_timeout = float(retry_policy.get("timeout_seconds", self.crowd_timeout))
+        failure_policy = retry_policy.get("failure_policy", "pause")
+        max_claims = max(1, self.max_agent_workers) if parallel else 1
+
+        last_error_msg = None
+        last_task = None
+        attempted = 0
+
+        for attempt in range(max_retries + 1):
+            attempted = attempt + 1
+            task = self.task_pool.publish(
+                task_payload,
+                stream=stream,
+                max_claims=max_claims,
+                min_results=1,
+            )
+            self._trace(
+                "crowd_task_published",
+                role=role_needed,
+                work_item=work_item,
+                task_id=task.get("task_id"),
+                required_skills=task.get("required_skills", []),
+                max_claims=max_claims,
+                parallel=parallel,
+                attempt=attempt + 1,
+                max_attempts=max_retries + 1,
+            )
+            print(
+                f"[CROWD] Published {role_needed} work_item={work_item} "
+                f"task_id={task.get('task_id')} skills={task.get('required_skills', [])}"
+                + (f" (attempt {attempt + 1}/{max_retries + 1})" if max_retries > 0 else "")
+            )
+
+            success, response, completed_task = self.task_pool.wait_for_result(
+                work_item,
+                timeout_seconds=attempt_timeout,
+                poll_interval=self.crowd_poll_interval,
+            )
+
+            if success and response:
+                self._remember_task_response(
+                    work_item,
+                    response,
+                    role=role_needed,
+                    target="crowd-task-pool",
+                )
+                self._trace(
+                    "crowd_task_completed",
+                    role=role_needed,
+                    work_item=work_item,
+                    task_id=task.get("task_id"),
+                    status=(completed_task or {}).get("status"),
+                    attempt=attempt + 1,
+                )
+                print(f"[CROWD] Completed {role_needed} work_item={work_item}")
+                return True
+
+            # ── diagnose failure ──
+            last_task = completed_task
+            last_error_msg = self._crowd_failure_message(completed_task, attempt_timeout)
+
+            # Determine if this is a system-level failure (should retry) or business failure (stop)
+            is_system_failure = self._is_crowd_system_failure(completed_task, last_error_msg)
+
+            self._trace(
+                "crowd_task_failed",
+                role=role_needed,
+                work_item=work_item,
+                task_id=task.get("task_id"),
+                error=last_error_msg,
+                attempt=attempt + 1,
+                is_system_failure=is_system_failure,
+            )
+            print(
+                f"[CROWD] Failed {role_needed} work_item={work_item} "
+                f"(attempt {attempt + 1}/{max_retries + 1}): {last_error_msg}"
+                + (" [system failure, will retry]" if is_system_failure and attempt < max_retries else "")
+            )
+
+            if not is_system_failure:
+                # Business failure ― don't retry
+                break
+
+            if attempt < max_retries:
+                # Backoff before retry
+                backoff = self.retry_backoff * (2 ** attempt)
+                time.sleep(backoff)
+
+        # ── all attempts exhausted ──
+        self._remember_task_response(
+            work_item,
+            build_task_response(
+                workflow_id=task_payload.get("workflow_id"),
+                work_item=work_item,
+                agent="crowd-task-pool",
+                role=role_needed,
+                command=task_payload.get("command"),
+                status="failed",
+                output={},
+                error=last_error_msg or f"Crowd task failed after {attempted} attempt(s)",
+                message=last_error_msg or "crowd task exhausted all retries",
+                extra={
+                    "crowd_task_id": (last_task or {}).get("task_id"),
+                    "attempts": attempted,
+                    "failure_policy": failure_policy,
+                },
+            ),
+            role=role_needed,
+            target="crowd-task-pool",
+        )
+        self._trace(
+            "crowd_task_exhausted",
+            role=role_needed,
+            work_item=work_item,
+            attempts=attempted,
+            last_error=last_error_msg,
+        )
+        return False
+
+    @staticmethod
+    def _crowd_failure_message(task: dict | None, timeout: float) -> str:
+        """Extract a human-readable failure reason from a crowd task."""
+        if not task:
+            return f"Crowd task timed out after {timeout}s (no task state)"
+        status = task.get("status", "unknown")
+        if status == "failed":
+            results = task.get("results", [])
+            if results:
+                last = results[-1]
+                err = (last.get("response") or {}).get("error") or last.get("response", {}).get("message")
+                if err:
+                    return str(err)
+            return "Crowd task failed (agent reported failure)"
+        if status == "cancelled":
+            return "Crowd task was cancelled"
+        if status in {"pending", "claimed"}:
+            return f"Crowd task timed out after {timeout}s (status={status}, no agent completed)"
+        return f"Crowd task ended with status={status}"
+
+    # ── system-level error codes that should trigger retry / failover ──
+    _CROWD_SYSTEM_ERROR_CODES = frozenset({
+        "AGENT_UNAVAILABLE", "AGENT_TIMEOUT", "AGENT_NOT_READY",
+        "AGENT_HEARTBEAT_LOST", "AGENT_HTTP_5XX",
+    })
+
+    @classmethod
+    def _is_crowd_system_failure(cls, task: dict | None, error_message: str) -> bool:
+        """Determine if a crowd task failure is system-level (should trigger retry)."""
+        if not task:
+            # Timeout with no task state → likely no agent claimed → system failure
+            return True
+
+        status = task.get("status", "unknown")
+
+        # If task is still pending/claimed → timeout waiting for agent → system failure
+        if status in {"pending", "claimed"}:
+            return True
+
+        if status == "failed":
+            # Check if any claim expired from offline agent
+            for claim in task.get("claims", []):
+                if claim.get("expired_reason") == "agent_offline_heartbeat_lost":
+                    return True
+
+            # Use structured error codes from results (preferred)
+            results = task.get("results", [])
+            for r in results:
+                error_code = r.get("error_code") or (r.get("response") or {}).get("error_code", "")
+                error_category = r.get("error_category") or ""
+                if error_code in cls._CROWD_SYSTEM_ERROR_CODES:
+                    return True
+                if error_category == "system":
+                    return True
+                if error_code in {"AGENT_BUSINESS_ERROR", "AGENT_PROTOCOL_ERROR"}:
+                    return False
+                if error_category == "business":
+                    return False
+
+            # Fallback: string matching on error messages (for agents without structured codes)
+            for r in results:
+                resp = r.get("response") or {}
+                err = str(resp.get("error") or resp.get("message") or "")
+                err_lower = err.lower()
+                if any(
+                    marker in err_lower
+                    for marker in (
+                        "timeout", "timed out", "connection refused",
+                        "connection reset", "not ready", "heartbeat lost",
+                        "service unavailable", "503", "502", "504",
+                    )
+                ):
+                    return True
+
+        # Cancelled or completed are terminal
+        return False
 
     def _delegate_task_with_lease(self, role_needed: str, task_payload: dict, stream: bool = False):
         work_item = task_payload.get("work_item", f"{self.workflow_id}:{role_needed}")
@@ -762,8 +1014,10 @@ class CommanderAgent:
 
     def delegate_local_task(self, role_needed: str, task_payload: dict, stream: bool = False):
         try:
+            local_role = self._local_role_for_dispatch_key(role_needed)
             call_started = time.perf_counter()
-            response, events = self.local_runtime.execute(role_needed, task_payload, stream=stream)
+            response, events = self.local_runtime.execute(local_role, task_payload, stream=stream)
+            response.setdefault("dispatch_key", role_needed)
             metrics = response.setdefault("metrics", {})
             metrics.setdefault("duration_ms", round((time.perf_counter() - call_started) * 1000, 3))
             self._remember_task_response(task_payload.get("work_item"), response, role=role_needed, target="local")
@@ -800,6 +1054,15 @@ class CommanderAgent:
                 **exception_diagnostics(e),
             )
             return False
+
+    @staticmethod
+    def _local_role_for_dispatch_key(dispatch_key: str) -> str:
+        return {
+            "scan_beach_defenses": "recon",
+            "suppress_beach_sector_A": "artillery",
+            "evaluate_strike": "evaluator",
+            "capture_beachhead": "assault",
+        }.get(dispatch_key, dispatch_key)
 
     def ask_llm(self, battle_log: list):
         log_str = "\n".join(battle_log)
@@ -980,6 +1243,17 @@ class CommanderAgent:
             return [cls._make_context_entry(item) for item in value]
         return [cls._make_context_entry(value)]
 
+    @staticmethod
+    def _activity_id_aliases(activity_id: str | None):
+        if not activity_id:
+            return []
+        aliases = [activity_id]
+        if activity_id.startswith("activatity-"):
+            aliases.append("activity-" + activity_id[len("activatity-"):])
+        elif activity_id.startswith("activity-"):
+            aliases.append("activatity-" + activity_id[len("activity-"):])
+        return aliases
+
     def _normalize_context(self, context: dict):
         normalized = self.initial_workflow_context()
         normalized.update(self._migrate_legacy_context(context))
@@ -999,15 +1273,19 @@ class CommanderAgent:
         normalized["trace"] = list(normalized.get("trace", []))
         normalized["work_list"] = list(normalized.get("work_list", []))
         if self.bpel_definition:
-            existing_items = {
-                item.get("activatity_id") or item.get("activity_id"): item
-                for item in normalized["work_list"]
-                if item.get("activatity_id") or item.get("activity_id")
-            }
-            normalized["work_list"] = [
-                {**item, **existing_items.get(item["activatity_id"], {})}
-                for item in self._initial_work_list()
-            ]
+            existing_items = {}
+            for item in normalized["work_list"]:
+                for item_id in self._activity_id_aliases(item.get("activity_id") or item.get("activatity_id")):
+                    existing_items[item_id] = item
+            merged_work_list = []
+            for item in self._initial_work_list():
+                existing = existing_items.get(item["activity_id"], existing_items.get(item["activatity_id"], {}))
+                merged = {**existing, **item}
+                for state_key in ("status", "error", "started_at", "finished_at", "updated_at"):
+                    if state_key in existing:
+                        merged[state_key] = existing[state_key]
+                merged_work_list.append(merged)
+            normalized["work_list"] = merged_work_list
         normalized["workflow_id"] = self.workflow_id
         normalized["workflow_mode"] = self.mode
         normalized["workflow_name"] = self.workflow
@@ -1193,6 +1471,11 @@ class CommanderAgent:
             raise ValueError("activatity_index is required")
         work_item = self._work_item_for_activatity(role, activatity_index)
         context_snapshot = self._context_snapshot(context)
+        activity_id = f"activity-{activatity_index:03d}-{role}"
+        activity_common = {
+            "id": activity_id,
+            "activity_index": activatity_index,
+        }
 
         if role == "recon":
             return {
@@ -1201,6 +1484,17 @@ class CommanderAgent:
                 "workflow_mode": self.mode,
                 "work_item": work_item,
                 "parent_work_item": context.get("last_work_item"),
+                "activity_id": activity_id,
+                "activity_index": activatity_index,
+                "activity_skill": "scan_beach_defenses",
+                "activity": {
+                    **activity_common,
+                    "activity_skill": "scan_beach_defenses",
+                    "skill": "scan_beach_defenses",
+                    "operation": "scan_beach_defenses",
+                    "required_skill": "scan_beach_defenses",
+                    "required_skills": ["scan_beach_defenses"],
+                },
                 "activatity_index": activatity_index,
                 "activatity_role": role,
                 "command": "scan_beach_defenses",
@@ -1222,6 +1516,17 @@ class CommanderAgent:
                 "workflow_mode": self.mode,
                 "work_item": work_item,
                 "parent_work_item": context.get("last_work_item"),
+                "activity_id": activity_id,
+                "activity_index": activatity_index,
+                "activity_skill": "suppress_beach_sector_A",
+                "activity": {
+                    **activity_common,
+                    "activity_skill": "suppress_beach_sector_A",
+                    "skill": "suppress_beach_sector_A",
+                    "operation": "suppress_beach_sector_A",
+                    "required_skill": "suppress_beach_sector_A",
+                    "required_skills": ["suppress_beach_sector_A"],
+                },
                 "activatity_index": activatity_index,
                 "activatity_role": role,
                 "command": "suppress_beach_sector_A",
@@ -1245,6 +1550,17 @@ class CommanderAgent:
                 "workflow_mode": self.mode,
                 "work_item": work_item,
                 "parent_work_item": context.get("last_work_item"),
+                "activity_id": activity_id,
+                "activity_index": activatity_index,
+                "activity_skill": "evaluate_strike",
+                "activity": {
+                    **activity_common,
+                    "activity_skill": "evaluate_strike",
+                    "skill": "evaluate_strike",
+                    "operation": "evaluate_strike",
+                    "required_skill": "evaluate_strike",
+                    "required_skills": ["evaluate_strike"],
+                },
                 "activatity_index": activatity_index,
                 "activatity_role": role,
                 "command": "evaluate_strike",
@@ -1269,6 +1585,17 @@ class CommanderAgent:
                 "workflow_mode": self.mode,
                 "work_item": work_item,
                 "parent_work_item": context.get("last_work_item"),
+                "activity_id": activity_id,
+                "activity_index": activatity_index,
+                "activity_skill": "capture_beachhead",
+                "activity": {
+                    **activity_common,
+                    "activity_skill": "capture_beachhead",
+                    "skill": "capture_beachhead",
+                    "operation": "capture_beachhead",
+                    "required_skill": "capture_beachhead",
+                    "required_skills": ["capture_beachhead"],
+                },
                 "activatity_index": activatity_index,
                 "activatity_role": role,
                 "command": "capture_beachhead",
@@ -1581,8 +1908,9 @@ class CommanderAgent:
         return decision
 
     def _work_list_item(self, context: dict, activatity_id: str):
+        aliases = set(self._activity_id_aliases(activatity_id))
         for item in context.get("work_list", []):
-            if item.get("activatity_id") == activatity_id or item.get("activity_id") == activatity_id:
+            if item.get("activity_id") in aliases or item.get("activatity_id") in aliases:
                 return item
         raise KeyError(f"Unknown activatity: {activatity_id}")
 
@@ -1613,9 +1941,11 @@ class CommanderAgent:
 
             current_activatity = {
                 "activatity_id": activatity.activatity_id,
-                "activatity_index": item["activatity_index"],
+                "activatity_index": item.get("activatity_index", item.get("activity_index")),
+                "activatity_role": self._activity_dispatch_key(activatity),
                 "activity_id": activatity.activatity_id,
-                "activity_index": item["activatity_index"],
+                "activity_index": item.get("activity_index", item.get("activatity_index")),
+                "activity_skill": activatity.required_skill or activatity.command,
                 "work_item": item["work_item"],
                 "type": activatity.type,
                 "role": self._activity_dispatch_key(activatity),
@@ -2155,6 +2485,21 @@ class CommanderAgent:
             dispatch_key = self._activity_dispatch_key(activatity)
             if dispatch_key == "evaluator" or activatity.required_skill == "evaluate_strike":
                 input_payload["mock_eval_score"] = self.mock_eval_score if self.mock_eval_score is not None else 40
+            activity_index = item.get("activity_index", item.get("activatity_index"))
+            skill_key = activatity.required_skill or activatity.command
+            activity_payload = {
+                "id": activatity.activatity_id,
+                "index": activity_index,
+                "name": activatity.name,
+                "type": activatity.type,
+                "operation": activatity.operation,
+                "skill": skill_key,
+                "required_skill": skill_key,
+                "required_skills": list(activatity.required_skills),
+                "dispatch_mode": activatity.dispatch_mode,
+                "assignment_mode": self._assignment_mode_for_activity(activatity),
+                "resource_requirements": deepcopy(activatity.resource_requirements),
+            }
 
             return {
                 "workflow_id": self.workflow_id,
@@ -2162,12 +2507,18 @@ class CommanderAgent:
                 "workflow_mode": self.mode,
                 "work_item": item["work_item"],
                 "parent_work_item": parent_item.get("work_item") if parent_item else None,
+                "activity_id": activatity.activatity_id,
+                "activity_index": activity_index,
+                "activity_skill": skill_key,
+                "activity": activity_payload,
                 "activatity_id": activatity.activatity_id,
-                "activatity_index": item["activatity_index"],
+                "activatity_index": activity_index,
                 "activatity_role": dispatch_key,
                 "command": activatity.command,
-                "required_skill": activatity.required_skill or activatity.command,
+                "required_skill": skill_key,
                 "required_skills": list(activatity.required_skills),
+                "assignment_mode": self._assignment_mode_for_activity(activatity),
+                "resource_requirements": deepcopy(activatity.resource_requirements),
                 "input": input_payload,
                 "context": self._context_snapshot(context),
                 "attachments": attachment_snapshot(context.get("attachments", [])),
@@ -2207,7 +2558,20 @@ class CommanderAgent:
 
     @staticmethod
     def _activity_dispatch_key(activatity: BPELActivatity) -> str | None:
-        return activatity.required_skill or activatity.command
+        return activatity.role or activatity.required_skill or activatity.command
+
+    def _assignment_mode_for_activity(self, activatity: BPELActivatity) -> str:
+        assignment_mode = (
+            activatity.assignment_mode
+            or ("crowd" if activatity.dispatch_mode == "crowd" else None)
+            or self.agent_dispatch_mode
+        ).lower()
+        if assignment_mode not in {"direct", "crowd"}:
+            raise ValueError(
+                f"Unsupported assignmentMode={assignment_mode!r} for invoke={activatity.name}; "
+                "expected direct or crowd"
+            )
+        return assignment_mode
 
     def _execute_bpel_invoke(self, activatity: BPELActivatity, context: dict):
         if activatity.role == "commander":
@@ -2232,10 +2596,21 @@ class CommanderAgent:
             raise ValueError(f"No role or requiredSkill mapping for invoke={activatity.name}")
 
         payload, stream = self._build_bpel_task_payload(activatity, context)
+        assignment_mode = self._assignment_mode_for_activity(activatity)
+        payload["assignment_mode"] = assignment_mode
+        payload.setdefault("activity", {})["assignment_mode"] = assignment_mode
         if activatity.dispatch_mode == "parallel":
-            success = self.delegate_parallel_task(dispatch_key, payload, stream=stream)
+            success = self.delegate_parallel_task(
+                dispatch_key,
+                payload,
+                stream=stream,
+            )
         else:
-            success = self.delegate_task(dispatch_key, payload, stream=stream)
+            success = self.delegate_task(
+                dispatch_key,
+                payload,
+                stream=stream,
+            )
         with self._checkpoint_lock:
             output_key = self._context_key_for_bpel_variable(activatity.output_variable)
             collection_key = self._output_collection_key_for_activity(activatity.activatity_id)
@@ -2597,6 +2972,11 @@ def parse_args():
         help="Start the resident multi-workflow manager HTTP API.",
     )
     parser.add_argument(
+        "--serve-supervisor",
+        action="store_true",
+        help="Start the Agent supervisor HTTP API and dashboard.",
+    )
+    parser.add_argument(
         "--recovery-host",
         default="127.0.0.1",
         help="Host used by the recovery HTTP API.",
@@ -2617,6 +2997,22 @@ def parse_args():
         type=int,
         default=8021,
         help="Port used by the resident workflow manager HTTP API.",
+    )
+    parser.add_argument(
+        "--supervisor-host",
+        default=os.environ.get("A2A_SUPERVISOR_HOST", "127.0.0.1"),
+        help="Host used by the supervisor HTTP API.",
+    )
+    parser.add_argument(
+        "--supervisor-port",
+        type=int,
+        default=int(os.environ.get("A2A_SUPERVISOR_PORT", "8030")),
+        help="Port used by the supervisor HTTP API.",
+    )
+    parser.add_argument(
+        "--supervisor-path",
+        default=os.environ.get("A2A_SUPERVISOR_PATH"),
+        help="JSON file used by supervisor Agent registry. Defaults to .a2a_state/supervisor.json.",
     )
     parser.add_argument(
         "--max-workflows",
@@ -2660,6 +3056,29 @@ def parse_args():
         type=float,
         default=float(os.environ.get("A2A_REQUEST_TIMEOUT", "5")),
         help="HTTP timeout in seconds for A2A discovery/auth/sendMessage.",
+    )
+    parser.add_argument(
+        "--agent-dispatch-mode",
+        choices=["direct", "crowd"],
+        default=os.environ.get("A2A_AGENT_DISPATCH_MODE", os.environ.get("A2A_DISPATCH_MODE", "direct")),
+        help="direct calls Agents immediately; crowd publishes tasks to the task pool for Agents to claim.",
+    )
+    parser.add_argument(
+        "--task-pool-path",
+        default=os.environ.get("A2A_TASK_POOL_PATH"),
+        help="JSON file used by crowd task pool. Defaults to .a2a_state/task_pool.json.",
+    )
+    parser.add_argument(
+        "--crowd-timeout",
+        type=float,
+        default=float(os.environ.get("A2A_CROWD_TIMEOUT", "30")),
+        help="Seconds Commander waits for a crowd task result.",
+    )
+    parser.add_argument(
+        "--crowd-poll-interval",
+        type=float,
+        default=float(os.environ.get("A2A_CROWD_POLL_INTERVAL", "0.5")),
+        help="Seconds between task-pool result polls in crowd mode.",
     )
     parser.add_argument(
         "--mock-eval-score",
@@ -2718,6 +3137,15 @@ if __name__ == "__main__":
         uvicorn.run(app, host=args.manager_host, port=args.manager_port)
         raise SystemExit(0)
 
+    if args.serve_supervisor:
+        import uvicorn
+
+        from supervisor import SupervisorStore, build_supervisor_app
+
+        app = build_supervisor_app(SupervisorStore(args.supervisor_path))
+        uvicorn.run(app, host=args.supervisor_host, port=args.supervisor_port)
+        raise SystemExit(0)
+
     cmd = CommanderAgent(
         mode=args.mode,
         workflow=args.workflow,
@@ -2733,6 +3161,10 @@ if __name__ == "__main__":
         max_retries=args.max_retries,
         retry_backoff=args.retry_backoff,
         request_timeout=args.request_timeout,
+        agent_dispatch_mode=args.agent_dispatch_mode,
+        task_pool_path=args.task_pool_path,
+        crowd_timeout=args.crowd_timeout,
+        crowd_poll_interval=args.crowd_poll_interval,
         details=args.details,
     )
 

@@ -1,0 +1,17 @@
+<process name="DecisionSupportWorkflow" targetNamespace="http://a2a.project613/workflow">
+
+    <variables>
+        <variable name="DecisionPlanningResult" type="JsonObject"/>
+        <variable name="ComplianceAuthorizationResult" type="JsonObject"/>
+    </variables>
+
+    <sequence>
+
+        <invoke partnerLink="DecisionPlanningAgent" operation="generateDecisionPlan"
+                inputVariable="PlanningInput" outputVariable="DecisionPlanningResult"/>
+
+        <invoke partnerLink="ComplianceAuthorizationAgent" operation="checkComplianceAuthorization"
+                inputVariable="DecisionPlanningResult" outputVariable="ComplianceAuthorizationResult"/>
+
+    </sequence>
+</process>

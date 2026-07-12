@@ -1,8 +1,16 @@
 fastapi
+starlette>=0.46.2,<0.47.0
 uvicorn
 pydantic
 requests
 redis>=5.0,<7.0
 nacos-sdk-python<2.0.0
 sseclient-py
+python-dotenv
+click
+httpx
+pytest
+pypdf
+numpy
+onnxruntime
 psutil>=5.9,<8.0

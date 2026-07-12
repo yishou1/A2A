@@ -10,3 +10,7 @@ docs/
 __pycache__/
 *.py[cod]
 *.log
+# Local test run output
+crowd_smoke_tests.txt
+lzh_agent_tests.txt
+test_output.txt

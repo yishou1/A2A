@@ -227,11 +227,20 @@ Commander 调用 `/sendMessage` 时，会发送类似 payload：
   "workflow_id": "workflow-abc123",
   "workflow": "bpel",
   "workflow_mode": "remote",
-  "work_item": "workflow-abc123:activatity-002-skillonlyrecon",
-  "parent_work_item": "workflow-abc123:activatity-001-sequence",
-  "activatity_id": "activatity-002-skillonlyrecon",
-  "activatity_index": 2,
-  "activatity_role": "scan_beach_defenses",
+  "work_item": "workflow-abc123:activity-002-skillonlyrecon",
+  "parent_work_item": "workflow-abc123:activity-001-sequence",
+  "activity_id": "activity-002-skillonlyrecon",
+  "activity_index": 2,
+  "activity_skill": "scan_beach_defenses",
+  "activity": {
+    "id": "activity-002-skillonlyrecon",
+    "index": 2,
+    "name": "SkillOnlyRecon",
+    "operation": "scanBeachDefenses",
+    "skill": "scan_beach_defenses",
+    "required_skill": "scan_beach_defenses",
+    "required_skills": ["scan_beach_defenses"]
+  },
   "command": "scan_beach_defenses",
   "required_skill": "scan_beach_defenses",
   "required_skills": ["scan_beach_defenses"],
@@ -262,6 +271,10 @@ Commander 调用 `/sendMessage` 时，会发送类似 payload：
 | --- | --- |
 | `workflow_id` | 整个 workflow 的唯一 ID |
 | `work_item` | 当前 activity 的唯一任务 ID，Agent 应用它做幂等 |
+| `activity_id` | 当前 activity 的唯一 ID |
+| `activity_index` | 当前 activity 在 work_list 中的顺序号 |
+| `activity_skill` | Commander 本次用于匹配和调度 Agent 的技能 key |
+| `activity` | 当前 activity 的结构化描述，真实 Agent 优先读取 |
 | `command` | 当前希望执行的命令，通常和 requiredSkill 对齐 |
 | `required_skill` | 当前 activity 需要的主技能 |
 | `required_skills` | 当前 activity 需要的技能列表 |
@@ -275,6 +288,7 @@ Agent 需要重点读取：
 
 ```text
 work_item
+activity / activity_id / activity_skill
 required_skill / required_skills
 input
 output_hint
@@ -287,7 +301,7 @@ output_hint
 ```json
 {
   "workflow_id": "workflow-abc123",
-  "work_item": "workflow-abc123:activatity-002-skillonlyrecon",
+  "work_item": "workflow-abc123:activity-002-skillonlyrecon",
   "agent": "TerrainAnalysisAgent",
   "role": "scan_beach_defenses",
   "command": "scan_beach_defenses",

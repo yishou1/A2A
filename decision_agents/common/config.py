@@ -1,0 +1,101 @@
+"""Environment configuration for local agent demos."""
+
+from __future__ import annotations
+
+import os
+
+from dataclasses import dataclass
+
+from dotenv import load_dotenv
+
+
+load_dotenv()
+
+
+@dataclass(frozen=True)
+class Settings:
+    host: str
+    decision_planning_port: int
+    compliance_authorization_port: int
+    enable_llm: bool
+    llm_provider: str
+    tool_llm_url: str
+    tool_llm_name: str
+    api_key: str
+    azure_openai_api_version: str
+    llm_timeout_seconds: float
+    decision_agent_backend: str
+    algolib_base_url: str
+    algolib_timeout_seconds: float
+    tool_llm_allowed_models: tuple[str, ...]
+    default_compute_budget: str
+    default_risk_policy: str
+    enable_local_rag_models: bool
+    enable_rag_onnx_models: bool
+    rag_query_model: str
+    rag_embedding_model: str
+    rag_rerank_model: str
+    rag_generation_model: str
+    rag_onnx_model_dir: str
+    rag_onnx_providers: str
+    rag_top_k_recall: int
+    rag_top_k_final: int
+    rag_document_dir: str
+    rag_index_path: str
+    enable_rag_ocr: bool
+    rag_ocr_engine: str
+
+
+def get_settings() -> Settings:
+    return Settings(
+        host=os.getenv("HOST", "localhost"),
+        decision_planning_port=int(os.getenv("DECISION_PLANNING_AGENT_PORT", "10202")),
+        compliance_authorization_port=int(
+            os.getenv("COMPLIANCE_AUTHORIZATION_AGENT_PORT", "10203")
+        ),
+        enable_llm=os.getenv("ENABLE_LLM", "false").lower() == "true",
+        llm_provider=os.getenv("LLM_PROVIDER", "openai_compatible").lower(),
+        tool_llm_url=os.getenv("TOOL_LLM_URL", ""),
+        tool_llm_name=os.getenv("TOOL_LLM_NAME", ""),
+        api_key=os.getenv("API_KEY", "EMPTY"),
+        azure_openai_api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview"),
+        llm_timeout_seconds=float(os.getenv("LLM_TIMEOUT_SECONDS", "30")),
+        decision_agent_backend=os.getenv("DECISION_AGENT_BACKEND", "local").lower(),
+        algolib_base_url=os.getenv("ALGOLIB_BASE_URL", "http://127.0.0.1:8088"),
+        algolib_timeout_seconds=float(os.getenv("ALGOLIB_TIMEOUT_SECONDS", "10")),
+        tool_llm_allowed_models=tuple(
+            item.strip()
+            for item in os.getenv("TOOL_LLM_ALLOWED_MODELS", "").split(",")
+            if item.strip()
+        ),
+        default_compute_budget=os.getenv("DEFAULT_COMPUTE_BUDGET", "small"),
+        default_risk_policy=os.getenv("DEFAULT_RISK_POLICY", "balanced"),
+        enable_local_rag_models=os.getenv("ENABLE_LOCAL_RAG_MODELS", "false").lower()
+        == "true",
+        enable_rag_onnx_models=os.getenv("ENABLE_RAG_ONNX_MODELS", "false").lower()
+        == "true",
+        rag_query_model=os.getenv(
+            "RAG_QUERY_ONNX_MODEL",
+            os.getenv("RAG_QUERY_MODEL", "models/rag/query_rewrite.onnx"),
+        ),
+        rag_embedding_model=os.getenv(
+            "RAG_EMBEDDING_ONNX_MODEL",
+            os.getenv("RAG_EMBEDDING_MODEL", "models/rag/embedding.onnx"),
+        ),
+        rag_rerank_model=os.getenv(
+            "RAG_RERANK_ONNX_MODEL",
+            os.getenv("RAG_RERANK_MODEL", "models/rag/rerank.onnx"),
+        ),
+        rag_generation_model=os.getenv(
+            "RAG_GENERATION_ONNX_MODEL",
+            os.getenv("RAG_GENERATION_MODEL", "models/rag/generation.onnx"),
+        ),
+        rag_onnx_model_dir=os.getenv("RAG_ONNX_MODEL_DIR", "models/rag"),
+        rag_onnx_providers=os.getenv("RAG_ONNX_PROVIDERS", "CPUExecutionProvider"),
+        rag_top_k_recall=int(os.getenv("RAG_TOP_K_RECALL", "20")),
+        rag_top_k_final=int(os.getenv("RAG_TOP_K_FINAL", "6")),
+        rag_document_dir=os.getenv("RAG_DOCUMENT_DIR", "data/roe_docs"),
+        rag_index_path=os.getenv("RAG_INDEX_PATH", ".a2a_state/rag/rag_index.sqlite"),
+        enable_rag_ocr=os.getenv("ENABLE_RAG_OCR", "false").lower() == "true",
+        rag_ocr_engine=os.getenv("RAG_OCR_ENGINE", "paddleocr"),
+    )

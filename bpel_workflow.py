@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import json
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -44,6 +45,42 @@ def _split_list_attribute(value: str | None) -> list[str]:
     ]
 
 
+def _optional_number(value: str | None):
+    if value in (None, ""):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return int(number) if number.is_integer() else number
+
+
+def _parse_resource_requirements(attributes: dict) -> dict:
+    requirements = {}
+    raw = attributes.get("resourceRequirements") or attributes.get("resources")
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                requirements.update(parsed)
+        except json.JSONDecodeError:
+            pass
+    mapping = {
+        "minGpuCount": "min_gpu_count",
+        "minGpuVramGb": "min_gpu_vram_gb",
+        "maxCpuPercent": "max_cpu_percent",
+        "maxMemoryPercent": "max_memory_percent",
+        "maxDiskPercent": "max_disk_percent",
+        "maxGpuMemoryPercent": "max_gpu_memory_percent",
+        "maxGpuUtilizationPercent": "max_gpu_utilization_percent",
+    }
+    for xml_key, payload_key in mapping.items():
+        value = _optional_number(attributes.get(xml_key))
+        if value is not None:
+            requirements[payload_key] = value
+    return requirements
+
+
 @dataclass
 class BPELActivatity:
     activatity_id: str
@@ -57,6 +94,8 @@ class BPELActivatity:
     required_skill: str | None = None
     required_skills: list[str] = field(default_factory=list)
     dispatch_mode: str = "single"
+    assignment_mode: str | None = None
+    resource_requirements: dict = field(default_factory=dict)
     input_variable: str | None = None
     output_variable: str | None = None
     condition: str | None = None
@@ -78,11 +117,13 @@ class BPELActivatity:
         return self.parent_activatity
 
     def to_work_list_item(self, workflow_id: str, index: int) -> dict:
+        activity_skill = self.required_skill or self.command
         return {
             "activatity_id": self.activatity_id,
             "activatity_index": index,
             "activity_id": self.activatity_id,
             "activity_index": index,
+            "activity_skill": activity_skill,
             "work_item": f"{workflow_id}:{self.activatity_id}",
             "type": self.type,
             "name": self.name,
@@ -95,6 +136,8 @@ class BPELActivatity:
             "required_skill": self.required_skill,
             "required_skills": list(self.required_skills),
             "dispatch_mode": self.dispatch_mode,
+            "assignment_mode": self.assignment_mode,
+            "resource_requirements": deepcopy(self.resource_requirements),
             "input_variable": self.input_variable,
             "output_variable": self.output_variable,
             "retry_count": self.retry_count,
@@ -160,7 +203,7 @@ class BPELWorkflowDefinition:
                 or element.attrib.get("faultName")
                 or kind
             )
-            activatity_id = f"activatity-{index:03d}-{_slug(raw_name)}"
+            activatity_id = f"activity-{index:03d}-{_slug(raw_name)}"
             partner_link = element.attrib.get("partnerLink")
             operation = element.attrib.get("operation")
             role = PARTNER_ROLE_MAP.get(partner_link)
@@ -211,6 +254,12 @@ class BPELWorkflowDefinition:
                 required_skill=required_skill,
                 required_skills=required_skills,
                 dispatch_mode=element.attrib.get("dispatchMode", "single"),
+                assignment_mode=(
+                    element.attrib.get("assignmentMode")
+                    or element.attrib.get("routingMode")
+                    or element.attrib.get("deliveryMode")
+                ),
+                resource_requirements=_parse_resource_requirements(element.attrib),
                 input_variable=element.attrib.get("inputVariable"),
                 output_variable=element.attrib.get("outputVariable"),
                 condition=element.attrib.get("condition"),
