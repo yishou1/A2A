@@ -2207,7 +2207,7 @@ class CommanderAgent:
 
     @staticmethod
     def _activity_dispatch_key(activatity: BPELActivatity) -> str | None:
-        return activatity.required_skill or activatity.command
+        return activatity.role or activatity.required_skill or activatity.command
 
     def _execute_bpel_invoke(self, activatity: BPELActivatity, context: dict):
         if activatity.role == "commander":

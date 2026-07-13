@@ -6,8 +6,6 @@ import json
 
 from typing import Any
 
-import httpx
-
 from decision_agents.config import Settings
 
 
@@ -27,6 +25,11 @@ class OpenAICompatibleClient:
         self.timeout = settings.llm_timeout_seconds
 
     def chat(self, *, system_prompt: str, user_prompt: str) -> str:
+        try:
+            import httpx
+        except ImportError as exc:
+            raise LLMClientError("httpx is required when ENABLE_LLM=true.") from exc
+
         payload = {
             "model": self.model,
             "messages": [
@@ -78,4 +81,3 @@ def _strip_json_fence(content: str) -> str:
             lines = lines[:-1]
         text = "\n".join(lines).strip()
     return text
-
