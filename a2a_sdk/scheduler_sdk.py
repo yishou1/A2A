@@ -15,7 +15,7 @@ class SchedulerSDK:
 
     Example::
 
-        sdk = SchedulerSDK(resource_aware=True, resource_limits={"cpu_percent": 90})
+        sdk = SchedulerSDK()
         lease = sdk.bind_agent("recon", "wf-1", "wf-1:1", required_model="recon_detector_v1")
         result = sdk.dispatch_to_lease(lease, {"command": "scan", "input": {...}})
         sdk.release(lease)
@@ -35,8 +35,10 @@ class SchedulerSDK:
         self.service_name = service_name
         self._registry = registry
         self._lease_manager = None
-        self._resource_aware = resource_aware
-        self._resource_limits = resource_limits
+        # Backward-compatible constructor arguments. Resource metrics are
+        # exposed for observation, but scheduling thresholds are not applied in
+        # the SDK/lease layer.
+        _ = (resource_aware, resource_limits)
         self._circuit_breaker = circuit_breaker
         self._distributed_lock = distributed_lock
         self._client_factory = client_factory
@@ -58,8 +60,6 @@ class SchedulerSDK:
             self._lease_manager = AgentLeaseManager(
                 self.registry,
                 service_name=self.service_name,
-                resource_aware=self._resource_aware,
-                resource_limits=self._resource_limits,
                 circuit_breaker=self._circuit_breaker,
                 distributed_lock=self._distributed_lock,
             )

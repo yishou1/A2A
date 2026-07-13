@@ -47,8 +47,10 @@ class AgentLeaseManager:
         self.service_name = service_name
         self.circuit_breaker = circuit_breaker
         self.distributed_lock = distributed_lock
-        self.resource_aware = resource_aware
-        self.resource_limits = dict(resource_limits or {})
+        # resource_aware/resource_limits are accepted for backward-compatible
+        # construction only. Resource metrics are raw observations and are not
+        # interpreted in the lease layer.
+        _ = (resource_aware, resource_limits)
         self._lock = threading.RLock()
         self._leases: dict[str, AgentLease] = {}
 
@@ -262,12 +264,11 @@ class AgentLeaseManager:
         candidates: list[dict],
         required_model: Optional[str] = None,
     ) -> list[dict]:
-        """Filter/rank discovered candidates by model availability and resources.
+        """Filter discovered candidates by model availability.
 
-        Model filtering is applied whenever a required model is requested.
-        Resource-aware filtering and ranking are only applied when the manager
-        was created with ``resource_aware=True`` so default behaviour is
-        unchanged.
+        Resource metrics remain available in Nacos metadata for upper-level
+        scheduling policies, but this lease layer does not apply thresholds or
+        load-based ranking.
         """
         result = list(candidates)
         if required_model:
@@ -276,48 +277,7 @@ class AgentLeaseManager:
                 for target in result
                 if instance_has_model(target.get("metadata", {}) or {}, required_model)
             ]
-        if self.resource_aware:
-            if self.resource_limits:
-                result = [target for target in result if self._resource_allows(target)]
-            result = sorted(result, key=self._resource_score)
         return result
-
-    @staticmethod
-    def _metadata_float(metadata: dict, key: str) -> Optional[float]:
-        try:
-            value = metadata.get(key)
-            return None if value is None else float(value)
-        except (TypeError, ValueError):
-            return None
-
-    def _resource_allows(self, target: dict) -> bool:
-        metadata = target.get("metadata", {}) or {}
-        max_checks = {
-            "resource_cpu_percent": self.resource_limits.get("cpu_percent"),
-            "resource_memory_percent": self.resource_limits.get("memory_percent"),
-            "resource_gpu_percent": self.resource_limits.get("gpu_percent"),
-            "resource_disk_percent": self.resource_limits.get("disk_percent"),
-        }
-        for meta_key, limit in max_checks.items():
-            if limit is None:
-                continue
-            value = self._metadata_float(metadata, meta_key)
-            if value is not None and value > float(limit):
-                return False
-        min_link = self.resource_limits.get("min_link_stability")
-        if min_link is not None:
-            link = self._metadata_float(metadata, "resource_link_stability")
-            if link is not None and link < float(min_link):
-                return False
-        return True
-
-    def _resource_score(self, target: dict) -> float:
-        """Lower score means a less-loaded, preferred instance."""
-        metadata = target.get("metadata", {}) or {}
-        cpu = self._metadata_float(metadata, "resource_cpu_percent") or 0.0
-        memory = self._metadata_float(metadata, "resource_memory_percent") or 0.0
-        gpu = self._metadata_float(metadata, "resource_gpu_percent") or 0.0
-        return cpu + memory + gpu
 
     def _recover_stale_busy_instances(
         self,

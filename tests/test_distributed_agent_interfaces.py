@@ -238,7 +238,7 @@ class FakeRegistry:
 
 
 class DelayedBindingTest(unittest.TestCase):
-    """延迟绑定接口: 资源感知 + 按算法模型绑定。"""
+    """延迟绑定接口: 资源数值透传 + 按算法模型绑定。"""
 
     def _instances(self):
         return [
@@ -264,15 +264,15 @@ class DelayedBindingTest(unittest.TestCase):
             },
         ]
 
-    def test_resource_aware_prefers_less_loaded_agent(self):
+    def test_resource_metrics_do_not_rank_candidates(self):
         registry = FakeRegistry(self._instances())
         leases = AgentLeaseManager(registry, resource_aware=True)
 
         acquired = leases.acquire_one("recon", "wf-1", "wf-1:1")
-        # The 10% CPU agent must be chosen over the 95% CPU agent.
-        self.assertEqual(acquired.instance_key, "10.0.0.2:8013")
+        # Resource metrics are observable values only; discovery order wins.
+        self.assertEqual(acquired.instance_key, "10.0.0.1:8012")
 
-    def test_resource_limits_filter_overloaded_agents(self):
+    def test_resource_limits_are_ignored_for_compatibility(self):
         registry = FakeRegistry(self._instances())
         leases = AgentLeaseManager(
             registry, resource_aware=True, resource_limits={"cpu_percent": 90.0}
@@ -280,16 +280,16 @@ class DelayedBindingTest(unittest.TestCase):
 
         first = leases.acquire_one("recon", "wf-1", "wf-1:1")
         second = leases.acquire_one("recon", "wf-2", "wf-2:1")
-        self.assertEqual(first.instance_key, "10.0.0.2:8013")
-        # The overloaded (95%) agent is filtered out entirely.
-        self.assertIsNone(second)
+        self.assertEqual(first.instance_key, "10.0.0.1:8012")
+        # Threshold parameters are accepted for compatibility but no longer
+        # filter candidates in the lease layer.
+        self.assertEqual(second.instance_key, "10.0.0.2:8013")
 
-    def test_default_binding_is_not_resource_aware(self):
+    def test_default_binding_uses_discovery_order(self):
         registry = FakeRegistry(self._instances())
         leases = AgentLeaseManager(registry)
 
         acquired = leases.acquire_one("recon", "wf-1", "wf-1:1")
-        # Without resource awareness, discovery order (first instance) wins.
         self.assertEqual(acquired.instance_key, "10.0.0.1:8012")
 
     def test_required_model_filters_candidates(self):
