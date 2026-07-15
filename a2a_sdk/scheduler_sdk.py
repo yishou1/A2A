@@ -26,7 +26,7 @@ class SchedulerSDK:
         *,
         registry: Any = None,
         service_name: str = "A2A-Agent",
-        resource_aware: bool = False,
+        resource_aware: bool = True,
         resource_limits: Optional[dict] = None,
         circuit_breaker: Any = None,
         distributed_lock: Any = None,
@@ -35,10 +35,8 @@ class SchedulerSDK:
         self.service_name = service_name
         self._registry = registry
         self._lease_manager = None
-        # Backward-compatible constructor arguments. Resource metrics are
-        # exposed for observation, but scheduling thresholds are not applied in
-        # the SDK/lease layer.
-        _ = (resource_aware, resource_limits)
+        self._resource_aware = bool(resource_aware)
+        self._resource_limits = dict(resource_limits or {})
         self._circuit_breaker = circuit_breaker
         self._distributed_lock = distributed_lock
         self._client_factory = client_factory
@@ -62,6 +60,8 @@ class SchedulerSDK:
                 service_name=self.service_name,
                 circuit_breaker=self._circuit_breaker,
                 distributed_lock=self._distributed_lock,
+                resource_aware=self._resource_aware,
+                resource_limits=self._resource_limits,
             )
         return self._lease_manager
 

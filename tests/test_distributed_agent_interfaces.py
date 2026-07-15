@@ -264,15 +264,14 @@ class DelayedBindingTest(unittest.TestCase):
             },
         ]
 
-    def test_resource_metrics_do_not_rank_candidates(self):
+    def test_resource_metrics_rank_candidates(self):
         registry = FakeRegistry(self._instances())
         leases = AgentLeaseManager(registry, resource_aware=True)
 
         acquired = leases.acquire_one("recon", "wf-1", "wf-1:1")
-        # Resource metrics are observable values only; discovery order wins.
-        self.assertEqual(acquired.instance_key, "10.0.0.1:8012")
+        self.assertEqual(acquired.instance_key, "10.0.0.2:8013")
 
-    def test_resource_limits_are_ignored_for_compatibility(self):
+    def test_resource_limits_filter_candidates(self):
         registry = FakeRegistry(self._instances())
         leases = AgentLeaseManager(
             registry, resource_aware=True, resource_limits={"cpu_percent": 90.0}
@@ -280,17 +279,15 @@ class DelayedBindingTest(unittest.TestCase):
 
         first = leases.acquire_one("recon", "wf-1", "wf-1:1")
         second = leases.acquire_one("recon", "wf-2", "wf-2:1")
-        self.assertEqual(first.instance_key, "10.0.0.1:8012")
-        # Threshold parameters are accepted for compatibility but no longer
-        # filter candidates in the lease layer.
-        self.assertEqual(second.instance_key, "10.0.0.2:8013")
+        self.assertEqual(first.instance_key, "10.0.0.2:8013")
+        self.assertIsNone(second)
 
-    def test_default_binding_uses_discovery_order(self):
+    def test_default_binding_uses_resource_score(self):
         registry = FakeRegistry(self._instances())
         leases = AgentLeaseManager(registry)
 
         acquired = leases.acquire_one("recon", "wf-1", "wf-1:1")
-        self.assertEqual(acquired.instance_key, "10.0.0.1:8012")
+        self.assertEqual(acquired.instance_key, "10.0.0.2:8013")
 
     def test_required_model_filters_candidates(self):
         registry = FakeRegistry(self._instances())
@@ -347,6 +344,34 @@ class RecoveryNotificationTest(unittest.TestCase):
         self.assertEqual(metadata["algorithm_deployment_status"], "ready")
         self.assertEqual(metadata["task_execution_status"], "idle")
         self.assertEqual(metadata["agent_run_state"], "ready")
+
+    def test_agent_capacity_metadata_and_rejection(self):
+        agent = A2ABaseAgent(
+            name="Recon_Agent",
+            description="test",
+            role="recon",
+            port=9911,
+            max_concurrent_tasks=2,
+        )
+
+        first = agent._reserve_task_capacity("wf-1:1")
+        second = agent._reserve_task_capacity("wf-2:1")
+        third = agent._reserve_task_capacity("wf-3:1")
+        metadata = agent.heartbeat_metadata()
+
+        self.assertEqual(first, (True, None, None))
+        self.assertEqual(second, (True, None, None))
+        self.assertFalse(third[0])
+        self.assertEqual(third[2], "AGENT_RESOURCE_EXHAUSTED")
+        self.assertEqual(metadata["active_tasks"], "2")
+        self.assertEqual(metadata["max_concurrent_tasks"], "2")
+        self.assertEqual(metadata["available_task_slots"], "0")
+        self.assertEqual(metadata["task_execution_status"], "saturated")
+
+        agent._release_task_capacity()
+        metadata = agent.heartbeat_metadata()
+        self.assertEqual(metadata["active_tasks"], "1")
+        self.assertEqual(metadata["task_execution_status"], "busy")
 
 
 if __name__ == "__main__":

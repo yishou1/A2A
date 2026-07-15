@@ -4,6 +4,98 @@ from copy import deepcopy
 from typing import Iterable
 
 
+DEFAULT_INPUT_SCHEMA = {"type": "object", "additionalProperties": True}
+DEFAULT_OUTPUT_SCHEMA = {
+    "type": ["object", "array", "string", "number", "boolean", "null"]
+}
+
+CONTEXT_ENTRY_ARRAY_SCHEMA = {
+    "type": "array",
+    "items": {"type": "object"},
+}
+
+SKILL_CONTRACTS = {
+    "scan_beach_defenses": {
+        "input_schema": {
+            "type": "object",
+            "required": ["sector"],
+            "properties": {"sector": {"type": "string"}},
+            "additionalProperties": False,
+        },
+        "output_schema": {"type": "string"},
+    },
+    "suppress_beach_sector_A": {
+        "input_schema": {
+            "type": "object",
+            "required": ["coordinates"],
+            "properties": {
+                "coordinates": {"type": "string"},
+                "intensity": {"type": "string"},
+                "recon_report": CONTEXT_ENTRY_ARRAY_SCHEMA,
+            },
+            "additionalProperties": False,
+        },
+        "output_schema": {"type": "string"},
+    },
+    "evaluate_strike": {
+        "input_schema": {
+            "type": "object",
+            "required": ["coordinates"],
+            "properties": {
+                "coordinates": {"type": "string"},
+                "recon_report": CONTEXT_ENTRY_ARRAY_SCHEMA,
+                "strike_result": CONTEXT_ENTRY_ARRAY_SCHEMA,
+                "mock_eval_score": {"type": "integer"},
+            },
+            "additionalProperties": False,
+        },
+        "output_schema": {"type": ["integer", "number"]},
+    },
+    "capture_beachhead": {
+        "input_schema": {
+            "type": "object",
+            "required": ["coordinates"],
+            "properties": {
+                "coordinates": {"type": "string"},
+                "recon_report": CONTEXT_ENTRY_ARRAY_SCHEMA,
+                "strike_result": CONTEXT_ENTRY_ARRAY_SCHEMA,
+                "eval_score": CONTEXT_ENTRY_ARRAY_SCHEMA,
+                "commander_decision": CONTEXT_ENTRY_ARRAY_SCHEMA,
+            },
+            "additionalProperties": False,
+        },
+        "output_schema": {"type": "string"},
+    },
+    "analyze_and_replanning": {
+        "input_schema": {
+            "type": "object",
+            "required": ["recon_report", "strike_result"],
+            "properties": {
+                "recon_report": CONTEXT_ENTRY_ARRAY_SCHEMA,
+                "strike_result": CONTEXT_ENTRY_ARRAY_SCHEMA,
+            },
+            "additionalProperties": False,
+        },
+        "output_schema": {"type": ["object", "string"]}
+    },
+}
+
+
+def skill_contract(skill_id: str | None) -> dict:
+    contract = deepcopy(SKILL_CONTRACTS.get(str(skill_id or ""), {}))
+    contract.setdefault("input_schema", deepcopy(DEFAULT_INPUT_SCHEMA))
+    contract.setdefault("output_schema", deepcopy(DEFAULT_OUTPUT_SCHEMA))
+    return contract
+
+
+def enrich_skill_contract(skill: dict) -> dict:
+    enriched = deepcopy(skill)
+    contract = skill_contract(enriched.get("id"))
+    enriched.setdefault("input_schema", contract["input_schema"])
+    enriched.setdefault("output_schema", contract["output_schema"])
+    return enriched
+
+
 # The distributed-agent interface spec requires registration of the following
 # professional capabilities. Each entry is a self-describing A2A skill so it can
 # be advertised on the agent card, published to Nacos metadata and matched by the
@@ -93,14 +185,14 @@ def build_skill(capability: str) -> dict:
     skill = PROFESSIONAL_SKILLS.get(capability)
     if skill is None:
         raise KeyError(f"Unknown professional capability: {capability}")
-    return deepcopy(skill)
+    return enrich_skill_contract(skill)
 
 
 def skills_for_capabilities(capabilities: Iterable[str]) -> list[dict]:
     skills = []
     for capability in capabilities or []:
         if capability in PROFESSIONAL_SKILLS:
-            skills.append(deepcopy(PROFESSIONAL_SKILLS[capability]))
+            skills.append(enrich_skill_contract(PROFESSIONAL_SKILLS[capability]))
     return skills
 
 

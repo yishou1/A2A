@@ -13,7 +13,8 @@ class ArtilleryAgent(A2ABaseAgent):
         await asyncio.sleep(1)
         yield f"data: {json.dumps({'status': 'Working', 'message': 'Impact confirmed. Adjusting aim.', 'progress': '60%'})}\n\n"
         await asyncio.sleep(1)
-        yield f"data: {json.dumps({'status': 'Completed', 'message': 'Target suppression complete', 'progress': '100%'})}\n\n"
+        output, message = self.execute_task(payload)
+        yield f"data: {json.dumps({'status': 'Completed', 'message': message, 'progress': '100%', 'output': output})}\n\n"
 
 if __name__ == "__main__":
     port = int(os.environ.get("ARTILLERY_AGENT_PORT", "8003"))

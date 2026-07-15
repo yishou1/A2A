@@ -3,6 +3,8 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Dict, Optional
 
+from protocol_contracts import PROTOCOL_VERSION
+
 
 TERMINAL_SUCCESS_STATUSES = {"completed", "succeeded", "success", "accepted"}
 TERMINAL_FAILURE_STATUSES = {"failed", "error", "rejected", "timeout"}
@@ -46,6 +48,7 @@ def build_task_response(
     extra: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
+        "schema_version": PROTOCOL_VERSION,
         "workflow_id": workflow_id,
         "work_item": work_item,
         "agent": agent,
