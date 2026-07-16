@@ -142,6 +142,42 @@ class DecisionAgentsAlgolibRuntimeTest(unittest.TestCase):
         self.assertEqual(call.inputs, expected_inputs)
         self.assertEqual(normalized_plan["algorithm_calls"][0]["inputs"], expected_inputs)
 
+    def test_planning_ignores_llm_claim_that_candidate_plans_are_missing(self):
+        payload = sample_payload("decision_planning_input.json")
+        payload.pop("candidate_plans", None)
+        request = AgentRequest.model_validate(payload)
+        algorithms = [
+            {
+                "algorithm_id": "decision_planning_core",
+                "version": "1.0.0",
+                "backend_type": "python_http_service",
+            }
+        ]
+        llm_plan = {
+            "intent": "generate candidate plans",
+            "algorithm_calls": [
+                {
+                    "algorithm_id": "decision_planning_core",
+                    "version": "1.0.0",
+                    "backend_type": "python_http_service",
+                    "inputs": {},
+                    "params": {},
+                }
+            ],
+            "missing_fields": ["candidate_plans"],
+        }
+
+        with patch("decision_agents.common.algolib_runtime.llm_enabled", return_value=True):
+            with patch("decision_agents.common.algolib_runtime._llm_plan", return_value=llm_plan):
+                call, _normalized_plan = _select_algorithm_call(
+                    "decision_planning_agent",
+                    request,
+                    algorithms,
+                )
+
+        self.assertEqual(call.algorithm_id, "decision_planning_core")
+        self.assertEqual(call.inputs["candidate_plans"], [])
+
     def _run_with_algolib(self, agent, request_payload: dict, outputs: dict):
         algorithms = {
             "ok": True,

@@ -11,6 +11,7 @@ from decision_agents.common.algolib_client import (
     AlgorithmLibraryError,
     AlgorithmRunCall,
 )
+from decision_agents.common.algorithm_registry import missing_required_fields
 from decision_agents.common.config import get_settings
 from decision_agents.common.llm_enhancer import llm_enabled
 from decision_agents.common.prompt_loader import get_prompt_module
@@ -26,6 +27,11 @@ AGENT_DEFAULT_ALGORITHMS = {
 AGENT_ALLOWED_ALGORITHMS = {
     "decision_planning_agent": {"decision_planning_core"},
     "compliance_authorization_agent": {"compliance_authorization_core"},
+}
+
+AGENT_REQUIRED_FIELDS = {
+    "decision_planning_agent": ("scheduled_tasks", "resources"),
+    "compliance_authorization_agent": ("candidate_plans", "authorization"),
 }
 
 
@@ -95,6 +101,13 @@ def _select_algorithm_call(
     request: AgentRequest,
     algorithms: list[dict[str, Any]],
 ) -> tuple[AlgorithmRunCall, dict[str, Any]]:
+    actual_missing_fields = missing_required_fields(
+        request,
+        AGENT_REQUIRED_FIELDS[agent_name],
+    )
+    if actual_missing_fields:
+        raise ValueError(f"missing_fields:{','.join(actual_missing_fields)}")
+
     active_by_id = {
         item.get("algorithm_id"): item
         for item in algorithms
@@ -103,9 +116,6 @@ def _select_algorithm_call(
     if llm_enabled():
         llm_plan = _llm_plan(agent_name, request, algorithms)
         calls = llm_plan.get("algorithm_calls")
-        missing_fields = _string_list(llm_plan.get("missing_fields"))
-        if missing_fields:
-            raise ValueError(f"missing_fields:{','.join(missing_fields)}")
         if not isinstance(calls, list) or not calls:
             raise ValueError("LLM plan did not include algorithm_calls.")
         raw_call = calls[0]
@@ -226,9 +236,3 @@ def _summary(agent_name: str, result: dict[str, Any]) -> str:
         f"Compliance decision is {result.get('decision', 'unknown')}; "
         f"human_approval_required={result.get('requires_human_approval')}."
     )
-
-
-def _string_list(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [str(item) for item in value]

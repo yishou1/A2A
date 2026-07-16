@@ -50,6 +50,8 @@ Choose only one active algorithm from the provided algorithm catalog.
 Prefer decision_planning_core when it is active.
 Do not invent algorithm outputs, scores, evidence, or plans.
 If required information is missing, return missing_fields and do not call an algorithm.
+Only scheduled_tasks and resources are required for this algorithm call.
+candidate_plans is optional input and is normally empty because the algorithm generates it.
 RAG is out of scope for this step.
 Your job is to understand tasks, resources, risks, constraints, and planning objectives.
 Prepare inputs for candidate-plan generation, scoring, recommendation, and handoff notes.
