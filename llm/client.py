@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from typing import Any
 
@@ -28,16 +29,28 @@ class OpenAICompatibleClient:
         self.timeout = settings.llm_timeout_seconds
         self.provider = settings.llm_provider
         self.azure_api_version = settings.azure_openai_api_version
+        self.max_tokens = settings.llm_max_tokens
+        self.temperature = settings.llm_temperature
+        self.json_mode = settings.llm_json_mode
+        self.strip_thinking = settings.llm_strip_thinking
+        self.json_retry_count = settings.llm_json_retry_count
+        self.reasoning_effort = settings.llm_reasoning_effort
 
     def chat(self, *, system_prompt: str, user_prompt: str) -> str:
-        payload = {
+        payload: dict[str, Any] = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "temperature": 0,
+            "temperature": self.temperature,
         }
+        if self.max_tokens is not None:
+            payload["max_tokens"] = self.max_tokens
+        if self.json_mode:
+            payload["response_format"] = {"type": "json_object"}
+        if self.reasoning_effort:
+            payload["reasoning_effort"] = self.reasoning_effort
         url, headers = self._request_target()
         try:
             response = httpx.post(
@@ -78,14 +91,52 @@ class OpenAICompatibleClient:
         return ".openai.azure.com" in self.base_url
 
     def chat_json(self, *, system_prompt: str, user_prompt: str) -> dict[str, Any]:
-        content = self.chat(system_prompt=system_prompt, user_prompt=user_prompt)
-        try:
-            parsed = json.loads(_strip_json_fence(content))
-        except json.JSONDecodeError as exc:
-            raise LLMClientError("LLM content is not valid JSON.") from exc
-        if not isinstance(parsed, dict):
-            raise LLMClientError("LLM JSON content must be an object.")
-        return parsed
+        prompt = user_prompt
+        failure = "LLM content is not valid JSON."
+        for attempt in range(self.json_retry_count + 1):
+            content = self.chat(system_prompt=system_prompt, user_prompt=prompt)
+            text = _strip_model_wrappers(
+                content,
+                strip_thinking=self.strip_thinking,
+            )
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                failure = "LLM content is not valid JSON."
+            else:
+                if isinstance(parsed, dict):
+                    return parsed
+                failure = "LLM JSON content must be an object."
+
+            if attempt < self.json_retry_count:
+                prompt = _json_retry_prompt(user_prompt, content)
+
+        raise LLMClientError(failure)
+
+
+_THINK_BLOCK_RE = re.compile(r"<think\b[^>]*>.*?</think>", re.IGNORECASE | re.DOTALL)
+
+
+def _strip_model_wrappers(content: str, *, strip_thinking: bool) -> str:
+    text = content.strip()
+    if strip_thinking:
+        text = _THINK_BLOCK_RE.sub("", text).strip()
+        if text.lower().startswith("<think") and "</think>" not in text.lower():
+            object_start = text.find("{")
+            if object_start >= 0:
+                text = text[object_start:].strip()
+    return _strip_json_fence(text)
+
+
+def _json_retry_prompt(original_prompt: str, invalid_content: str) -> str:
+    preview = invalid_content.strip()[:1000]
+    return (
+        f"{original_prompt}\n\n"
+        "The previous response was not one valid JSON object. "
+        "Return only the JSON object required by the system prompt. "
+        "Do not include Markdown fences, thinking text, or commentary.\n\n"
+        f"Previous response:\n{preview}"
+    )
 
 
 def _strip_json_fence(content: str) -> str:

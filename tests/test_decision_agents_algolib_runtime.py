@@ -6,6 +6,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from decision_agents.compliance_authorization.agent import ComplianceAuthorizationAgent
+from decision_agents.common.algolib_runtime import _select_algorithm_call
+from decision_agents.common.schemas import AgentRequest
 from decision_agents.decision_planning.agent import DecisionPlanningAgent
 
 
@@ -104,6 +106,41 @@ class DecisionAgentsAlgolibRuntimeTest(unittest.TestCase):
         self.assertEqual(response.selected_algorithms, ["compliance_authorization_core"])
         self.assertIn("compliance_authorization_agent", FakeLLM.calls[0]["system_prompt"])
         self.assertNotIn("decision_planning_agent", FakeLLM.calls[0]["system_prompt"])
+
+    def test_validated_request_replaces_llm_generated_algorithm_inputs(self):
+        request = AgentRequest.model_validate(sample_payload("decision_planning_input.json"))
+        algorithms = [
+            {
+                "algorithm_id": "decision_planning_core",
+                "version": "1.0.0",
+                "backend_type": "python_http_service",
+            }
+        ]
+        llm_plan = {
+            "intent": "test",
+            "algorithm_calls": [
+                {
+                    "algorithm_id": "decision_planning_core",
+                    "version": "1.0.0",
+                    "backend_type": "python_http_service",
+                    "inputs": {"request_id": request.request_id},
+                    "params": {},
+                }
+            ],
+            "missing_fields": [],
+        }
+
+        with patch("decision_agents.common.algolib_runtime.llm_enabled", return_value=True):
+            with patch("decision_agents.common.algolib_runtime._llm_plan", return_value=llm_plan):
+                call, normalized_plan = _select_algorithm_call(
+                    "decision_planning_agent",
+                    request,
+                    algorithms,
+                )
+
+        expected_inputs = request.model_dump(mode="json")
+        self.assertEqual(call.inputs, expected_inputs)
+        self.assertEqual(normalized_plan["algorithm_calls"][0]["inputs"], expected_inputs)
 
     def _run_with_algolib(self, agent, request_payload: dict, outputs: dict):
         algorithms = {

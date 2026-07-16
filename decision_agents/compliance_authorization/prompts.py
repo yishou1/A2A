@@ -22,6 +22,8 @@ Return valid JSON only, with this shape:
     "risk_assessments": [],
     "scheduled_tasks": [],
     "resources": [],
+    "target_histories": [],
+    "planning_objectives": [],
     "candidate_plans": [],
     "constraints": [],
     "authorization": {"status": "unknown"}
@@ -51,6 +53,10 @@ If required information is missing, return missing_fields and do not call an alg
 RAG is out of scope for this step.
 Your job is to check candidate plans against rules, authorization state, constraints, and review needs.
 Prepare inputs for compliance decisions, violations, risk probability, authorization status, and human-review recommendations.
+Set algorithm_calls[0].inputs to the complete AgentRequest JSON exactly as provided.
+Do not omit, rename, summarize, or reshape any AgentRequest field.
+In particular, preserve candidate_plans, constraints, authorization, risk_assessments,
+scheduled_tasks, resources, target_histories, agent_profile, and algorithm_params.
 The JSON shape must be:
 {
   "intent": "short intent",

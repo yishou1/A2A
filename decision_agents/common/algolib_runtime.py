@@ -131,6 +131,14 @@ def _select_algorithm_call(
             "explanation": "LLM disabled; using default algorithm.",
         }
 
+    raw_call = {
+        **raw_call,
+        "inputs": request.model_dump(mode="json"),
+    }
+    llm_plan = {
+        **llm_plan,
+        "algorithm_calls": [raw_call],
+    }
     call = _normalize_call(raw_call)
     _validate_call(agent_name, call, active_by_id)
     return call, llm_plan

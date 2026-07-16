@@ -24,6 +24,12 @@ class Settings:
     api_key: str
     azure_openai_api_version: str
     llm_timeout_seconds: float
+    llm_max_tokens: int | None
+    llm_temperature: float
+    llm_json_mode: bool
+    llm_strip_thinking: bool
+    llm_json_retry_count: int
+    llm_reasoning_effort: str
     decision_agent_backend: str
     algolib_base_url: str
     algolib_timeout_seconds: float
@@ -60,6 +66,17 @@ def get_settings() -> Settings:
         api_key=os.getenv("API_KEY", "EMPTY"),
         azure_openai_api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview"),
         llm_timeout_seconds=float(os.getenv("LLM_TIMEOUT_SECONDS", "30")),
+        llm_max_tokens=(
+            int(os.environ["LLM_MAX_TOKENS"])
+            if os.getenv("LLM_MAX_TOKENS", "").strip()
+            else None
+        ),
+        llm_temperature=float(os.getenv("LLM_TEMPERATURE", "0")),
+        llm_json_mode=os.getenv("LLM_JSON_MODE", "false").lower() == "true",
+        llm_strip_thinking=os.getenv("LLM_STRIP_THINKING", "true").lower()
+        == "true",
+        llm_json_retry_count=max(0, int(os.getenv("LLM_JSON_RETRY_COUNT", "0"))),
+        llm_reasoning_effort=os.getenv("LLM_REASONING_EFFORT", "").strip(),
         decision_agent_backend=os.getenv("DECISION_AGENT_BACKEND", "local").lower(),
         algolib_base_url=os.getenv("ALGOLIB_BASE_URL", "http://127.0.0.1:8088"),
         algolib_timeout_seconds=float(os.getenv("ALGOLIB_TIMEOUT_SECONDS", "10")),
