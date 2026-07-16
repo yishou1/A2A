@@ -122,9 +122,9 @@ Example:
 }
 ```
 
-### A2A Workflow Envelope
+### A2A Task Envelope
 
-The Agent also supports the workflow-style payload used by the shared A2A repository:
+The Agent accepts the Commander task envelope used by the shared A2A repository. `workflow_id` is correlation metadata only; algorithms still execute in-process without an internal workflow engine:
 
 ```http
 POST /sendMessage

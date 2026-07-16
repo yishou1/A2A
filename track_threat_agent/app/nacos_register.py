@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict
 from urllib import parse, request
 
+from .agent_model_registry import configured_model_metadata
 from .skills import nacos_skill_ids
 
 
@@ -117,9 +118,13 @@ class NacosSettings:
             "st_gnn_max_inference_ms": os.getenv("ST_GNN_MAX_INFERENCE_MS", "200"),
             "asset_events": "asset.updated,asset.relationship.updated",
             "artifact_events": "track.updated,threat.updated,track.group.updated,threat.group.updated,threat.ranking.updated,protected.asset.updated,asset.impact.updated",
+            "algorithm_execution_location": "agent_process",
+            "algorithm_library_transport": "none",
+            "internal_workflow_engine": "false",
             "heartbeat_ts": str(int(time.time())),
             "heartbeat_at": _utc_now_iso(),
         }
+        metadata.update(configured_model_metadata())
         return cls(
             enabled=enabled,
             server=os.getenv("NACOS_SERVER", "127.0.0.1:8848"),
@@ -205,6 +210,17 @@ class NacosRegistrar:
         self.settings.metadata.update({key: str(value) for key, value in metadata_updates.items()})
         self.settings.metadata["heartbeat_ts"] = str(int(time.time()))
         self.settings.metadata["heartbeat_at"] = _utc_now_iso()
+
+    def set_model_registry(self, model_registry: Any) -> None:
+        """Publish locally loaded model state; Nacos never executes the models."""
+        self.settings.metadata.update(
+            {key: str(value) for key, value in model_registry.metadata().items()}
+        )
+        self.settings.metadata["model_status"] = (
+            "model_loaded"
+            if model_registry.ready_model_ids()
+            else "no_model"
+        )
 
     def _register_instance(self) -> None:
         assert self.client is not None

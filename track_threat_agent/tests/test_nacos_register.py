@@ -23,6 +23,11 @@ def test_nacos_metadata_exposes_ready_and_metrics_endpoints(monkeypatch):
     assert "tactical_intelligence_result" in settings.metadata["input_message_types"]
     assert "asset_impact" in settings.metadata["ranking_item_types"]
     assert "protected_assets" in settings.metadata["scene_contract"]
+    assert settings.metadata["algorithm_execution_location"] == "agent_process"
+    assert settings.metadata["algorithm_library_transport"] == "none"
+    assert "track_state_kalman_cv" in settings.metadata["models"]
+    assert "trajectory_imm" in settings.metadata["models_ready"]
+    assert settings.metadata["algorithm_deployment_status"] in {"ready", "partial"}
     skills = set(settings.metadata["skills"].split(","))
     assert "track_threat_situation_analysis" in skills
     assert "trajectory_prediction" in skills

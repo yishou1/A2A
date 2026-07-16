@@ -44,17 +44,18 @@ metadata.status=idle
 - 己方保护资产影响分析。
 - 单体、群体、资产影响统一关注排序。
 - A2A `sendMessage` / `sendMessageStream`。
-- `workflow_id` / `work_item` / `work_list` 工作流字段。
+- 兼容 Commander 传入的 `workflow_id` / `work_item` / `work_list` 任务信封字段；Agent 内部不运行工作流引擎。
 - `work_item` 幂等缓存。
 - `GET /workflows/{workflow_id}/work-list`。
 - `GET /ready`、`POST /lifecycle/ready`、`GET /metrics`，适配 Commander 宕机恢复/ready=false 切换规范。
 - `GET /schema/input`、`GET /schema/output`、`GET /state/summary`，用于上游/Gateway/Commander 自动读取协议版本和当前 Agent 状态。
+- `GET /models` 返回 Agent 已加载的模型、版本和 ready/unavailable 状态。
 - Nacos role/status metadata 和 heartbeat_ts 心跳；心跳会保留 Commander 写入的 busy/unavailable/lease_* 状态。
 - `AlgorithmProvider` 作为算法边界，默认主线已经切换到本地可运行的计划书算法栈。
 - 本地 JSON 状态快照，支持演示环境重启后恢复航迹、最近 artifact、幂等缓存和 workflow work list。
 - 独立 ST-GNN 模型包发现：默认发现 `models/track_threat` 下的内置模型包，也可通过 `ST_GNN_AIRCRAFT_MODEL_DIR`、`ST_GNN_SHIP_MODEL_DIR` 或旧 `ST_GNN_MODEL_DIR` 覆盖；模型不可用时安全回退。
 
-当前工程不再只是“预留接口”。`PlanAlgorithmProvider` 会实际调用本地算法：协方差 Kalman 跟踪、IMM 多模型预测、本地 ST-GNN 消息传递、DBN 风险状态校准、保护资产影响分析、编队识别和 XAI 证据链。知识库/RAG/方案规划/合规授权不放在本 Agent 中，交由 lzh 等下游 Agent 消费 `decision_risk_assessments` 后继续处理。后续公共算法库或 A100 训练版 ST-GNN 完成后，可以替换 `app/algorithm_provider.py` 后端实现和模型权重，但 A2A/Nacos 对外协议不需要改变。
+当前工程不再只是“预留接口”。`PlanAlgorithmProvider` 会在 Agent 进程内直接执行协方差 Kalman 跟踪、IMM 多模型预测、TorchScript ST-GNN、DBN 风险状态校准、保护资产影响分析、编队识别和 XAI 证据链。知识库/RAG/方案规划/合规授权不放在本 Agent 中，交由下游 Agent 消费 `decision_risk_assessments` 后继续处理。公共算法库只作为算法源码、模型包和 schema 的交付仓库，不是本 Agent 的运行时 HTTP 依赖。
 
 ## 2.1 独立 ST-GNN 训练工程
 
@@ -72,6 +73,8 @@ metadata.status=idle
 models/track_threat/st_gnn_aircraft_kaggle_v1_candidate
 models/track_threat/st_gnn_ship_kaggle_v1
 ```
+
+`scripts/start_track_threat_agent.sh` 默认同时安装 `requirements-model.txt` 并在 CPU 上加载这两个 TorchScript bundle。只有明确要运行降级版时才设置 `TRACK_THREAT_ENABLE_TORCHSCRIPT=false`。
 
 其中船舶模型已通过当前 release gate；飞机模型是候选模型，FDE 和覆盖率通过，但 ADE 提升略低于 10% 门槛，适合演示和联调。若要替换为实验室服务器训练出的新模型，可以通过以下环境变量覆盖内置模型：
 
@@ -154,37 +157,11 @@ export HEARTBEAT_INTERVAL=5
 
 完整 Nacos 联调步骤见 `docs/nacos_smoke_test.md`。该文档覆盖 Docker Compose 启动 Nacos、Agent 注册、师兄 `NacosRegistry` 发现、以及通过发现到的 `/sendMessage` endpoint 发起 A2A 调用。
 
-### 4.1 共享算法库优先调用
+### 4.1 Agent 本地模型执行
 
-Agent 始终持有权威 `TrackStore`、任务幂等缓存和宕机恢复快照；共享算法库负责可替换的计算能力。启用后，Agent 会优先发现并调用 `track-threat-algorithms` 服务：
+Agent 持有权威 `TrackStore`、任务幂等缓存、宕机恢复快照和模型实例。启动时从 `models/track_threat` 或 `ST_GNN_*_MODEL_DIR` 加载 TorchScript 模型，每帧航迹在本进程完成推理。`GET /models` 和 Nacos metadata 会公布 `models`、`models_ready`、`models_count` 和 `algorithm_deployment_status`。
 
-```text
-M03 multimodal_feature_fuser -> 输入特征增强
-M04 target_type_classifier   -> 类型/置信度补全
-M05 track_state_updater      -> 航迹关联一致性校验
-M06 trajectory_predictor     -> 预测路径写入 TrackState
-M07 graph_relation_reasoner  -> 图关系/编队证据增强
-```
-
-远程服务超时、Nacos 不可用、模型未加载或返回异常时，对应步骤会继续使用本 Agent 的 Kalman、IMM、ST-GNN 运行时与群体检测实现，不会中断 A2A 任务。
-
-本机不使用 Nacos 时，可显式指定算法库地址：
-
-```bash
-export ALGORITHM_LIBRARY_ENABLED=true
-export ALGORITHM_LIBRARY_BASE_URL=http://127.0.0.1:9022
-export ALGORITHM_LIBRARY_TIMEOUT_S=3
-```
-
-真实联调时让 Agent 从 Nacos 发现服务：
-
-```bash
-export ALGORITHM_LIBRARY_ENABLED=true
-export ALGORITHM_LIBRARY_BASE_URL=
-export ALGORITHM_LIBRARY_SERVICE_NAME=track-threat-algorithms
-```
-
-算法库服务需注册 `owner_scope=track_threat_agent` 和 `algorithm_classes=M03,M04,M05,M06,M07`，Agent 会过滤掉不属于本职责范围的服务实例。
+Nacos 只发现 Agent、公布 skill/模型/健康状态，不调度算法、不传输模型输入、不承载逐帧航迹。模型超时、输入不足或 bundle 校验失败时，当前帧在 Agent 内回退 IMM/CV，不会转发给远程算法服务。
 
 接入 Commander 宕机恢复时，本 Agent 遵守师兄统一规范：
 
@@ -230,7 +207,7 @@ export TRACK_THREAT_STATE_PATH=/tmp/track_threat_agent_state.json
 
 ## 6. A2A 调用
 
-### 6.1 工作流入口
+### 6.1 A2A 任务入口
 
 ```http
 POST /sendMessage
@@ -267,6 +244,8 @@ Content-Type: application/json
 ```
 
 `work_item` 是幂等键。同一个 `work_item` 重试时，Agent 会返回缓存 artifact，不会重复推进航迹历史、DBN 状态或编组状态。
+
+`workflow_id` 和 `work_list` 只是 Commander 传入的跨 Agent 任务关联信息。本 Agent 收到任务后会作为一次本地分析调用执行，不在内部创建子工作流或网络算法步骤。
 
 `/sendMessage` 返回统一 A2A 任务响应信封，业务结果放在 `output` 中，同时为了兼容调试保留顶层 `artifact`：
 

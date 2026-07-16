@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from a2a_protocol.messages import build_task_error_response, build_task_response
 
 from .a2a_runtime import A2ARuntimeState
-from .algorithm_library_client import AlgorithmLibraryClient
+from .agent_model_registry import build_agent_model_registry
 from .algorithm_provider import PlanAlgorithmProvider
 from .amos_adapter import build_integration_events
 from .asset_impact_analyzer import AssetImpactAnalyzer
@@ -81,7 +81,6 @@ graph_predictor = STGNNTrajectoryPredictor()
 learned_predictor = LearnedTrajectoryPredictor(os.getenv("TRACK_THREAT_LEARNED_MODEL_PATH") or DEFAULT_LEARNED_MODEL_PATH)
 st_gnn_model_bundle = ModelBundleLoader(os.getenv("ST_GNN_MODEL_DIR"))
 trained_st_gnn_runtime = TrackSTGNNRuntime.from_env(BACKEND_DIR / "models" / "track_threat")
-algorithm_library_client = AlgorithmLibraryClient()
 algorithm_provider = PlanAlgorithmProvider(
     tracker,
     graph_predictor,
@@ -90,8 +89,9 @@ algorithm_provider = PlanAlgorithmProvider(
     group_detector,
     learned_predictor=learned_predictor,
     trained_st_gnn_runtime=trained_st_gnn_runtime,
-    algorithm_library=algorithm_library_client,
 )
+model_registry = build_agent_model_registry(learned_predictor, trained_st_gnn_runtime)
+registrar.set_model_registry(model_registry)
 runtime = A2ARuntimeState(agent_name="track-threat-group-agent", role=registrar.settings.role)
 processing_lock = asyncio.Lock()
 auto_demo_task: asyncio.Task | None = None
@@ -179,6 +179,7 @@ def health() -> Dict[str, Any]:
         "current_workflow_id": runtime_snapshot["current_workflow_id"],
         "current_work_item": runtime_snapshot["current_work_item"],
         "algorithm_provider": runtime_snapshot["algorithm_provider"],
+        "model_registry": model_registry.snapshot(),
         "state_snapshot": {
             "path": str(state_store.path),
             "exists": state_store.path.exists(),
@@ -200,6 +201,7 @@ def ready() -> Dict[str, Any]:
         "current_workflow_id": runtime_snapshot["current_workflow_id"],
         "current_work_item": runtime_snapshot["current_work_item"],
         "model_status": trained_st_gnn_runtime.status(),
+        "model_registry": model_registry.snapshot(),
     }
 
 
@@ -300,6 +302,7 @@ def _agent_card_payload() -> Dict[str, Any]:
         "workListEndpoint": "/workflows/{workflow_id}/work-list",
         "healthEndpoint": "/health",
         "readyEndpoint": "/ready",
+        "modelsEndpoint": "/models",
             "metricsEndpoint": "/metrics",
             "stateSummaryEndpoint": "/state/summary",
             "inputSchemaEndpoint": "/schema/input",
@@ -322,6 +325,14 @@ def _agent_card_payload() -> Dict[str, Any]:
             "state_summary_schema_version": STATE_SUMMARY_SCHEMA_VERSION,
         },
         "model_status": _model_status(),
+        "model_registry": model_registry.snapshot(),
+        "execution": {
+            "mode": "in_process_model_execution",
+            "model_ownership": "track_threat_agent",
+            "internal_workflow_engine": False,
+            "network_algorithm_calls": False,
+            "note": "workflow_id/work_item are accepted only as external A2A correlation fields",
+        },
         "safety_boundary": [
             "no real weapon control",
             "no attack recommendation",
@@ -349,6 +360,12 @@ def well_known_a2a_agent_card() -> Dict[str, Any]:
 @app.get("/.well-known/agent.json")
 def well_known_agent_json() -> Dict[str, Any]:
     return _agent_card_payload()
+
+
+@app.get("/models")
+def models() -> Dict[str, Any]:
+    """Report models loaded by this Agent; execution remains in-process."""
+    return model_registry.snapshot()
 
 
 @app.get("/schema/input")
@@ -930,6 +947,13 @@ def _process_payload(payload: PerceptionResultRequest) -> Dict[str, Any]:
             "highest_asset_impact_score": asset_impacts[0].score if asset_impacts else 0.0,
             "algorithm_provider": algorithm_provider.algorithm_contract(),
             "model_status": _model_status(),
+            "model_registry": model_registry.snapshot(),
+            "execution": {
+                "mode": "in_process_model_execution",
+                "model_ownership": "track_threat_agent",
+                "internal_workflow_engine": False,
+                "network_algorithm_calls": False,
+            },
             "prediction_eval": _prediction_eval_summary(tracks),
             "schema": {
                 "input_schema_version": INPUT_SCHEMA_VERSION,
@@ -968,6 +992,7 @@ def _model_status() -> Dict[str, Any]:
         "learned_trajectory_predictor": learned_status,
         "st_gnn_model_bundle": bundle_status,
         "st_gnn_runtime": trained_status,
+        "model_registry": model_registry.snapshot(),
         "local_graph_fallback": {
             "loaded": True,
             "provider": "local_numpy_message_passing",

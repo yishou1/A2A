@@ -13,5 +13,14 @@ export SERVICE_IP="${SERVICE_IP:-127.0.0.1}"
 export SERVICE_PORT="${SERVICE_PORT:-8102}"
 
 cd "${AGENT_DIR}"
-exec uv run --with-requirements requirements.txt --with-requirements ../requirements.txt \
+
+UV_REQUIREMENTS=(
+  --with-requirements requirements.txt
+  --with-requirements ../requirements.txt
+)
+if [[ "${TRACK_THREAT_ENABLE_TORCHSCRIPT:-true}" == "true" ]]; then
+  UV_REQUIREMENTS+=(--with-requirements requirements-model.txt)
+fi
+
+exec uv run "${UV_REQUIREMENTS[@]}" \
   uvicorn app.main:app --host 0.0.0.0 --port "${SERVICE_PORT}"

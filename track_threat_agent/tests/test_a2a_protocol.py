@@ -26,6 +26,22 @@ def test_a2a_agent_card_compatibility_endpoint():
         "group_threat_ranking",
         "protected_asset_impact_analysis",
     } <= skill_ids
+    assert card["execution"]["mode"] == "in_process_model_execution"
+    assert card["execution"]["internal_workflow_engine"] is False
+    assert card["modelsEndpoint"] == "/models"
+    assert card["model_registry"]["count"] >= 7
+    assert "track_state_kalman_cv" in {
+        model["id"] for model in card["model_registry"]["models"]
+    }
+
+
+def test_models_endpoint_reports_agent_loaded_models():
+    payload = main.models()
+
+    assert payload["deployment_status"] in {"ready", "partial"}
+    assert payload["count"] >= 7
+    assert "trajectory_imm" in {model["id"] for model in payload["models"]}
+    assert all(model["status"] in {"ready", "unavailable"} for model in payload["models"])
 
 
 def test_commander_camel_case_required_skill_is_supported():
@@ -73,6 +89,8 @@ async def test_send_message_accepts_a2a_task_payload():
     assert body["artifact"]["trace"]["task_id"] == body["task_id"]
     assert body["artifact"]["summary"]["schema"]["artifact_schema_version"] == "track_threat_group_artifact/v1"
     assert body["artifact"]["tracks"][0]["predicted_path"][0]["st_gnn_inspired"] in {True, False}
+    assert body["artifact"]["summary"]["execution"]["mode"] == "in_process_model_execution"
+    assert body["artifact"]["summary"]["execution"]["network_algorithm_calls"] is False
 
 
 @pytest.mark.anyio

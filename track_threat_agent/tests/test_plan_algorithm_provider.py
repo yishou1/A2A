@@ -14,15 +14,19 @@ def test_default_algorithm_provider_uses_project_plan_contract():
     provider = main.algorithm_provider
 
     assert isinstance(provider, PlanAlgorithmProvider)
-    assert provider.mode == "plan_algorithm_provider"
+    assert provider.mode == "agent_local_model_runtime"
 
     contract = provider.algorithm_contract()
+    assert contract["execution_strategy"] == "in_process_model_execution"
+    assert contract["model_ownership"] == "track_threat_agent"
+    assert "algorithm_library" not in contract
     assert contract["primary_algorithms"]["trajectory_prediction"] == "st_gnn_dynamic_entity_tracking"
     assert contract["primary_algorithms"]["threat_assessment"] == "dynamic_bayesian_network"
     assert "semantic_reasoning" not in contract["primary_algorithms"]
     assert contract["primary_algorithms"]["explainability"] == "xai_evidence_chain"
     assert contract["fallback_providers"]["trajectory_prediction"] == "baseline_motion_provider"
     assert "learned_trajectory_predictor" in contract["training_status"]
+    assert contract["network_algorithm_calls"] is False
 
 
 @pytest.mark.anyio
@@ -41,7 +45,9 @@ async def test_artifact_exposes_plan_algorithm_trace_for_reporting():
     artifact = body["artifact"]
     summary = artifact["summary"]
 
-    assert summary["algorithm_provider"]["mode"] == "plan_algorithm_provider"
+    assert summary["algorithm_provider"]["mode"] == "agent_local_model_runtime"
+    assert summary["algorithm_provider"]["execution_strategy"] == "in_process_model_execution"
+    assert summary["algorithm_provider"]["network_algorithm_calls"] is False
     assert summary["algorithm_provider"]["primary_algorithms"]["trajectory_prediction"] == "st_gnn_dynamic_entity_tracking"
     assert summary["algorithm_provider"]["fallback_providers"]["trajectory_prediction"] == "baseline_motion_provider"
 

@@ -130,7 +130,7 @@ medium  最近邻关联 + 简化 Kalman-like 滤波
 large   当前为接口占位，回退 medium，并在 metadata 标注 large_mock
 ```
 
-## 3. A2A 工作流输入：sendMessage
+## 3. A2A 任务信封输入：sendMessage
 
 近真实联调入口：
 
@@ -165,7 +165,7 @@ Content-Type: application/json
 
 字段说明：
 
-- `workflow_id`：一次跨 Agent 工作流编号。
+- `workflow_id`：Commander 分配的跨 Agent 任务关联编号，不表示本 Agent 内部运行工作流引擎。
 - `work_item`：幂等键。同一个 `work_item` 重试时返回缓存结果，不重复推进航迹历史。
 - `command`：当前推荐 `analyze_perception_result`。
 - `role`：当前 Agent 角色，应为 `track_threat`。
@@ -607,10 +607,17 @@ output_message_types=track_threat_group_artifact,track.updated,threat.updated,tr
 ranking_item_types=track,group,asset_impact
 scene_contract=protected_zone_lat,protected_zone_lon,protected_radius_m,protected_assets
 minimum_detection_fields=detection_id,object_type,timestamp,lat,lon,speed,heading,confidence
+models=track_state_kalman_cv,trajectory_imm,...
+models_ready=<Agent 已成功加载的模型>
+models_count=<模型数量>
+algorithm_deployment_status=ready / partial / unavailable
+algorithm_execution_location=agent_process
+algorithm_library_transport=none
+internal_workflow_engine=false
 heartbeat_ts=<recent unix timestamp>
 ```
 
-Nacos 只负责服务发现、健康和能力 metadata，不承载每一帧航迹数据。航迹数据通过 A2A HTTP/SSE 或 AMOS Bridge 传输。
+Nacos 只负责 Agent 发现、健康、skill 和模型部署摘要，不承载每一帧航迹数据，也不调度算法执行。航迹数据通过 A2A HTTP/SSE 或 AMOS Bridge 传输，模型由 Agent 本进程加载和执行。
 
 心跳保护约定：
 

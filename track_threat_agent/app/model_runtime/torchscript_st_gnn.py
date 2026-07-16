@@ -112,6 +112,11 @@ class TorchScriptBundleRunner:
                 raise ValueError("node feature schema mismatch")
             if len(manifest.get("edge_feature_schema", [])) != EDGE_FEATURE_COUNT:
                 raise ValueError("edge feature schema mismatch")
+            # Keep identity/schema visible in /models even if torch is absent or
+            # loading fails later. The runtime status must distinguish a known
+            # but unavailable bundle from an unconfigured model.
+            self.manifest = manifest
+            self.object_type = str(manifest["object_type"])
             self._verify_hashes()
             self.normalization = json.loads(
                 (self.bundle_dir / manifest["normalization_file"]).read_text(encoding="utf-8")
@@ -122,8 +127,6 @@ class TorchScriptBundleRunner:
                 str(self.bundle_dir / manifest["model_file"]),
                 map_location="cpu",
             ).eval()
-            self.manifest = manifest
-            self.object_type = str(manifest["object_type"])
             self._validate_golden_io()
         except Exception as exc:
             self.model = None
