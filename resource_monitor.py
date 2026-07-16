@@ -25,6 +25,16 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _env_optional_float(name: str) -> Optional[float]:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 def _round(value: Any, digits: int = 3):
     if value is None:
         return None
@@ -35,18 +45,17 @@ def _round(value: Any, digits: int = 3):
 
 
 class ResourceMonitor:
-    """Collects system and process resource metrics for an Agent runtime."""
+    """Collects system and process resource metrics for an Agent runtime.
+
+    The monitor only samples raw values (CPU, GPU, memory, energy, network
+    bandwidth, link stability, node online state) and reports them; it does not
+    classify health or make scheduling decisions.
+    """
 
     def __init__(
         self,
         *,
         sample_ttl_seconds: Optional[float] = None,
-        cpu_warn_percent: Optional[float] = None,
-        cpu_critical_percent: Optional[float] = None,
-        memory_warn_percent: Optional[float] = None,
-        memory_critical_percent: Optional[float] = None,
-        disk_warn_percent: Optional[float] = None,
-        disk_critical_percent: Optional[float] = None,
         sampler: Optional[Callable[[], dict]] = None,
     ):
         self.sample_ttl_seconds = (
@@ -54,43 +63,13 @@ class ResourceMonitor:
             if sample_ttl_seconds is not None
             else _env_float("A2A_RESOURCE_SAMPLE_TTL_SECONDS", 1.0)
         )
-        self.thresholds = {
-            "cpu_warn_percent": (
-                float(cpu_warn_percent)
-                if cpu_warn_percent is not None
-                else _env_float("A2A_RESOURCE_CPU_WARN_PERCENT", 85.0)
-            ),
-            "cpu_critical_percent": (
-                float(cpu_critical_percent)
-                if cpu_critical_percent is not None
-                else _env_float("A2A_RESOURCE_CPU_CRITICAL_PERCENT", 95.0)
-            ),
-            "memory_warn_percent": (
-                float(memory_warn_percent)
-                if memory_warn_percent is not None
-                else _env_float("A2A_RESOURCE_MEMORY_WARN_PERCENT", 85.0)
-            ),
-            "memory_critical_percent": (
-                float(memory_critical_percent)
-                if memory_critical_percent is not None
-                else _env_float("A2A_RESOURCE_MEMORY_CRITICAL_PERCENT", 95.0)
-            ),
-            "disk_warn_percent": (
-                float(disk_warn_percent)
-                if disk_warn_percent is not None
-                else _env_float("A2A_RESOURCE_DISK_WARN_PERCENT", 90.0)
-            ),
-            "disk_critical_percent": (
-                float(disk_critical_percent)
-                if disk_critical_percent is not None
-                else _env_float("A2A_RESOURCE_DISK_CRITICAL_PERCENT", 97.0)
-            ),
-        }
         self._uses_default_sampler = sampler is None
         self._sampler = sampler or self._sample_with_psutil
         self._lock = threading.RLock()
         self._last_snapshot = None
         self._last_sampled_at = 0.0
+        # Previous network counters, used to derive bandwidth rates between samples.
+        self._last_net_sample = None  # (timestamp, bytes_sent, bytes_recv)
         self._process = psutil.Process(os.getpid()) if psutil is not None else None
         if self._process is not None:
             # Prime psutil's process CPU counter; the next sample is meaningful.
@@ -122,19 +101,40 @@ class ResourceMonitor:
             self._last_sampled_at = now
             return dict(snapshot)
 
-    def ready(self) -> bool:
-        return self.snapshot().get("resource_state") != "critical"
-
     def heartbeat_metadata(self) -> dict:
         snapshot = self.snapshot()
+        system = snapshot.get("system", {}) or {}
+        process = snapshot.get("process", {}) or {}
+        gpu = snapshot.get("gpu", {}) or {}
+        energy = snapshot.get("energy", {}) or {}
+        network = snapshot.get("network", {}) or {}
         return {
             "resource_monitor_available": str(snapshot.get("monitor_available", False)).lower(),
-            "resource_state": snapshot.get("resource_state", "unknown"),
-            "resource_cpu_percent": snapshot.get("system", {}).get("cpu_percent"),
-            "resource_memory_percent": snapshot.get("system", {}).get("memory_percent"),
-            "resource_disk_percent": snapshot.get("system", {}).get("disk_percent"),
-            "process_cpu_percent": snapshot.get("process", {}).get("cpu_percent"),
-            "process_memory_mb": snapshot.get("process", {}).get("memory_rss_mb"),
+            "node_online": str(snapshot.get("node_online", False)).lower(),
+            "resource_cpu_percent": system.get("cpu_percent"),
+            "resource_memory_percent": system.get("memory_percent"),
+            "resource_disk_percent": system.get("disk_percent"),
+            "process_cpu_percent": process.get("cpu_percent"),
+            "process_memory_mb": process.get("memory_rss_mb"),
+            "resource_gpu_available": str(gpu.get("available", False)).lower(),
+            "resource_gpu_percent": gpu.get("gpu_percent"),
+            "resource_gpu_memory_percent": gpu.get("memory_percent"),
+            "resource_energy_available": str(energy.get("available", False)).lower(),
+            "resource_energy_percent": energy.get("percent"),
+            "resource_power_plugged": (
+                None
+                if energy.get("power_plugged") is None
+                else str(energy.get("power_plugged")).lower()
+            ),
+            "resource_net_sent_kbps": network.get("send_kbps"),
+            "resource_net_recv_kbps": network.get("recv_kbps"),
+            "resource_bandwidth_mbps": network.get("bandwidth_mbps"),
+            "resource_link_stability": network.get("link_stability"),
+            "resource_link_up": (
+                None
+                if network.get("link_up") is None
+                else str(network.get("link_up")).lower()
+            ),
             "resource_sampled_at": snapshot.get("sampled_at"),
         }
 
@@ -159,6 +159,7 @@ class ResourceMonitor:
             open_files_count = None
 
         return {
+            "node_online": True,
             "system": {
                 "cpu_percent": psutil.cpu_percent(interval=None),
                 "cpu_count": psutil.cpu_count(logical=True),
@@ -183,6 +184,192 @@ class ResourceMonitor:
                 "open_files": open_files_count,
                 "io_counters": io_counters,
             },
+            "gpu": self._sample_gpu(),
+            "energy": self._sample_energy(),
+            "network": self._sample_network(),
+        }
+
+    def _sample_gpu(self) -> dict:
+        """Sample GPU utilization. Falls back gracefully when no GPU/driver."""
+        override_percent = _env_optional_float("A2A_RESOURCE_GPU_PERCENT")
+        override_memory = _env_optional_float("A2A_RESOURCE_GPU_MEMORY_PERCENT")
+        if override_percent is not None or override_memory is not None:
+            return {
+                "available": True,
+                "source": "env-override",
+                "device_count": 1,
+                "gpu_percent": override_percent,
+                "memory_percent": override_memory,
+                "devices": [
+                    {
+                        "index": 0,
+                        "gpu_percent": override_percent,
+                        "memory_percent": override_memory,
+                    }
+                ],
+            }
+
+        try:
+            import pynvml  # type: ignore
+        except Exception:
+            return {"available": False, "reason": "pynvml not installed", "devices": []}
+
+        try:
+            pynvml.nvmlInit()
+            count = pynvml.nvmlDeviceGetCount()
+            devices = []
+            gpu_percents = []
+            memory_percents = []
+            for idx in range(count):
+                handle = pynvml.nvmlDeviceGetHandleByIndex(idx)
+                util = pynvml.nvmlDeviceGetUtilizationRates(handle)
+                mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                name = pynvml.nvmlDeviceGetName(handle)
+                if isinstance(name, bytes):
+                    name = name.decode("utf-8", "replace")
+                mem_percent = (mem.used / mem.total) * 100 if mem.total else None
+                gpu_percents.append(float(util.gpu))
+                if mem_percent is not None:
+                    memory_percents.append(mem_percent)
+                devices.append(
+                    {
+                        "index": idx,
+                        "name": name,
+                        "gpu_percent": float(util.gpu),
+                        "memory_percent": mem_percent,
+                        "memory_used_bytes": int(mem.used),
+                        "memory_total_bytes": int(mem.total),
+                    }
+                )
+            pynvml.nvmlShutdown()
+            return {
+                "available": True,
+                "source": "pynvml",
+                "device_count": count,
+                "gpu_percent": max(gpu_percents) if gpu_percents else None,
+                "memory_percent": max(memory_percents) if memory_percents else None,
+                "devices": devices,
+            }
+        except Exception as exc:
+            return {"available": False, "reason": str(exc), "devices": []}
+
+    def _sample_energy(self) -> dict:
+        """Sample power/energy state. Servers without a battery report unavailable."""
+        override_percent = _env_optional_float("A2A_RESOURCE_ENERGY_PERCENT")
+        if override_percent is not None:
+            plugged_env = os.environ.get("A2A_RESOURCE_POWER_PLUGGED")
+            power_plugged = (
+                None if plugged_env is None else plugged_env.strip().lower() in {"1", "true", "yes"}
+            )
+            return {
+                "available": True,
+                "source": "env-override",
+                "percent": override_percent,
+                "power_plugged": power_plugged,
+                "secs_left": None,
+            }
+
+        if psutil is None:
+            return {"available": False, "reason": "psutil is not installed"}
+
+        try:
+            battery = psutil.sensors_battery()
+        except Exception as exc:
+            return {"available": False, "reason": str(exc)}
+
+        if battery is None:
+            return {
+                "available": False,
+                "reason": "no battery/energy sensor",
+                "percent": None,
+                "power_plugged": None,
+            }
+
+        secs_left = getattr(battery, "secsleft", None)
+        if secs_left is not None and secs_left < 0:
+            secs_left = None
+        return {
+            "available": True,
+            "source": "psutil",
+            "percent": battery.percent,
+            "power_plugged": battery.power_plugged,
+            "secs_left": secs_left,
+        }
+
+    def _sample_network(self) -> dict:
+        """Sample bandwidth and link stability from network IO counters."""
+        override_bandwidth = _env_optional_float("A2A_RESOURCE_BANDWIDTH_MBPS")
+        override_stability = _env_optional_float("A2A_RESOURCE_LINK_STABILITY")
+        if override_bandwidth is not None or override_stability is not None:
+            return {
+                "available": True,
+                "source": "env-override",
+                "send_kbps": None,
+                "recv_kbps": None,
+                "bandwidth_mbps": override_bandwidth,
+                "link_stability": override_stability,
+                "link_up": True,
+            }
+
+        if psutil is None:
+            return {"available": False, "reason": "psutil is not installed"}
+
+        try:
+            counters = psutil.net_io_counters()
+        except Exception as exc:
+            return {"available": False, "reason": str(exc)}
+
+        if counters is None:
+            return {"available": False, "reason": "no network counters"}
+
+        now = time.time()
+        sent = int(counters.bytes_sent)
+        recv = int(counters.bytes_recv)
+        send_kbps = None
+        recv_kbps = None
+        bandwidth_mbps = None
+        previous = self._last_net_sample
+        self._last_net_sample = (now, sent, recv)
+        if previous is not None:
+            elapsed = now - previous[0]
+            if elapsed > 0:
+                # bits/sec -> kilobits/sec
+                send_kbps = max(0.0, (sent - previous[1]) * 8 / 1000.0 / elapsed)
+                recv_kbps = max(0.0, (recv - previous[2]) * 8 / 1000.0 / elapsed)
+                bandwidth_mbps = (send_kbps + recv_kbps) / 1000.0
+
+        total_packets = int(counters.packets_sent) + int(counters.packets_recv)
+        total_errors = (
+            int(counters.errin)
+            + int(counters.errout)
+            + int(counters.dropin)
+            + int(counters.dropout)
+        )
+        link_stability = None
+        if total_packets > 0:
+            link_stability = max(0.0, 1.0 - (total_errors / total_packets))
+
+        link_up = None
+        try:
+            stats = psutil.net_if_stats()
+            link_up = any(
+                nic.isup
+                for name, nic in stats.items()
+                if name.lower() not in {"lo", "lo0"}
+            )
+        except Exception:
+            link_up = None
+
+        return {
+            "available": True,
+            "source": "psutil",
+            "send_kbps": send_kbps,
+            "recv_kbps": recv_kbps,
+            "bandwidth_mbps": bandwidth_mbps,
+            "link_stability": link_stability,
+            "link_up": link_up,
+            "errors_total": total_errors,
+            "packets_total": total_packets,
         }
 
     def _build_snapshot(self, raw: dict) -> dict:
@@ -199,60 +386,57 @@ class ResourceMonitor:
             (process.get("memory_vms_bytes") or 0) / (1024 * 1024)
         )
 
-        state, violations = self._evaluate(system)
         return {
             "monitor_available": True,
-            "resource_state": state,
-            "violations": violations,
-            "thresholds": dict(self.thresholds),
+            "node_online": bool(raw.get("node_online", True)),
             "sampled_at": utc_now_iso(),
             "system": system,
             "process": process,
+            "gpu": self._normalize_gpu(raw.get("gpu")),
+            "energy": self._normalize_energy(raw.get("energy")),
+            "network": self._normalize_network(raw.get("network")),
         }
 
-    def _evaluate(self, system: dict) -> tuple[str, list[dict]]:
-        checks = [
-            ("cpu_percent", system.get("cpu_percent"), "cpu"),
-            ("memory_percent", system.get("memory_percent"), "memory"),
-            ("disk_percent", system.get("disk_percent"), "disk"),
-        ]
-        state = "ok"
-        violations = []
-        for field, value, label in checks:
-            if value is None:
-                continue
-            critical = self.thresholds[f"{label}_critical_percent"]
-            warn = self.thresholds[f"{label}_warn_percent"]
-            if value >= critical:
-                state = "critical"
-                violations.append(
-                    {
-                        "resource": label,
-                        "level": "critical",
-                        "value": value,
-                        "threshold": critical,
-                    }
-                )
-            elif value >= warn and state != "critical":
-                state = "warn"
-                violations.append(
-                    {
-                        "resource": label,
-                        "level": "warn",
-                        "value": value,
-                        "threshold": warn,
-                    }
-                )
-        return state, violations
+    @staticmethod
+    def _normalize_gpu(gpu: Optional[dict]) -> dict:
+        if not gpu:
+            return {"available": False, "devices": []}
+        normalized = dict(gpu)
+        normalized["available"] = bool(gpu.get("available", False))
+        normalized["gpu_percent"] = _round(gpu.get("gpu_percent"))
+        normalized["memory_percent"] = _round(gpu.get("memory_percent"))
+        return normalized
+
+    @staticmethod
+    def _normalize_energy(energy: Optional[dict]) -> dict:
+        if not energy:
+            return {"available": False, "percent": None, "power_plugged": None}
+        normalized = dict(energy)
+        normalized["available"] = bool(energy.get("available", False))
+        normalized["percent"] = _round(energy.get("percent"))
+        return normalized
+
+    @staticmethod
+    def _normalize_network(network: Optional[dict]) -> dict:
+        if not network:
+            return {"available": False}
+        normalized = dict(network)
+        normalized["available"] = bool(network.get("available", False))
+        normalized["send_kbps"] = _round(network.get("send_kbps"))
+        normalized["recv_kbps"] = _round(network.get("recv_kbps"))
+        normalized["bandwidth_mbps"] = _round(network.get("bandwidth_mbps"))
+        normalized["link_stability"] = _round(network.get("link_stability"), 4)
+        return normalized
 
     def _unavailable_snapshot(self, reason: str) -> dict:
         return {
             "monitor_available": False,
-            "resource_state": "unknown",
+            "node_online": False,
             "unavailable_reason": reason,
-            "thresholds": dict(self.thresholds),
             "sampled_at": utc_now_iso(),
             "system": {},
             "process": {"pid": os.getpid()},
-            "violations": [],
+            "gpu": {"available": False, "devices": []},
+            "energy": {"available": False, "percent": None, "power_plugged": None},
+            "network": {"available": False},
         }

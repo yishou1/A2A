@@ -532,7 +532,6 @@ class AgentHeartbeatSupervisor(threading.Thread):
             except Exception as exc:
                 provider_metadata = {
                     "resource_monitor_available": "false",
-                    "resource_state": "unknown",
                     "resource_monitor_error": str(exc),
                 }
             heartbeat_metadata.update(provider_metadata)

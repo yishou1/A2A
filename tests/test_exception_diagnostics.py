@@ -60,7 +60,15 @@ class ExceptionDiagnosticsTest(unittest.TestCase):
         )
         response = asyncio.run(
             send_message_endpoint(
-                {"workflow_id": "wf-1", "work_item": "wf-1:recon", "command": "scan"},
+                {
+                    "schema_version": "1.0",
+                    "workflow_id": "wf-1",
+                    "work_item": "wf-1:recon",
+                    "command": "scan_beach_defenses",
+                    "required_skill": "scan_beach_defenses",
+                    "input": {"sector": "Sector_A"},
+                    "output_hint": "recon_report",
+                },
                 token="test-token",
             )
         )

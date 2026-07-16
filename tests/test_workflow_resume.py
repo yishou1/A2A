@@ -1,21 +1,18 @@
 import hashlib
-import asyncio
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from fastapi.testclient import TestClient
+
 from attachment_uploader import upload_attachment_file
 from a2a_protocol.server import A2ABaseAgent
 from commander_agent.main import CommanderAgent
-from commander_agent.recovery_api import RecoveryRequest, build_recovery_app
+from commander_agent.recovery_api import build_recovery_app
 from local_runtime import LocalAgentRuntime
 from workflow_payloads import build_attachment_ref, normalize_attachment_ref
 from workflow_state_store import WorkflowStateStore
-
-
-def route_endpoint(app, path: str):
-    return next(route.endpoint for route in app.routes if getattr(route, "path", None) == path)
 
 
 class WorkflowResumeTest(unittest.TestCase):
@@ -92,7 +89,15 @@ class WorkflowResumeTest(unittest.TestCase):
 
     def test_local_runtime_replays_cached_results(self):
         runtime = LocalAgentRuntime()
-        payload = {"work_item": "wf-001:1:recon", "command": "scan_beach_defenses"}
+        payload = {
+            "schema_version": "1.0",
+            "workflow_id": "wf-001",
+            "work_item": "wf-001:1:recon",
+            "command": "scan_beach_defenses",
+            "required_skill": "scan_beach_defenses",
+            "input": {"sector": "Sector_A"},
+            "output_hint": "recon_report",
+        }
 
         first_response, first_events = runtime.execute("recon", payload, stream=False)
         second_response, second_events = runtime.execute("recon", payload, stream=False)
@@ -100,7 +105,15 @@ class WorkflowResumeTest(unittest.TestCase):
         self.assertEqual(first_response, second_response)
         self.assertEqual(first_events, second_events)
 
-        stream_payload = {"work_item": "wf-001:2:artillery", "command": "suppress_beach_sector_A"}
+        stream_payload = {
+            "schema_version": "1.0",
+            "workflow_id": "wf-001",
+            "work_item": "wf-001:2:artillery",
+            "command": "suppress_beach_sector_A",
+            "required_skill": "suppress_beach_sector_A",
+            "input": {"coordinates": "120.5E, 35.1N"},
+            "output_hint": "strike_result",
+        }
         first_stream_response, first_stream_events = runtime.execute("artillery", stream_payload, stream=True)
         second_stream_response, second_stream_events = runtime.execute("artillery", stream_payload, stream=True)
 
@@ -174,33 +187,33 @@ class WorkflowResumeTest(unittest.TestCase):
             )
 
             app = build_recovery_app(default_mode="local", default_state_dir=temp_dir)
-            resume = route_endpoint(app, "/workflows/{workflow_id}/resume")
-            payload = asyncio.run(
-                resume(
-                    workflow_id,
-                    RecoveryRequest(
-                        mode="local",
-                        workflow="dynamic",
-                        state_dir=temp_dir,
-                        max_steps=1,
-                        resume=True,
-                        strict=True,
-                        mock_eval_score=75,
-                        attachments=[
-                            {
-                                "uri": "s3://a2a-media/beachhead/recon-01.jpg",
-                                "checksum": {"algorithm": "sha256", "value": "abc123"},
-                                "kind": "image",
-                                "mime_type": "image/jpeg",
-                                "size_bytes": 4096,
-                                "width": 1920,
-                                "height": 1080,
-                            }
-                        ],
-                    ),
-                )
+            client = TestClient(app)
+            response = client.post(
+                f"/workflows/{workflow_id}/resume",
+                json={
+                    "mode": "local",
+                    "workflow": "dynamic",
+                    "state_dir": temp_dir,
+                    "max_steps": 1,
+                    "resume": True,
+                    "strict": True,
+                    "mock_eval_score": 75,
+                    "attachments": [
+                        {
+                            "uri": "s3://a2a-media/beachhead/recon-01.jpg",
+                            "checksum": {"algorithm": "sha256", "value": "abc123"},
+                            "kind": "image",
+                            "mime_type": "image/jpeg",
+                            "size_bytes": 4096,
+                            "width": 1920,
+                            "height": 1080,
+                        }
+                    ],
+                },
             )
 
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
             self.assertEqual(payload["workflow_id"], workflow_id)
             self.assertEqual(payload["context"]["workflow_activatity"], 3)
             self.assertEqual(payload["context"]["eval_score"][0]["value"], 75)
@@ -214,10 +227,15 @@ class WorkflowResumeTest(unittest.TestCase):
             role="recon",
             port=9999,
         )
+        client = TestClient(agent.app)
         payload = {
+            "schema_version": "1.0",
             "workflow_id": "wf-work-list",
             "work_item": "wf-work-list:activatity-001-recon",
             "command": "scan_beach_defenses",
+            "required_skill": "scan_beach_defenses",
+            "input": {"sector": "Sector_A"},
+            "output_hint": "recon_report",
             "work_list": [
                 {
                     "activatity_id": "activatity-001-recon",
@@ -227,14 +245,18 @@ class WorkflowResumeTest(unittest.TestCase):
             ],
         }
 
-        send_message = route_endpoint(agent.app, "/sendMessage")
-        work_list = route_endpoint(agent.app, "/workflows/{workflow_id}/work-list")
-        response = asyncio.run(send_message(payload, token="test-token"))
-        self.assertEqual(response["work_item"], payload["work_item"])
-        self.assertEqual(response["work_list_size"], 1)
+        response = client.post(
+            "/sendMessage",
+            json=payload,
+            headers={"Authorization": "Bearer test-token"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["work_item"], payload["work_item"])
+        self.assertEqual(response.json()["work_list_size"], 1)
 
-        response = asyncio.run(work_list("wf-work-list"))
-        self.assertEqual(response["work_list"], payload["work_list"])
+        response = client.get("/workflows/wf-work-list/work-list")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["work_list"], payload["work_list"])
 
     def test_agent_card_exposes_skills(self):
         agent = A2ABaseAgent(
@@ -243,7 +265,12 @@ class WorkflowResumeTest(unittest.TestCase):
             role="recon",
             port=9999,
         )
-        card = agent.get_agent_card()
+        client = TestClient(agent.app)
+
+        response = client.get("/.well-known/agent-card")
+
+        self.assertEqual(response.status_code, 200)
+        card = response.json()
         self.assertIn("skills", card)
         self.assertEqual(card["skills"][0]["id"], "scan_beach_defenses")
         self.assertIn("探测", card["skills"][0]["tags"])
@@ -256,19 +283,24 @@ class WorkflowResumeTest(unittest.TestCase):
             port=9999,
         )
         agent.ready = False
+        client = TestClient(agent.app)
 
-        send_message = route_endpoint(agent.app, "/sendMessage")
-        payload = asyncio.run(
-            send_message(
-                {
-                    "workflow_id": "wf-not-ready",
-                    "work_item": "wf-not-ready:1:recon",
-                    "command": "scan_beach_defenses",
-                },
-                token="test-token",
-            )
+        response = client.post(
+            "/sendMessage",
+            json={
+                "schema_version": "1.0",
+                "workflow_id": "wf-not-ready",
+                "work_item": "wf-not-ready:1:recon",
+                "command": "scan_beach_defenses",
+                "required_skill": "scan_beach_defenses",
+                "input": {"sector": "Sector_A"},
+                "output_hint": "recon_report",
+            },
+            headers={"Authorization": "Bearer test-token"},
         )
 
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
         self.assertEqual(payload["status"], "failed")
         self.assertEqual(payload["error_code"], "AGENT_NOT_READY")
         self.assertEqual(payload["error"], "agent is not ready")

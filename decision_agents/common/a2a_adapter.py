@@ -21,19 +21,20 @@ class A2ATaskResponseError(RuntimeError):
 class DecisionAlgorithmA2AAgent(A2ABaseAgent):
     def __init__(self, *, algorithm_agent, name: str, description: str, role: str, port: int):
         self.algorithm_agent = algorithm_agent
-        super().__init__(name=name, description=description, role=role, port=port)
-
-    def get_agent_card(self):
-        card = super().get_agent_card()
-        card["skills"] = [
-            {
-                "id": f"{self.role}_analysis",
-                "name": self.name,
-                "description": self.description,
-                "tags": ["project-613", "decision-support", self.role],
-            }
-        ]
-        return card
+        super().__init__(
+            name=name,
+            description=description,
+            role=role,
+            port=port,
+            skills=[
+                {
+                    "id": f"{role}_analysis",
+                    "name": name,
+                    "description": description,
+                    "tags": ["project-613", "decision-support", role],
+                }
+            ],
+        )
 
     def handle_message(self, payload, token):
         del token

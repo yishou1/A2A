@@ -9,7 +9,15 @@ class LocalAgentRuntimeTest(unittest.TestCase):
 
         response, events = runtime.execute(
             "recon",
-            {"command": "scan_beach_defenses", "sector": "Sector_A"},
+            {
+                "schema_version": "1.0",
+                "workflow_id": "wf-local",
+                "work_item": "wf-local:recon",
+                "command": "scan_beach_defenses",
+                "required_skill": "scan_beach_defenses",
+                "input": {"sector": "Sector_A"},
+                "output_hint": "recon_report",
+            },
             stream=False,
         )
 
@@ -22,7 +30,15 @@ class LocalAgentRuntimeTest(unittest.TestCase):
 
         response, events = runtime.execute(
             "artillery",
-            {"command": "suppress_beach_sector_A"},
+            {
+                "schema_version": "1.0",
+                "workflow_id": "wf-local",
+                "work_item": "wf-local:artillery",
+                "command": "suppress_beach_sector_A",
+                "required_skill": "suppress_beach_sector_A",
+                "input": {"coordinates": "120.5E, 35.1N"},
+                "output_hint": "strike_result",
+            },
             stream=True,
         )
 

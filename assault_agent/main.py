@@ -1,5 +1,6 @@
 from a2a_protocol.server import A2ABaseAgent, skills_metadata
 from registry.nacos_manager import NacosRegistry, get_host_ip
+from model_registry import build_model
 import os
 # 111
 if __name__ == "__main__":
@@ -9,7 +10,15 @@ if __name__ == "__main__":
         name="Assault_Agent",
         description="Assault infantry unit for capturing the beachhead.",
         role="assault",
-        port=port
+        port=port,
+        models=[
+            build_model(
+                "route_planner_v1",
+                name="Assault Route Planning Model",
+                model_type="route_planning",
+                tags=["route_planning", "target_assignment"],
+            ),
+        ],
     )
     
     registry = NacosRegistry()

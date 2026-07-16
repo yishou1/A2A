@@ -77,3 +77,24 @@ class A2AClient:
         for event in client.events():
             if event.data:
                 yield event.data
+
+    def get_resources(self):
+        """State reporting: GET /resources for CPU/GPU/memory/energy/network."""
+        endpoint = (self.agent_card or {}).get("resourcesEndpoint", "/resources")
+        res = self.http.get(f"{self.base_url}{endpoint}", timeout=self.timeout)
+        res.raise_for_status()
+        return res.json()
+
+    def get_models(self):
+        """Dynamic discovery: GET /models for the deployed algorithm models."""
+        endpoint = (self.agent_card or {}).get("modelsEndpoint", "/models")
+        res = self.http.get(f"{self.base_url}{endpoint}", timeout=self.timeout)
+        res.raise_for_status()
+        return res.json()
+
+    def notify_recovery(self, notice: Dict[str, Any]):
+        """Recovery notification: POST /recovery/notify after re-planning."""
+        endpoint = (self.agent_card or {}).get("recoveryEndpoint", "/recovery/notify")
+        res = self.http.post(f"{self.base_url}{endpoint}", json=notice, timeout=self.timeout)
+        res.raise_for_status()
+        return res.json()

@@ -7,6 +7,7 @@
         <variable name="StrikeResult" type="String"/>
         <variable name="EvalScore" type="Integer"/>
         <variable name="CommanderDecision" type="String"/>
+        <variable name="AssaultResult" type="String"/>
     </variables>
 
     <sequence>
@@ -41,7 +42,7 @@
                 <sequence>
                     <invoke partnerLink="LLMCommanderAgent" operation="analyzeAndReplanning"
                             requiredSkill="analyze_and_replanning"
-                            inputVariable="ReconReport + StrikeResult" outputVariable="CommanderDecision"/>
+                            inputVariables="ReconReport,StrikeResult" outputVariable="CommanderDecision"/>
                     <throw faultName="ReinforcedSuppressionInsufficientFault"/>
                 </sequence>
             </case>
@@ -51,7 +52,7 @@
                 <invoke partnerLink="AssaultAgent" operation="captureBeachhead"
                         requiredSkill="capture_beachhead"
                         dispatchMode="parallel"
-                        inputVariable="StrikeCoordinates"/>
+                        inputVariable="StrikeCoordinates" outputVariable="AssaultResult"/>
             </otherwise>
         </switch>
 

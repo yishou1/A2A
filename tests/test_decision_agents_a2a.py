@@ -73,10 +73,13 @@ class DecisionAgentsA2ATest(unittest.TestCase):
             port=10202,
         )
         payload = {
+            "schema_version": "1.0",
             "workflow_id": "wf-decision-agent",
             "work_item": "wf-decision-agent:decision-planning",
             "command": "decision_planning",
+            "required_skill": "decision_planning_analysis",
             "input": {"agent_request": sample_payload("decision_planning_input.json")},
+            "output_hint": "decision_planning_result",
             "work_list": [
                 {
                     "activatity_id": "activatity-001-decision-planning",
@@ -110,10 +113,13 @@ class DecisionAgentsA2ATest(unittest.TestCase):
             port=10202,
         )
         payload = {
+            "schema_version": "1.0",
             "workflow_id": "wf-missing-input",
             "work_item": "wf-missing-input:decision-planning",
             "command": "decision_planning",
+            "required_skill": "decision_planning_analysis",
             "input": {"agent_request": {"request_id": "missing-input"}},
+            "output_hint": "decision_planning_result",
             "work_list": [],
         }
 

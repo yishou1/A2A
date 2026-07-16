@@ -8,10 +8,12 @@
     <sequence>
 
         <invoke partnerLink="DecisionPlanningAgent" operation="generateDecisionPlan"
-                inputVariable="PlanningInput" outputVariable="DecisionPlanningResult"/>
+                inputVariables="AgentProfile RiskAssessments ScheduledTasks Resources TargetHistories PlanningObjectives Constraints Authorization"
+                outputVariable="DecisionPlanningResult"/>
 
         <invoke partnerLink="ComplianceAuthorizationAgent" operation="checkComplianceAuthorization"
-                inputVariable="DecisionPlanningResult" outputVariable="ComplianceAuthorizationResult"/>
+                inputVariables="DecisionPlanningResult Constraints Authorization"
+                outputVariable="ComplianceAuthorizationResult"/>
 
     </sequence>
 </process>

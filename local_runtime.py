@@ -7,6 +7,8 @@ from a2a_protocol.messages import build_task_response
 from decision_agents.common.a2a_payloads import agent_response_to_a2a_response, run_agent_payload
 from decision_agents.compliance_authorization.agent import ComplianceAuthorizationAgent
 from decision_agents.decision_planning.agent import DecisionPlanningAgent
+from protocol_contracts import validate_task_payload, validate_task_response
+from skill_catalog import skill_contract
 
 
 class LocalAgentRuntime:
@@ -84,6 +86,8 @@ class LocalAgentRuntime:
 
     def send_message(self, role: str, payload: dict) -> dict:
         self.discover(role)
+        skill_id = payload.get("required_skill") or payload.get("command")
+        payload = validate_task_payload(payload, {"id": skill_id, **skill_contract(skill_id)})
         self._capture_work_list(payload)
         work_item = self._work_item_from_payload(payload)
         if work_item in self._task_response_cache:
@@ -116,6 +120,7 @@ class LocalAgentRuntime:
             work_list_size=len(self.get_work_list(payload.get("workflow_id"))),
             extra={"mode": "local"},
         )
+        validate_task_response(payload, response, {"id": skill_id, **skill_contract(skill_id)})
         self._task_response_cache[work_item] = response
         return response
 
