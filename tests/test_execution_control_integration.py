@@ -153,18 +153,22 @@ class ExecutionControlLocalRuntimeTest(unittest.TestCase):
     def test_local_runtime_execution_control_and_artillery(self):
         runtime = LocalAgentRuntime()
         ec_payload = {
+            "schema_version": "1.0",
             "workflow_id": "wf-local-ec",
             "work_item": "wf-local-ec:2:execution_control",
             "command": "plan_strike_control",
+            "required_skill": "plan_strike_control",
             "input": {"phase": "strike", "results": {}},
             "output_hint": "execution_control_result",
         }
         ec_response, _events = runtime.execute("execution_control", ec_payload)
         ec_value = ec_response["output"]["execution_control_result"]
         artillery_payload = {
+            "schema_version": "1.0",
             "workflow_id": "wf-local-ec",
             "work_item": "wf-local-ec:3:artillery",
             "command": ec_value["output_data"]["commands"][0]["action"],
+            "required_skill": "suppress_beach_sector_A",
             "input": {
                 "execution_command": ec_value["output_data"]["commands"][0],
             },

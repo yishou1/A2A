@@ -31,7 +31,7 @@ def build_closed_loop_arguments(payload: dict) -> dict:
 
 
 class ClosedLoopAgent(A2ABaseAgent):
-    def __init__(self, port: int):
+    def __init__(self, port: int, **kwargs):
         super().__init__(
             name="Closed_Loop_Optimization_Agent",
             description=(
@@ -42,8 +42,10 @@ class ClosedLoopAgent(A2ABaseAgent):
             port=port,
             skills=[
                 {
-                    "name": CLOSED_LOOP_COMMAND,
+                    "id": CLOSED_LOOP_COMMAND,
+                    "name": "Closed Loop Optimization",
                     "description": "执行控制、效果评估与闭环优化",
+                    "tags": ["closed_loop", "optimization", "闭环", "优化"],
                     "input": {
                         "targets": "Optional live target list. If omitted, simulated targets are generated.",
                         "dataset_paths.xbd_damage_csv": "Optional xBD feature table for damage model training.",
@@ -55,6 +57,7 @@ class ClosedLoopAgent(A2ABaseAgent):
                     },
                 }
             ],
+            **kwargs,
         )
 
     def execute_task(self, payload: dict):

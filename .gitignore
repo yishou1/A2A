@@ -10,3 +10,19 @@ docs/
 __pycache__/
 *.py[cod]
 *.log
+
+# Large raw datasets and regenerated ML artifacts (keep small fixtures tracked)
+data/xbd/train/
+data/xbd/test/
+data/xbd/train.zip
+data/xbd/processed/xbd_closed_loop_result*.json
+data/xbd/processed/xbd_damage_features_train.csv
+data/xbd/processed/xbd_damage_features_train_report.json
+data/xbd/processed/xbd_cnn_embeddings*.npz
+data/sc2/3.16.1-Pack_1-fix/
+data/sc2/processed/samples/
+data/sc2/processed/sc2le_task_features.csv
+data/sc2/processed/sc2le_task_features_report.json
+data/sc2/processed/sc2le_closed_loop_result.json
+*.npz
+*.zip

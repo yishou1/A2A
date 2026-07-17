@@ -32,7 +32,7 @@ def build_execution_control_arguments(payload: dict) -> dict:
 
 
 class ExecutionControlAgent(A2ABaseAgent):
-    def __init__(self, port: int):
+    def __init__(self, port: int, **kwargs):
         super().__init__(
             name="Execution_Control_Agent",
             description="Generates executable strike/assault commands from upstream agent results.",
@@ -40,8 +40,10 @@ class ExecutionControlAgent(A2ABaseAgent):
             port=port,
             skills=[
                 {
-                    "name": EXECUTION_CONTROL_COMMAND,
+                    "id": EXECUTION_CONTROL_COMMAND,
+                    "name": "Execution Control Planning",
                     "description": "关联规则匹配 + 线性回归运动预测，生成结构化作战指令",
+                    "tags": ["execution_control", "planning", "command", "执行控制"],
                     "input": {
                         "phase": "strike or assault",
                         "results": "Upstream standardized agent outputs",
@@ -49,8 +51,33 @@ class ExecutionControlAgent(A2ABaseAgent):
                     "output": {
                         "execution_control_result": "Structured commands/tracks/coordination envelope",
                     },
-                }
+                },
+                {
+                    "id": "plan_strike_control",
+                    "name": "Strike Execution Control",
+                    "description": "火力压制阶段：生成 strike 可执行指令",
+                    "tags": ["execution_control", "strike", "planning", "火力控制"],
+                    "input": {
+                        "results": "Upstream standardized agent outputs",
+                    },
+                    "output": {
+                        "execution_control_result": "Strike-phase commands/tracks/coordination envelope",
+                    },
+                },
+                {
+                    "id": "plan_assault_control",
+                    "name": "Assault Execution Control",
+                    "description": "突击阶段：生成 assault 可执行指令",
+                    "tags": ["execution_control", "assault", "planning", "突击控制"],
+                    "input": {
+                        "results": "Upstream standardized agent outputs",
+                    },
+                    "output": {
+                        "execution_control_result": "Assault-phase commands/tracks/coordination envelope",
+                    },
+                },
             ],
+            **kwargs,
         )
 
     def execute_task(self, payload: dict):

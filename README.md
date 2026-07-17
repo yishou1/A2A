@@ -23,9 +23,11 @@
 在一场抢滩登陆战役中，面临复杂的敌防信息、火力配属和登陆时机等挑战。整个作战流程被分解给多个不同专长的智能体：
 - **指控大脑 (Commander Agent)**：负责全局统筹、任务分解与下发。
 - **侦察单位 (Reconnaissance Agent)**：负责收集敌军火力部署、气象水文信息。
+- **执行控制单位 (Execution Control Agent)**：基于上游态势做关联规则匹配与运动预测，生成 strike/assault 可执行指令。
 - **火力打击单位 (Artillery Agent)**：负责实施精准的炮火覆盖与压制。
 - **突击步兵单位 (Assault Agent)**：负责滩头阵地的抢占。
 - **战果评估单位 (Evaluator Agent)**：负责对前序任务的执行效果进行评估。
+- **闭环优化单位 (Closed Loop Agent)**：接入 xBD / SC2LE 特征与代理任务模型，做毁伤评估与闭环优化。
 
 ---
 
@@ -78,12 +80,16 @@ A2A/
 │   └── agent_leases.py      # Agent 租约与资源锁
 ├── commander_gateway/       # AMOS 数据包接入和 Commander 状态投影
 ├── recon_agent/             # 侦察兵 Agent
+├── execution_control_agent/ # 执行控制（规则匹配 + 运动预测）
 ├── artillery_agent/         # 火力打击 Agent
 ├── assault_agent/           # 登陆突击 Agent
 ├── evaluator_agent/         # 战果评估 & 策略重算 Agent
+├── closed_loop_agent/       # 闭环优化（xBD / SC2LE）
 ├── registry/                # Nacos 相关配置与客户端封装
-├── scripts/                 # 恢复 / failover 演示脚本
+├── scripts/                 # 恢复 / failover / 闭环演示脚本
 ├── tests/                   # 回归测试
+├── models/                  # 冻结的代理任务模型（如 SC2LE proxy）
+├── data/                    # 小规模 fixtures；大数据集请本地生成，勿提交
 ├── attachment_uploader.py   # 本地文件上传成附件引用
 ├── bpel_workflow.py         # BPEL 动态发现、解析与 work_list 生成
 ├── beachhead_workflow.bpel  # 可动态加载的抢滩登陆 BPEL
@@ -93,6 +99,61 @@ A2A/
 ├── timing_probe.py          # 阶段耗时测试工具
 └── docker-compose.yml       # 环境部署文件
 ```
+
+## 🧠 Execution Control 与 Closed Loop
+
+`beachhead_workflow.bpel` 在标准侦察/火力/评估链路中插入了执行控制与闭环节点：
+
+```text
+recon
+  -> execution_control (plan_strike_control)
+  -> artillery
+  -> evaluator
+  -> (score >= 60) execution_control (plan_assault_control)
+  -> assault
+  -> closed_loop (closed_loop_optimization)
+```
+
+### 端口与启动
+
+| Agent | 默认端口 | 环境变量 |
+|---|---|---|
+| Closed Loop | `8016` | `CLOSED_LOOP_AGENT_PORT` |
+| Execution Control | `8017` | `EXECUTION_CONTROL_AGENT_PORT` |
+
+`start_agents.sh` 已包含这两个进程。单独启动：
+
+```bash
+python execution_control_agent/main.py
+python closed_loop_agent/main.py
+```
+
+### Skill 约定
+
+Execution Control 在 Agent Card 中同时注册：
+
+- `generate_execution_commands`（通用入口，用 `phase=strike|assault`）
+- `plan_strike_control`（BPEL 火力阶段）
+- `plan_assault_control`（BPEL 突击阶段）
+
+Closed Loop 注册：`closed_loop_optimization`。
+
+### Local 模式快速验证
+
+```bash
+python -u commander_agent/main.py --mode local --workflow bpel --workflow-file beachhead_workflow --mock-eval-score 75
+```
+
+### 闭环 / 特征脚本（可选）
+
+```bash
+python scripts/run_xbd_closed_loop_demo.py
+python scripts/run_sc2le_closed_loop_demo.py
+python scripts/extract_sc2le_task_features.py
+python scripts/train_sc2le_proxy_mission_model.py
+```
+
+原始 xBD / SC2 数据包和大型中间结果默认被 `.gitignore` 忽略；仓库只保留小规模 fixtures 与可复现脚本。
 
 ## 🔄 工作流恢复与接管
 
@@ -119,7 +180,7 @@ cd /home/yl/yl/jzz/A2A
 - `40` 会触发 `RE-PLAN` 分支。
 - `75` 会触发 `ASSAULT` 分支。
 
-`beachhead_workflow.bpel` 中不同角色严格按 `recon -> artillery -> evaluator -> assault` 顺序推进。炮兵节点使用 `dispatchMode="parallel"`，Commander 会把同一个火力任务并发派发给多个 `role=artillery` 实例。`--max-workers` 控制最大并发数。
+`beachhead_workflow.bpel` 中不同角色按 `recon -> execution_control(strike) -> artillery -> evaluator -> (execution_control(assault) -> assault -> closed_loop)` 顺序推进。
 
 项目中可以提前保存多套 BPEL，并在运行前选择：
 

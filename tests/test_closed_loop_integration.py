@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import requests
@@ -28,6 +29,15 @@ def sample_closed_loop_result() -> dict:
         "accuracy": 0.9,
         "latency": 0.01,
     }
+
+
+def _agent_with_temp_store(port: int = 8016) -> tuple[ClosedLoopAgent, tempfile.TemporaryDirectory]:
+    temp_dir = tempfile.TemporaryDirectory()
+    agent = ClosedLoopAgent(
+        port=port,
+        idempotency_db_path=str(Path(temp_dir.name) / "agent.db"),
+    )
+    return agent, temp_dir
 
 
 class ClosedLoopIntegrationTest(unittest.TestCase):
@@ -86,12 +96,15 @@ class ClosedLoopIntegrationTest(unittest.TestCase):
 
     @patch("closed_loop_agent.main._closed_loop_optimization", return_value=sample_closed_loop_result())
     def test_closed_loop_agent_send_message_returns_standard_response(self, _mock_opt):
-        agent = ClosedLoopAgent(port=8016)
+        agent, temp_dir = _agent_with_temp_store(8016)
+        self.addCleanup(temp_dir.cleanup)
         client = TestClient(agent.app)
         payload = {
+            "schema_version": "1.0",
             "workflow_id": "wf-1",
             "work_item": "wf-1:5:closed_loop",
             "command": "closed_loop_optimization",
+            "required_skill": "closed_loop_optimization",
             "input": {"cycles": 1, "target_count": 2},
             "output_hint": "closed_loop_result",
             "work_list": [
@@ -120,12 +133,15 @@ class ClosedLoopIntegrationTest(unittest.TestCase):
 
     @patch("closed_loop_agent.main._closed_loop_optimization", return_value=sample_closed_loop_result())
     def test_closed_loop_agent_reuses_work_item_cache(self, mock_opt):
-        agent = ClosedLoopAgent(port=8016)
+        agent, temp_dir = _agent_with_temp_store(8016)
+        self.addCleanup(temp_dir.cleanup)
         client = TestClient(agent.app)
         payload = {
+            "schema_version": "1.0",
             "workflow_id": "wf-cache",
             "work_item": "wf-cache:5:closed_loop",
             "command": "closed_loop_optimization",
+            "required_skill": "closed_loop_optimization",
             "input": {"cycles": 1},
             "output_hint": "closed_loop_result",
         }
@@ -146,16 +162,21 @@ class ClosedLoopIntegrationTest(unittest.TestCase):
         self.assertEqual(mock_opt.call_count, 1)
 
     def test_closed_loop_agent_unsupported_command_returns_business_error(self):
-        agent = ClosedLoopAgent(port=8016)
+        agent, temp_dir = _agent_with_temp_store(8016)
+        self.addCleanup(temp_dir.cleanup)
         send_message_endpoint = next(
             route.endpoint for route in agent.app.routes if getattr(route, "path", None) == "/sendMessage"
         )
         response = asyncio.run(
             send_message_endpoint(
                 {
-                    "workflow_id": "wf-1",
-                    "work_item": "wf-1:5:closed_loop",
+                    "schema_version": "1.0",
+                    "workflow_id": "wf-invalid-cmd",
+                    "work_item": "wf-invalid-cmd:5:closed_loop",
                     "command": "invalid_command",
+                    "required_skill": "closed_loop_optimization",
+                    "input": {"cycles": 1},
+                    "output_hint": "closed_loop_result",
                 },
                 token="test-token",
             )
@@ -248,9 +269,11 @@ class ClosedLoopIntegrationTest(unittest.TestCase):
         response, events = runtime.execute(
             "closed_loop",
             {
+                "schema_version": "1.0",
                 "workflow_id": "wf-local",
                 "work_item": "wf-local:5:closed_loop",
                 "command": "closed_loop_optimization",
+                "required_skill": "closed_loop_optimization",
                 "input": {"cycles": 1, "target_count": 2},
                 "output_hint": "closed_loop_result",
             },

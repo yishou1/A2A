@@ -66,7 +66,19 @@ DEFAULT_ROLE_SKILLS = {
             "name": "Execution Control Planning",
             "description": "基于态势与规则生成可执行 strike/assault 指令。",
             "tags": ["execution_control", "planning", "command", "执行控制"],
-        }
+        },
+        {
+            "id": "plan_strike_control",
+            "name": "Strike Execution Control",
+            "description": "火力压制阶段：关联规则 + 运动预测，生成 strike 指令。",
+            "tags": ["execution_control", "strike", "planning", "火力控制"],
+        },
+        {
+            "id": "plan_assault_control",
+            "name": "Assault Execution Control",
+            "description": "突击阶段：关联规则 + 运动预测，生成 assault 指令。",
+            "tags": ["execution_control", "assault", "planning", "突击控制"],
+        },
     ],
     "closed_loop": [
         {
