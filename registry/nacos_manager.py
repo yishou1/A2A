@@ -68,6 +68,7 @@ class NacosRegistry:
         ephemeral=True,
         cluster_name=None,
         group_name="DEFAULT_GROUP",
+        metadata_provider=None,
     ):
         cluster_name = self._normalize_cluster_name(cluster_name)
         if metadata is None:
@@ -113,6 +114,7 @@ class NacosRegistry:
                 cluster_name=cluster_name,
                 group_name=group_name,
                 ephemeral=ephemeral,
+                metadata_provider=metadata_provider,
             )
 
     def _register_service_sdk(self, service_name, ip, port, metadata, ephemeral=True, cluster_name=None, group_name="DEFAULT_GROUP"):
@@ -360,7 +362,18 @@ class NacosRegistry:
                 group_name=group_name,
             )
 
-    def _start_heartbeat(self, service_name, ip, port, metadata, heartbeat_interval, cluster_name=None, group_name="DEFAULT_GROUP", ephemeral=True):
+    def _start_heartbeat(
+        self,
+        service_name,
+        ip,
+        port,
+        metadata,
+        heartbeat_interval,
+        cluster_name=None,
+        group_name="DEFAULT_GROUP",
+        ephemeral=True,
+        metadata_provider=None,
+    ):
         supervisor = AgentHeartbeatSupervisor(
             registry=self,
             service_name=service_name,
@@ -371,6 +384,7 @@ class NacosRegistry:
             cluster_name=cluster_name,
             group_name=group_name,
             ephemeral=ephemeral,
+            metadata_provider=metadata_provider,
         )
 
         heartbeat_key = self._heartbeat_key(service_name, ip, port)
@@ -475,6 +489,7 @@ class AgentHeartbeatSupervisor(threading.Thread):
         cluster_name=None,
         group_name: str = "DEFAULT_GROUP",
         ephemeral: bool = True,
+        metadata_provider=None,
     ):
         super().__init__(daemon=True)
         self.registry = registry
@@ -486,6 +501,7 @@ class AgentHeartbeatSupervisor(threading.Thread):
         self.cluster_name = cluster_name
         self.group_name = group_name
         self.ephemeral = ephemeral
+        self.metadata_provider = metadata_provider
         self._stop_event = threading.Event()
         self._metadata_lock = threading.Lock()
 
@@ -509,6 +525,16 @@ class AgentHeartbeatSupervisor(threading.Thread):
             if latest:
                 latest_metadata = dict(latest.get("metadata", {}) or {})
                 heartbeat_metadata.update(latest_metadata)
+
+        if self.metadata_provider is not None:
+            try:
+                provider_metadata = self.metadata_provider() or {}
+            except Exception as exc:
+                provider_metadata = {
+                    "resource_monitor_available": "false",
+                    "resource_monitor_error": str(exc),
+                }
+            heartbeat_metadata.update(provider_metadata)
 
         heartbeat_metadata["heartbeat_ts"] = int(time.time())
         heartbeat_metadata["heartbeat_at"] = utc_now_iso()

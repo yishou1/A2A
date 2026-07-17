@@ -21,6 +21,13 @@ from commander_agent.distributed_lock import RedisDistributedLock
 from commander_agent.error_classification import classify_agent_error
 from local_runtime import LocalAgentRuntime
 from observability import append_trace, exception_diagnostics, log_event
+from protocol_contracts import (
+    ContractValidationError,
+    PROTOCOL_VERSION,
+    validate_task_response,
+)
+from skill_catalog import skill_contract
+from telemetry import traced_method
 from workflow_state_store import WorkflowStateStore, new_workflow_id, utc_now_iso
 from workflow_payloads import attachment_snapshot, merge_attachments, normalize_attachments
 from closed_loop_agent.agent_results_mapping import build_standard_results_from_context
@@ -75,8 +82,10 @@ class CommanderAgent:
         request_timeout: float = None,
         registry=None,
         lease_manager=None,
+        details: bool = False,
     ):
         load_env_file()
+        self.details = bool(details or os.environ.get("A2A_DETAILS", "").lower() in {"1", "true", "yes", "on"})
         self.mode = (mode or os.environ.get("A2A_COMMANDER_MODE", "remote")).lower()
         if self.mode not in {"remote", "local"}:
             raise ValueError("mode must be either 'remote' or 'local'")
@@ -171,12 +180,112 @@ class CommanderAgent:
             workflow_id=self.workflow_id,
             **fields,
         )
-        log_event(
-            event_type,
-            workflow_id=self.workflow_id,
-            **fields,
-        )
+        self._log_event_if_details(event_type, **fields)
         return event
+
+    def _log_event_if_details(self, event_type: str, **fields):
+        if self.details or os.environ.get("A2A_PRINT_EVENTS", "").lower() in {"1", "true", "yes", "on"}:
+            log_event(
+                event_type,
+                workflow_id=self.workflow_id,
+                **fields,
+            )
+
+    @staticmethod
+    def _latest_entry_value(value):
+        if isinstance(value, list):
+            if not value:
+                return None
+            latest = value[-1]
+            if isinstance(latest, dict):
+                return latest.get("value")
+            return latest
+        return value
+
+    def _print_context_result(self, context: dict, *, title: str = "WORKFLOW SUMMARY"):
+        if self.details:
+            print(f"\n================= {title.replace('SUMMARY', 'CONTEXT')} =================")
+            print(json.dumps(context, ensure_ascii=False, indent=2))
+            print("====================================================")
+            return
+
+        print(f"\n=== {title} ===")
+        print(f"workflow_id={context.get('workflow_id')}")
+        print(f"status={context.get('workflow_status')} activity={context.get('workflow_activatity')}")
+        print(f"completed_roles={context.get('completed_roles', [])}")
+        if context.get("last_error"):
+            print(f"last_error={context.get('last_error')}")
+        for key in ["recon_report", "strike_result", "eval_score", "commander_decision", "assault_result", "replan_result"]:
+            value = self._latest_entry_value(context.get(key))
+            if value not in (None, [], ""):
+                print(f"{key}={value}")
+        print(f"checkpoint={self.state_store.state_path(self.workflow_id)}")
+        print("========================")
+
+    def _build_workflow_result(self, context: dict) -> dict:
+        work_list = deepcopy(context.get("work_list", []))
+        agent_results = context.get("agent_results", {}) or {}
+        output_keys = set()
+        if self.bpel_definition:
+            for activity in self.bpel_definition.activatities:
+                if activity.output_variable:
+                    output_keys.add(
+                        self._context_key_for_bpel_variable(activity.output_variable)
+                    )
+        else:
+            output_keys.update(self._result_collection_keys())
+
+        outputs = {}
+        for key in sorted(output_keys):
+            values = self._context_values(context, key)
+            if values:
+                outputs[key] = values[0] if len(values) == 1 else values
+
+        activity_results = []
+        for item in work_list:
+            work_item = item.get("work_item")
+            response = deepcopy(agent_results.get(work_item, {}))
+            activity_results.append(
+                {
+                    "activity_id": item.get("activity_id") or item.get("activatity_id"),
+                    "work_item": work_item,
+                    "type": item.get("type"),
+                    "role": item.get("role"),
+                    "required_skills": list(item.get("required_skills", [])),
+                    "status": item.get("status"),
+                    "error": item.get("error"),
+                    "agent": response.get("agent"),
+                    "output": response.get("output", {}),
+                    "metrics": response.get("metrics", {}),
+                }
+            )
+
+        counts = {
+            status: sum(1 for item in work_list if item.get("status") == status)
+            for status in ("completed", "failed", "skipped", "pending", "running")
+        }
+        duration_ms = sum(
+            float((result.get("metrics") or {}).get("duration_ms") or 0)
+            for result in activity_results
+        )
+        warnings = [
+            item.get("error")
+            for item in work_list
+            if item.get("status") in {"failed", "skipped"} and item.get("error")
+        ]
+        if context.get("last_error") and context.get("last_error") not in warnings:
+            warnings.append(context["last_error"])
+        return {
+            "schema_version": PROTOCOL_VERSION,
+            "workflow_id": self.workflow_id,
+            "workflow": self.bpel_definition.process_name if self.bpel_definition else self.workflow,
+            "status": context.get("workflow_status"),
+            "outputs": outputs,
+            "activity_results": activity_results,
+            "summary": {**counts, "duration_ms": round(duration_ms, 3)},
+            "warnings": warnings,
+            "trace_id": self.workflow_id,
+        }
 
     def _remember_task_response(self, work_item: str, response: dict, *, role: str = None, target: str = None):
         if not work_item:
@@ -648,6 +757,16 @@ class CommanderAgent:
         )
         return False
 
+    @traced_method(
+        "a2a.agent.call",
+        lambda self, role_needed, target, task_payload, *args, **kwargs: {
+            "a2a.workflow_id": str(task_payload.get("workflow_id") or self.workflow_id),
+            "a2a.work_item": str(task_payload.get("work_item") or ""),
+            "a2a.role": str(role_needed),
+            "server.address": str(target.get("ip") or ""),
+            "server.port": int(target.get("port") or 0),
+        },
+    )
     def _delegate_remote_candidate(self, role_needed: str, target: dict, task_payload: dict, stream: bool = False, lease=None):
         ip = target.get("ip")
         port = target.get("port")
@@ -672,6 +791,15 @@ class CommanderAgent:
                 )
                 card = client.discover()
                 print(f"[DISCOVERY] {label} Agent Card from '{card.get('name')}'")
+                advertised_ids = {
+                    str(skill.get("id"))
+                    for skill in (card.get("skills") or [])
+                    if isinstance(skill, dict) and skill.get("id")
+                }
+                required_skills = set(self._required_skills_from_payload(role_needed, task_payload))
+                if advertised_ids and not required_skills.issubset(advertised_ids):
+                    missing = sorted(required_skills - advertised_ids)
+                    raise ValueError(f"Agent Card is missing required skill ids: {missing}")
 
                 token = client.authenticate()
                 print(f"[AUTH] {label} JWT Token: {token[:10]}...")
@@ -693,13 +821,19 @@ class CommanderAgent:
                         role=role_needed,
                         command=task_payload.get("command"),
                         status="completed" if events and str(events[-1].get("status", "")).lower() == "completed" else "accepted",
-                        output={},
+                        output=events[-1].get("output", {}) if events else {},
                         metrics={
                             "stream_events": len(events),
                             "duration_ms": round((time.perf_counter() - call_started) * 1000, 3),
                         },
                         message=events[-1].get("message", "") if events else "",
                         extra={"stream_events": events, "target": label},
+                    )
+                    required_skill = self._required_skill_from_payload(role_needed, task_payload)
+                    validate_task_response(
+                        task_payload,
+                        response,
+                        {"id": required_skill, **skill_contract(required_skill)},
                     )
                     if not self._lease_allows_response(lease, label, work_item, role_needed):
                         return False, RuntimeError(f"late response ignored after failover: {label}")
@@ -708,12 +842,21 @@ class CommanderAgent:
                     return True, None
 
                 res = client.send_message(task_payload)
+                required_skill = self._required_skill_from_payload(role_needed, task_payload)
+                validate_task_response(
+                    task_payload,
+                    res,
+                    {"id": required_skill, **skill_contract(required_skill)},
+                )
                 if not self._lease_allows_response(lease, label, work_item, role_needed):
                     return False, RuntimeError(f"late response ignored after failover: {label}")
                 metrics = res.setdefault("metrics", {})
                 metrics.setdefault("duration_ms", round((time.perf_counter() - call_started) * 1000, 3))
                 self._remember_task_response(work_item, res, role=role_needed, target=label)
-                print(f"[SEND] {label} Task Response: {res}")
+                if self.details:
+                    print(f"[SEND] {label} Task Response: {res}")
+                else:
+                    print(f"[SEND] {label} role={role_needed} status={res.get('status')} work_item={work_item}")
                 self._trace("agent_call_completed", role=role_needed, work_item=work_item, target=label, attempt=attempt)
                 return True, None
             except Exception as exc:
@@ -750,7 +893,14 @@ class CommanderAgent:
                 for data in events:
                     print(f"   -> [{data.get('status')}] {data.get('progress', '')} {data.get('message', '')}")
             else:
-                print(f"[LOCAL SEND] Task Response: {response}")
+                if self.details:
+                    print(f"[LOCAL SEND] Task Response: {response}")
+                else:
+                    print(
+                        f"[LOCAL SEND] role={role_needed} "
+                        f"status={response.get('status')} "
+                        f"output={response.get('output')}"
+                    )
             self._trace(
                 "local_agent_call_completed",
                 role=role_needed,
@@ -1019,9 +1169,8 @@ class CommanderAgent:
                 workflow_id=self.workflow_id,
                 activity_ids=recovered,
             )
-            log_event(
+            self._log_event_if_details(
                 "interrupted_activities_recovered",
-                workflow_id=self.workflow_id,
                 activity_ids=recovered,
             )
         return recovered
@@ -1232,6 +1381,7 @@ class CommanderAgent:
 
         if role == "recon":
             return {
+                "schema_version": PROTOCOL_VERSION,
                 "workflow_id": self.workflow_id,
                 "workflow": self.workflow,
                 "workflow_mode": self.mode,
@@ -1255,6 +1405,7 @@ class CommanderAgent:
             phase = self._execution_control_phase_for_context(context)
             command = "plan_strike_control" if phase == "strike" else "plan_assault_control"
             return {
+                "schema_version": PROTOCOL_VERSION,
                 "workflow_id": self.workflow_id,
                 "workflow": self.workflow,
                 "workflow_mode": self.mode,
@@ -1310,6 +1461,7 @@ class CommanderAgent:
 
         if role == "evaluator":
             return {
+                "schema_version": PROTOCOL_VERSION,
                 "workflow_id": self.workflow_id,
                 "workflow": self.workflow,
                 "workflow_mode": self.mode,
@@ -1321,7 +1473,7 @@ class CommanderAgent:
                 "required_skill": "evaluate_strike",
                 "required_skills": ["evaluate_strike"],
                 "input": {
-                    "target_coordinates": context["coordinates"],
+                    "coordinates": context["coordinates"],
                     "recon_report": self._context_entries(context, "recon_report"),
                     "strike_result": self._context_entries(context, "strike_result"),
                     "mock_eval_score": self.mock_eval_score if self.mock_eval_score is not None else 40,
@@ -1341,6 +1493,7 @@ class CommanderAgent:
                 else None
             ) or "capture_beachhead"
             return {
+                "schema_version": PROTOCOL_VERSION,
                 "workflow_id": self.workflow_id,
                 "workflow": self.workflow,
                 "workflow_mode": self.mode,
@@ -1409,6 +1562,15 @@ class CommanderAgent:
         for value in (output or {}).values():
             return value
         return None
+
+    @staticmethod
+    def _required_output_value(output: dict, target_key: str):
+        if target_key not in output or output.get(target_key) is None:
+            raise ContractValidationError(
+                f"Agent response is missing required output key '{target_key}'",
+                code="OUTPUT_CONTRACT_ERROR",
+            )
+        return output[target_key]
 
     def _append_output_collection(
         self,
@@ -1505,11 +1667,7 @@ class CommanderAgent:
 
         if role == "recon":
             target_key = output_key or "recon_report"
-            output_value = output.get(target_key)
-            if output_value is None:
-                output_value = self._first_output_value(output)
-            if output_value is None:
-                output_value = "Sector_A is heavily fortified with overlapping machine gun nests."
+            output_value = self._required_output_value(output, target_key)
             self._append_output_collection(
                 context,
                 target_key,
@@ -1560,11 +1718,7 @@ class CommanderAgent:
                 context["battle_log"].append(f"[Execution Control] {output_value}")
         elif role == "artillery":
             target_key = output_key or "strike_result"
-            output_value = output.get(target_key)
-            if output_value is None:
-                output_value = self._first_output_value(output)
-            if output_value is None:
-                output_value = "Suppression barrage executed on Sector_A."
+            output_value = self._required_output_value(output, target_key)
             self._append_output_collection(
                 context,
                 target_key,
@@ -1580,11 +1734,7 @@ class CommanderAgent:
             context["battle_log"].append(f"[Artillery Report] {self._result_display_text(output_value)}")
         elif role == "evaluator":
             target_key = output_key or "eval_score"
-            raw_score = output.get(target_key)
-            if raw_score is None:
-                raw_score = self._first_output_value(output)
-            if raw_score is None:
-                raw_score = self.mock_eval_score if self.mock_eval_score is not None else 40
+            raw_score = self._required_output_value(output, target_key)
             output_value = int(raw_score) if target_key == "eval_score" else raw_score
             self._append_output_collection(
                 context,
@@ -1603,11 +1753,7 @@ class CommanderAgent:
             )
         elif role == "assault":
             target_key = output_key or "assault_result"
-            output_value = output.get(target_key)
-            if output_value is None:
-                output_value = self._first_output_value(output)
-            if output_value is None:
-                output_value = "Assault unit captured the beachhead."
+            output_value = self._required_output_value(output, target_key)
             self._append_output_collection(
                 context,
                 target_key,
@@ -1656,9 +1802,7 @@ class CommanderAgent:
             )
         else:
             target_key = output_key or self._default_output_key_for_role(role) or "result"
-            output_value = output.get(target_key)
-            if output_value is None:
-                output_value = self._first_output_value(output)
+            output_value = self._required_output_value(output, target_key)
             self._append_output_collection(
                 context,
                 target_key,
@@ -1841,9 +1985,8 @@ class CommanderAgent:
                 status=status,
                 error=error,
             )
-            log_event(
+            self._log_event_if_details(
                 "activity_status_changed",
-                workflow_id=self.workflow_id,
                 activity_id=activatity.activatity_id,
                 work_item=item["work_item"],
                 role=self._activity_dispatch_key(activatity),
@@ -1896,8 +2039,19 @@ class CommanderAgent:
 
     def _context_input_value(self, context: dict, key: str, default=None):
         if key in self._result_collection_keys():
-            return self._context_entries(context, key)
-        return context.get(key, default)
+            entries = self._context_entries(context, key)
+            if not entries:
+                raise ContractValidationError(
+                    f"BPEL input variable '{default or key}' has no upstream value",
+                    code="MISSING_ACTIVITY_INPUT",
+                )
+            return entries
+        if key not in context or context.get(key) is None:
+            raise ContractValidationError(
+                f"BPEL input variable '{default or key}' is missing from workflow context",
+                code="MISSING_ACTIVITY_INPUT",
+            )
+        return context[key]
 
     def _output_keys_for_activatity_tree(self, activatity: BPELActivatity):
         keys = set()
@@ -1916,9 +2070,10 @@ class CommanderAgent:
     def _input_keys_for_activatity_tree(self, activatity: BPELActivatity):
         keys = set()
         if activatity.type == "invoke":
-            input_key = self._context_key_for_bpel_variable(activatity.input_variable)
-            if input_key:
-                keys.add(input_key)
+            for variable in activatity.input_variables:
+                input_key = self._context_key_for_bpel_variable(variable)
+                if input_key:
+                    keys.add(input_key)
         if activatity.type in {"switch", "case"} and activatity.condition:
             keys.update(self._condition_input_keys(activatity.condition))
         for child in activatity.children:
@@ -1945,9 +2100,10 @@ class CommanderAgent:
     def _direct_input_keys_for_activity(self, activatity: BPELActivatity):
         keys = set()
         if activatity.type == "invoke":
-            input_key = self._context_key_for_bpel_variable(activatity.input_variable)
-            if input_key:
-                keys.add(input_key)
+            for variable in activatity.input_variables:
+                input_key = self._context_key_for_bpel_variable(variable)
+                if input_key:
+                    keys.add(input_key)
         if activatity.type in {"switch", "case"}:
             keys.update(self._condition_input_keys(activatity.condition))
         return keys
@@ -2254,9 +2410,8 @@ class CommanderAgent:
             reset_activity_ids=sorted(reset_ids),
             removed_outputs=removed,
         )
-        log_event(
+        self._log_event_if_details(
             "dag_resume_cleanup",
-            workflow_id=self.workflow_id,
             failed_activity_ids=sorted(failed_ids),
             affected_activity_ids=sorted(affected_ids),
             reset_activity_ids=sorted(reset_ids),
@@ -2357,7 +2512,6 @@ class CommanderAgent:
                 if activatity.parent_activatity
                 else None
             )
-
             if activatity.role in {
                 "recon",
                 "execution_control",
@@ -2393,15 +2547,19 @@ class CommanderAgent:
                 )
                 return payload, stream
 
-            input_key = self._context_key_for_bpel_variable(activatity.input_variable)
             input_payload = {}
-            if input_key:
-                input_payload[input_key] = self._context_input_value(context, input_key, activatity.input_variable)
+            for variable in activatity.input_variables:
+                input_key = self._context_key_for_bpel_variable(variable)
+                if input_key:
+                    input_payload[input_key] = self._context_input_value(
+                        context, input_key, variable
+                    )
             dispatch_key = self._activity_dispatch_key(activatity)
             if dispatch_key == "evaluator" or activatity.required_skill == "evaluate_strike":
                 input_payload["mock_eval_score"] = self.mock_eval_score if self.mock_eval_score is not None else 40
 
             return {
+                "schema_version": PROTOCOL_VERSION,
                 "workflow_id": self.workflow_id,
                 "workflow": self.workflow,
                 "workflow_mode": self.mode,
@@ -2458,7 +2616,7 @@ class CommanderAgent:
 
     @staticmethod
     def _activity_dispatch_key(activatity: BPELActivatity) -> str | None:
-        return activatity.required_skill or activatity.command
+        return activatity.role or activatity.required_skill or activatity.command
 
     def _execute_bpel_invoke(self, activatity: BPELActivatity, context: dict):
         if activatity.role == "commander":
@@ -2623,12 +2781,14 @@ class CommanderAgent:
         success = self._execute_bpel_activatity(self.bpel_definition.root_activatity, context)
         with self._checkpoint_lock:
             context["workflow_status"] = "completed" if success else "paused"
+            context["workflow_result"] = self._build_workflow_result(context)
             self._trace(
                 "workflow_finished",
                 workflow_type="bpel",
                 status=context["workflow_status"],
                 last_error=context.get("last_error"),
             )
+            context["workflow_result"]["status"] = context["workflow_status"]
             self._save_workflow_checkpoint(
                 context,
                 status=context["workflow_status"],
@@ -2636,9 +2796,7 @@ class CommanderAgent:
                 last_error=context.get("last_error"),
             )
 
-        print("\n================= WORKFLOW CONTEXT =================")
-        print(json.dumps(context, ensure_ascii=False, indent=2))
-        print("====================================================")
+        self._print_context_result(context)
         return context
 
     def run_dynamic_battle_scenario(self, max_steps: int = 10):
@@ -2646,9 +2804,7 @@ class CommanderAgent:
 
         if context.get("workflow_status") == "completed":
             print(f"[WORKFLOW] Workflow {self.workflow_id} already completed. Nothing to resume.")
-            print("\n================= WORKFLOW CONTEXT =================")
-            print(json.dumps(context, ensure_ascii=False, indent=2))
-            print("====================================================")
+            self._print_context_result(context)
             return context
 
         print("\n=== DYNAMIC WORKFLOW: RULE STATE MACHINE + LLM FALLBACK ===")
@@ -2764,9 +2920,15 @@ class CommanderAgent:
             self._save_workflow_checkpoint(context, status="paused")
             print(f"[WORKFLOW] Reached max_steps={max_steps}. Stop current workflow.")
 
-        print("\n================= WORKFLOW CONTEXT =================")
-        print(json.dumps(context, ensure_ascii=False, indent=2))
-        print("====================================================")
+        with self._checkpoint_lock:
+            context["workflow_result"] = self._build_workflow_result(context)
+            self._save_workflow_checkpoint(
+                context,
+                status=context.get("workflow_status", "paused"),
+                current_activatity=context.get("current_activatity"),
+                last_error=context.get("last_error"),
+            )
+        self._print_context_result(context)
         return context
 
     def run_battle_scenario(self):
@@ -2931,6 +3093,11 @@ def parse_args():
         default=None,
         help="Force commander decision in local/mock runs.",
     )
+    parser.add_argument(
+        "--details",
+        action="store_true",
+        help="Print full A2A trace events and workflow context JSON.",
+    )
     return parser.parse_args()
 
 
@@ -2986,6 +3153,7 @@ if __name__ == "__main__":
         max_retries=args.max_retries,
         retry_backoff=args.retry_backoff,
         request_timeout=args.request_timeout,
+        details=args.details,
     )
 
     if args.workflow == "legacy":

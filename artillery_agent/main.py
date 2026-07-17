@@ -1,5 +1,6 @@
 from a2a_protocol.server import A2ABaseAgent, skills_metadata
 from registry.nacos_manager import NacosRegistry, get_host_ip
+from model_registry import build_model
 import asyncio
 import json
 import os
@@ -39,12 +40,13 @@ def execute_artillery_command(payload: dict) -> tuple[dict, str]:
 
 
 class ArtilleryAgent(A2ABaseAgent):
-    def __init__(self, port: int):
+    def __init__(self, port: int, models=None):
         super().__init__(
             name="Artillery_Agent",
             description="Assigned heavy artillery forces for beach suppression.",
             role="artillery",
             port=port,
+            models=models,
         )
 
     def execute_task(self, payload: dict):
@@ -59,14 +61,24 @@ class ArtilleryAgent(A2ABaseAgent):
         await asyncio.sleep(0.2)
         yield f"data: {json.dumps({'status': 'Working', 'message': 'Impact confirmed. Adjusting aim.', 'progress': '60%'})}\n\n"
         await asyncio.sleep(0.2)
-        _, message = await asyncio.to_thread(self.execute_task, payload)
-        yield f"data: {json.dumps({'status': 'Completed', 'message': message, 'progress': '100%'})}\n\n"
+        output, message = await asyncio.to_thread(self.execute_task, payload)
+        yield f"data: {json.dumps({'status': 'Completed', 'message': message, 'progress': '100%', 'output': output})}\n\n"
 
 
 if __name__ == "__main__":
     port = int(os.environ.get("ARTILLERY_AGENT_PORT", "8003"))
     heartbeat_interval = float(os.environ.get("A2A_HEARTBEAT_INTERVAL", "5"))
-    agent = ArtilleryAgent(port=port)
+    agent = ArtilleryAgent(
+        port=port,
+        models=[
+            build_model(
+                "fire_control_v1",
+                name="Fire Control Model",
+                model_type="target_assignment",
+                tags=["target_assignment", "route_planning"],
+            ),
+        ],
+    )
     
     registry = NacosRegistry()
     ip = get_host_ip()
@@ -75,7 +87,14 @@ if __name__ == "__main__":
         service_name="A2A-Agent",
         ip=ip,
         port=port,
-        metadata={"role": "artillery", "firepower": "heavy", "status": "idle", **skills_metadata(agent.skills)},
+        metadata={
+            "role": "artillery",
+            "firepower": "heavy",
+            "status": "idle",
+            **skills_metadata(agent.skills),
+            **agent.heartbeat_metadata(),
+        },
         heartbeat_interval=heartbeat_interval,
+        metadata_provider=agent.heartbeat_metadata,
     )
     agent.start()

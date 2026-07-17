@@ -9,6 +9,7 @@ import requests
 from bpel_workflow import BPELWorkflowCatalog
 from commander_agent.agent_leases import AgentLeaseManager
 from commander_agent.main import CommanderAgent
+from protocol_contracts import ContractValidationError
 from scripts.demo_bpel_workflows import main as demo_bpel_workflows_main
 
 
@@ -142,6 +143,28 @@ class BPELWorkflowTest(unittest.TestCase):
 
             self.assertEqual(payload["required_skill"], "scan_beach_defenses")
             self.assertEqual(payload["required_skills"], ["scan_beach_defenses"])
+
+    def test_bpel_payload_rejects_missing_upstream_input(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            commander = CommanderAgent(
+                mode="local",
+                workflow="bpel",
+                workflow_file="beachhead_workflow",
+                state_dir=temp_dir,
+            )
+            replanning_activity = next(
+                activity
+                for activity in commander.bpel_definition.activatities
+                if activity.required_skill == "analyze_and_replanning"
+            )
+
+            with self.assertRaises(ContractValidationError) as raised:
+                commander._build_bpel_task_payload(
+                    replanning_activity,
+                    commander.workflow_context,
+                )
+
+            self.assertEqual(raised.exception.code, "MISSING_ACTIVITY_INPUT")
 
     def test_skill_only_bpel_can_orchestrate_without_partner_link_role(self):
         with tempfile.TemporaryDirectory() as temp_dir:

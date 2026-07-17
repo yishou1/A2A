@@ -95,7 +95,15 @@ class WorkflowResumeTest(unittest.TestCase):
 
     def test_local_runtime_replays_cached_results(self):
         runtime = LocalAgentRuntime()
-        payload = {"work_item": "wf-001:1:recon", "command": "scan_beach_defenses"}
+        payload = {
+            "schema_version": "1.0",
+            "workflow_id": "wf-001",
+            "work_item": "wf-001:1:recon",
+            "command": "scan_beach_defenses",
+            "required_skill": "scan_beach_defenses",
+            "input": {"sector": "Sector_A"},
+            "output_hint": "recon_report",
+        }
 
         first_response, first_events = runtime.execute("recon", payload, stream=False)
         second_response, second_events = runtime.execute("recon", payload, stream=False)
@@ -103,7 +111,15 @@ class WorkflowResumeTest(unittest.TestCase):
         self.assertEqual(first_response, second_response)
         self.assertEqual(first_events, second_events)
 
-        stream_payload = {"work_item": "wf-001:2:artillery", "command": "suppress_beach_sector_A"}
+        stream_payload = {
+            "schema_version": "1.0",
+            "workflow_id": "wf-001",
+            "work_item": "wf-001:2:artillery",
+            "command": "suppress_beach_sector_A",
+            "required_skill": "suppress_beach_sector_A",
+            "input": {"coordinates": "120.5E, 35.1N"},
+            "output_hint": "strike_result",
+        }
         first_stream_response, first_stream_events = runtime.execute("artillery", stream_payload, stream=True)
         second_stream_response, second_stream_events = runtime.execute("artillery", stream_payload, stream=True)
 
@@ -222,9 +238,13 @@ class WorkflowResumeTest(unittest.TestCase):
         )
         client = TestClient(agent.app)
         payload = {
+            "schema_version": "1.0",
             "workflow_id": "wf-work-list",
             "work_item": "wf-work-list:activatity-001-recon",
             "command": "scan_beach_defenses",
+            "required_skill": "scan_beach_defenses",
+            "input": {"sector": "Sector_A"},
+            "output_hint": "recon_report",
             "work_list": [
                 {
                     "activatity_id": "activatity-001-recon",
@@ -277,9 +297,13 @@ class WorkflowResumeTest(unittest.TestCase):
         response = client.post(
             "/sendMessage",
             json={
+                "schema_version": "1.0",
                 "workflow_id": "wf-not-ready",
                 "work_item": "wf-not-ready:1:recon",
                 "command": "scan_beach_defenses",
+                "required_skill": "scan_beach_defenses",
+                "input": {"sector": "Sector_A"},
+                "output_hint": "recon_report",
             },
             headers={"Authorization": "Bearer test-token"},
         )

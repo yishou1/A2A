@@ -12,6 +12,7 @@ from commander_agent.main import CommanderAgent, PROJECT_ROOT
 from registry.nacos_manager import NacosRegistry
 from workflow_payloads import normalize_attachments
 from workflow_state_store import WorkflowStateStore, new_workflow_id, utc_now_iso
+from telemetry import traced_method
 
 
 class CommanderWorkflowManager:
@@ -195,6 +196,14 @@ class CommanderWorkflowManager:
         if self.registry is not None:
             self.registry.close()
 
+    @traced_method(
+        "a2a.workflow.run",
+        lambda self, workflow_id, workflow, *args, **kwargs: {
+            "a2a.workflow_id": str(workflow_id),
+            "a2a.workflow_type": str(workflow),
+            "a2a.mode": str(self.mode),
+        },
+    )
     def _run_workflow(
         self,
         workflow_id: str,
@@ -245,6 +254,7 @@ class CommanderWorkflowManager:
                 current_activity=context.get("current_activity") or context.get("current_activatity"),
                 last_error=context.get("last_error"),
                 trace_count=len(context.get("trace", [])),
+                result=deepcopy(context.get("workflow_result")),
             )
         except Exception as exc:
             self._update_job(

@@ -78,6 +78,33 @@ class AgentHeartbeatTest(unittest.TestCase):
         self.assertEqual(heartbeat_metadata["lease_work_item"], "wf-1:1:recon")
         self.assertGreater(heartbeat_metadata["heartbeat_ts"], time.time() - 1)
 
+    def test_heartbeat_merges_resource_metadata_provider(self):
+        fake_registry = FakeRegistry()
+        supervisor = AgentHeartbeatSupervisor(
+            registry=fake_registry,
+            service_name="A2A-Agent",
+            ip="127.0.0.1",
+            port=8002,
+            metadata={"role": "recon", "status": "idle"},
+            heartbeat_interval=0.05,
+            metadata_provider=lambda: {
+                "resource_cpu_percent": 88.5,
+                "resource_memory_percent": 61.0,
+            },
+        )
+
+        supervisor.start()
+        deadline = time.time() + 1.0
+        while time.time() < deadline and not fake_registry.calls:
+            time.sleep(0.01)
+        supervisor.stop()
+        supervisor.join(timeout=1.0)
+
+        heartbeat_metadata = fake_registry.calls[0]["kwargs"]["metadata"]
+        self.assertEqual(heartbeat_metadata["status"], "idle")
+        self.assertEqual(heartbeat_metadata["resource_cpu_percent"], 88.5)
+        self.assertEqual(heartbeat_metadata["resource_memory_percent"], 61.0)
+
     def test_filter_instances_discards_stale_instances(self):
         registry = NacosRegistry(server_addresses="127.0.0.1:8848")
         registry.heartbeat_grace_seconds = 5

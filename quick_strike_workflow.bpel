@@ -5,6 +5,7 @@
         <variable name="ReconReport" type="String"/>
         <variable name="StrikeCoordinates" type="String"/>
         <variable name="StrikeResult" type="String"/>
+        <variable name="AssaultResult" type="String"/>
     </variables>
 
     <sequence>
@@ -27,7 +28,7 @@
 
         <invoke partnerLink="AssaultAgent" operation="captureBeachhead"
                 requiredSkill="capture_beachhead"
-                inputVariable="StrikeCoordinates"/>
+                inputVariable="StrikeCoordinates" outputVariable="AssaultResult"/>
 
     </sequence>
 </process>

@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "a2a-distributed-agent"
+version = "0.1.0"
+description = "A2A distributed-agent interfaces and lightweight SDK (AgentRuntimeSDK / SchedulerSDK)."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "requests",
+    "redis>=5.0,<7.0",
+    "nacos-sdk-python<2.0.0",
+    "sseclient-py",
+    "psutil>=5.9,<8.0",
+    "prometheus-client>=0.20,<1.0",
+    "opentelemetry-api>=1.25,<2.0",
+    "opentelemetry-sdk>=1.25,<2.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.25,<2.0",
+]
+
+[project.optional-dependencies]
+# Enables real GPU utilization reporting in resource_monitor. The monitor
+# degrades gracefully when this is not installed.
+gpu = ["nvidia-ml-py>=12.0"]
+
+[tool.setuptools]
+# Top-level single-file modules that make up the runtime + SDK core.
+py-modules = [
+    "resource_monitor",
+    "model_registry",
+    "skill_catalog",
+    "observability",
+    "monitoring",
+    "telemetry",
+    "protocol_contracts",
+    "idempotency_store",
+    "workflow_state_store",
+]
+
+[tool.setuptools.packages.find]
+include = ["a2a_sdk*", "a2a_protocol*", "registry*", "commander_agent*"]

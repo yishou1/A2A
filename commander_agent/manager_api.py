@@ -3,9 +3,11 @@ from __future__ import annotations
 from typing import Any, Dict, Literal, Optional
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from commander_agent.workflow_manager import CommanderWorkflowManager
+from monitoring import SUPERVISOR_HTML, SupervisorMonitor
 
 
 class WorkflowSubmitRequest(BaseModel):
@@ -44,6 +46,7 @@ def build_workflow_manager_app(
         state_dir=state_dir,
         max_workflows=max_workflows,
     )
+    app.state.supervisor_monitor = SupervisorMonitor()
 
     @app.on_event("shutdown")
     async def shutdown_manager():
@@ -60,6 +63,23 @@ def build_workflow_manager_app(
             "active_leases": len(workflow_manager.list_agent_leases()),
             "agent_count": len(workflow_manager.list_agents()),
         }
+
+    @app.get("/supervisor", response_class=HTMLResponse)
+    async def supervisor_dashboard():
+        return SUPERVISOR_HTML
+
+    @app.get("/supervisor/snapshot")
+    async def supervisor_snapshot():
+        return app.state.supervisor_monitor.snapshot(app.state.workflow_manager)
+
+    @app.get("/alerts")
+    async def active_alerts():
+        return app.state.supervisor_monitor.snapshot(app.state.workflow_manager)["alerts"]
+
+    @app.get("/metrics")
+    async def prometheus_metrics():
+        payload = app.state.supervisor_monitor.prometheus(app.state.workflow_manager)
+        return Response(payload, media_type="text/plain; version=0.0.4; charset=utf-8")
 
     @app.get("/workflows")
     async def list_workflows():
