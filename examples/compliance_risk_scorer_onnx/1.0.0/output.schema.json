@@ -1,0 +1,15 @@
+{
+  "title": "Compliance Risk Scorer ONNX Output",
+  "type": "object",
+  "required": ["risk_probability"],
+  "properties": {
+    "risk_probability": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
+      }
+    }
+  },
+  "additionalProperties": false
+}

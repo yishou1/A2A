@@ -1,0 +1,4 @@
+type: raw_tensor_to_json
+outputs:
+  - tensor_name: trend_score
+    json_path: $.trend_score

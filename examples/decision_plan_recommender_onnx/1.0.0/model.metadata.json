@@ -1,0 +1,29 @@
+{
+  "model_source": "a2a_decision_planning_bootstrap_lr",
+  "model_type": "logistic_regression",
+  "format": "onnx",
+  "input_name": "features",
+  "output_name": "probability",
+  "feature_order": [
+    "coverage",
+    "risk_alignment",
+    "resource_efficiency",
+    "constraint_fit",
+    "authorization",
+    "lstm_trend",
+    "priority",
+    "objective_fit"
+  ],
+  "weights": {
+    "coverage": 1.2,
+    "risk_alignment": 1.05,
+    "resource_efficiency": 0.6,
+    "constraint_fit": 0.85,
+    "authorization": 0.55,
+    "lstm_trend": 0.75,
+    "priority": 0.45,
+    "objective_fit": 0.35
+  },
+  "intercept": -1.45,
+  "training_status": "bootstrap_from_existing_agent_weights"
+}

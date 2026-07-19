@@ -1,0 +1,8 @@
+inputs:
+  - name: sequence
+    dtype: float32
+    shape: [1, 12, 4]
+outputs:
+  - name: trend_score
+    dtype: float32
+    shape: [1, 1]

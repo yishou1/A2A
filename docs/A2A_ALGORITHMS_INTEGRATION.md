@@ -16,6 +16,42 @@ This branch packages algorithms from the A2A `zh` branch as standalone `python_h
 | `decision_planning_core` | 9020 | Non-RAG decision planning core for candidate generation and ranking |
 | `compliance_authorization_core` | 9021 | Non-RAG compliance and authorization core for plan checking |
 
+## Native ONNX packages
+
+Three fine-grained model capabilities are also packaged for direct execution by
+the algorithm library. They coexist with the Python orchestration services and
+do not use HTTP ports.
+
+| algorithm_id | Model input | Output | Purpose |
+|---|---|---|---|
+| `decision_plan_recommender_onnx` | `features` `[1, 8]` | `recommendation_probability` `[1, 1]` | Candidate-plan recommendation score |
+| `target_trend_predictor_onnx` | `sequence` `[1, 12, 4]` | `trend_score` `[1, 1]` | Fixed-window target trend score |
+| `compliance_risk_scorer_onnx` | `features` `[1, 6]` | `risk_probability` `[1, 1]` | Compliance risk score |
+
+These packages copy, rather than move, the model assets used by
+`decision_planning_core` and `compliance_authorization_core`. The existing
+Python services therefore keep their current behavior and fallback paths.
+
+Register and run them with a build linked to the real ONNX Runtime SDK:
+
+```powershell
+./build/algolib.exe register ./examples/decision_plan_recommender_onnx/1.0.0
+./build/algolib.exe activate decision_plan_recommender_onnx 1.0.0 onnx
+./build/algolib.exe run ./examples/decision_plan_recommender_onnx/1.0.0/golden_cases/case_001_input.json
+
+./build/algolib.exe register ./examples/target_trend_predictor_onnx/1.0.0
+./build/algolib.exe activate target_trend_predictor_onnx 1.0.0 onnx
+./build/algolib.exe run ./examples/target_trend_predictor_onnx/1.0.0/golden_cases/case_001_input.json
+
+./build/algolib.exe register ./examples/compliance_risk_scorer_onnx/1.0.0
+./build/algolib.exe activate compliance_risk_scorer_onnx 1.0.0 onnx
+./build/algolib.exe run ./examples/compliance_risk_scorer_onnx/1.0.0/golden_cases/case_001_input.json
+```
+
+The current files are bootstrap models. Their package contracts are stable, but
+the model weights must still be replaced or re-evaluated before a production
+accuracy claim is made.
+
 ## Start services
 
 ```powershell
