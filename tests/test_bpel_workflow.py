@@ -58,6 +58,32 @@ class BPELWorkflowTest(unittest.TestCase):
         self.assertEqual(invoked_roles, ["recon", "artillery", "assault"])
         self.assertNotIn("evaluator", invoked_roles)
 
+    def test_integrated_workflow_partner_links_map_to_new_agent_roles(self):
+        definition = BPELWorkflowCatalog(PROJECT_ROOT).load(
+            "integrated_system/workflows/integrated_demo_workflow.bpel"
+        )
+        work_list = definition.initial_work_list("wf-integrated")
+        invoked_roles = [
+            item["role"]
+            for item in work_list
+            if item["type"] == "invoke"
+        ]
+
+        self.assertEqual(
+            invoked_roles,
+            [
+                "tactical_intelligence",
+                "track_threat",
+                "track_threat",
+                "decision_planning",
+                "compliance_authorization",
+                "simulation_execution",
+                "closed_loop",
+            ],
+        )
+        self.assertEqual(work_list[1]["required_skill"], "semantic_intelligence")
+        self.assertEqual(work_list[-1]["required_skill"], "closed_loop_optimization")
+
     def test_bpel_invokes_different_roles_in_workflow_order(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             commander = CommanderAgent(

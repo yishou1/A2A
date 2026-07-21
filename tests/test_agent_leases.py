@@ -56,6 +56,8 @@ class AgentLeaseManagerTest(unittest.TestCase):
         self.assertEqual(second.instance_key, "10.0.0.2:8013")
         self.assertIsNone(unavailable)
         self.assertEqual(first.target["metadata"]["status"], "busy")
+        self.assertIn("scheduling_score", first.target["metadata"])
+        self.assertIn("scheduling_reason", first.target["metadata"])
         self.assertEqual(len(leases.list_leases()), 2)
 
         leases.release(first)
@@ -218,6 +220,49 @@ class AgentLeaseManagerTest(unittest.TestCase):
         )
 
         self.assertIsNone(no_skill_match)
+
+    def test_execution_feedback_is_recorded_for_future_scheduling(self):
+        registry = FakeRegistry()
+        leases = AgentLeaseManager(registry)
+
+        acquired = leases.acquire_one("recon", "wf-feedback", "wf-feedback:1:recon")
+        feedback = leases.record_feedback(
+            acquired,
+            success=False,
+            latency_ms=1200,
+            error_code="AGENT_TIMEOUT",
+        )
+
+        self.assertEqual(feedback["attempts"], 1)
+        self.assertEqual(feedback["failures"], 1)
+        self.assertEqual(feedback["last_error_code"], "AGENT_TIMEOUT")
+        snapshot = leases.feedback_snapshot()
+        self.assertIn(acquired.instance_key, snapshot)
+
+    def test_required_skill_can_match_capability_metadata_for_new_agents(self):
+        registry = FakeRegistry()
+        registry.instances = [
+            {
+                "ip": "10.0.0.30",
+                "port": 10202,
+                "metadata": {
+                    "role": "decision_planning",
+                    "status": "idle",
+                    "capability": "decision_planning",
+                },
+            }
+        ]
+        leases = AgentLeaseManager(registry)
+
+        acquired = leases.acquire_one(
+            "decision_planning",
+            "wf-integrated",
+            "wf-integrated:decision",
+            required_skill="decision_planning",
+        )
+
+        self.assertIsNotNone(acquired)
+        self.assertEqual(acquired.instance_key, "10.0.0.30:10202")
 
 
 if __name__ == "__main__":

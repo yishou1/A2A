@@ -13,6 +13,12 @@ Convenience re-exports of the building blocks are also provided.
 
 from a2a_sdk.agent_sdk import AgentRuntimeSDK
 from a2a_sdk.scheduler_sdk import SchedulerSDK
+from commander_agent.scheduling_policy import (
+    JsonSchedulerFeedbackStore,
+    SchedulerFeedbackStore,
+    SchedulingPolicy,
+)
+from commander_agent.task_decomposer import PlannedActivity, TaskDecomposer, TaskPlan
 from model_registry import AlgorithmModel, ModelRegistry, build_model
 from skill_catalog import (
     PROFESSIONAL_SKILLS,
@@ -24,6 +30,12 @@ from skill_catalog import (
 __all__ = [
     "AgentRuntimeSDK",
     "SchedulerSDK",
+    "TaskDecomposer",
+    "TaskPlan",
+    "PlannedActivity",
+    "SchedulingPolicy",
+    "SchedulerFeedbackStore",
+    "JsonSchedulerFeedbackStore",
     "AlgorithmModel",
     "ModelRegistry",
     "build_model",

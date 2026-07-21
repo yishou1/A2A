@@ -186,6 +186,38 @@ class SchedulerSDKTest(unittest.TestCase):
         skills = sdk.discover_skills()
         self.assertIn("detect", skills)
 
+    def test_task_decomposition_and_candidate_ranking(self):
+        sdk, _, _ = self._sdk()
+
+        plan = sdk.decompose_task("coordinate recon strike evaluation and assault")
+        self.assertIn("bpel", plan)
+        self.assertTrue(any(activity["required_skill"] == "scan_beach_defenses" for activity in plan["activities"]))
+
+        ranked = sdk.rank_candidates(
+            [
+                {
+                    "ip": "10.0.0.20",
+                    "port": 9001,
+                    "metadata": {
+                        "role": "recon",
+                        "status": "idle",
+                        "resource_cpu_percent": "90",
+                    },
+                },
+                {
+                    "ip": "10.0.0.21",
+                    "port": 9002,
+                    "metadata": {
+                        "role": "recon",
+                        "status": "idle",
+                        "resource_cpu_percent": "10",
+                    },
+                },
+            ]
+        )
+        self.assertEqual(ranked[0]["port"], 9002)
+        self.assertIn("_scheduling_decision", ranked[0])
+
     def test_bind_dispatch_and_release(self):
         sdk, registry, clients = self._sdk()
         lease = sdk.bind_agent(

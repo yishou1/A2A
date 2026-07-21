@@ -7,6 +7,7 @@ import re
 from typing import Iterable, Optional
 
 from commander_agent.distributed_lock import DistributedLockHandle
+from commander_agent.scheduling_policy import SchedulingPolicy
 from model_registry import instance_has_model
 from workflow_state_store import utc_now_iso
 
@@ -48,6 +49,7 @@ class AgentLeaseManager:
         distributed_lock=None,
         resource_aware: bool = True,
         resource_limits: Optional[dict] = None,
+        scheduling_policy: Optional[SchedulingPolicy] = None,
     ):
         self.registry = registry
         self.service_name = service_name
@@ -55,6 +57,10 @@ class AgentLeaseManager:
         self.distributed_lock = distributed_lock
         self.resource_aware = bool(resource_aware)
         self.resource_limits = dict(resource_limits or {})
+        self.scheduling_policy = scheduling_policy or SchedulingPolicy(
+            resource_aware=self.resource_aware,
+            resource_limits=self.resource_limits,
+        )
         self._lock = threading.RLock()
         self._leases: dict[str, AgentLease] = {}
 
@@ -304,7 +310,7 @@ class AgentLeaseManager:
         candidates: list[dict],
         required_model: Optional[str] = None,
     ) -> list[dict]:
-        """Apply hard constraints and rank candidates by resource/quality data."""
+        """Apply hard constraints and rank candidates by scheduling policy."""
         result = list(candidates)
         if required_model:
             result = [
@@ -312,52 +318,29 @@ class AgentLeaseManager:
                 for target in result
                 if instance_has_model(target.get("metadata", {}) or {}, required_model)
             ]
-        if self.resource_limits:
-            result = [target for target in result if self._within_resource_limits(target)]
-        if self.resource_aware:
-            result.sort(
-                key=lambda target: (
-                    -self._candidate_score(target),
-                    self.instance_key(target),
-                )
-            )
-        return result
+        return self.scheduling_policy.rank(
+            result,
+            instance_key=self.instance_key,
+        )
 
-    def _within_resource_limits(self, target: dict) -> bool:
-        metadata = target.get("metadata", {}) or {}
-        mappings = {
-            "cpu_percent": "resource_cpu_percent",
-            "memory_percent": "resource_memory_percent",
-            "gpu_percent": "resource_gpu_percent",
-            "gpu_memory_percent": "resource_gpu_memory_percent",
-            "active_tasks": "active_tasks",
-        }
-        for limit_name, metadata_name in mappings.items():
-            if limit_name not in self.resource_limits:
-                continue
-            value = self._as_float(metadata.get(metadata_name))
-            if value is not None and value > float(self.resource_limits[limit_name]):
-                return False
-        if not self._has_available_capacity(target):
-            return False
-        return True
+    def record_feedback(
+        self,
+        lease: AgentLease,
+        *,
+        success: bool,
+        latency_ms: Optional[float] = None,
+        error_code: Optional[str] = None,
+    ) -> dict:
+        feedback = self.scheduling_policy.record_feedback(
+            lease.instance_key,
+            success=success,
+            latency_ms=latency_ms,
+            error_code=error_code,
+        )
+        return feedback.snapshot()
 
-    @classmethod
-    def _candidate_score(cls, target: dict) -> float:
-        metadata = target.get("metadata", {}) or {}
-        cpu = cls._as_float(metadata.get("resource_cpu_percent"), 50.0)
-        memory = cls._as_float(metadata.get("resource_memory_percent"), 50.0)
-        gpu = cls._as_float(metadata.get("resource_gpu_percent"), 50.0)
-        active = cls._as_float(metadata.get("active_tasks"), 0.0)
-        success_rate = cls._as_float(metadata.get("quality_success_rate"), 1.0)
-        latency = cls._as_float(metadata.get("quality_avg_latency_ms"), 0.0)
-        resource_score = (100.0 - cpu) * 0.18 + (100.0 - memory) * 0.12
-        if str(metadata.get("resource_gpu_available", "false")).lower() == "true":
-            resource_score += (100.0 - gpu) * 0.10
-        quality_score = max(0.0, min(1.0, success_rate)) * 50.0
-        latency_penalty = min(max(latency, 0.0) / 1000.0, 10.0) * 2.0
-        load_penalty = max(active, 0.0) * 5.0
-        return round(resource_score + quality_score - latency_penalty - load_penalty, 6)
+    def feedback_snapshot(self) -> dict:
+        return self.scheduling_policy.feedback_snapshot()
 
     @staticmethod
     def _as_float(value, default=None):
@@ -497,7 +480,12 @@ class AgentLeaseManager:
         explicit = metadata.get("skill_ids")
         if explicit:
             return cls._split_metadata_values(explicit, ids_only=True)
-        return cls._split_metadata_values(metadata.get("skills"), ids_only=True)
+        values = []
+        for key in ("skills", "skill", "capabilities", "capability"):
+            value = metadata.get(key)
+            if value:
+                values.extend(cls._split_metadata_values(value, ids_only=True))
+        return values
 
     @classmethod
     def _split_metadata_values(cls, value, *, ids_only: bool = False) -> list[str]:
@@ -640,6 +628,7 @@ class AgentLeaseManager:
                 }
             active_tasks = self._active_task_count(target)
             max_concurrent = self._max_concurrent_tasks(target)
+            scheduling_decision = target.get("_scheduling_decision") or {}
             self.registry.update_instance_metadata(
                 self.service_name,
                 target,
@@ -657,6 +646,8 @@ class AgentLeaseManager:
                     "lease_work_item": work_item,
                     "lease_slot_id": str(slot_id),
                     "lease_acquired_at": acquired_at,
+                    "scheduling_score": str(scheduling_decision.get("score", "")),
+                    "scheduling_reason": ",".join(scheduling_decision.get("reasons", [])),
                     **lock_metadata,
                     **circuit_metadata,
                 },

@@ -133,6 +133,30 @@ class CommanderWorkflowManagerTest(unittest.TestCase):
             finally:
                 manager.shutdown()
 
+    def test_task_goal_can_be_auto_decomposed_into_generated_bpel(self):
+        FakeCommander.reset()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = CommanderWorkflowManager(
+                mode="local",
+                state_dir=temp_dir,
+                max_workflows=1,
+                commander_factory=FakeCommander,
+            )
+            try:
+                submitted = manager.submit_workflow(
+                    workflow_id="wf-auto-plan",
+                    task_goal="coordinate recon strike evaluation and assault",
+                    auto_decompose=True,
+                )
+                self.assertEqual(submitted["workflow"], "bpel")
+                self.assertIsNotNone(submitted["generated_workflow_file"])
+
+                manager.wait_for_workflow("wf-auto-plan", timeout=2)
+                kwargs = FakeCommander.init_kwargs["wf-auto-plan"]
+                self.assertTrue(kwargs["workflow_file"].endswith("wf-auto-plan.bpel"))
+            finally:
+                manager.shutdown()
+
 
 if __name__ == "__main__":
     unittest.main()

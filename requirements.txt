@@ -2,9 +2,14 @@ fastapi
 uvicorn
 pydantic
 requests
+httpx2
 redis>=5.0,<7.0
 nacos-sdk-python<2.0.0
 sseclient-py
+PyYAML>=6.0,<7.0
+numpy>=1.26,<3.0
+scikit-learn>=1.4,<2.0
+python-dotenv>=1.0,<2.0
 psutil>=5.9,<8.0
 prometheus-client>=0.20,<1.0
 opentelemetry-api>=1.25,<2.0

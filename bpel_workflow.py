@@ -14,6 +14,12 @@ PARTNER_ROLE_MAP = {
     "EvaluatorAgent": "evaluator",
     "AssaultAgent": "assault",
     "LLMCommanderAgent": "commander",
+    "TacticalIntelligenceAgent": "tactical_intelligence",
+    "TrackThreatAgent": "track_threat",
+    "DecisionPlanningAgent": "decision_planning",
+    "ComplianceAuthorizationAgent": "compliance_authorization",
+    "SimulationExecutionAgent": "simulation_execution",
+    "ClosedLoopAgent": "closed_loop",
 }
 
 OPERATION_COMMAND_MAP = {
@@ -22,6 +28,13 @@ OPERATION_COMMAND_MAP = {
     "evaluateStrike": "evaluate_strike",
     "captureBeachhead": "capture_beachhead",
     "analyzeAndReplanning": "analyze_and_replanning",
+    "buildSituationSummary": "build_situation_summary",
+    "updateTracks": "update_tracks",
+    "rankThreats": "rank_threats",
+    "generateDecisionPlan": "generate_decision_plan",
+    "checkComplianceAuthorization": "check_compliance_authorization",
+    "simulateExecutionControl": "simulate_execution_control",
+    "evaluateMissionEffect": "evaluate_mission_effect",
 }
 
 

@@ -19,6 +19,7 @@ from commander_agent.agent_leases import AgentLeaseManager
 from commander_agent.circuit_breaker import AgentCircuitBreaker
 from commander_agent.distributed_lock import RedisDistributedLock
 from commander_agent.error_classification import classify_agent_error
+from commander_agent.task_decomposer import TaskDecomposer
 from local_runtime import LocalAgentRuntime
 from observability import append_trace, exception_diagnostics, log_event
 from protocol_contracts import (
@@ -607,6 +608,25 @@ class CommanderAgent:
 
     def _release_agent_lease(self, lease, *, available: bool = True, error=None):
         try:
+            response = self._task_response_for_work_item(lease.work_item, self.workflow_context)
+            latency_ms = self._response_duration_ms(response) if response else None
+            error_info = classify_agent_error(error) if error is not None else None
+            if hasattr(self.lease_manager, "record_feedback"):
+                feedback = self.lease_manager.record_feedback(
+                    lease,
+                    success=bool(available),
+                    latency_ms=latency_ms,
+                    error_code=error_info.code if error_info else None,
+                )
+                self._trace(
+                    "scheduler_feedback_recorded",
+                    role=lease.role,
+                    work_item=lease.work_item,
+                    target=lease.instance_key,
+                    success=bool(available),
+                    latency_ms=latency_ms,
+                    feedback=feedback,
+                )
             if available:
                 previous_state = self.circuit_breaker.snapshot(lease.instance_key)["state"]
                 self.circuit_breaker.record_success(lease.instance_key)
@@ -624,7 +644,7 @@ class CommanderAgent:
                     )
                 print(f"[LEASE] Released {lease.role} at {lease.instance_key}")
                 return
-            error_info = classify_agent_error(error)
+            error_info = error_info or classify_agent_error(error)
             circuit = self.circuit_breaker.record_failure(lease.instance_key)
             circuit_metadata = self.circuit_breaker.metadata(lease.instance_key)
             circuit_open = circuit["state"] == "open"
@@ -974,12 +994,25 @@ class CommanderAgent:
             "last_error": None,
             "sector": "Sector_A",
             "coordinates": "120.5E, 35.1N",
+            "mission_input": {
+                "objective": "auto-generated integrated mission",
+                "contacts": [],
+                "friendly_platforms": [],
+                "simulation_mode": "safe",
+            },
             "recon_report": [],
             "strike_result": [],
             "eval_score": [],
             "commander_decision": [],
             "assault_result": [],
             "replan_result": [],
+            "cognition_result": [],
+            "tracking_result": [],
+            "threat_assessment_result": [],
+            "decision_planning_result": [],
+            "compliance_authorization_result": [],
+            "execution_simulation_result": [],
+            "effect_evaluation_result": [],
             "battle_log": [],
             "completed_roles": [],
             "attachments": [],
@@ -1771,6 +1804,14 @@ class CommanderAgent:
             "AssaultResult": "assault_result",
             "ReplanResult": "replan_result",
             "Sector_A": "sector",
+            "MissionInput": "mission_input",
+            "CognitionResult": "cognition_result",
+            "TrackingResult": "tracking_result",
+            "ThreatAssessmentResult": "threat_assessment_result",
+            "DecisionPlanningResult": "decision_planning_result",
+            "ComplianceAuthorizationResult": "compliance_authorization_result",
+            "ExecutionSimulationResult": "execution_simulation_result",
+            "EffectEvaluationResult": "effect_evaluation_result",
         }.get(variable_name, variable_name)
 
     @staticmethod
@@ -1782,6 +1823,13 @@ class CommanderAgent:
             "commander_decision",
             "assault_result",
             "replan_result",
+            "cognition_result",
+            "tracking_result",
+            "threat_assessment_result",
+            "decision_planning_result",
+            "compliance_authorization_result",
+            "execution_simulation_result",
+            "effect_evaluation_result",
         }
 
     def _context_input_value(self, context: dict, key: str, default=None):
@@ -2692,6 +2740,22 @@ def parse_args():
         help="BPEL file path, filename, stem, or process name. Defaults to the first discovered .bpel workflow.",
     )
     parser.add_argument(
+        "--task-goal",
+        default=None,
+        help="Natural-language or structured task goal to auto-decompose into a BPEL workflow.",
+    )
+    parser.add_argument(
+        "--required-skill",
+        action="append",
+        default=[],
+        help="Skill required by an auto-decomposed task. Can be provided more than once.",
+    )
+    parser.add_argument(
+        "--auto-decompose",
+        action="store_true",
+        help="Generate a BPEL workflow from --task-goal before execution.",
+    )
+    parser.add_argument(
         "--list-workflows",
         action="store_true",
         help="List discovered BPEL workflow definitions and exit.",
@@ -2842,6 +2906,19 @@ if __name__ == "__main__":
         )
         uvicorn.run(app, host=args.manager_host, port=args.manager_port)
         raise SystemExit(0)
+
+    if args.task_goal and (args.auto_decompose or not args.workflow_file):
+        args.workflow_id = args.workflow_id or new_workflow_id()
+        state_dir = args.state_dir or os.path.join(PROJECT_ROOT, ".a2a_state", "workflows")
+        workflow_path = TaskDecomposer().write_bpel(
+            args.task_goal,
+            output_dir=os.path.join(state_dir, "generated_workflows"),
+            workflow_id=args.workflow_id,
+            required_skills=args.required_skill,
+        )
+        args.workflow = "bpel"
+        args.workflow_file = str(workflow_path)
+        print(f"[AUTO-DECOMPOSE] task_goal -> {workflow_path}")
 
     cmd = CommanderAgent(
         mode=args.mode,

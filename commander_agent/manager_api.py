@@ -7,6 +7,7 @@ from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from commander_agent.workflow_manager import CommanderWorkflowManager
+from commander_agent.task_decomposer import TaskDecomposer
 from monitoring import SUPERVISOR_HTML, SupervisorMonitor
 
 
@@ -25,6 +26,17 @@ class WorkflowSubmitRequest(BaseModel):
     mock_eval_score: Optional[int] = None
     mock_decision: Optional[Literal["ASSAULT", "RE-PLAN"]] = None
     attachments: list[Dict[str, Any]] = Field(default_factory=list)
+    task_goal: Optional[str] = None
+    required_skills: list[str] = Field(default_factory=list)
+    auto_decompose: bool = False
+
+
+class TaskDecomposeRequest(BaseModel):
+    task_goal: str
+    required_skills: list[str] = Field(default_factory=list)
+    workflow_name: Optional[str] = None
+    evaluation_threshold: Optional[int] = None
+    strike_coordinates: str = "120.5E, 35.1N"
 
 
 def _request_payload(request: BaseModel) -> dict:
@@ -94,6 +106,20 @@ def build_workflow_manager_app(
         except (RuntimeError, ValueError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    @app.post("/planning/decompose")
+    async def decompose_task(request: TaskDecomposeRequest):
+        try:
+            plan = TaskDecomposer().decompose(
+                request.task_goal,
+                required_skills=request.required_skills,
+                workflow_name=request.workflow_name,
+                evaluation_threshold=request.evaluation_threshold,
+                strike_coordinates=request.strike_coordinates,
+            )
+            return plan.snapshot()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.get("/workflows/{workflow_id}")
     async def get_workflow(workflow_id: str, checkpoint: bool = False):
         try:
@@ -119,6 +145,11 @@ def build_workflow_manager_app(
     @app.get("/leases")
     async def list_agent_leases():
         return app.state.workflow_manager.list_agent_leases()
+
+    @app.get("/scheduling/feedback")
+    async def scheduling_feedback():
+        lease_manager = app.state.workflow_manager.lease_manager
+        return lease_manager.feedback_snapshot() if lease_manager is not None else {}
 
     @app.get("/agents")
     async def list_agents():

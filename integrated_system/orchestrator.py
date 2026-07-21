@@ -417,11 +417,84 @@ class IntegratedDemoOrchestrator:
             threat = latest_result(blackboard, "threat_assessment").get("result", {}).get("ranked_threats", [])
             top_contact = threat[0]["contact_id"] if threat else "contact-unknown"
             plan_name = "replanned_containment" if is_replan else "coordinated_precision_strike"
+            resource_ids = [
+                str(
+                    platform.get("platform_id")
+                    or platform.get("resource_id")
+                    or platform.get("name")
+                    or f"platform-{index}"
+                )
+                for index, platform in enumerate(platforms, start=1)
+            ]
+            candidate_plans = [
+                {
+                    "id": "PLAN-PRIORITY-MONITOR",
+                    "name": "Priority monitoring and reassessment",
+                    "status": "recommended",
+                    "target_ids": [top_contact],
+                    "assigned_resources": resource_ids[: max(1, min(2, len(resource_ids)))],
+                    "actions": [
+                        "focus available resources on highest-priority targets",
+                        "increase observation cadence for selected targets",
+                        "reassess risk ranking after the next review window",
+                    ],
+                    "expected_effects": [
+                        "improves confidence on the highest-risk items",
+                        "keeps the plan in decision-support mode",
+                    ],
+                    "score": 86.0 if not is_replan else 82.0,
+                    "rationale": "Fallback planner aligned the highest ranked threat with available platforms.",
+                    "assumptions": ["highest-risk targets should receive first attention"],
+                    "risk_notes": [],
+                },
+                {
+                    "id": "PLAN-BROAD-SURVEILLANCE",
+                    "name": "Broad surveillance coverage",
+                    "status": "candidate",
+                    "target_ids": [item.get("contact_id") for item in threat[:3] if item.get("contact_id")],
+                    "assigned_resources": resource_ids,
+                    "actions": [
+                        "spread available resources across all scheduled targets",
+                        "maintain broad-area monitoring continuity",
+                        "defer prioritization changes until updated risk evidence arrives",
+                    ],
+                    "expected_effects": [
+                        "maximizes target coverage",
+                        "reduces chance of losing lower-priority targets",
+                    ],
+                    "score": 78.0,
+                    "rationale": "Fallback planner favors coverage when all platforms remain available.",
+                    "assumptions": ["coverage is preferred over concentrated monitoring"],
+                    "risk_notes": [],
+                },
+                {
+                    "id": "PLAN-RESOURCE-SPARING",
+                    "name": "Resource-sparing watch",
+                    "status": "candidate",
+                    "target_ids": [top_contact],
+                    "assigned_resources": resource_ids[:1],
+                    "actions": [
+                        "monitor only the top-priority target with minimum viable resources",
+                        "hold remaining resources for follow-up tasking",
+                        "escalate to broader coverage if risk increases",
+                    ],
+                    "expected_effects": [
+                        "preserves resource availability",
+                        "accepts reduced coverage for lower-priority targets",
+                    ],
+                    "score": 71.0,
+                    "rationale": "Fallback planner keeps spare capacity for later reassignment.",
+                    "assumptions": ["resource availability is valuable for follow-up tasking"],
+                    "risk_notes": [],
+                },
+            ]
             return {
                 "status": "completed",
                 "capability": capability,
                 "agent": agent_name,
                 "result": {
+                    "candidate_plans": candidate_plans,
+                    "recommended_plan_id": "PLAN-PRIORITY-MONITOR",
                     "recommended_plan": {
                         "plan_name": plan_name,
                         "target_contact_id": top_contact,

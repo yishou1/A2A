@@ -116,6 +116,50 @@ class SchedulerSDK:
             models.update(models_from_metadata(metadata))
         return sorted(models)
 
+    # ----- task decomposition / scheduling decision ------------------------------
+    def decompose_task(
+        self,
+        task_goal: str,
+        *,
+        required_skills: Optional[Iterable[str]] = None,
+        workflow_name: Optional[str] = None,
+        evaluation_threshold: Optional[int] = None,
+    ) -> dict:
+        """Turn a high-level task goal into an executable BPEL task plan."""
+        from commander_agent.task_decomposer import TaskDecomposer
+
+        return TaskDecomposer().decompose(
+            task_goal,
+            required_skills=required_skills,
+            workflow_name=workflow_name,
+            evaluation_threshold=evaluation_threshold,
+        ).snapshot()
+
+    def rank_candidates(self, candidates: Iterable[dict]) -> list[dict]:
+        """Return candidates ordered by the active scheduling policy."""
+        return self.lease_manager.scheduling_policy.rank(
+            list(candidates),
+            instance_key=self.lease_manager.instance_key,
+        )
+
+    def scheduling_feedback(self) -> dict:
+        return self.lease_manager.feedback_snapshot()
+
+    def record_feedback(
+        self,
+        lease,
+        *,
+        success: bool,
+        latency_ms: Optional[float] = None,
+        error_code: Optional[str] = None,
+    ) -> dict:
+        return self.lease_manager.record_feedback(
+            lease,
+            success=success,
+            latency_ms=latency_ms,
+            error_code=error_code,
+        )
+
     # ----- delayed binding --------------------------------------------------------
     def bind_agent(
         self,
