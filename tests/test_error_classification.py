@@ -56,6 +56,63 @@ class AgentErrorClassificationTest(unittest.TestCase):
         self.assertEqual(info.category, "business")
         self.assertFalse(info.failover)
 
+    def test_algorithm_input_error_is_non_retryable_business_error(self):
+        info = classify_agent_error(
+            A2AClientError(
+                "missing candidate plans",
+                response_payload={
+                    "status": "failed",
+                    "error": "missing candidate plans",
+                    "error_code": "ALGORITHM_INPUT_ERROR",
+                },
+            )
+        )
+
+        self.assertEqual(info.category, "business")
+        self.assertFalse(info.failover)
+        self.assertFalse(info.retryable)
+
+    def test_runtime_provider_errors_trigger_failover(self):
+        expected_categories = {
+            "ALGORITHM_RUNTIME_ERROR": "algorithm",
+            "LLM_PROVIDER_ERROR": "model",
+            "RAG_RETRIEVAL_ERROR": "retrieval",
+        }
+        for error_code, category in expected_categories.items():
+            with self.subTest(error_code=error_code):
+                info = classify_agent_error(
+                    A2AClientError(
+                        "dependency unavailable",
+                        response_payload={
+                            "status": "failed",
+                            "error": "dependency unavailable",
+                            "error_code": error_code,
+                        },
+                    )
+                )
+
+                self.assertEqual(info.category, category)
+                self.assertTrue(info.failover)
+                self.assertTrue(info.retryable)
+
+    def test_contract_errors_remain_non_retryable_protocol_errors(self):
+        for error_code in ("SCHEMA_VALIDATION_ERROR", "OUTPUT_CONTRACT_ERROR"):
+            with self.subTest(error_code=error_code):
+                info = classify_agent_error(
+                    A2AClientError(
+                        "invalid contract",
+                        response_payload={
+                            "status": "failed",
+                            "error": "invalid contract",
+                            "error_code": error_code,
+                        },
+                    )
+                )
+
+                self.assertEqual(info.category, "protocol")
+                self.assertFalse(info.failover)
+                self.assertFalse(info.retryable)
+
     def test_http_status_classification_distinguishes_5xx_and_4xx(self):
         unavailable_response = requests.Response()
         unavailable_response.status_code = 503

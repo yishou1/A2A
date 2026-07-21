@@ -159,6 +159,7 @@ class AgentRequest(BaseModel):
 class AgentResponse(BaseModel):
     status: ResponseStatus = "completed"
     agent: AgentName
+    error_code: str | None = None
     selected_algorithms: list[str] = Field(default_factory=list)
     result: dict[str, Any] = Field(default_factory=dict)
     rag_evidence: list[dict[str, Any]] = Field(default_factory=list)

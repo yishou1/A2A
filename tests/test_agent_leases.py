@@ -103,6 +103,11 @@ class AgentLeaseManagerTest(unittest.TestCase):
             registry.instances[0]["metadata"]["task_execution_status"],
             "busy",
         )
+        self.assertEqual(
+            registry.instances[0]["metadata"]["lease_work_item"],
+            second.work_item,
+        )
+        self.assertEqual(registry.instances[0]["metadata"]["lease_slot_id"], "1")
 
         leases.release(second)
         self.assertEqual(registry.instances[0]["metadata"]["status"], "idle")

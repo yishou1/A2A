@@ -144,6 +144,11 @@ class AgentLeaseManager:
                 self._local_active_count(lease.instance_key),
                 active_before - 1,
             )
+            remaining_leases = [
+                item
+                for item in self._leases.values()
+                if item.instance_key == lease.instance_key
+            ]
             max_concurrent = self._max_concurrent_tasks(lease.target)
             if status == "idle" and active_after > 0:
                 status = "busy"
@@ -154,15 +159,36 @@ class AgentLeaseManager:
                 "available_task_slots": str(max(0, max_concurrent - active_after)),
                 "task_execution_status": execution_status,
             }
+            if remaining_leases and status != "unavailable":
+                representative = remaining_leases[-1]
+                updates.update(
+                    {
+                        "lease_workflow_id": representative.workflow_id,
+                        "lease_work_item": representative.work_item,
+                        "lease_acquired_at": representative.acquired_at,
+                        "lease_slot_id": str(representative.slot_id),
+                        "lease_lock_backend": (
+                            "redis" if representative.lock_handle else "process"
+                        ),
+                    }
+                )
+                if representative.lock_handle:
+                    updates["lease_lock_key"] = representative.lock_handle.key
             updates.update(metadata_updates or {})
-            cleanup_keys = [
-                "lease_workflow_id",
-                "lease_work_item",
-                "lease_acquired_at",
-                "lease_lock_backend",
-                "lease_lock_key",
-                "lease_slot_id",
-            ]
+            cleanup_keys = []
+            if not remaining_leases or status == "unavailable":
+                cleanup_keys.extend(
+                    [
+                        "lease_workflow_id",
+                        "lease_work_item",
+                        "lease_acquired_at",
+                        "lease_lock_backend",
+                        "lease_lock_key",
+                        "lease_slot_id",
+                    ]
+                )
+            elif not remaining_leases[-1].lock_handle:
+                cleanup_keys.append("lease_lock_key")
             if status == "idle" and active_after == 0:
                 cleanup_keys.extend(
                     [

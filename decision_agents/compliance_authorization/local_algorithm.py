@@ -128,6 +128,7 @@ def run_compliance_authorization(request: AgentRequest) -> AgentResponse:
         return AgentResponse(
             status="error",
             agent="compliance_authorization_agent",
+            error_code="ALGORITHM_INPUT_ERROR",
             result={"available_algorithms": exc.available_algorithms},
             summary=str(exc),
             warnings=[f"unknown_algorithm:{exc.algorithm_id}"],
@@ -137,6 +138,7 @@ def run_compliance_authorization(request: AgentRequest) -> AgentResponse:
         return AgentResponse(
             status="input_required",
             agent="compliance_authorization_agent",
+            error_code="ALGORITHM_INPUT_ERROR",
             selected_algorithms=[algorithm.algorithm_id],
             summary="Missing required fields for compliance and authorization checks.",
             warnings=[f"missing:{field}" for field in missing],

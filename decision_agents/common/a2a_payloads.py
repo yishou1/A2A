@@ -90,6 +90,7 @@ def agent_response_to_a2a_response(
         role=payload.get("activatity_role") or payload.get("role") or agent_role(agent_name),
         command=payload.get("command"),
         error=response.summary or response.status,
+        error_code=response.error_code or "AGENT_BUSINESS_ERROR",
         output=output,
         metrics={},
     ) | extra

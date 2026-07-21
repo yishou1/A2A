@@ -6,9 +6,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 from decision_agents.compliance_authorization.agent import ComplianceAuthorizationAgent
-from decision_agents.common.algolib_runtime import _select_algorithm_call
+from decision_agents.common.algolib_client import AlgorithmLibraryError
+from decision_agents.common.algolib_runtime import (
+    _llm_algorithm_catalog,
+    _llm_request_view,
+    _select_algorithm_call,
+)
 from decision_agents.common.schemas import AgentRequest
 from decision_agents.decision_planning.agent import DecisionPlanningAgent
+from llm.client import LLMClientError
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -142,6 +148,38 @@ class DecisionAgentsAlgolibRuntimeTest(unittest.TestCase):
         self.assertEqual(call.inputs, expected_inputs)
         self.assertEqual(normalized_plan["algorithm_calls"][0]["inputs"], expected_inputs)
 
+    def test_llm_selection_view_is_compact_but_execution_keeps_full_request(self):
+        request = AgentRequest.model_validate(
+            sample_payload("compliance_authorization_input.json")
+        )
+        compact = _llm_request_view(request)
+
+        self.assertEqual(len(compact.candidate_plans), len(request.candidate_plans))
+        self.assertTrue(any(plan.actions for plan in request.candidate_plans))
+        self.assertTrue(all(not plan.actions for plan in compact.candidate_plans))
+        self.assertEqual(compact.authorization, request.authorization)
+
+    def test_llm_catalog_only_contains_algorithms_allowed_for_agent(self):
+        algorithms = [
+            {
+                "algorithm_id": "decision_planning_core",
+                "version": "1.0.0",
+                "backend_type": "python_http_service",
+            },
+            {
+                "algorithm_id": "compliance_authorization_core",
+                "version": "1.0.0",
+                "backend_type": "python_http_service",
+            },
+        ]
+
+        catalog = _llm_algorithm_catalog("compliance_authorization_agent", algorithms)
+
+        self.assertEqual(
+            [item["algorithm_id"] for item in catalog],
+            ["compliance_authorization_core"],
+        )
+
     def test_planning_ignores_llm_claim_that_candidate_plans_are_missing(self):
         payload = sample_payload("decision_planning_input.json")
         payload.pop("candidate_plans", None)
@@ -177,6 +215,55 @@ class DecisionAgentsAlgolibRuntimeTest(unittest.TestCase):
 
         self.assertEqual(call.algorithm_id, "decision_planning_core")
         self.assertEqual(call.inputs["candidate_plans"], [])
+
+    def test_algolib_connection_failure_uses_runtime_error_code(self):
+        with patch(
+            "decision_agents.common.algolib_runtime.AlgorithmLibraryClient.list_algorithms",
+            side_effect=AlgorithmLibraryError("offline"),
+        ):
+            response = DecisionPlanningAgent().handle_query(
+                json.dumps(sample_payload("decision_planning_input.json"), ensure_ascii=False)
+            )
+
+        self.assertEqual(response.status, "error")
+        self.assertEqual(response.error_code, "ALGORITHM_RUNTIME_ERROR")
+
+    def test_llm_failure_uses_provider_error_code(self):
+        algorithms = [
+            {
+                "algorithm_id": "decision_planning_core",
+                "version": "1.0.0",
+                "backend_type": "python_http_service",
+            }
+        ]
+        with patch(
+            "decision_agents.common.algolib_runtime.AlgorithmLibraryClient.list_algorithms",
+            return_value=algorithms,
+        ):
+            with patch(
+                "decision_agents.common.algolib_runtime._llm_plan",
+                side_effect=LLMClientError("timeout"),
+            ):
+                response = DecisionPlanningAgent().handle_query(
+                    json.dumps(sample_payload("decision_planning_input.json"), ensure_ascii=False)
+                )
+
+        self.assertEqual(response.status, "input_required")
+        self.assertEqual(response.error_code, "LLM_PROVIDER_ERROR")
+
+    def test_missing_algorithm_input_uses_input_error_code(self):
+        payload = sample_payload("decision_planning_input.json")
+        payload["scheduled_tasks"] = []
+        with patch(
+            "decision_agents.common.algolib_runtime.AlgorithmLibraryClient.list_algorithms",
+            return_value=[],
+        ):
+            response = DecisionPlanningAgent().handle_query(
+                json.dumps(payload, ensure_ascii=False)
+            )
+
+        self.assertEqual(response.status, "input_required")
+        self.assertEqual(response.error_code, "ALGORITHM_INPUT_ERROR")
 
     def _run_with_algolib(self, agent, request_payload: dict, outputs: dict):
         algorithms = {

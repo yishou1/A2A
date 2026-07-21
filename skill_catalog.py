@@ -15,6 +15,14 @@ CONTEXT_ENTRY_ARRAY_SCHEMA = {
 }
 
 SKILL_CONTRACTS = {
+    "decision_planning_analysis": {
+        "input_schema": {"type": "object", "additionalProperties": True},
+        "output_schema": {"type": "object", "additionalProperties": True},
+    },
+    "compliance_authorization_analysis": {
+        "input_schema": {"type": "object", "additionalProperties": True},
+        "output_schema": {"type": "object", "additionalProperties": True},
+    },
     "scan_beach_defenses": {
         "input_schema": {
             "type": "object",

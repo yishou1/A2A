@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from a2a_sdk import AgentRuntimeSDK, SchedulerSDK, build_model
+from a2a_protocol.server import A2ABaseAgent
 from a2a_protocol.messages import build_task_response
 from resource_monitor import ResourceMonitor
 
@@ -115,6 +116,44 @@ class AgentRuntimeSDKTest(unittest.TestCase):
         self.assertEqual(call["port"], 9921)
         self.assertIn("recon_detector_v1", call["metadata"]["models"])
         self.assertIsNotNone(call["metadata_provider"])
+
+    def test_from_agent_preserves_custom_agent_and_registration_metadata(self):
+        registry = FakeRegistry()
+        agent = A2ABaseAgent(
+            name="Decision_Planning_Agent",
+            description="test",
+            role="decision_planning",
+            port=10202,
+            skills=[
+                {
+                    "id": "decision_planning_analysis",
+                    "name": "Decision Planning Analysis",
+                    "description": "test",
+                }
+            ],
+            resource_monitor=ResourceMonitor(sampler=full_sampler),
+            max_concurrent_tasks=2,
+        )
+        sdk = AgentRuntimeSDK.from_agent(
+            agent,
+            registry=registry,
+            heartbeat_interval=3,
+            extra_metadata={"capability": "decision_planning"},
+        )
+
+        self.assertIs(sdk.agent, agent)
+        metadata = sdk.register(ip="10.0.0.9")
+        self.assertEqual(metadata["skill_ids"], "decision_planning_analysis")
+        self.assertEqual(metadata["max_concurrent_tasks"], "2")
+        self.assertEqual(metadata["available_task_slots"], "2")
+        self.assertEqual(metadata["resource_gpu_percent"], 55.0)
+        self.assertEqual(metadata["capability"], "decision_planning")
+        self.assertEqual(registry.registered[0]["heartbeat_interval"], 3)
+        self.assertIsNotNone(registry.registered[0]["metadata_provider"])
+
+    def test_from_agent_rejects_non_a2a_agent(self):
+        with self.assertRaises(TypeError):
+            AgentRuntimeSDK.from_agent(object())
 
     def test_register_model_at_runtime(self):
         sdk = self._sdk()

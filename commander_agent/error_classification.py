@@ -17,6 +17,12 @@ class AgentErrorCode(str, Enum):
     AGENT_PROTOCOL_ERROR = "AGENT_PROTOCOL_ERROR"
     AGENT_BUSINESS_ERROR = "AGENT_BUSINESS_ERROR"
     MODEL_INVOCATION_ERROR = "MODEL_INVOCATION_ERROR"
+    SCHEMA_VALIDATION_ERROR = "SCHEMA_VALIDATION_ERROR"
+    OUTPUT_CONTRACT_ERROR = "OUTPUT_CONTRACT_ERROR"
+    ALGORITHM_INPUT_ERROR = "ALGORITHM_INPUT_ERROR"
+    ALGORITHM_RUNTIME_ERROR = "ALGORITHM_RUNTIME_ERROR"
+    LLM_PROVIDER_ERROR = "LLM_PROVIDER_ERROR"
+    RAG_RETRIEVAL_ERROR = "RAG_RETRIEVAL_ERROR"
     AGENT_LATE_RESPONSE = "AGENT_LATE_RESPONSE"
     AGENT_UNKNOWN_ERROR = "AGENT_UNKNOWN_ERROR"
 
@@ -28,6 +34,9 @@ FAILOVER_ERROR_CODES = {
     AgentErrorCode.AGENT_HEARTBEAT_LOST.value,
     AgentErrorCode.AGENT_HTTP_5XX.value,
     AgentErrorCode.AGENT_RESOURCE_EXHAUSTED.value,
+    AgentErrorCode.ALGORITHM_RUNTIME_ERROR.value,
+    AgentErrorCode.LLM_PROVIDER_ERROR.value,
+    AgentErrorCode.RAG_RETRIEVAL_ERROR.value,
 }
 
 
@@ -150,10 +159,20 @@ def _info(code: AgentErrorCode, message: str, *, failover: bool, retryable: bool
 def _category_for_code(code: str) -> str:
     if code == AgentErrorCode.AGENT_RESOURCE_EXHAUSTED.value:
         return "resource"
-    if code == AgentErrorCode.MODEL_INVOCATION_ERROR.value:
+    if code in {
+        AgentErrorCode.MODEL_INVOCATION_ERROR.value,
+        AgentErrorCode.LLM_PROVIDER_ERROR.value,
+    }:
         return "model"
+    if code == AgentErrorCode.ALGORITHM_RUNTIME_ERROR.value:
+        return "algorithm"
+    if code == AgentErrorCode.RAG_RETRIEVAL_ERROR.value:
+        return "retrieval"
     if code in FAILOVER_ERROR_CODES:
         return "system"
-    if code == AgentErrorCode.AGENT_BUSINESS_ERROR.value:
+    if code in {
+        AgentErrorCode.AGENT_BUSINESS_ERROR.value,
+        AgentErrorCode.ALGORITHM_INPUT_ERROR.value,
+    }:
         return "business"
     return "protocol"

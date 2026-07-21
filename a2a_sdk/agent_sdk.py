@@ -52,6 +52,28 @@ class AgentRuntimeSDK:
         self.extra_metadata = dict(extra_metadata or {})
         self._registered_ip: Optional[str] = None
 
+    @classmethod
+    def from_agent(
+        cls,
+        agent: A2ABaseAgent,
+        *,
+        service_name: str = "A2A-Agent",
+        registry: Any = None,
+        heartbeat_interval: Optional[float] = None,
+        extra_metadata: Optional[dict] = None,
+    ) -> "AgentRuntimeSDK":
+        """Wrap an existing A2ABaseAgent without replacing its business behavior."""
+        if not isinstance(agent, A2ABaseAgent):
+            raise TypeError("agent must be an A2ABaseAgent instance")
+        runtime = cls.__new__(cls)
+        runtime.agent = agent
+        runtime.service_name = service_name
+        runtime.registry = registry
+        runtime.heartbeat_interval = heartbeat_interval
+        runtime.extra_metadata = dict(extra_metadata or {})
+        runtime._registered_ip = None
+        return runtime
+
     # ----- pass-through accessors -------------------------------------------------
     @property
     def app(self):

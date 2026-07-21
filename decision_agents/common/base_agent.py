@@ -48,6 +48,7 @@ class AlgorithmAgent:
             return AgentResponse(
                 status="input_required",
                 agent=self.agent_name,  # type: ignore[arg-type]
+                error_code="ALGORITHM_INPUT_ERROR",
                 summary="Input must be a JSON object for this demo stage.",
                 warnings=["non_json_input"],
             )
@@ -57,6 +58,7 @@ class AlgorithmAgent:
             return AgentResponse(
                 status="input_required",
                 agent=self.agent_name,  # type: ignore[arg-type]
+                error_code="ALGORITHM_INPUT_ERROR",
                 summary="Input JSON does not match the shared request schema.",
                 warnings=[str(exc)],
             )
@@ -69,6 +71,7 @@ class AlgorithmAgent:
             return AgentResponse(
                 status="input_required",
                 agent=self.agent_name,  # type: ignore[arg-type]
+                error_code="LLM_PROVIDER_ERROR",
                 summary="LLM could not convert the natural-language input into a valid AgentRequest.",
                 warnings=[f"llm_parse_failed:{exc}"],
             )

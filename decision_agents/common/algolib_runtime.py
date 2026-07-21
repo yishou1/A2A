@@ -45,16 +45,37 @@ def run_agent_with_algolib(agent_name: str, request: AgentRequest) -> AgentRespo
     try:
         algorithms = client.list_algorithms()
     except AlgorithmLibraryError as exc:
-        return _error_response(agent_name, "Algorithm library is unavailable.", [str(exc)])
+        return _error_response(
+            agent_name,
+            "Algorithm library is unavailable.",
+            [str(exc)],
+            error_code="ALGORITHM_RUNTIME_ERROR",
+        )
 
     try:
         call, llm_plan = _select_algorithm_call(agent_name, request, algorithms)
-    except (AlgorithmLibraryError, LLMClientError, ValidationError, ValueError) as exc:
+    except LLMClientError as exc:
         return AgentResponse(
             status="input_required",
             agent=agent_name,  # type: ignore[arg-type]
+            error_code="LLM_PROVIDER_ERROR",
             summary="Could not build a valid algorithm-library call.",
             warnings=[f"algolib_plan_failed:{exc}"],
+        )
+    except (ValidationError, ValueError) as exc:
+        return AgentResponse(
+            status="input_required",
+            agent=agent_name,  # type: ignore[arg-type]
+            error_code="ALGORITHM_INPUT_ERROR",
+            summary="Could not build a valid algorithm-library call.",
+            warnings=[f"algolib_plan_failed:{exc}"],
+        )
+    except AlgorithmLibraryError as exc:
+        return _error_response(
+            agent_name,
+            "Could not select an active algorithm-library implementation.",
+            [f"algolib_plan_failed:{exc}"],
+            error_code="ALGORITHM_RUNTIME_ERROR",
         )
 
     try:
@@ -64,7 +85,12 @@ def run_agent_with_algolib(agent_name: str, request: AgentRequest) -> AgentRespo
             call=call,
         )
     except AlgorithmLibraryError as exc:
-        return _error_response(agent_name, "Algorithm library execution failed.", [str(exc)])
+        return _error_response(
+            agent_name,
+            "Algorithm library execution failed.",
+            [str(exc)],
+            error_code="ALGORITHM_RUNTIME_ERROR",
+        )
 
     if not result.get("ok", False):
         error = result.get("error") if isinstance(result.get("error"), dict) else {}
@@ -72,6 +98,7 @@ def run_agent_with_algolib(agent_name: str, request: AgentRequest) -> AgentRespo
             agent_name,
             "Algorithm library returned an error.",
             [f"algolib_run_error:{error.get('code', 'UNKNOWN')}:{error.get('message', '')}"],
+            error_code="ALGORITHM_RUNTIME_ERROR",
             selected_algorithms=[call.algorithm_id],
             result={"llm_plan": llm_plan, "algolib_result": result},
         )
@@ -167,13 +194,69 @@ def _llm_plan(
             raise LLMClientError(f"LLM model is not allowed: {model}")
     llm = OpenAICompatibleClient(settings, model=model)
     prompts = get_prompt_module(agent_name)
+    request_view = _llm_request_view(request)
+    algorithm_catalog = _llm_algorithm_catalog(agent_name, algorithms)
     return llm.chat_json(
         system_prompt=prompts.ALGOLIB_SYSTEM_PROMPT,
         user_prompt=prompts.algolib_user_prompt(
-            request_json=request.model_dump_json(indent=2),
-            algorithms=algorithms,
+            request_json=request_view.model_dump_json(indent=2),
+            algorithms=algorithm_catalog,
         ),
     )
+
+
+def _llm_request_view(request: AgentRequest) -> AgentRequest:
+    """Keep algorithm-selection context small; execution still uses the full request."""
+    payload = request.model_dump(mode="json")
+    payload["candidate_plans"] = [
+        {
+            "id": plan["id"],
+            "name": plan["name"],
+            "status": plan["status"],
+            "target_ids": plan["target_ids"],
+            "assigned_resources": plan["assigned_resources"],
+            "score": plan["score"],
+            "rationale": "",
+            "assumptions": [],
+            "risk_notes": [],
+            "actions": [],
+            "expected_effects": [],
+        }
+        for plan in payload.get("candidate_plans", [])
+    ]
+    payload["target_histories"] = [
+        {
+            "target_id": history["target_id"],
+            "steps": history.get("steps", [])[-1:],
+        }
+        for history in payload.get("target_histories", [])
+    ]
+    return AgentRequest.model_validate(payload)
+
+
+def _llm_algorithm_catalog(
+    agent_name: str,
+    algorithms: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    allowed = AGENT_ALLOWED_ALGORITHMS[agent_name]
+    catalog = []
+    for algorithm in algorithms:
+        if algorithm.get("algorithm_id") not in allowed:
+            continue
+        input_summary = algorithm.get("input_schema_summary") or {}
+        agent_card = algorithm.get("agent_card") or {}
+        catalog.append(
+            {
+                "algorithm_id": algorithm.get("algorithm_id"),
+                "version": algorithm.get("version"),
+                "backend_type": algorithm.get("backend_type"),
+                "task_family": algorithm.get("task_family"),
+                "capabilities": algorithm.get("capabilities", []),
+                "required_fields": input_summary.get("required", []),
+                "summary": agent_card.get("summary", ""),
+            }
+        )
+    return catalog
 
 
 def _normalize_call(raw_call: dict[str, Any]) -> AlgorithmRunCall:
@@ -213,12 +296,14 @@ def _error_response(
     summary: str,
     warnings: list[str],
     *,
+    error_code: str,
     selected_algorithms: list[str] | None = None,
     result: dict[str, Any] | None = None,
 ) -> AgentResponse:
     return AgentResponse(
         status="error",
         agent=agent_name,  # type: ignore[arg-type]
+        error_code=error_code,
         selected_algorithms=selected_algorithms or [],
         result=result or {},
         summary=summary,

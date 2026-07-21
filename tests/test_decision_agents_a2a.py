@@ -9,6 +9,10 @@ from pathlib import Path
 from bpel_workflow import BPELWorkflowCatalog
 from commander_agent.main import CommanderAgent
 from decision_agents.common.a2a_adapter import DecisionAlgorithmA2AAgent
+from decision_agents.common.a2a_service import build_agent_card
+from decision_agents.common.definitions import AGENT_DEFINITIONS
+from decision_agents.common.base_agent import AlgorithmAgent
+from decision_agents.common.schemas import AgentResponse
 from decision_agents.compliance_authorization.agent import ComplianceAuthorizationAgent
 from decision_agents.decision_planning.agent import DecisionPlanningAgent
 
@@ -25,6 +29,25 @@ def sample_payload(name: str) -> dict:
 
 
 class DecisionAgentsA2ATest(unittest.TestCase):
+    def test_agent_cards_and_bpel_use_shared_skill_ids(self):
+        definition = BPELWorkflowCatalog(PROJECT_ROOT).load("DecisionSupportWorkflow")
+        invokes = [
+            item
+            for item in definition.initial_work_list("wf-skills")
+            if item["type"] == "invoke"
+        ]
+
+        self.assertEqual(
+            [item["required_skill"] for item in invokes],
+            [
+                AGENT_DEFINITIONS["decision_planning"]["skill_id"],
+                AGENT_DEFINITIONS["compliance_authorization"]["skill_id"],
+            ],
+        )
+        for key, item in zip(AGENT_DEFINITIONS, invokes):
+            card = build_agent_card(key, "127.0.0.1", 10202)
+            self.assertEqual(card["skills"][0]["id"], item["required_skill"])
+
     def test_decision_planning_generates_candidate_plans_from_external_input(self):
         response = DecisionPlanningAgent().handle_query(
             json.dumps(sample_payload("decision_planning_input.json"), ensure_ascii=False)
@@ -127,6 +150,7 @@ class DecisionAgentsA2ATest(unittest.TestCase):
         body = asyncio.run(send_message(payload, token="test-token"))
 
         self.assertEqual(body["status"], "failed")
+        self.assertEqual(body["error_code"], "ALGORITHM_INPUT_ERROR")
         self.assertIn("missing:scheduled_tasks", body["agent_response"]["warnings"])
         self.assertIn("missing:resources", body["agent_response"]["warnings"])
 
@@ -157,6 +181,57 @@ class DecisionAgentsA2ATest(unittest.TestCase):
         self.assertTrue(context["compliance_authorization_result"])
         self.assertIn(context["compliance_decision"], {"approved", "blocked", "review_required"})
         self.assertTrue(context["agent_results"])
+
+    def test_failed_work_item_is_reexecuted_instead_of_cached(self):
+        class FlakyPlanningAgent(AlgorithmAgent):
+            agent_name = "decision_planning_agent"
+
+            def __init__(self):
+                self.calls = 0
+
+            def run(self, request):
+                self.calls += 1
+                if self.calls == 1:
+                    return AgentResponse(
+                        status="error",
+                        agent=self.agent_name,
+                        error_code="ALGORITHM_RUNTIME_ERROR",
+                        summary="temporary failure",
+                    )
+                return AgentResponse(
+                    agent=self.agent_name,
+                    result={"candidate_plans": [], "recommended_plan_id": None},
+                    summary="recovered",
+                )
+
+        algorithm_agent = FlakyPlanningAgent()
+        payload = {
+            "schema_version": "1.0",
+            "workflow_id": "wf-retry",
+            "work_item": "wf-retry:planning",
+            "command": "decision_planning",
+            "required_skill": "decision_planning_analysis",
+            "input": {"agent_request": sample_payload("decision_planning_input.json")},
+            "output_hint": "decision_planning_result",
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            agent = DecisionAlgorithmA2AAgent(
+                algorithm_agent=algorithm_agent,
+                name="Decision_Planning_Agent",
+                description="Test planning agent.",
+                role="decision_planning",
+                port=10212,
+                idempotency_db_path=str(Path(temp_dir) / "idempotency.db"),
+            )
+            send_message = route_endpoint(agent.app, "/sendMessage")
+
+            first = asyncio.run(send_message(payload, token="test-token"))
+            second = asyncio.run(send_message(payload, token="test-token"))
+
+        self.assertEqual(first["status"], "failed")
+        self.assertEqual(second["status"], "completed")
+        self.assertFalse(second["cached"])
+        self.assertEqual(algorithm_agent.calls, 2)
 
 
 if __name__ == "__main__":

@@ -9,7 +9,11 @@ import time
 from copy import deepcopy
 from urllib.parse import urljoin
 
-from a2a_protocol.messages import build_task_error_response, build_task_response
+from a2a_protocol.messages import (
+    build_task_error_response,
+    build_task_response,
+    is_success_response,
+)
 from observability import exception_diagnostics, log_event
 from resource_monitor import ResourceMonitor, utc_now_iso
 from model_registry import ModelRegistry
@@ -502,6 +506,11 @@ class A2ABaseAgent:
                 cached_response = self._task_response_cache.get(work_item)
             if cached_response is None:
                 cached_response = self.idempotency_store.get(work_item)
+            if cached_response is not None and not is_success_response(cached_response):
+                with self._state_lock:
+                    self._task_response_cache.pop(work_item, None)
+                self.idempotency_store.delete(work_item)
+                cached_response = None
             if cached_response is not None:
                 try:
                     validate_task_response(
@@ -604,8 +613,6 @@ class A2ABaseAgent:
                     self._metrics["total_duration_ms"] += duration_ms
                     self._metrics["last_error"] = str(exc)
                     self._last_error_details = diagnostics
-                    self._task_response_cache[work_item] = response
-                self.idempotency_store.put(work_item, response)
                 log_event(
                     "agent_task_failed",
                     agent=self.name,

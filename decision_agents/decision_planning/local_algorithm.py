@@ -182,6 +182,7 @@ def run_decision_planning(request: AgentRequest) -> AgentResponse:
         return AgentResponse(
             status="error",
             agent="decision_planning_agent",
+            error_code="ALGORITHM_INPUT_ERROR",
             result={"available_algorithms": exc.available_algorithms},
             summary=str(exc),
             warnings=[f"unknown_algorithm:{exc.algorithm_id}"],
@@ -191,6 +192,7 @@ def run_decision_planning(request: AgentRequest) -> AgentResponse:
         return AgentResponse(
             status="input_required",
             agent="decision_planning_agent",
+            error_code="ALGORITHM_INPUT_ERROR",
             selected_algorithms=[algorithm.algorithm_id],
             summary="Missing required fields for decision planning.",
             warnings=[f"missing:{field}" for field in missing],

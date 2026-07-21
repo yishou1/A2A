@@ -8,10 +8,12 @@
     <sequence>
 
         <invoke partnerLink="DecisionPlanningAgent" operation="generateDecisionPlan"
+                requiredSkill="decision_planning_analysis"
                 inputVariables="AgentProfile RiskAssessments ScheduledTasks Resources TargetHistories PlanningObjectives Constraints Authorization"
                 outputVariable="DecisionPlanningResult"/>
 
         <invoke partnerLink="ComplianceAuthorizationAgent" operation="checkComplianceAuthorization"
+                requiredSkill="compliance_authorization_analysis"
                 inputVariables="DecisionPlanningResult Constraints Authorization"
                 outputVariable="ComplianceAuthorizationResult"/>
 

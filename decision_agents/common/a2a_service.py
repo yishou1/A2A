@@ -14,29 +14,19 @@ from starlette.routing import Route
 
 from decision_agents.common.base_agent import AlgorithmAgent
 from decision_agents.common.config import get_settings
+from decision_agents.common.definitions import AGENT_DEFINITIONS as SHARED_AGENT_DEFINITIONS
 from decision_agents.compliance_authorization.agent import ComplianceAuthorizationAgent
 from decision_agents.decision_planning.agent import DecisionPlanningAgent
 
 
+AGENT_CLASSES = {
+    "decision_planning": DecisionPlanningAgent,
+    "compliance_authorization": ComplianceAuthorizationAgent,
+}
+
 AGENT_DEFINITIONS = {
-    "decision_planning": {
-        "agent_class": DecisionPlanningAgent,
-        "agent_name": "decision_planning_agent",
-        "description": "Generates and scores candidate decision-support plans.",
-        "skill_id": "scheme_planning_decision",
-        "skill_name": "Scheme Planning and Decision Support",
-        "default_port": 10202,
-        "artifact_name": "decision_planning_result",
-    },
-    "compliance_authorization": {
-        "agent_class": ComplianceAuthorizationAgent,
-        "agent_name": "compliance_authorization_agent",
-        "description": "Checks rules, compliance, and authorization status.",
-        "skill_id": "rule_legal_authorization",
-        "skill_name": "Rule Legal Authorization Check",
-        "default_port": 10203,
-        "artifact_name": "compliance_authorization_result",
-    },
+    key: {**definition, "agent_class": AGENT_CLASSES[key]}
+    for key, definition in SHARED_AGENT_DEFINITIONS.items()
 }
 
 
@@ -116,7 +106,7 @@ def build_app(agent_key: str, host: str, port: int) -> Starlette:
             {
                 "jsonrpc": "2.0",
                 "id": request_id,
-                "result": _task_result(agent, definition["artifact_name"], response),
+                "result": _task_result(agent, definition["output_hint"], response),
             }
         )
 
