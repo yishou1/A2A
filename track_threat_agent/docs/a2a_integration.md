@@ -1,12 +1,12 @@
 # A2A Gateway Integration
 
-This document explains how an A2A Gateway can discover and call `track-threat-group-agent-demo`.
+This document explains how an A2A Gateway can discover and call the Track Threat Agent registered as `role=track_threat`.
 
 当前版本是一个独立后端 Agent，不内置前端，也不依赖 AMOS 源码。A2A Gateway 的职责是发现 Agent、调用 Agent，并把返回的 artifact/events 转给态势前端、消息总线、AMOS 适配器或其他下游模块。
 
 ## Role
 
-`track-threat-group-agent-demo` acts as a downstream situation-awareness Agent. It receives perception results, maintains simulated tracks, predicts short-term trajectories, detects likely groups, analyzes protected-asset impact, and returns a combined artifact with integration-friendly events.
+The Track Threat Agent acts as a downstream situation-awareness Agent. It receives perception results, maintains simulated tracks, predicts short-term trajectories, detects likely groups, analyzes protected-asset impact, and returns a combined artifact with integration-friendly events.
 
 Safety boundary: all `threat` and `risk` fields mean demo attention priority only. The Agent does not perform weapon control, attack recommendation, guidance, or engagement decisions.
 
@@ -29,13 +29,26 @@ send_message_endpoint=http://{SERVICE_IP}:{SERVICE_PORT}/sendMessage
 send_message_stream_endpoint=http://{SERVICE_IP}:{SERVICE_PORT}/sendMessageStream
 work_list_endpoint=http://{SERVICE_IP}:{SERVICE_PORT}/workflows/{workflow_id}/work-list
 health_endpoint=http://{SERVICE_IP}:{SERVICE_PORT}/health
+resources_endpoint=http://{SERVICE_IP}:{SERVICE_PORT}/resources
+algorithms_endpoint=http://{SERVICE_IP}:{SERVICE_PORT}/algorithms
+recovery_endpoint=http://{SERVICE_IP}:{SERVICE_PORT}/recovery/notify
 agent_card=http://{SERVICE_IP}:{SERVICE_PORT}/.well-known/agent-card.json
 legacy_agent_card=http://{SERVICE_IP}:{SERVICE_PORT}/agent-card
 skills=trajectory_tracking,trajectory_prediction,threat_ranking,group_detection,group_threat_ranking,protected_asset_impact_analysis
 algorithm_levels=small,medium,large
 asset_events=asset.updated,asset.relationship.updated
 artifact_events=track.updated,threat.updated,track.group.updated,threat.group.updated,threat.ranking.updated,protected.asset.updated,asset.impact.updated
+active_tasks=0
+max_concurrent_tasks=1
+available_task_slots=1
+task_execution_status=idle
+quality_success_rate=1.000000
+quality_avg_latency_ms=0.000
+algorithm_loading_mode=agent_local_model_bundle
+remote_algorithm_execution=false
 ```
+
+The Agent first uses the Nacos SDK for registration and heartbeat, then falls back to the Nacos HTTP API when the SDK path fails. Heartbeats preserve Commander-owned lease, circuit-breaker, unavailable and scheduling metadata.
 
 Relevant environment variables:
 
@@ -134,26 +147,41 @@ Content-Type: application/json
 
 ```json
 {
+  "schema_version": "1.0",
   "workflow_id": "wf-demo-001",
   "work_item": "track-threat-step-001",
-  "command": "analyze_perception_result",
-  "role": "track_threat",
-  "work_list": [
-    {"activity": "perception_fusion", "role": "recon"},
-    {"activity": "track_threat_analysis", "role": "track_threat"},
-    {"activity": "situation_display", "role": "commander"}
-  ],
-  "payload": {
-    "task_id": "task-001",
-    "message_type": "perception_result",
-    "algorithm_level": "medium",
+  "command": "trajectory_tracking",
+  "required_skill": "trajectory_tracking",
+  "required_skills": ["trajectory_tracking"],
+  "input": {
     "scene": {},
     "detections": []
-  }
+  },
+  "context": {"algorithm_level": "medium"},
+  "work_list": [],
+  "output_hint": "tracking_result"
 }
 ```
 
 `work_item` is an idempotency key. If the same work item is retried, the Agent returns the cached artifact and does not update track history or DBN state again.
+
+The current Commander can invoke this Agent in two stages:
+
+```text
+input.cognition_result
+→ required_skill=trajectory_tracking
+→ output.tracking_result
+→ required_skill=threat_ranking
+→ output.threat_assessment_result
+```
+
+Both `cognition_result` and `tracking_result` may be Commander context-entry arrays containing a `value` field. The Agent unwraps the latest value. Threat ranking consumes TrackState directly, so the second stage does not replay the same frame through the tracker. A full pipeline call uses `required_skill=track_threat_situation_analysis` and `output_hint=track_threat_group_artifact`.
+
+Successful responses always include `schema_version=1.0` and must contain `output[output_hint]`, as required by the shared protocol validator.
+
+They also report `selected_algorithms` and per-stage `algorithm_duration_ms`. When the single stateful TrackStore slot is occupied, the Agent returns `error_code=AGENT_RESOURCE_EXHAUSTED`; the Commander should retry or dispatch another idle `track_threat` instance.
+
+`GET /algorithms` is a discovery/diagnostic endpoint. Models and Python algorithms are loaded and executed inside this Agent process; the Agent does not call a remote algorithm-library `/run` endpoint.
 
 The Agent stores the latest `work_list` snapshot per workflow:
 
@@ -266,7 +294,7 @@ If the team later uses an AMOS web app directly, the integration can also bypass
 ```text
 AMOS C2 Console
   -> /api/v1/track-threat/start or /pull
-  -> Track-Threat Agent /demo/start or /demo/state
+  -> Track-Threat Agent /sendMessage or /state/summary
   -> artifact
   -> AMOS sim_assets / sim_threats
   -> AMOS native map

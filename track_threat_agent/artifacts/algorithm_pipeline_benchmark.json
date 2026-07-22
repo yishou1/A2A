@@ -1,0 +1,29 @@
+{
+  "benchmark": "track_threat_algorithm_pipeline/v1",
+  "scope": "deterministic engineering regression; not a substitute for customer field data",
+  "seed": 42,
+  "frame_count": 90,
+  "target_count": 7,
+  "metrics": {
+    "association_observations": 584,
+    "association_accuracy": 1.0,
+    "id_switches": 0,
+    "maximum_false_tracks": 0,
+    "group_id_churn": 0,
+    "ranking_explanation_coverage": 1.0,
+    "maximum_history_points": 50,
+    "pipeline_p50_ms": 3.685,
+    "pipeline_p95_ms": 3.835,
+    "pipeline_max_p95_ms": 200.0
+  },
+  "gates": {
+    "association_accuracy_at_least_99_percent": true,
+    "zero_id_switches": true,
+    "zero_false_tracks": true,
+    "group_id_churn_at_most_one": true,
+    "ranking_explanation_coverage_100_percent": true,
+    "history_path_at_most_50": true,
+    "pipeline_cpu_p95_within_budget": true
+  },
+  "passed": true
+}

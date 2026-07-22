@@ -28,19 +28,19 @@ Independent test metrics:
 - ADE improvement over strongest baseline: 53.25%
 - FDE improvement over strongest baseline: 53.11%
 
-### `st_gnn_aircraft_kaggle_v1_candidate`
+### `st_gnn_aircraft_kaggle_v1`
 
-Release status: `candidate_ade_gate_pending`.
+Release status: `gate_passed`.
 
 Independent test metrics:
 
-- ADE: 336.18 m
-- FDE: 695.34 m
-- calibrated 90% coverage: 0.9066
+- ADE: 318.68 m
+- FDE: 654.18 m
+- calibrated 90% coverage: 0.9026
 - strongest physical baseline: IMM
-- ADE improvement over strongest baseline: 9.24%
-- FDE improvement over strongest baseline: 13.30%
+- ADE improvement over strongest baseline: 13.96%
+- FDE improvement over strongest baseline: 18.43%
 
-The aircraft bundle is exported for demonstration and integration testing. It is not marked as a production-passed model because the ADE improvement is slightly below the 10% release gate.
+Both bundles were evaluated on isolated test splits. Uncertainty scaling was fitted on validation data only. Each connected golden graph verifies that the exported TorchScript includes the graph-message path.
 
 Safety boundary: these model outputs are used only for simulation trajectory prediction and situation-awareness ranking. They do not produce weapon control, guidance, or engagement decisions.

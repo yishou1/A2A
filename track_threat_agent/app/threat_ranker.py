@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Dict, Iterable, List
+import math
+from typing import Any, Dict, Iterable, List
 from uuid import uuid4
 
 from .dbn_threat_evaluator import DBNThreatEvaluator
@@ -52,15 +53,22 @@ class ThreatRanker:
             dbn_result = self.dbn_evaluator.update(track, score, factors)
             final_score = float(dbn_result["smoothed_score"])
             xai_metadata = self.explainer.threat_metadata(track, factors, score, dbn_result)
+            prediction_context = self._prediction_risk_context(track, factors)
             extended_factors = {
                 **factors,
                 "dbn_low_prob": float(dbn_result["posterior"]["low"]),
                 "dbn_medium_prob": float(dbn_result["posterior"]["medium"]),
                 "dbn_high_prob": float(dbn_result["posterior"]["high"]),
                 "dbn_state_factor": float(dbn_result["state_factor"]),
-                "pattern_asset_approach_prob": float(dbn_result["risk_pattern_probabilities"]["asset_approach"]),
-                "pattern_surveillance_prob": float(dbn_result["risk_pattern_probabilities"]["surveillance_or_probe"]),
-                "pattern_formation_prob": float(dbn_result["risk_pattern_probabilities"]["formation_coordination"]),
+                "pattern_protected_zone_approach_prob": float(
+                    dbn_result["risk_pattern_probabilities"]["protected_zone_approach"]
+                ),
+                "pattern_sustained_presence_prob": float(
+                    dbn_result["risk_pattern_probabilities"]["sustained_presence"]
+                ),
+                "pattern_coordinated_motion_prob": float(
+                    dbn_result["risk_pattern_probabilities"]["coordinated_motion"]
+                ),
             }
             assessments.append(
                 ThreatAssessment(
@@ -76,6 +84,7 @@ class ThreatRanker:
                         **xai_metadata,
                         "dbn": dbn_result,
                         "weighted_score_before_dbn": round(score, 4),
+                        "prediction_risk_context": prediction_context,
                     },
                 )
             )
@@ -93,11 +102,10 @@ class ThreatRanker:
         radius_m: float,
     ) -> Dict[str, float]:
         distance_m = haversine_m(track.lat, track.lon, zone_lat, zone_lon)
-        predicted_lat, predicted_lon = project_position(track.lat, track.lon, track.vx, track.vy, 30.0)
-        predicted_distance_m = haversine_m(predicted_lat, predicted_lon, zone_lat, zone_lon)
+        prediction = self._prediction_summary(track, zone_lat, zone_lon, distance_m)
 
         distance_factor = clamp(1.0 - distance_m / (radius_m * 3.0))
-        closing_delta = distance_m - predicted_distance_m
+        closing_delta = distance_m - prediction["uncertainty_adjusted_distance_m"]
         closing_factor = clamp((closing_delta / max(radius_m, 1.0) + 0.5) / 1.5)
         type_factor = self.TYPE_WEIGHTS.get(track.object_type, 0.6)
         anomaly = track.metadata.get("anomaly", {})
@@ -116,24 +124,120 @@ class ThreatRanker:
             "anomaly_factor": clamp(anomaly_factor),
             "quality_factor": quality_factor,
             "distance_m": distance_m,
-            "predicted_distance_m_30s": predicted_distance_m,
+            "predicted_distance_m_30s": prediction["predicted_distance_m_30s"],
+            "predicted_min_distance_m": prediction["predicted_min_distance_m"],
+            "uncertainty_adjusted_distance_m": prediction["uncertainty_adjusted_distance_m"],
+            "predicted_closest_horizon_s": prediction["predicted_closest_horizon_s"],
+            "prediction_confidence": prediction["prediction_confidence"],
+            "prediction_uncertainty_radius_m": prediction["prediction_uncertainty_radius_m"],
+            "prediction_path_used": prediction["prediction_path_used"],
         }
 
     def _evidence(self, track: TrackState, factors: Dict[str, float], score: float) -> List[str]:
         distance_m = factors["distance_m"]
-        closing_delta = distance_m - factors["predicted_distance_m_30s"]
+        closing_delta = distance_m - factors["uncertainty_adjusted_distance_m"]
+        context = self._prediction_risk_context(track, factors)
         evidence = [
-            f"distance to protected zone is {distance_m:.0f} m",
-            f"30s projection changes distance by {closing_delta:.0f} m",
-            f"object type {track.object_type} uses demo weight {factors['type_factor']:.2f}",
-            f"track quality contributes {factors['quality_factor']:.2f}",
+            f"当前距重点区域 {distance_m:.0f} 米",
+            (
+                f"{context['model_label']} 预测在 {factors['predicted_closest_horizon_s']:.0f}s 时最接近，"
+                f"距离 {factors['predicted_min_distance_m']:.0f} 米，折算后接近量 {closing_delta:.0f} 米"
+            ),
+            (
+                f"预测置信度 {factors['prediction_confidence']:.2f}，"
+                f"不确定性半径 {factors['prediction_uncertainty_radius_m']:.0f} 米"
+            ),
+            f"目标类型 {track.object_type} 的态势关注权重为 {factors['type_factor']:.2f}",
+            f"航迹质量因子为 {factors['quality_factor']:.2f}",
         ]
         if factors["anomaly_factor"] > 0:
-            evidence.append(f"anomaly metadata raises attention factor to {factors['anomaly_factor']:.2f}")
+            evidence.append(f"异常机动将态势关注因子提高到 {factors['anomaly_factor']:.2f}")
         if score >= 0.72:
-            evidence.append("score is high because multiple simulated attention factors are elevated")
+            evidence.append("多项态势关注因子同时较高，因此排序分数较高")
         elif score >= 0.45:
-            evidence.append("score is medium because some attention factors are elevated")
+            evidence.append("部分态势关注因子升高，因此排序分数居中")
         else:
-            evidence.append("score is low because proximity, closing, or anomaly factors are limited")
+            evidence.append("当前接近程度、趋近趋势或异常因子有限，因此排序分数较低")
         return evidence
+
+    def _prediction_summary(
+        self,
+        track: TrackState,
+        zone_lat: float,
+        zone_lon: float,
+        current_distance_m: float,
+    ) -> Dict[str, float]:
+        candidates: List[Dict[str, float]] = []
+        for point in track.predicted_path:
+            try:
+                lat = float(point["lat"])
+                lon = float(point["lon"])
+                horizon_s = max(0.0, float(point.get("dt_s", 0.0)))
+                confidence = clamp(float(point.get("prediction_confidence", track.track_quality)))
+                uncertainty_m = max(0.0, float(point.get("uncertainty_radius_m", 0.0)))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if not all(math.isfinite(value) for value in (lat, lon, horizon_s, confidence, uncertainty_m)):
+                continue
+            raw_distance_m = haversine_m(lat, lon, zone_lat, zone_lon)
+            adjusted_distance_m = max(0.0, raw_distance_m - uncertainty_m * (1.0 - confidence))
+            candidates.append(
+                {
+                    "horizon_s": horizon_s,
+                    "raw_distance_m": raw_distance_m,
+                    "adjusted_distance_m": adjusted_distance_m,
+                    "confidence": confidence,
+                    "uncertainty_m": uncertainty_m,
+                }
+            )
+
+        if not candidates:
+            predicted_lat, predicted_lon = project_position(track.lat, track.lon, track.vx, track.vy, 30.0)
+            raw_distance_m = haversine_m(predicted_lat, predicted_lon, zone_lat, zone_lon)
+            candidates = [
+                {
+                    "horizon_s": 30.0,
+                    "raw_distance_m": raw_distance_m,
+                    "adjusted_distance_m": raw_distance_m,
+                    "confidence": clamp(track.track_quality),
+                    "uncertainty_m": 0.0,
+                }
+            ]
+            path_used = 0.0
+        else:
+            path_used = 1.0
+
+        closest = min(candidates, key=lambda item: (item["adjusted_distance_m"], item["horizon_s"]))
+        point_30s = min(candidates, key=lambda item: abs(item["horizon_s"] - 30.0))
+        return {
+            "predicted_distance_m_30s": point_30s["raw_distance_m"],
+            "predicted_min_distance_m": closest["raw_distance_m"],
+            "uncertainty_adjusted_distance_m": min(closest["adjusted_distance_m"], current_distance_m),
+            "predicted_closest_horizon_s": closest["horizon_s"],
+            "prediction_confidence": closest["confidence"],
+            "prediction_uncertainty_radius_m": closest["uncertainty_m"],
+            "prediction_path_used": path_used,
+        }
+
+    def _prediction_risk_context(self, track: TrackState, factors: Dict[str, float]) -> Dict[str, Any]:
+        horizon_s = float(factors.get("predicted_closest_horizon_s", 30.0))
+        point = min(
+            track.predicted_path,
+            key=lambda item: abs(float(item.get("dt_s", 0.0)) - horizon_s),
+            default={},
+        )
+        model_used = str(point.get("model_used") or point.get("prediction_model") or "constant_velocity_fallback")
+        if "st_gnn" in model_used.lower() or "st-gnn" in model_used.lower():
+            model_label = "ST-GNN"
+        elif "adaptive_multi_model" in model_used.lower():
+            model_label = "自适应物理多假设融合"
+        else:
+            model_label = model_used
+        return {
+            "model_used": model_used,
+            "model_label": model_label,
+            "model_version": point.get("model_version"),
+            "closest_horizon_s": horizon_s,
+            "prediction_path_used": bool(factors.get("prediction_path_used", 0.0)),
+            "uncertainty_policy": "lower_confidence_bound_for_attention_priority",
+        }

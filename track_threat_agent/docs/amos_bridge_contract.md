@@ -1,6 +1,6 @@
 # AMOS Bridge 回写协议
 
-本文说明 `track-threat-group-agent-demo` 如何把航迹预测、编组包络、保护资产影响和威胁关注排序回写给 AMOS。当前项目本身不直接控制 AMOS 前端，推荐由 AMOS Bridge 或 A2A Gateway 消费本 Agent 的 `artifact.events[]`。
+本文说明 Track Threat Agent 如何把航迹预测、编组包络、保护资产影响和威胁关注排序回写给 AMOS。当前项目本身不直接控制 AMOS 前端，推荐由 AMOS Bridge 或 A2A Gateway 消费本 Agent 的 `artifact.events[]`。
 
 ## 1. 回写链路
 
@@ -51,9 +51,10 @@ AMOS 地图建议：
 - `history_path`：实线历史航迹。
 - `predicted_path`：虚线预测航线。
 - `predicted_path[].uncertainty_radius_m`：预测误差圈或 popup 字段。
-- `predicted_path[].graph_influence`：图关系预测影响程度。
 - `metadata.plan_algorithms.trajectory_prediction`：ST-GNN 动态实体跟踪与轨迹预测契约说明。
-- `predicted_path[].st_gnn`：ST-GNN 预测点 metadata；`metadata.st_gnn_inspired` 为旧版兼容字段。
+- `predicted_path[].model_used`：`st_gnn_torchscript` 表示正式模型已应用；`adaptive_multi_model_fused` 表示物理回退。
+- `predicted_path[].model_version`：模型版本；物理回退点可为空。
+- `predicted_path[].prediction_confidence` / `uncertainty_radius_m`：置信度与不确定半径。
 
 ### 3.2 编组/编队
 
@@ -69,7 +70,12 @@ AMOS 地图建议：
   "envelope": {},
   "centroid_prediction": [],
   "predicted_envelope": {},
-  "cohesion_score": 0.82
+  "cohesion_score": 0.82,
+  "metadata": {
+    "lifecycle_state": "confirmed",
+    "hit_count": 4,
+    "missed_count": 0
+  }
 }
 ```
 
@@ -79,6 +85,7 @@ AMOS 地图建议：
 - `centroid`：群体中心 marker。
 - `centroid_prediction`：群体中心虚线预测路线。
 - `members`：在 popup 中显示成员 track。
+- `metadata.lifecycle_state`：`tentative` 为待确认，`confirmed` 为连续确认，`coasting` 为短时漏检保持；前端可降低 coasting 包络透明度。
 
 ### 3.3 保护资产
 

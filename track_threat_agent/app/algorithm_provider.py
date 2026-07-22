@@ -16,13 +16,11 @@ from .models import Detection, ProtectedAsset, TrackState
 @dataclass
 class LocalBuiltInAlgorithmProvider:
     tracker: Any
-    graph_predictor: Any
     ranker: Any
     impact_analyzer: Any
     group_detector: Any
 
     mode: str = "local_builtin"
-    learned_predictor: Any | None = None
     trained_st_gnn_runtime: Any | None = None
 
     def update_tracks(
@@ -31,9 +29,6 @@ class LocalBuiltInAlgorithmProvider:
         algorithm_level: str = "medium",
     ) -> List[TrackState]:
         tracks = self.tracker.update(detections, algorithm_level=algorithm_level)
-        tracks = self.graph_predictor.refine(tracks)
-        if self.learned_predictor is not None:
-            tracks = self.learned_predictor.refine_tracks(tracks)
         if self.trained_st_gnn_runtime is not None:
             tracks = self.trained_st_gnn_runtime.refine_tracks(tracks)
         return tracks
@@ -85,37 +80,44 @@ class PlanAlgorithmProvider(LocalBuiltInAlgorithmProvider):
                 "trajectory_prediction": "st_gnn_dynamic_entity_tracking",
                 "threat_assessment": "dynamic_bayesian_network",
                 "explainability": "xai_evidence_chain",
-                "group_detection": "track_relation_connected_components",
-                "protected_asset_impact": "asset_track_relation_graph",
+                "group_detection": "physical_relation_complete_link_clustering",
+                "protected_asset_impact": "predicted_path_asset_proximity",
             },
             "fallback_providers": {
-                "trajectory_prediction": "baseline_motion_provider",
+                "trajectory_prediction": "adaptive_cv_ca_ct_physics",
                 "threat_assessment": "weighted_risk_factor_score",
                 "explainability": "local_xai_evidence_runtime",
             },
             "fallback_details": {
-                "trajectory_prediction": "Agent-local IMM or constant-velocity physics",
+                "trajectory_prediction": "Agent-local adaptive CV/CA/CT physical hypothesis fusion",
             },
             "local_runtime_implementations": {
-                "trajectory_prediction": "torchscript_st_gnn_with_local_graph_fallback",
+                "trajectory_prediction": "torchscript_st_gnn_with_physics_fallback",
                 "threat_assessment": "dbn_risk_state_calibration_runtime",
                 "tracking_filter": "covariance_kalman_cv_filter",
-                "group_detection": "local_relation_graph_runtime",
+                "group_detection": "physical_relation_complete_link_runtime",
                 "protected_asset_impact": "local_asset_impact_runtime",
             },
             "training_status": {
-                "st_gnn": "TorchScript bundles are loaded by the Agent; physical fallback remains local",
-                "dbn": "runtime_probabilistic_model_available",
-                "learned_trajectory_predictor": (
-                    self.learned_predictor.status()
-                    if self.learned_predictor is not None
-                    else {"loaded": False, "model_path": None, "model_type": None}
-                ),
+                "st_gnn": "Only verified TorchScript bundles are treated as ST-GNN; physical fallback is labeled separately",
+                "dbn": {
+                    "status": "runtime_probabilistic_model_available",
+                    "parameter_schema": self.ranker.dbn_evaluator.parameters["schema_version"],
+                    "parameter_version": self.ranker.dbn_evaluator.parameters["model_version"],
+                    "parameter_sha256": self.ranker.dbn_evaluator.parameter_sha256,
+                },
                 "trained_st_gnn_runtime": (
                     self.trained_st_gnn_runtime.status()
                     if self.trained_st_gnn_runtime is not None
                     else {"overall": "degraded", "ready": True, "models": {}}
                 ),
+            },
+            "algorithm_boundary": {
+                "sensor_detection": "upstream_perception_agent",
+                "multimodal_fusion": "upstream_fusion_agent",
+                "intent_inference": "downstream_agent",
+                "knowledge_graph_reasoning": "downstream_agent",
+                "weapon_or_engagement_decision": "out_of_scope",
             },
         }
 
@@ -169,71 +171,40 @@ class PlanAlgorithmProvider(LocalBuiltInAlgorithmProvider):
 
     def _annotate_track_plan_algorithms(self, track: TrackState) -> None:
         plan_algorithms = track.metadata.setdefault("plan_algorithms", {})
-        graph_meta = track.metadata.get("st_gnn_inspired", {}) or {}
-        learned_meta = track.metadata.get("learned_predictor", {}) or {}
         trained_runtime_meta = track.metadata.get("st_gnn_runtime", {}) or {}
-        trained_model_loaded = bool(learned_meta.get("applied")) or bool(
-            trained_runtime_meta.get("applied")
-        )
+        trained_model_applied = bool(trained_runtime_meta.get("applied"))
         plan_algorithms["trajectory_prediction"] = {
             "algorithm": "ST-GNN",
             "contract": "dynamic_entity_tracking_and_trajectory_prediction",
-            "runtime_provider": trained_runtime_meta.get(
-                "runtime",
-                graph_meta.get("runtime", "local_numpy_message_passing"),
-            ),
+            "applied": trained_model_applied,
+            "runtime_provider": trained_runtime_meta.get("runtime") if trained_model_applied else None,
             "execution_location": "agent_process",
-            "fallback_provider": "imm_or_constant_velocity_physics",
-            "graph_neighbor_count": int(graph_meta.get("neighbor_count", 0) or 0),
-            "graph_influence": float(graph_meta.get("graph_influence", 0.0) or 0.0),
-            "trained_model_loaded": trained_model_loaded,
-            "learned_model_provider": learned_meta.get("model_type"),
+            "fallback_provider": "adaptive_multi_model_physics",
+            "fallback_algorithm": "adaptive_multi_model_physics",
+            "trained_model_loaded": trained_model_applied,
             "model_version": trained_runtime_meta.get("model_version"),
-            "fallback_reason": trained_runtime_meta.get("fallback_reason"),
+            "fallback_reason": trained_runtime_meta.get("fallback_reason") or (
+                None if trained_model_applied else "trained_model_not_applied"
+            ),
         }
         for point in track.predicted_path:
-            st_gnn = dict(point.get("st_gnn", {}) or {})
-            point_learned = dict(point.get("learned_model", {}) or {})
             uses_torchscript = point.get("model_used") == "st_gnn_torchscript"
-            runtime_provider = (
-                "torchscript_pytorch"
-                if uses_torchscript
-                else st_gnn.get(
-                    "runtime",
-                    graph_meta.get("runtime", "local_numpy_message_passing"),
-                )
-            )
-            st_gnn.update(
-                {
-                    "algorithm": "ST-GNN",
-                    "contract": "dynamic_entity_tracking_and_trajectory_prediction",
-                    "runtime": runtime_provider,
-                    "runtime_provider": runtime_provider,
-                    "execution_location": "agent_process",
-                    "trained_model_loaded": (
-                        uses_torchscript
-                        or bool(point_learned.get("loaded"))
-                        or bool(st_gnn.get("trained_model_loaded"))
-                    ),
-                    "model_version": point.get("model_version")
-                    or st_gnn.get("model_version"),
-                    "baseline_model": point.get("baseline_model")
-                    or st_gnn.get("baseline_model"),
-                    "uncertainty_radius_m": point.get("uncertainty_radius_m"),
-                    "graph_neighbor_count": int(
-                        point.get(
-                            "graph_neighbor_count",
-                            graph_meta.get("neighbor_count", 0),
-                        )
-                        or 0
-                    ),
-                    "graph_influence": float(
-                        point.get(
-                            "graph_influence",
-                            graph_meta.get("graph_influence", 0.0),
-                        )
-                        or 0.0
-                    ),
+            if not uses_torchscript:
+                point.pop("st_gnn", None)
+                point["prediction_provenance"] = {
+                    "algorithm": "adaptive_multi_model_physics",
+                    "role": "fallback",
+                    "is_trained_model": False,
                 }
-            )
-            point["st_gnn"] = st_gnn
+                continue
+            point["st_gnn"] = {
+                "algorithm": "ST-GNN",
+                "contract": "dynamic_entity_tracking_and_trajectory_prediction",
+                "runtime": "torchscript_pytorch",
+                "runtime_provider": "torchscript_pytorch",
+                "execution_location": "agent_process",
+                "trained_model_loaded": True,
+                "model_version": point.get("model_version"),
+                "baseline_model": point.get("baseline_model"),
+                "uncertainty_radius_m": point.get("uncertainty_radius_m"),
+            }

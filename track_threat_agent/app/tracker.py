@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import Dict, Iterable, List, Optional, Set
+from typing import Dict, Iterable, List, Set, Tuple
 from uuid import uuid4
 
 import numpy as np
@@ -20,30 +20,74 @@ from .utils import (
 
 
 class MultiTargetTracker:
-    """Maintains in-memory tracks using simple demo association and filters."""
+    """Maintains in-memory tracks using gated global association and filters."""
 
-    def __init__(self, association_gate_m: float = 4_000.0, stale_after_s: float = 300.0) -> None:
+    _INVALID_ASSOCIATION_COST = 1_000_000.0
+    _POSITION_NIS_GATE = 13.815  # 99.9% chi-square gate with two position dimensions.
+
+    def __init__(
+        self,
+        association_gate_m: float = 4_000.0,
+        stale_after_s: float = 300.0,
+        confirmation_hits: int = 2,
+    ) -> None:
         self.tracks: Dict[str, TrackState] = {}
         self.association_gate_m = association_gate_m
         self.stale_after_s = stale_after_s
+        self.confirmation_hits = max(1, confirmation_hits)
+        self._latest_detection_time: float | None = None
+        self._recent_detection_ids: Dict[str, float] = {}
+        self._ignored_duplicate_detection_count = 0
+        self._ignored_out_of_order_detection_count = 0
 
     def reset(self) -> None:
         self.tracks.clear()
+        self._latest_detection_time = None
+        self._recent_detection_ids.clear()
+        self._ignored_duplicate_detection_count = 0
+        self._ignored_out_of_order_detection_count = 0
+
+    def restore_tracks(self, tracks: Dict[str, TrackState]) -> None:
+        self.tracks = dict(tracks)
+        self._latest_detection_time = max(
+            (track.last_update_time for track in self.tracks.values()),
+            default=None,
+        )
+        self._recent_detection_ids = {
+            str(track.metadata["last_detection_id"]): track.last_update_time
+            for track in self.tracks.values()
+            if track.metadata.get("last_detection_id")
+        }
+
+    def diagnostics(self) -> Dict[str, object]:
+        lifecycle_counts: Dict[str, int] = {}
+        for track in self.tracks.values():
+            state = str(track.metadata.get("lifecycle_state", track.metadata.get("status", "unknown")))
+            lifecycle_counts[state] = lifecycle_counts.get(state, 0) + 1
+        return {
+            "latest_detection_time": self._latest_detection_time,
+            "ignored_duplicate_detection_count": self._ignored_duplicate_detection_count,
+            "ignored_out_of_order_detection_count": self._ignored_out_of_order_detection_count,
+            "lifecycle_counts": lifecycle_counts,
+        }
 
     def update(self, detections: Iterable[Detection], algorithm_level: str = "medium") -> List[TrackState]:
-        detections_list = [d if isinstance(d, Detection) else Detection.model_validate(d) for d in detections]
+        detections_list = self._prepare_detections(detections)
         if algorithm_level not in {"small", "medium", "large"}:
             algorithm_level = "medium"
 
         now = max((d.timestamp for d in detections_list), default=0.0)
         self._mark_or_remove_stale(now)
 
+        ordered_detections = sorted(detections_list, key=lambda item: (item.timestamp, item.detection_id))
+        associations = self._associate_frame(ordered_detections)
         assigned_tracks: Set[str] = set()
-        for detection in sorted(detections_list, key=lambda item: item.timestamp):
-            track = self._nearest_track(detection, assigned_tracks)
-            if track is None:
+        for detection_index, detection in enumerate(ordered_detections):
+            association = associations.get(detection_index)
+            if association is None:
                 track = self._new_track(detection)
             else:
+                track, association_metadata = association
                 previous = track.model_copy(deep=True)
                 if algorithm_level == "small":
                     track = self._update_alpha_beta(track, detection)
@@ -51,6 +95,7 @@ class MultiTargetTracker:
                     track = self._update_kalman_like(track, detection)
                 track.metadata["prediction_eval"] = self._evaluate_previous_prediction(previous, detection)
                 track.metadata["anomaly"] = self._detect_anomaly(previous, detection)
+                track.metadata["association"] = association_metadata
                 if algorithm_level == "large":
                     track.metadata["large_mock"] = True
                     track.metadata["algorithm_note"] = "large is reserved; medium filter used for this demo"
@@ -63,28 +108,228 @@ class MultiTargetTracker:
         self._age_unassigned_tracks(assigned_tracks, now)
         return list(self.tracks.values())
 
-    def _nearest_track(self, detection: Detection, assigned_tracks: Set[str]) -> Optional[TrackState]:
-        candidates = []
-        for track in self.tracks.values():
-            if track.track_id in assigned_tracks:
+    def _prepare_detections(self, detections: Iterable[Detection]) -> List[Detection]:
+        validated = [d if isinstance(d, Detection) else Detection.model_validate(d) for d in detections]
+        unique_by_id: Dict[str, Detection] = {}
+        for detection in validated:
+            existing = unique_by_id.get(detection.detection_id)
+            if existing is not None:
+                self._ignored_duplicate_detection_count += 1
+                if detection.confidence > existing.confidence:
+                    unique_by_id[detection.detection_id] = detection
                 continue
-            if track.metadata.get("status") == "lost":
+            unique_by_id[detection.detection_id] = detection
+
+        accepted = []
+        previous_watermark = self._latest_detection_time
+        for detection in unique_by_id.values():
+            if detection.detection_id in self._recent_detection_ids:
+                self._ignored_duplicate_detection_count += 1
                 continue
-            dt = max(0.0, detection.timestamp - track.last_update_time)
-            predicted_lat, predicted_lon = project_position(track.lat, track.lon, track.vx, track.vy, dt)
-            distance = haversine_m(predicted_lat, predicted_lon, detection.lat, detection.lon)
-            gate = max(self.association_gate_m, track.speed * max(dt, 1.0) * 2.0 + 1_500.0)
+            if previous_watermark is not None and detection.timestamp <= previous_watermark:
+                self._ignored_out_of_order_detection_count += 1
+                continue
+            accepted.append(detection)
+
+        if accepted:
+            newest = max(detection.timestamp for detection in accepted)
+            self._latest_detection_time = newest if previous_watermark is None else max(previous_watermark, newest)
+            for detection in accepted:
+                self._recent_detection_ids[detection.detection_id] = detection.timestamp
+            cutoff = self._latest_detection_time - self.stale_after_s
+            self._recent_detection_ids = {
+                detection_id: timestamp
+                for detection_id, timestamp in self._recent_detection_ids.items()
+                if timestamp >= cutoff
+            }
+        return accepted
+
+    def _associate_frame(
+        self,
+        detections: List[Detection],
+    ) -> Dict[int, Tuple[TrackState, Dict[str, object]]]:
+        active_tracks = sorted(
+            (
+                track
+                for track in self.tracks.values()
+                if track.metadata.get("status") != "lost"
+            ),
+            key=lambda track: track.track_id,
+        )
+        if not active_tracks or not detections:
+            return {}
+
+        cost_matrix = np.full(
+            (len(active_tracks), len(detections)),
+            self._INVALID_ASSOCIATION_COST,
+            dtype=float,
+        )
+        metrics_by_pair: Dict[tuple[int, int], Dict[str, object]] = {}
+        for track_index, track in enumerate(active_tracks):
+            for detection_index, detection in enumerate(detections):
+                metrics = self._association_metrics(track, detection)
+                if metrics is None:
+                    continue
+                cost_matrix[track_index, detection_index] = float(metrics["cost"])
+                metrics_by_pair[(track_index, detection_index)] = metrics
+
+        row_indices, column_indices = self._linear_sum_assignment(cost_matrix)
+        associations: Dict[int, Tuple[TrackState, Dict[str, object]]] = {}
+        for track_index, detection_index in zip(row_indices, column_indices):
+            if cost_matrix[track_index, detection_index] >= self._INVALID_ASSOCIATION_COST:
+                continue
+            metrics = metrics_by_pair[(track_index, detection_index)]
+            associations[detection_index] = (
+                active_tracks[track_index],
+                {
+                    "method": "global_nearest_neighbor",
+                    "cost": round(float(metrics["cost"]), 6),
+                    "distance_m": round(float(metrics["distance_m"]), 2),
+                    "position_nis": round(float(metrics["position_nis"]), 4),
+                    "position_nis_gate": self._POSITION_NIS_GATE,
+                    "physical_gate_m": round(float(metrics["physical_gate_m"]), 2),
+                },
+            )
+        return associations
+
+    def _association_metrics(self, track: TrackState, detection: Detection) -> Dict[str, float] | None:
+        known_types = {"aircraft", "ship", "uav"}
+        if track.object_type in known_types and detection.object_type in known_types:
             if track.object_type != detection.object_type:
-                gate *= 0.55
-            if distance <= gate:
-                heading_cost = heading_difference_deg(track.heading, detection.heading) / 180.0
-                speed_cost = abs(track.speed - detection.speed) / max(track.speed, detection.speed, 1.0)
-                quality_bonus = 1.0 - track.track_quality
-                score = distance / gate + 0.35 * heading_cost + 0.25 * speed_cost + 0.10 * quality_bonus
-                candidates.append((score, track))
-        if not candidates:
+                return None
+
+        dt = max(0.0, detection.timestamp - track.last_update_time)
+        predicted_lat, predicted_lon = project_position(track.lat, track.lon, track.vx, track.vy, dt)
+        distance_m = haversine_m(predicted_lat, predicted_lon, detection.lat, detection.lon)
+        physical_gate_m = max(
+            self.association_gate_m,
+            track.speed * max(dt, 1.0) * 2.0 + 1_500.0,
+        )
+        if distance_m > physical_gate_m:
             return None
-        return min(candidates, key=lambda item: item[0])[1]
+
+        covariance = self._association_position_covariance(track, detection, dt)
+        east_m, north_m = self._latlon_to_local_m(
+            detection.lat,
+            detection.lon,
+            predicted_lat,
+            predicted_lon,
+        )
+        innovation = np.array([east_m, north_m], dtype=float)
+        position_nis = float(innovation.T @ np.linalg.pinv(covariance) @ innovation)
+        if not math.isfinite(position_nis) or position_nis > self._POSITION_NIS_GATE:
+            return None
+
+        heading_cost = heading_difference_deg(track.heading, detection.heading) / 180.0
+        speed_cost = abs(track.speed - detection.speed) / max(track.speed, detection.speed, 1.0)
+        type_penalty = 0.12 if track.object_type != detection.object_type else 0.0
+        quality_penalty = (1.0 - track.track_quality) * 0.08
+        cost = (
+            math.sqrt(max(position_nis, 0.0) / self._POSITION_NIS_GATE)
+            + 0.30 * heading_cost
+            + 0.20 * speed_cost
+            + type_penalty
+            + quality_penalty
+        )
+        return {
+            "cost": cost,
+            "distance_m": distance_m,
+            "position_nis": position_nis,
+            "physical_gate_m": physical_gate_m,
+        }
+
+    def _association_position_covariance(
+        self,
+        track: TrackState,
+        detection: Detection,
+        dt: float,
+    ) -> np.ndarray:
+        kalman = track.metadata.get("kalman_filter") or {}
+        covariance = np.asarray(
+            kalman.get("covariance", np.diag([900.0, 900.0, 100.0, 100.0])),
+            dtype=float,
+        )
+        if covariance.shape != (4, 4) or not np.isfinite(covariance).all():
+            covariance = np.diag([900.0, 900.0, 100.0, 100.0])
+        f = np.array(
+            [
+                [1.0, 0.0, dt, 0.0],
+                [0.0, 1.0, 0.0, dt],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+            dtype=float,
+        )
+        accel_noise = self._process_noise(track.object_type)
+        q = accel_noise**2 * np.array(
+            [
+                [dt**4 / 4.0, 0.0, dt**3 / 2.0, 0.0],
+                [0.0, dt**4 / 4.0, 0.0, dt**3 / 2.0],
+                [dt**3 / 2.0, 0.0, dt**2, 0.0],
+                [0.0, dt**3 / 2.0, 0.0, dt**2],
+            ],
+            dtype=float,
+        )
+        predicted_covariance = f @ covariance @ f.T + q
+        position_sigma = max(18.0, 260.0 * (1.0 - detection.confidence))
+        measurement_covariance = np.diag([position_sigma**2, position_sigma**2])
+        return predicted_covariance[:2, :2] + measurement_covariance
+
+    @staticmethod
+    def _linear_sum_assignment(cost_matrix: np.ndarray) -> tuple[List[int], List[int]]:
+        """Solve rectangular minimum-cost assignment with the Hungarian method."""
+        if cost_matrix.ndim != 2 or 0 in cost_matrix.shape:
+            return [], []
+        original_rows, original_columns = cost_matrix.shape
+        transposed = original_rows > original_columns
+        matrix = cost_matrix.T if transposed else cost_matrix
+        row_count, column_count = matrix.shape
+
+        u = np.zeros(row_count + 1, dtype=float)
+        v = np.zeros(column_count + 1, dtype=float)
+        matched_row = np.zeros(column_count + 1, dtype=int)
+        previous_column = np.zeros(column_count + 1, dtype=int)
+        for row in range(1, row_count + 1):
+            matched_row[0] = row
+            min_value = np.full(column_count + 1, np.inf, dtype=float)
+            used = np.zeros(column_count + 1, dtype=bool)
+            column = 0
+            while True:
+                used[column] = True
+                current_row = matched_row[column]
+                delta = np.inf
+                next_column = 0
+                for candidate in range(1, column_count + 1):
+                    if used[candidate]:
+                        continue
+                    reduced_cost = matrix[current_row - 1, candidate - 1] - u[current_row] - v[candidate]
+                    if reduced_cost < min_value[candidate]:
+                        min_value[candidate] = reduced_cost
+                        previous_column[candidate] = column
+                    if min_value[candidate] < delta:
+                        delta = min_value[candidate]
+                        next_column = candidate
+                for candidate in range(column_count + 1):
+                    if used[candidate]:
+                        u[matched_row[candidate]] += delta
+                        v[candidate] -= delta
+                    else:
+                        min_value[candidate] -= delta
+                column = next_column
+                if matched_row[column] == 0:
+                    break
+            while True:
+                previous = previous_column[column]
+                matched_row[column] = matched_row[previous]
+                column = previous
+                if column == 0:
+                    break
+
+        pairs = [(matched_row[column] - 1, column - 1) for column in range(1, column_count + 1) if matched_row[column]]
+        if transposed:
+            pairs = [(column, row) for row, column in pairs]
+        pairs.sort()
+        return [row for row, _ in pairs], [column for _, column in pairs]
 
     def _new_track(self, detection: Detection) -> TrackState:
         vx, vy = speed_heading_to_velocity(detection.speed, detection.heading)
@@ -114,11 +359,20 @@ class MultiTargetTracker:
             missed_count=0,
             history_path=[point],
             metadata={
+                **detection.metadata,
                 "status": "active",
+                "lifecycle_state": "confirmed" if self.confirmation_hits <= 1 else "tentative",
+                "hit_count": 1,
+                "consecutive_hit_count": 1,
+                "confirmed_once": self.confirmation_hits <= 1,
                 "source_agent": detection.source_agent,
                 "last_detection_id": detection.detection_id,
                 "anomaly": anomaly,
                 "filter": "initialized",
+                "association": {
+                    "method": "new_track",
+                    "detection_id": detection.detection_id,
+                },
                 "kalman_filter": {
                     "reference_lat": detection.lat,
                     "reference_lon": detection.lon,
@@ -126,7 +380,6 @@ class MultiTargetTracker:
                     "covariance": np.diag([900.0, 900.0, 100.0, 100.0]).tolist(),
                     "model": "constant_velocity_xy",
                 },
-                **detection.metadata,
             },
         )
         track.predicted_path = self._predict_path(track)
@@ -240,16 +493,25 @@ class MultiTargetTracker:
         return 2.8
 
     def _finalize_track_update(self, track: TrackState, detection: Detection, filter_name: str) -> TrackState:
-        track.object_type = detection.object_type
+        if track.object_type == "unknown" and detection.object_type != "unknown":
+            track.object_type = detection.object_type
         track.last_update_time = detection.timestamp
         track.missed_count = 0
+        hit_count = int(track.metadata.get("hit_count", 1)) + 1
+        consecutive_hit_count = int(track.metadata.get("consecutive_hit_count", 0)) + 1
+        confirmed_once = bool(track.metadata.get("confirmed_once")) or consecutive_hit_count >= self.confirmation_hits
+        lifecycle_state = "confirmed" if confirmed_once else "tentative"
+        track.metadata.update(detection.metadata)
         track.metadata.update(
             {
                 "status": "active",
+                "lifecycle_state": lifecycle_state,
+                "hit_count": hit_count,
+                "consecutive_hit_count": consecutive_hit_count,
+                "confirmed_once": confirmed_once,
                 "source_agent": detection.source_agent,
                 "last_detection_id": detection.detection_id,
                 "filter": filter_name,
-                **detection.metadata,
             }
         )
         track.history_path.append(
@@ -288,7 +550,7 @@ class MultiTargetTracker:
 
     def _predict_path(self, track: TrackState) -> List[Dict[str, object]]:
         profile = self._prediction_profile(track)
-        model_probabilities = self._imm_model_probabilities(track, profile)
+        model_probabilities = self._adaptive_model_probabilities(track, profile)
         hypotheses = self._prediction_hypotheses(track, profile, model_probabilities)
         predictions = []
         for dt in (10.0, 20.0, 30.0, 60.0, 120.0):
@@ -309,8 +571,8 @@ class MultiTargetTracker:
                     "alt": alt,
                     "speed": speed,
                     "heading": heading,
-                    "model_used": "imm_fused",
-                    "prediction_model": "imm_fused",
+                    "model_used": "adaptive_multi_model_fused",
+                    "prediction_model": "adaptive_multi_model_fused",
                     "primary_model": profile["model"],
                     "model_probabilities": model_probabilities,
                     "prediction_confidence": confidence,
@@ -318,7 +580,7 @@ class MultiTargetTracker:
                     "horizon_type": horizon_type,
                 }
             )
-        profile["prediction_method"] = "imm_fused"
+        profile["prediction_method"] = "adaptive_multi_model_fused"
         profile["model_probabilities"] = model_probabilities
         profile["prediction_hypotheses"] = hypotheses
         track.metadata["prediction"] = profile
@@ -391,7 +653,11 @@ class MultiTargetTracker:
             "basis_points": len(recent),
         }
 
-    def _imm_model_probabilities(self, track: TrackState, profile: Dict[str, object]) -> Dict[str, float]:
+    def _adaptive_model_probabilities(
+        self,
+        track: TrackState,
+        profile: Dict[str, object],
+    ) -> Dict[str, float]:
         accel = abs(float(profile.get("accel_mps2", 0.0)))
         turn_rate = abs(float(profile.get("turn_rate_dps", 0.0)))
         accel_cap, turn_cap, _ = self._motion_caps(track.object_type)
@@ -571,12 +837,15 @@ class MultiTargetTracker:
                 track.missed_count += 1
                 track.track_quality = clamp(track.track_quality * 0.96)
                 track.metadata["status"] = "coasting"
+                track.metadata["lifecycle_state"] = "coasting"
+                track.metadata["consecutive_hit_count"] = 0
                 track.predicted_path = self._predict_path(track)
 
     def _mark_or_remove_stale(self, now: float) -> None:
         stale_ids = []
         for track_id, track in self.tracks.items():
             if now - track.last_update_time > self.stale_after_s:
+                track.metadata["lifecycle_state"] = "lost"
                 stale_ids.append(track_id)
         for track_id in stale_ids:
             self.tracks[track_id].metadata["status"] = "lost"

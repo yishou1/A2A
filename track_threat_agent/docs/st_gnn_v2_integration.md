@@ -5,7 +5,7 @@
 Agent 默认会查找内置模型目录：
 
 ```text
-models/track_threat/st_gnn_aircraft_kaggle_v1_candidate
+models/track_threat/st_gnn_aircraft_kaggle_v1
 models/track_threat/st_gnn_ship_kaggle_v1
 ```
 
@@ -19,7 +19,7 @@ ST_GNN_REQUIRED=false
 ST_GNN_MAX_INFERENCE_MS=200
 ```
 
-旧 `ST_GNN_MODEL_DIR` 作为单飞机模型兼容入口。Agent 主机启用 TorchScript 模型推理时额外安装 `requirements-model.txt`；不安装时服务仍可启动并回退到 Kalman / IMM / NumPy ST-GNN 链路。
+旧 `ST_GNN_MODEL_DIR` 作为单飞机模型兼容入口。Agent 主机启用 TorchScript 模型推理时额外安装 `requirements-model.txt`；不安装时服务仍可启动并回退到 Kalman 与自适应 CV/CA/CT 物理预测链，不运行任何伪 ST-GNN。
 
 ## 加载校验
 
@@ -55,6 +55,7 @@ model_version
 baseline_model
 prediction_confidence
 uncertainty_radius_m
+uncertainty_calibration_scale
 inference_latency_ms
 fallback_reason
 ```
@@ -63,8 +64,10 @@ fallback_reason
 
 当前内置模型状态：
 
-- `st_gnn_ship_kaggle_v1`：release gate passed，可作为演示发布模型。
-- `st_gnn_aircraft_kaggle_v1_candidate`：候选模型，FDE 和覆盖率通过，ADE 提升略低于 10% 门槛，用于演示和接口联调。
+- `st_gnn_ship_kaggle_v1`：release gate passed，ADE/FDE 相对最强 CV 基线约改善 53%。
+- `st_gnn_aircraft_kaggle_v1`：release gate passed，ADE/FDE 相对最强 IMM 基线改善 13.96%/18.43%。
+
+不确定性 `sigma_scale` 仅使用 validation split 拟合，Agent 在生成 `uncertainty_radius_m` 时应用该系数。模型门禁仅使用独立 test split 评估。
 
 ## 降级
 

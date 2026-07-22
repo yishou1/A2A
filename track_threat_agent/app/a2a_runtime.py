@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 import time
 from typing import Any, Dict, List
 
@@ -27,10 +28,13 @@ class A2ARuntimeState:
     failed_task_count: int = 0
     cache_hit_count: int = 0
     active_task_count: int = 0
+    rejected_task_count: int = 0
+    max_concurrent_tasks: int = 1
     last_error: str | None = None
     _task_response_cache: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     _stream_response_cache: Dict[str, List[str]] = field(default_factory=dict)
     _workflow_work_lists: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
+    _recovery_notices: List[Dict[str, Any]] = field(default_factory=list)
 
     @staticmethod
     def work_item_from_payload(payload: Dict[str, Any]) -> str:
@@ -74,6 +78,20 @@ class A2ARuntimeState:
         self.tasks_received_count += 1
         self.active_task_count += 1
 
+    def try_mark_busy(self, workflow_id: str | None, work_item: str | None) -> bool:
+        """Atomically reserve the single stateful processing slot.
+
+        The FastAPI event loop calls this synchronous method without an await
+        between checking and incrementing, so competing requests cannot both
+        reserve the TrackStore update slot.
+        """
+
+        if not self.ready or self.active_task_count >= self.max_concurrent_tasks:
+            self.rejected_task_count += 1
+            return False
+        self.mark_busy(workflow_id, work_item)
+        return True
+
     def mark_idle(self) -> None:
         self.agent_status = "idle"
         self.current_workflow_id = None
@@ -84,7 +102,6 @@ class A2ARuntimeState:
         self.agent_status = "error"
         self.failed_task_count += 1
         self.last_error = error
-        self.active_task_count = max(0, self.active_task_count - 1)
 
     def set_ready(self, ready: bool) -> None:
         self.ready = ready
@@ -99,10 +116,47 @@ class A2ARuntimeState:
         self.failed_task_count = 0
         self.cache_hit_count = 0
         self.active_task_count = 0
+        self.rejected_task_count = 0
         self.last_error = None
         self._task_response_cache.clear()
         self._stream_response_cache.clear()
         self._workflow_work_lists.clear()
+        self._recovery_notices.clear()
+
+    def notify_recovery(self, notice: Dict[str, Any]) -> Dict[str, Any]:
+        notice = notice or {}
+        record = {
+            "received_at": datetime.now(timezone.utc).isoformat(),
+            "workflow_id": notice.get("workflow_id"),
+            "action": notice.get("action", "resume"),
+            "reason": notice.get("reason"),
+            "detail": deepcopy(notice.get("detail")) if notice.get("detail") else None,
+            "reset_cache": bool(notice.get("reset_cache", False)),
+        }
+        self._recovery_notices.append(record)
+        self._recovery_notices = self._recovery_notices[-100:]
+        if record["reset_cache"]:
+            workflow_id = record["workflow_id"]
+            if workflow_id:
+                self._task_response_cache = {
+                    key: value
+                    for key, value in self._task_response_cache.items()
+                    if value.get("workflow_id") != workflow_id
+                }
+            else:
+                self._task_response_cache.clear()
+            self._stream_response_cache.clear()
+        self.ready = True
+        return {
+            "acknowledged": True,
+            "agent": self.agent_name,
+            "role": self.role,
+            "ready": self.ready,
+            "recovery": deepcopy(record),
+        }
+
+    def recovery_notices(self) -> List[Dict[str, Any]]:
+        return deepcopy(self._recovery_notices)
 
     def snapshot(self, algorithm_provider: str | None = None) -> Dict[str, Any]:
         return {
@@ -117,10 +171,14 @@ class A2ARuntimeState:
             "failed_task_count": self.failed_task_count,
             "cache_hit_count": self.cache_hit_count,
             "active_task_count": self.active_task_count,
+            "max_concurrent_tasks": self.max_concurrent_tasks,
+            "available_task_slots": max(0, self.max_concurrent_tasks - self.active_task_count),
+            "rejected_task_count": self.rejected_task_count,
             "last_error": self.last_error,
             "cached_work_item_count": len(self._task_response_cache),
             "cached_stream_count": len(self._stream_response_cache),
             "workflow_work_list_count": len(self._workflow_work_lists),
+            "recovery_notice_count": len(self._recovery_notices),
             "algorithm_provider": algorithm_provider,
         }
 
@@ -137,7 +195,11 @@ class A2ARuntimeState:
             "stream_requests": len(self._stream_response_cache),
             "cache_hits": self.cache_hit_count,
             "active_tasks": self.active_task_count,
+            "max_concurrent_tasks": self.max_concurrent_tasks,
+            "available_task_slots": max(0, self.max_concurrent_tasks - self.active_task_count),
+            "tasks_rejected": self.rejected_task_count,
             "last_error": self.last_error,
+            "rejected_task_count": self.rejected_task_count,
             "last_work_item": self.current_work_item,
         }
 
@@ -157,10 +219,12 @@ class A2ARuntimeState:
             "processed_task_count": self.processed_task_count,
             "failed_task_count": self.failed_task_count,
             "cache_hit_count": self.cache_hit_count,
+            "rejected_task_count": self.rejected_task_count,
             "last_error": self.last_error,
             "task_response_cache": deepcopy(self._task_response_cache),
             "stream_response_cache": deepcopy(self._stream_response_cache),
             "workflow_work_lists": deepcopy(self._workflow_work_lists),
+            "recovery_notices": deepcopy(self._recovery_notices),
         }
 
     def restore_persistent_state(self, state: Dict[str, Any]) -> None:
@@ -173,7 +237,9 @@ class A2ARuntimeState:
         self.failed_task_count = int(state.get("failed_task_count", 0) or 0)
         self.cache_hit_count = int(state.get("cache_hit_count", 0) or 0)
         self.active_task_count = 0
+        self.rejected_task_count = int(state.get("rejected_task_count", 0) or 0)
         self.last_error = state.get("last_error")
         self._task_response_cache = deepcopy(state.get("task_response_cache", {}) or {})
         self._stream_response_cache = deepcopy(state.get("stream_response_cache", {}) or {})
         self._workflow_work_lists = deepcopy(state.get("workflow_work_lists", {}) or {})
+        self._recovery_notices = deepcopy(state.get("recovery_notices", []) or [])[-100:]

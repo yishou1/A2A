@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
 from app.models import Detection, TrackState
+from app.model_runtime import TrackSTGNNRuntime
 from app.scenario_generator import generate_long_operation_sequence
-from app.st_gnn_predictor import STGNNTrajectoryPredictor
 from app.tracker import MultiTargetTracker
 from app.utils import haversine_m
 
@@ -30,7 +30,9 @@ def evaluate_sequence(frames: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
 
 def _evaluate_one_mode(frames: List[Dict[str, Any]], use_st_gnn: bool) -> Dict[str, Any]:
     tracker = MultiTargetTracker()
-    graph_predictor = STGNNTrajectoryPredictor()
+    trained_runtime = TrackSTGNNRuntime.from_env(
+        Path(__file__).resolve().parents[1] / "models" / "track_threat"
+    )
     previous_predictions: Dict[str, Dict[str, Any]] = {}
     samples: List[Dict[str, float]] = []
 
@@ -49,7 +51,7 @@ def _evaluate_one_mode(frames: List[Dict[str, Any]], use_st_gnn: bool) -> Dict[s
 
         tracks = tracker.update(detections, algorithm_level=str(frame.get("algorithm_level", "medium")))
         if use_st_gnn:
-            tracks = graph_predictor.refine(tracks)
+            tracks = trained_runtime.refine_tracks(tracks)
         previous_predictions = {
             _source_track_key(str(track.metadata.get("last_detection_id", track.track_id))): {
                 "timestamp": track.last_update_time,
@@ -58,7 +60,10 @@ def _evaluate_one_mode(frames: List[Dict[str, Any]], use_st_gnn: bool) -> Dict[s
             for track in tracks
         }
 
-    return _summarize(samples, "kalman_imm_st_gnn" if use_st_gnn else "kalman_imm")
+    return _summarize(
+        samples,
+        "kalman_physics_torchscript_st_gnn" if use_st_gnn else "kalman_adaptive_multi_model_physics",
+    )
 
 
 def _prediction_error(predicted_path: List[Dict[str, Any]], previous_timestamp: float, detection: Detection) -> Dict[str, float] | None:

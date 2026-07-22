@@ -177,10 +177,12 @@ class TrackSTGNNRuntime:
         runners: Mapping[str, Any] | None = None,
         *,
         required: bool = False,
+        enforce_release_gate: bool = False,
         max_inference_ms: float = 200.0,
     ) -> None:
         self.runners = dict(runners or {})
         self.required = required
+        self.enforce_release_gate = enforce_release_gate
         self.max_inference_ms = max_inference_ms
 
     @classmethod
@@ -213,6 +215,8 @@ class TrackSTGNNRuntime:
         return cls(
             runners,
             required=os.getenv("ST_GNN_REQUIRED", "false").lower() in {"1", "true", "yes", "on"},
+            enforce_release_gate=os.getenv("ST_GNN_ENFORCE_RELEASE_GATE", "false").lower()
+            in {"1", "true", "yes", "on"},
             max_inference_ms=float(os.getenv("ST_GNN_MAX_INFERENCE_MS", "200")),
         )
 
@@ -220,14 +224,15 @@ class TrackSTGNNRuntime:
     def ready(self) -> bool:
         if not self.required:
             return True
-        return bool(self.runners) and all(runner.loaded for runner in self.runners.values())
+        return bool(self.runners) and all(self._runner_usable(runner) for runner in self.runners.values())
 
     def status(self) -> Dict[str, Any]:
         statuses = {object_type: runner.status() for object_type, runner in self.runners.items()}
         loaded_count = sum(1 for value in statuses.values() if value.get("loaded"))
+        usable_count = sum(1 for runner in self.runners.values() if self._runner_usable(runner))
         if self.required and not self.ready:
             overall = "unavailable"
-        elif loaded_count == len(statuses) and loaded_count > 0:
+        elif usable_count == len(statuses) and usable_count > 0:
             overall = "ready"
         elif loaded_count > 0:
             overall = "degraded"
@@ -236,6 +241,7 @@ class TrackSTGNNRuntime:
         return {
             "overall": overall,
             "required": self.required,
+            "enforce_release_gate": self.enforce_release_gate,
             "ready": self.ready,
             "max_inference_ms": self.max_inference_ms,
             "models": statuses,
@@ -250,8 +256,18 @@ class TrackSTGNNRuntime:
             if not runner.loaded:
                 self._fallback(candidates, "model_unavailable")
                 continue
+            if not self._runner_usable(runner):
+                self._fallback(candidates, "release_gate_failed")
+                continue
             self._run_group(candidates, runner)
         return track_list
+
+    def _runner_usable(self, runner: Any) -> bool:
+        if not runner.loaded:
+            return False
+        if not self.enforce_release_gate:
+            return True
+        return (runner.manifest.get("release_gate") or {}).get("passed") is True
 
     def _run_group(self, tracks: List[TrackState], runner: Any) -> None:
         manifest = runner.manifest
@@ -311,6 +327,7 @@ class TrackSTGNNRuntime:
                 model_version=str(manifest["model_version"]),
                 baseline_model=baseline_names[node_index],
                 latency_ms=latency_ms,
+                uncertainty_scale=_uncertainty_scale(manifest),
             )
 
     def _merge_prediction(
@@ -323,12 +340,13 @@ class TrackSTGNNRuntime:
         model_version: str,
         baseline_model: str,
         latency_ms: float,
+        uncertainty_scale: float,
     ) -> None:
         by_horizon = {float(point.get("dt_s", -1)): dict(point) for point in track.predicted_path}
         for index, horizon in enumerate(horizons):
             east, north = float(offsets[index][0]), float(offsets[index][1])
             lat, lon = _offset_to_latlon(track.lat, track.lon, east, north)
-            sigma_east, sigma_north = np.exp(log_sigma[index])
+            sigma_east, sigma_north = np.exp(log_sigma[index]) * uncertainty_scale
             uncertainty = 1.645 * math.hypot(float(sigma_east), float(sigma_north))
             distance = max(1.0, math.hypot(east, north))
             confidence = max(
@@ -349,6 +367,7 @@ class TrackSTGNNRuntime:
                 "baseline_model": baseline_model,
                 "prediction_confidence": round(confidence, 4),
                 "uncertainty_radius_m": round(uncertainty, 3),
+                "uncertainty_calibration_scale": round(uncertainty_scale, 6),
                 "inference_latency_ms": round(latency_ms, 3),
                 "fallback_reason": None,
             }
@@ -360,6 +379,7 @@ class TrackSTGNNRuntime:
             "baseline_model": baseline_model,
             "prediction_horizons_s": list(horizons),
             "inference_latency_ms": round(latency_ms, 3),
+            "uncertainty_calibration_scale": round(uncertainty_scale, 6),
             "fallback_reason": None,
         }
 
@@ -524,7 +544,7 @@ def _physics_baseline(
             1.0,
             abs(turn_rate) / math.radians(3.0) + abs(acceleration) / 8.0,
         )
-        return "imm_ctra", (
+        return "adaptive_ctra_fusion", (
             (1.0 - maneuver_strength) * cv + maneuver_strength * ctra
         ).astype(np.float32)
     turn_strength = min(1.0, abs(turn_rate) / math.radians(0.05))
@@ -537,6 +557,18 @@ def _normalize(values: np.ndarray, mean: Sequence[float], std: Sequence[float]) 
     mean_array = np.asarray(mean, dtype=np.float32)
     std_array = np.maximum(np.asarray(std, dtype=np.float32), 1e-6)
     return (values - mean_array) / std_array
+
+
+def _uncertainty_scale(manifest: Mapping[str, Any]) -> float:
+    calibration = (manifest.get("test_metrics") or {}).get(
+        "uncertainty_calibration",
+        {},
+    )
+    try:
+        scale = float(calibration.get("sigma_scale", 1.0))
+    except (TypeError, ValueError):
+        return 1.0
+    return scale if math.isfinite(scale) and scale > 0.0 else 1.0
 
 
 def _relative_xy(anchor_lat: float, anchor_lon: float, lat: float, lon: float) -> Tuple[float, float]:

@@ -88,7 +88,6 @@ class AgentModelRegistry:
 
 
 def build_agent_model_registry(
-    learned_predictor: Any | None,
     trained_st_gnn_runtime: Any | None,
 ) -> Any:
     model_class = SharedAlgorithmModel or AgentModel
@@ -101,28 +100,26 @@ def build_agent_model_registry(
             tags=["tracking", "kalman", "local"],
         ),
         model_class(
-            "trajectory_imm",
-            "IMM Motion Predictor",
+            "trajectory_adaptive_multi_model_physics",
+            "Adaptive CV/CA/CT Physics Predictor",
             model_type="physics_predictor",
-            tags=["prediction", "imm", "fallback", "local"],
-        ),
-        model_class(
-            "local_graph_message_passing",
-            "Local Track Graph Message Passing",
-            model_type="graph_predictor",
-            tags=["prediction", "graph", "fallback", "local"],
+            tags=["prediction", "physics", "fallback", "local"],
         ),
         model_class(
             "dbn_risk_state_calibration",
-            "DBN Risk State Calibration",
+            "DBN Situation-Attention Calibration",
+            version="dbn-risk-attention-v1",
             model_type="probabilistic_model",
-            tags=["risk", "dbn", "local"],
+            description="Versioned observable-factor DBN parameters with SHA256 traceability",
+            tags=["risk", "dbn", "versioned", "local"],
         ),
         model_class(
-            "track_relation_connected_components",
-            "Track Relation Group Detector",
+            "physical_relation_complete_link_clustering",
+            "Physical Relation Complete-Link Group Detector",
+            version="2.0.0",
             model_type="graph_algorithm",
-            tags=["group", "relation", "local"],
+            description="Complete-link physical grouping with tentative/confirmed/coasting lifecycle",
+            tags=["group", "relation", "lifecycle", "local"],
         ),
         model_class(
             "protected_asset_impact",
@@ -137,18 +134,6 @@ def build_agent_model_registry(
             tags=["xai", "evidence", "local"],
         ),
     ]
-
-    learned_status = learned_predictor.status() if learned_predictor is not None else {}
-    models.append(
-        model_class(
-            "trajectory_numpy_sequence_predictor",
-            "Learned NumPy Sequence Predictor",
-            version=str(learned_status.get("version") or "1.0.0"),
-            model_type="sequence_predictor",
-            status=READY if learned_status.get("loaded") else UNAVAILABLE,
-            tags=["prediction", "learned", "local"],
-        )
-    )
 
     runtime_status = (
         trained_st_gnn_runtime.status()
@@ -180,5 +165,5 @@ def build_agent_model_registry(
 
 def configured_model_metadata() -> Dict[str, str]:
     """Static startup metadata used before runtime objects are constructed."""
-    registry = build_agent_model_registry(None, None)
+    registry = build_agent_model_registry(None)
     return registry.metadata()

@@ -130,13 +130,14 @@ def _asset_updated_for_track(track: Any) -> Dict[str, Any]:
 
 
 def _asset_updated_for_group(group: Any) -> Dict[str, Any]:
+    lifecycle_state = (getattr(group, "metadata", {}) or {}).get("lifecycle_state", "confirmed")
     return {
         "event_type": "asset.updated",
         "asset_id": group.group_id,
         "asset_type": group.group_type,
         "asset_category": "track_group",
         "display_name": f"{group.group_type}:{group.group_id}",
-        "status": "active",
+        "status": lifecycle_state,
         "source": "track-threat-group-agent",
         "position": group.centroid,
         "geometry": {
@@ -154,6 +155,7 @@ def _asset_updated_for_group(group: Any) -> Dict[str, Any]:
             "cohesion_score": group.cohesion_score,
             "group_threat_score": group.group_threat_score,
             "group_threat_level": group.group_threat_level,
+            "lifecycle": getattr(group, "metadata", {}) or {},
             "owner_agent_id": "track-threat-group-agent-01",
             "asset_upsert_hint": True,
         },
@@ -171,6 +173,9 @@ def _asset_relationship_updated(group: Any) -> Dict[str, Any]:
         "metadata": {
             "group_type": group.group_type,
             "cohesion_score": group.cohesion_score,
+            "group_lifecycle_state": (getattr(group, "metadata", {}) or {}).get(
+                "lifecycle_state", "confirmed"
+            ),
             "owner_agent_id": "track-threat-group-agent-01",
         },
     }
@@ -244,6 +249,7 @@ def _track_group_updated(group: Any) -> Dict[str, Any]:
         "predicted_envelope": group.predicted_envelope,
         "cohesion_score": group.cohesion_score,
         "evidence": group.evidence,
+        "metadata": getattr(group, "metadata", {}) or {},
         "timestamp": group.timestamp,
         # Frontend compatibility: the AMOS fields above are canonical.
         "group": group.model_dump(),
@@ -257,6 +263,11 @@ def _threat_group_updated(group: Any) -> Dict[str, Any]:
         "score": group.group_threat_score,
         "level": group.group_threat_level,
         "evidence": group.evidence,
+        "metadata": {
+            "group_lifecycle_state": (getattr(group, "metadata", {}) or {}).get(
+                "lifecycle_state", "confirmed"
+            )
+        },
         "timestamp": group.timestamp,
         # Frontend compatibility: the AMOS fields above are canonical.
         "group": group.model_dump(),

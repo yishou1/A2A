@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
 from pathlib import Path
 
 import numpy as np
+
+AGENT_DIR = Path(__file__).resolve().parents[1]
+if str(AGENT_DIR) not in sys.path:
+    sys.path.insert(0, str(AGENT_DIR))
 
 from app.model_runtime.torchscript_st_gnn import TorchScriptBundleRunner
 
@@ -22,6 +27,8 @@ def main() -> None:
     if not runner.loaded:
         raise RuntimeError(runner.load_error)
     manifest = runner.manifest
+    model_path = args.model_dir / str(manifest["model_file"])
+    parameter_count = sum(int(parameter.numel()) for parameter in runner.model.parameters())
     nodes = 200
     edges = 2_000
     history = np.zeros(
@@ -56,6 +63,8 @@ def main() -> None:
         "nodes": nodes,
         "edges": edges,
         "iterations": args.iterations,
+        "parameter_count": parameter_count,
+        "model_size_bytes": model_path.stat().st_size,
         "p50_ms": round(p50, 3),
         "p95_ms": round(p95, 3),
         "max_p95_ms": args.max_p95_ms,

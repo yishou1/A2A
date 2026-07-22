@@ -14,7 +14,13 @@ from app.models import TrackState
 
 
 class FakeRunner:
-    def __init__(self, object_type, horizons):
+    def __init__(
+        self,
+        object_type,
+        horizons,
+        release_gate_passed=True,
+        uncertainty_scale=1.0,
+    ):
         self.object_type = object_type
         self.manifest = {
             "schema_version": "st_gnn_model_bundle/v2",
@@ -36,6 +42,10 @@ class FakeRunner:
             ],
             "edge_feature_schema": [f"edge-{index}" for index in range(8)],
             "graph_thresholds": {"max_edge_distance_m": 50_000},
+            "release_gate": {"passed": release_gate_passed},
+            "test_metrics": {
+                "uncertainty_calibration": {"sigma_scale": uncertainty_scale}
+            },
         }
         self.loaded = True
         self.load_error = None
@@ -93,7 +103,7 @@ def _track(object_type, track_id, interval, lon_offset=0.0):
                 "timestamp": history[-1]["timestamp"] + horizon,
                 "lat": history[-1]["lat"],
                 "lon": history[-1]["lon"] + horizon * 0.00001,
-                "model_used": "imm_fused",
+                "model_used": "adaptive_multi_model_fused",
                 "prediction_confidence": 0.8,
                 "uncertainty_radius_m": 100.0,
             }
@@ -115,10 +125,10 @@ def test_aircraft_runtime_replaces_model_horizons_and_keeps_120_second_fallback(
     by_horizon = {point["dt_s"]: point for point in track.predicted_path}
     assert by_horizon[10.0]["model_used"] == "st_gnn_torchscript"
     assert by_horizon[10.0]["model_version"] == "aircraft-v1"
-    assert by_horizon[10.0]["baseline_model"] == "imm_ctra"
+    assert by_horizon[10.0]["baseline_model"] == "adaptive_ctra_fusion"
     assert by_horizon[10.0]["uncertainty_radius_m"] > 0
     assert by_horizon[10.0]["inference_latency_ms"] == 12.5
-    assert by_horizon[120.0]["model_used"] == "imm_fused"
+    assert by_horizon[120.0]["model_used"] == "adaptive_multi_model_fused"
     assert track.metadata["st_gnn_runtime"]["applied"] is True
 
 
@@ -136,6 +146,26 @@ def test_ship_runtime_appends_long_horizons_and_preserves_short_term_predictions
     assert next(point for point in track.predicted_path if point["dt_s"] == 600.0)["baseline_model"] == "coordinated_turn_cv"
 
 
+def test_runtime_applies_bundle_uncertainty_calibration_scale():
+    runtime = TrackSTGNNRuntime(
+        runners={
+            "aircraft": FakeRunner(
+                "aircraft",
+                [10, 20, 30, 60],
+                uncertainty_scale=0.5,
+            )
+        },
+    )
+    track = _track("aircraft", "A1", 10)
+
+    runtime.refine_tracks([track])
+
+    point = next(item for item in track.predicted_path if item["dt_s"] == 10.0)
+    expected_radius = 1.645 * np.hypot(10.0, 10.0)
+    assert point["uncertainty_radius_m"] == pytest.approx(expected_radius, abs=0.001)
+    assert point["uncertainty_calibration_scale"] == 0.5
+
+
 def test_runtime_marks_insufficient_history_without_interrupting_agent():
     runtime = TrackSTGNNRuntime(
         runners={"aircraft": FakeRunner("aircraft", [10, 20, 30, 60])},
@@ -148,7 +178,36 @@ def test_runtime_marks_insufficient_history_without_interrupting_agent():
 
     assert track.metadata["st_gnn_runtime"]["applied"] is False
     assert track.metadata["st_gnn_runtime"]["fallback_reason"] == "insufficient_history"
-    assert all(point["model_used"] == "imm_fused" for point in track.predicted_path)
+    assert all(point["model_used"] == "adaptive_multi_model_fused" for point in track.predicted_path)
+
+
+def test_release_gate_enforcement_rejects_candidate_and_falls_back():
+    runner = FakeRunner("aircraft", [10, 20, 30, 60], release_gate_passed=False)
+    runtime = TrackSTGNNRuntime(
+        runners={"aircraft": runner},
+        required=False,
+        enforce_release_gate=True,
+    )
+    track = _track("aircraft", "A1", 10)
+
+    runtime.refine_tracks([track])
+
+    assert runtime.ready is True
+    assert runtime.status()["overall"] == "degraded"
+    assert track.metadata["st_gnn_runtime"]["applied"] is False
+    assert track.metadata["st_gnn_runtime"]["fallback_reason"] == "release_gate_failed"
+
+
+def test_required_runtime_is_not_ready_when_release_gate_fails():
+    runner = FakeRunner("aircraft", [10, 20, 30, 60], release_gate_passed=False)
+    runtime = TrackSTGNNRuntime(
+        runners={"aircraft": runner},
+        required=True,
+        enforce_release_gate=True,
+    )
+
+    assert runtime.ready is False
+    assert runtime.status()["overall"] == "unavailable"
 
 
 def test_online_physics_baseline_matches_constant_motion_case():
@@ -157,7 +216,7 @@ def test_online_physics_baseline_matches_constant_motion_case():
 
     name, offsets = _physics_baseline(track, history, [10, 20])
 
-    assert name == "imm_ctra"
+    assert name == "adaptive_ctra_fusion"
     assert offsets[0, 0] == pytest.approx(1_000.0, rel=0.01)
     assert offsets[0, 1] == pytest.approx(0.0, abs=0.01)
 

@@ -1,0 +1,122 @@
+{
+  "schema_version": "dbn_risk_model/v1",
+  "model_version": "dbn-risk-attention-v1",
+  "description": "Dynamic Bayesian calibration for observable situation-attention states.",
+  "states": ["low", "medium", "high"],
+  "initial_state": {
+    "low": 0.55,
+    "medium": 0.33,
+    "high": 0.12
+  },
+  "transition_matrices": {
+    "base": {
+      "low": {"low": 0.78, "medium": 0.18, "high": 0.04},
+      "medium": {"low": 0.15, "medium": 0.66, "high": 0.19},
+      "high": {"low": 0.03, "medium": 0.18, "high": 0.79}
+    },
+    "escalated": {
+      "low": {"low": 0.56, "medium": 0.30, "high": 0.14},
+      "medium": {"low": 0.08, "medium": 0.52, "high": 0.40},
+      "high": {"low": 0.02, "medium": 0.10, "high": 0.88}
+    },
+    "deescalated": {
+      "low": {"low": 0.88, "medium": 0.10, "high": 0.02},
+      "medium": {"low": 0.35, "medium": 0.55, "high": 0.10},
+      "high": {"low": 0.10, "medium": 0.35, "high": 0.55}
+    }
+  },
+  "transition_features": {
+    "escalation": {
+      "bias": 0.0,
+      "anomaly_factor": 0.34,
+      "distance_factor": 0.28,
+      "closing_factor": 0.22,
+      "type_factor": 0.10,
+      "coordinated_context": 0.06
+    },
+    "deescalation": {
+      "bias": 0.0,
+      "inverse_closing": 0.22,
+      "inverse_distance": 0.18,
+      "missed_indicator": 0.12
+    }
+  },
+  "observation_logits": {
+    "low": {
+      "bias": 0.85,
+      "base_score": -1.80,
+      "closing_factor": -0.45,
+      "distance_factor": -0.35,
+      "anomaly_factor": -0.25
+    },
+    "medium": {
+      "bias": 0.10,
+      "base_score": 0.35,
+      "quality_factor": 0.20,
+      "anomaly_factor": -0.08
+    },
+    "high": {
+      "bias": -0.90,
+      "base_score": 2.10,
+      "closing_factor": 0.70,
+      "distance_factor": 0.55,
+      "anomaly_factor": 0.45,
+      "type_factor": 0.25
+    }
+  },
+  "observation_reliability": {
+    "bias": 0.28,
+    "quality_factor": 0.34,
+    "coordinated_context": 0.10,
+    "anomaly_factor": -0.08,
+    "missed_count_capped": -0.04
+  },
+  "risk_pattern_utilities": {
+    "protected_zone_approach": {
+      "bias": 0.0,
+      "closing_factor": 1.20,
+      "distance_factor": 1.05,
+      "type_factor": 0.20
+    },
+    "sustained_presence": {
+      "bias": 0.0,
+      "quality_factor": 0.25,
+      "aircraft_or_uav": 0.15,
+      "distance_factor": 0.10,
+      "stable_motion": 0.10
+    },
+    "coordinated_motion": {
+      "bias": 0.0,
+      "coordinated_context": 0.95,
+      "aircraft_or_ship": 0.28,
+      "stable_motion": 0.18
+    },
+    "anomalous_motion": {
+      "bias": 0.0,
+      "anomaly_factor": 1.00,
+      "inverse_quality": 0.20
+    },
+    "non_closing_motion": {
+      "bias": 0.0,
+      "inverse_distance": 0.55,
+      "inverse_closing": 0.45
+    }
+  },
+  "risk_pattern_weights": {
+    "protected_zone_approach": 0.38,
+    "sustained_presence": 0.12,
+    "coordinated_motion": 0.22,
+    "anomalous_motion": 0.22,
+    "non_closing_motion": 0.06
+  },
+  "state_values": {
+    "low": 0.0,
+    "medium": 0.55,
+    "high": 1.0
+  },
+  "score_fusion": {
+    "base_score": 0.62,
+    "state_factor": 0.24,
+    "risk_pattern_factor": 0.14
+  }
+}

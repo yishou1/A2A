@@ -5,8 +5,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, List
+from uuid import uuid4
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -21,12 +23,22 @@ def build_smoke_task_payload(
     frame_index: int = 0,
     workflow_id: str = "wf-track-threat-smoke",
     work_item: str | None = None,
+    minimum_timestamp: float | None = None,
 ) -> Dict[str, Any]:
     sequence = generate_long_operation_sequence(frame_count=max(frame_index + 1, 90))
-    frame = sequence["frames"][frame_index]
+    frame = deepcopy(sequence["frames"][frame_index])
+    resolved_work_item = work_item or f"track-threat-smoke-{frame_index:03d}-{uuid4().hex[:8]}"
+    detections = frame.get("detections", [])
+    if detections and minimum_timestamp is not None:
+        earliest = min(float(item["timestamp"]) for item in detections)
+        offset = max(0.0, float(minimum_timestamp) - earliest + 1.0)
+        for detection in detections:
+            detection["timestamp"] = float(detection["timestamp"]) + offset
+    for detection in detections:
+        detection["detection_id"] = f"{detection['detection_id']}-{resolved_work_item}"
     return {
         "workflow_id": workflow_id,
-        "work_item": work_item or f"track-threat-smoke-{frame_index:03d}",
+        "work_item": resolved_work_item,
         "command": "analyze_perception_result",
         "role": "track_threat",
         "work_list": [
@@ -75,7 +87,14 @@ def main() -> int:
             "input_schema": _get_json(f"{base_url}/schema/input"),
             "output_schema": _get_json(f"{base_url}/schema/output"),
         }
-        task_payload = build_smoke_task_payload(args.frame, args.workflow_id, args.work_item)
+        initial_diagnostics = checks["health"].get("tracking_diagnostics") or {}
+        initial_watermark = initial_diagnostics.get("latest_detection_time")
+        task_payload = build_smoke_task_payload(
+            args.frame,
+            args.workflow_id,
+            args.work_item,
+            minimum_timestamp=float(initial_watermark) if initial_watermark is not None else None,
+        )
         body = _post_json(f"{base_url}/sendMessage", task_payload, args.token)
     except (HTTPError, URLError) as exc:
         print(f"smoke request failed: {exc}", file=sys.stderr)
@@ -94,6 +113,23 @@ def main() -> int:
     if "asset_impacts" not in checks["output_schema"].get("artifact_fields", []):
         errors.append("output schema does not document asset_impacts")
     errors.extend(validate_artifact(artifact))
+    expected_detection_ids = {
+        str(item["detection_id"])
+        for item in task_payload["payload"].get("detections", [])
+    }
+    updated_detection_ids = {
+        str((track.get("metadata") or {}).get("last_detection_id"))
+        for track in artifact.get("tracks", [])
+    }
+    if expected_detection_ids and not expected_detection_ids <= updated_detection_ids:
+        errors.append("smoke detections did not advance all expected tracks")
+    final_diagnostics = (artifact.get("summary") or {}).get("tracking_diagnostics") or {}
+    if initial_watermark is not None and float(final_diagnostics.get("latest_detection_time") or 0.0) <= float(initial_watermark):
+        errors.append("tracking timestamp watermark did not advance")
+    if int(final_diagnostics.get("ignored_out_of_order_detection_count", 0)) != int(
+        initial_diagnostics.get("ignored_out_of_order_detection_count", 0)
+    ):
+        errors.append("smoke frame was rejected as out of order")
 
     report = {
         "status": "passed" if not errors else "failed",

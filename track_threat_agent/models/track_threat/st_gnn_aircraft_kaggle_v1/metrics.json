@@ -2,36 +2,36 @@
   "schema_version": "st_gnn_evaluation/v2",
   "test_manifest": "data/processed/v2_release/aircraft/aircraft-test-manifest.json",
   "st_gnn": {
-    "ade_m": 336.17730712890625,
-    "fde_m": 695.3419799804688,
-    "rmse_m": 888.1160278320312,
+    "ade_m": 318.6798095703125,
+    "fde_m": 654.17919921875,
+    "rmse_m": 854.3287353515625,
     "by_horizon": {
       "10": {
-        "ade_m": 127.37349700927734,
-        "fde_m": 127.37349700927734
+        "ade_m": 125.22605895996094,
+        "fde_m": 125.22605895996094
       },
       "20": {
-        "ade_m": 213.01751708984375,
-        "fde_m": 213.01751708984375
+        "ade_m": 203.3968505859375,
+        "fde_m": 203.3968505859375
       },
       "30": {
-        "ade_m": 308.97625732421875,
-        "fde_m": 308.97625732421875
+        "ade_m": 291.9171447753906,
+        "fde_m": 291.9171447753906
       },
       "60": {
-        "ade_m": 695.3419799804688,
-        "fde_m": 695.3419799804688
+        "ade_m": 654.17919921875,
+        "fde_m": 654.17919921875
       }
     },
     "sample_count": 448589,
-    "coverage_90": 0.9066445008682781,
+    "coverage_90": 0.902648080982815,
     "uncertainty_calibration": {
       "schema_version": "st_gnn_uncertainty_calibration/v1",
       "method": "global_sigma_scale_from_validation_quantile",
       "target_coverage": 0.9,
-      "coverage_before": 0.7481674256754195,
+      "coverage_before": 0.969080574290878,
       "coverage_after": 0.8999998946796365,
-      "sigma_scale": 13.623958198322143,
+      "sigma_scale": 0.4607918450844166,
       "calibration_manifest": "data/processed/v2_release/aircraft/aircraft-validation-manifest.json",
       "checkpoint": "checkpoints/aircraft-kaggle-v1/best.ckpt",
       "sample_count": 474742,
@@ -166,49 +166,49 @@
   "stratified": {
     "by_source": {
       "opensky": {
-        "ade_m": 266.03948974609375,
-        "fde_m": 557.6474609375,
-        "rmse_m": 1132.635498046875,
+        "ade_m": 266.02630615234375,
+        "fde_m": 557.6304321289062,
+        "rmse_m": 1132.6199951171875,
         "by_horizon": {
           "10": {
-            "ade_m": 91.06317138671875,
-            "fde_m": 91.06317138671875
+            "ade_m": 91.05712890625,
+            "fde_m": 91.05712890625
           },
           "20": {
-            "ade_m": 166.4853973388672,
-            "fde_m": 166.4853973388672
+            "ade_m": 166.4733123779297,
+            "fde_m": 166.4733123779297
           },
           "30": {
-            "ade_m": 248.96188354492188,
-            "fde_m": 248.96188354492188
+            "ade_m": 248.9443817138672,
+            "fde_m": 248.9443817138672
           },
           "60": {
-            "ade_m": 557.6474609375,
-            "fde_m": 557.6474609375
+            "ade_m": 557.6304321289062,
+            "fde_m": 557.6304321289062
           }
         },
         "sample_count": 110799
       },
       "tartanaviation_raw_adsb": {
-        "ade_m": 359.1833190917969,
-        "fde_m": 740.50732421875,
-        "rmse_m": 791.6282348632812,
+        "ade_m": 335.9507751464844,
+        "fde_m": 685.8483276367188,
+        "rmse_m": 740.6101684570312,
         "by_horizon": {
           "10": {
-            "ade_m": 139.28370666503906,
-            "fde_m": 139.28370666503906
+            "ade_m": 136.433837890625,
+            "fde_m": 136.433837890625
           },
           "20": {
-            "ade_m": 228.28057861328125,
-            "fde_m": 228.28057861328125
+            "ade_m": 215.50820922851562,
+            "fde_m": 215.50820922851562
           },
           "30": {
-            "ade_m": 328.66162109375,
-            "fde_m": 328.66162109375
+            "ade_m": 306.0126953125,
+            "fde_m": 306.0126953125
           },
           "60": {
-            "ade_m": 740.50732421875,
-            "fde_m": 740.50732421875
+            "ade_m": 685.8483276367188,
+            "fde_m": 685.8483276367188
           }
         },
         "sample_count": 337790
@@ -264,25 +264,25 @@
         "sample_count": 243343
       },
       "sparse": {
-        "ade_m": 446.1460876464844,
-        "fde_m": 878.3590087890625,
-        "rmse_m": 980.619140625,
+        "ade_m": 405.0368957519531,
+        "fde_m": 781.64990234375,
+        "rmse_m": 907.3570556640625,
         "by_horizon": {
           "10": {
-            "ade_m": 190.75169372558594,
-            "fde_m": 190.75169372558594
+            "ade_m": 185.70640563964844,
+            "fde_m": 185.70640563964844
           },
           "20": {
-            "ade_m": 301.1678771972656,
-            "fde_m": 301.1678771972656
+            "ade_m": 278.5647888183594,
+            "fde_m": 278.5647888183594
           },
           "30": {
-            "ade_m": 414.3057556152344,
-            "fde_m": 414.3057556152344
+            "ade_m": 374.2265930175781,
+            "fde_m": 374.2265930175781
           },
           "60": {
-            "ade_m": 878.3590087890625,
-            "fde_m": 878.3590087890625
+            "ade_m": 781.64990234375,
+            "fde_m": 781.64990234375
           }
         },
         "sample_count": 190935
@@ -293,30 +293,26 @@
     }
   },
   "release_gate": {
-    "passed": false,
+    "passed": true,
     "strongest_physical_baseline": "imm",
     "strongest_ade_baseline": "imm",
     "strongest_fde_baseline": "imm",
-    "ade_improvement": 0.09238272215858823,
-    "fde_improvement": 0.13295778318150975,
-    "coverage_90": 0.9066445008682781,
-    "failed_checks": [
-      "overall_ade_improvement"
-    ]
+    "ade_improvement": 0.13962276711819066,
+    "fde_improvement": 0.184284856347805,
+    "coverage_90": 0.902648080982815,
+    "failed_checks": []
   },
   "uncertainty_calibration": {
     "schema_version": "st_gnn_uncertainty_calibration/v1",
     "method": "global_sigma_scale_from_validation_quantile",
     "target_coverage": 0.9,
-    "coverage_before": 0.7481674256754195,
+    "coverage_before": 0.969080574290878,
     "coverage_after": 0.8999998946796365,
-    "sigma_scale": 13.623958198322143,
+    "sigma_scale": 0.4607918450844166,
     "calibration_manifest": "data/processed/v2_release/aircraft/aircraft-validation-manifest.json",
     "checkpoint": "checkpoints/aircraft-kaggle-v1/best.ckpt",
     "sample_count": 474742,
     "safety_boundary": "Uncertainty calibration only; trajectory coordinates are unchanged."
   },
-  "safety_boundary": "Trajectory prediction evaluation only; no engagement advice.",
-  "release_status": "candidate_ade_gate_pending",
-  "candidate_warning": "This model is exported for demonstration and integration testing only; release_gate.passed remains false."
+  "safety_boundary": "Trajectory prediction evaluation only; no engagement advice."
 }

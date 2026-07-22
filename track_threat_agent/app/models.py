@@ -91,6 +91,7 @@ class TrackGroup(BaseModel):
     group_threat_level: ThreatLevel
     evidence: List[str] = Field(default_factory=list)
     timestamp: float
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ProtectedAsset(BaseModel):

@@ -103,7 +103,7 @@ def test_group_threat_score_is_calculated():
     assert groups[0].group_threat_level in {"low", "medium", "high"}
 
 
-def test_semantic_consistency_raises_group_cohesion_and_evidence():
+def test_external_semantic_fields_do_not_change_physical_group_score():
     semantic_tracks = [
         make_track("red1", "unknown", 31.4200, 121.3000, 40, 132),
         make_track("red2", "unknown", 31.4210, 121.3010, 41, 133),
@@ -121,6 +121,115 @@ def test_semantic_consistency_raises_group_cohesion_and_evidence():
     detector.reset()
     plain_group = detector.detect(plain_tracks, [make_threat(t.track_id, 0.5) for t in plain_tracks])[0]
 
-    assert semantic_group.cohesion_score > plain_group.cohesion_score
-    assert semantic_group.group_threat_score > plain_group.group_threat_score
-    assert any("semantic" in evidence.lower() or "语义" in evidence for evidence in semantic_group.evidence)
+    assert semantic_group.cohesion_score == plain_group.cohesion_score
+    assert semantic_group.group_threat_score == plain_group.group_threat_score
+    assert not any("semantic" in evidence.lower() or "语义" in evidence for evidence in semantic_group.evidence)
+
+
+def test_chain_links_do_not_merge_distant_endpoints_into_one_group():
+    tracks = [
+        make_track("a", "aircraft", 31.0000, 121.0000, 100, 90),
+        make_track("b", "aircraft", 31.0000, 121.0250, 100, 90),
+        make_track("c", "aircraft", 31.0000, 121.0500, 100, 90),
+    ]
+
+    groups = GroupDetector(max_distance_m=3_000.0).detect(
+        tracks,
+        [make_threat(track.track_id, 0.5) for track in tracks],
+    )
+
+    assert len(groups) == 1
+    assert len(groups[0].member_track_ids) == 2
+    assert set(groups[0].member_track_ids) in ({"a", "b"}, {"b", "c"})
+
+
+def test_group_prediction_aggregates_uncertainty_and_expands_envelope():
+    tracks = [
+        make_track("a1", "aircraft", 31.4200, 121.3000, 210, 132),
+        make_track("a2", "aircraft", 31.4260, 121.3090, 208, 134),
+    ]
+    for index, track in enumerate(tracks):
+        for point in track.predicted_path:
+            point.update(
+                {
+                    "prediction_confidence": 0.8 + index * 0.1,
+                    "uncertainty_radius_m": 400.0 + index * 200.0,
+                    "model_used": "st_gnn_torchscript",
+                    "model_version": "aircraft-release-v1",
+                }
+            )
+
+    group = GroupDetector().detect(
+        tracks,
+        [make_threat(track.track_id, 0.5) for track in tracks],
+    )[0]
+
+    first_prediction = group.centroid_prediction[0]
+    raw_prediction_lats = [track.predicted_path[0]["lat"] for track in tracks]
+    raw_prediction_lons = [track.predicted_path[0]["lon"] for track in tracks]
+    assert first_prediction["prediction_confidence"] == 0.85
+    assert first_prediction["uncertainty_radius_m"] >= 500.0
+    assert first_prediction["model_versions"] == ["aircraft-release-v1"]
+    assert group.predicted_envelope["uncertainty_expansion_m"] == 600.0
+    assert group.predicted_envelope["min_lat"] < min(raw_prediction_lats)
+    assert group.predicted_envelope["max_lat"] > max(raw_prediction_lats)
+    assert group.predicted_envelope["min_lon"] < min(raw_prediction_lons)
+    assert group.predicted_envelope["max_lon"] > max(raw_prediction_lons)
+
+
+def test_group_lifecycle_keeps_id_across_short_detection_gap():
+    detector = GroupDetector(confirmation_hits=2, max_missed_frames=2)
+    tracks = [
+        make_track("a1", "aircraft", 31.4200, 121.3000, 210, 132),
+        make_track("a2", "aircraft", 31.4260, 121.3090, 208, 134),
+    ]
+    threats = [make_threat(track.track_id, 0.5) for track in tracks]
+
+    tentative = detector.detect(tracks, threats)[0]
+    confirmed = detector.detect(tracks, threats)[0]
+    coasting = detector.detect([tracks[0]], [threats[0]])[0]
+    recovered = detector.detect(tracks, threats)[0]
+
+    assert tentative.metadata["lifecycle_state"] == "tentative"
+    assert confirmed.metadata["lifecycle_state"] == "confirmed"
+    assert coasting.metadata["lifecycle_state"] == "coasting"
+    assert coasting.metadata["missed_count"] == 1
+    assert recovered.metadata["lifecycle_state"] == "confirmed"
+    assert {tentative.group_id, confirmed.group_id, coasting.group_id, recovered.group_id} == {
+        tentative.group_id
+    }
+
+
+def test_group_lifecycle_expires_after_coasting_limit():
+    detector = GroupDetector(confirmation_hits=1, max_missed_frames=1)
+    tracks = [
+        make_track("s1", "ship", 31.0200, 121.8200, 13, 292),
+        make_track("s2", "ship", 31.0320, 121.8380, 12, 290),
+    ]
+    threats = [make_threat(track.track_id, 0.5) for track in tracks]
+
+    confirmed = detector.detect(tracks, threats)[0]
+    coasting = detector.detect([], [])[0]
+    expired = detector.detect([], [])
+
+    assert confirmed.metadata["lifecycle_state"] == "confirmed"
+    assert coasting.metadata["lifecycle_state"] == "coasting"
+    assert expired == []
+
+
+def test_group_detection_writes_physical_context_to_member_tracks():
+    tracks = [
+        make_track("a1", "aircraft", 31.4200, 121.3000, 210, 132),
+        make_track("a2", "aircraft", 31.4260, 121.3090, 208, 134),
+    ]
+
+    group = GroupDetector(confirmation_hits=1).detect(
+        tracks,
+        [make_threat(track.track_id, 0.5) for track in tracks],
+    )[0]
+
+    for track in tracks:
+        context = track.metadata["physical_group_context"]
+        assert context["group_id"] == group.group_id
+        assert context["group_type"] == "air_formation"
+        assert context["cohesion_score"] == group.cohesion_score

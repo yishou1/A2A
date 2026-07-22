@@ -2,7 +2,12 @@ from scripts.smoke_track_threat_agent import build_smoke_task_payload, validate_
 
 
 def test_smoke_task_payload_contains_a2a_workflow_and_protected_assets():
-    payload = build_smoke_task_payload(frame_index=0, workflow_id="wf-smoke", work_item="wi-smoke")
+    payload = build_smoke_task_payload(
+        frame_index=0,
+        workflow_id="wf-smoke",
+        work_item="wi-smoke",
+        minimum_timestamp=9_000.0,
+    )
 
     assert payload["workflow_id"] == "wf-smoke"
     assert payload["work_item"] == "wi-smoke"
@@ -10,6 +15,8 @@ def test_smoke_task_payload_contains_a2a_workflow_and_protected_assets():
     assert payload["role"] == "track_threat"
     assert payload["payload"]["message_type"] == "perception_result"
     assert payload["payload"]["scene"]["protected_assets"]
+    assert min(item["timestamp"] for item in payload["payload"]["detections"]) > 9_000.0
+    assert all("wi-smoke" in item["detection_id"] for item in payload["payload"]["detections"])
 
 
 def test_validate_artifact_requires_tracks_asset_impacts_and_ranking():

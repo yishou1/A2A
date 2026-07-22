@@ -24,14 +24,16 @@ def test_default_algorithm_provider_uses_project_plan_contract():
     assert contract["primary_algorithms"]["threat_assessment"] == "dynamic_bayesian_network"
     assert "semantic_reasoning" not in contract["primary_algorithms"]
     assert contract["primary_algorithms"]["explainability"] == "xai_evidence_chain"
-    assert contract["fallback_providers"]["trajectory_prediction"] == "baseline_motion_provider"
-    assert "learned_trajectory_predictor" in contract["training_status"]
+    assert contract["fallback_providers"]["trajectory_prediction"] == "adaptive_cv_ca_ct_physics"
+    assert contract["training_status"]["dbn"]["parameter_version"] == "dbn-risk-attention-v1"
+    assert "learned_trajectory_predictor" not in contract["training_status"]
+    assert contract["algorithm_boundary"]["intent_inference"] == "downstream_agent"
     assert contract["network_algorithm_calls"] is False
 
 
 @pytest.mark.anyio
 async def test_artifact_exposes_plan_algorithm_trace_for_reporting():
-    await main.demo_reset()
+    main.reset_runtime_state()
     payload = json.loads((DATA_DIR / "group_scene.json").read_text())
     task_payload = {
         "workflow_id": "wf-plan-algorithm",
@@ -49,22 +51,22 @@ async def test_artifact_exposes_plan_algorithm_trace_for_reporting():
     assert summary["algorithm_provider"]["execution_strategy"] == "in_process_model_execution"
     assert summary["algorithm_provider"]["network_algorithm_calls"] is False
     assert summary["algorithm_provider"]["primary_algorithms"]["trajectory_prediction"] == "st_gnn_dynamic_entity_tracking"
-    assert summary["algorithm_provider"]["fallback_providers"]["trajectory_prediction"] == "baseline_motion_provider"
+    assert summary["algorithm_provider"]["fallback_providers"]["trajectory_prediction"] == "adaptive_cv_ca_ct_physics"
 
     first_track = artifact["tracks"][0]
     first_prediction = first_track["predicted_path"][0]
     first_threat = artifact["threats"][0]
 
     assert first_track["metadata"]["plan_algorithms"]["trajectory_prediction"]["algorithm"] == "ST-GNN"
-    assert first_prediction["st_gnn"]["algorithm"] == "ST-GNN"
-    assert first_prediction["st_gnn"]["runtime_provider"] == "local_numpy_message_passing"
-    assert first_prediction["st_gnn"]["runtime"] == "local_numpy_message_passing"
+    assert "st_gnn" not in first_prediction
+    assert first_track["metadata"]["plan_algorithms"]["trajectory_prediction"]["applied"] is False
+    assert first_track["metadata"]["plan_algorithms"]["trajectory_prediction"]["fallback_algorithm"] == "adaptive_multi_model_physics"
     assert first_threat["metadata"]["plan_algorithms"]["threat_assessment"]["algorithm"] == "DBN"
     assert first_threat["metadata"]["plan_algorithms"]["threat_assessment"]["runtime_provider"] == "dbn_risk_state_calibration_runtime"
     assert "semantic_reasoning" not in first_threat["metadata"]["plan_algorithms"]
     assert first_threat["metadata"]["xai"]["algorithm"] == "XAI"
     assert "semantic_sitrep" not in first_threat["metadata"]
-    assert first_threat["metadata"]["dbn"]["risk_pattern_model"]["algorithm"] == "DBN risk-pattern calibration"
+    assert first_threat["metadata"]["dbn"]["risk_pattern_model"]["algorithm"] == "DBN observable-pattern calibration"
     assert first_threat["metadata"]["xai"]["factor_chain"]
     assert first_threat["metadata"]["xai"]["safety_chain"]
     assert artifact["decision_risk_assessments"]

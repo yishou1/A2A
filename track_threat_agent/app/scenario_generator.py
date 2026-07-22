@@ -291,7 +291,7 @@ def generate_long_operation_sequence(frame_count: int = 90) -> Dict[str, object]
             {"name": "phase_2_track_stabilization", "frame_start": 15, "frame_end": 34},
             {"name": "phase_3_protected_asset_monitoring", "frame_start": 35, "frame_end": 44},
             {"name": "phase_4_anomaly_escalation", "frame_start": 45, "frame_end": 74},
-            {"name": "phase_5_continuing_surveillance", "frame_start": 75, "frame_end": frame_count - 1},
+            {"name": "phase_5_sustained_presence", "frame_start": 75, "frame_end": frame_count - 1},
         ],
         "protected_assets": default_protected_assets(),
         "frames": frames,
@@ -334,4 +334,4 @@ def _operation_phase(frame_index: int) -> str:
         return "phase_3_protected_asset_monitoring"
     if frame_index < 75:
         return "phase_4_anomaly_escalation"
-    return "phase_5_continuing_surveillance"
+    return "phase_5_sustained_presence"

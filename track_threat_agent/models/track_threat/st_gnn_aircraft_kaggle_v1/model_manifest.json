@@ -1,10 +1,9 @@
 {
   "schema_version": "st_gnn_model_bundle/v2",
   "model_type": "gru_edge_aware_gatv2_physics_residual",
-  "model_version": "st_gnn_aircraft_kaggle_v1_candidate",
+  "model_version": "st_gnn_aircraft_kaggle_v1",
+  "release_status": "gate_passed",
   "object_type": "aircraft",
-  "release_status": "candidate_ade_gate_pending",
-  "candidate_warning": "This model is exported for demonstration and integration testing only; release_gate.passed remains false.",
   "sampling_interval_s": 10,
   "history_points": 6,
   "prediction_horizons_s": [
@@ -45,36 +44,36 @@
     "validation": "5975571d074ff9d2e18cb025e24e9e4787a81a8ffe2321282a256fb778937d81"
   },
   "test_metrics": {
-    "ade_m": 336.17730712890625,
-    "fde_m": 695.3419799804688,
-    "rmse_m": 888.1160278320312,
+    "ade_m": 318.6798095703125,
+    "fde_m": 654.17919921875,
+    "rmse_m": 854.3287353515625,
     "by_horizon": {
       "10": {
-        "ade_m": 127.37349700927734,
-        "fde_m": 127.37349700927734
+        "ade_m": 125.22605895996094,
+        "fde_m": 125.22605895996094
       },
       "20": {
-        "ade_m": 213.01751708984375,
-        "fde_m": 213.01751708984375
+        "ade_m": 203.3968505859375,
+        "fde_m": 203.3968505859375
       },
       "30": {
-        "ade_m": 308.97625732421875,
-        "fde_m": 308.97625732421875
+        "ade_m": 291.9171447753906,
+        "fde_m": 291.9171447753906
       },
       "60": {
-        "ade_m": 695.3419799804688,
-        "fde_m": 695.3419799804688
+        "ade_m": 654.17919921875,
+        "fde_m": 654.17919921875
       }
     },
     "sample_count": 448589,
-    "coverage_90": 0.9066445008682781,
+    "coverage_90": 0.902648080982815,
     "uncertainty_calibration": {
       "schema_version": "st_gnn_uncertainty_calibration/v1",
       "method": "global_sigma_scale_from_validation_quantile",
       "target_coverage": 0.9,
-      "coverage_before": 0.7481674256754195,
+      "coverage_before": 0.969080574290878,
       "coverage_after": 0.8999998946796365,
-      "sigma_scale": 13.623958198322143,
+      "sigma_scale": 0.4607918450844166,
       "calibration_manifest": "data/processed/v2_release/aircraft/aircraft-validation-manifest.json",
       "checkpoint": "checkpoints/aircraft-kaggle-v1/best.ckpt",
       "sample_count": 474742,
@@ -204,23 +203,19 @@
     }
   },
   "release_gate": {
-    "passed": false,
+    "passed": true,
     "strongest_physical_baseline": "imm",
     "strongest_ade_baseline": "imm",
     "strongest_fde_baseline": "imm",
-    "ade_improvement": 0.09238272215858823,
-    "fde_improvement": 0.13295778318150975,
-    "coverage_90": 0.9066445008682781,
-    "failed_checks": [
-      "overall_ade_improvement"
-    ],
-    "model_release_status": "candidate_ade_gate_pending",
-    "candidate_reason": "FDE and calibrated coverage passed, but ADE improvement is below the 10 percent release gate."
+    "ade_improvement": 0.13962276711819066,
+    "fde_improvement": 0.184284856347805,
+    "coverage_90": 0.902648080982815,
+    "failed_checks": []
   },
   "torch_version": "2.12.1",
   "python_version": "3.11.15",
   "cuda_version": "cpu",
-  "training_commit": "kaggle-20260708-local",
+  "training_commit": "local-uncommitted",
   "model_file": "model.ts",
   "normalization_file": "normalization.json",
   "metrics_file": "metrics.json",

@@ -2,12 +2,51 @@ import json
 from pathlib import Path
 
 import pytest
+from protocol_contracts import validate_task_response
 
 from app import main
 from app.main import _requested_skills, send_message, verify_a2a_token, well_known_a2a_agent_card
 
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "sample_data"
+
+
+def _commander_task(
+    *,
+    work_item: str,
+    required_skill: str,
+    output_hint: str,
+    input_payload: dict,
+) -> dict:
+    return {
+        "schema_version": "1.0",
+        "workflow_id": "wf-commander-v1",
+        "work_item": work_item,
+        "command": required_skill,
+        "required_skill": required_skill,
+        "required_skills": [required_skill],
+        "input": input_payload,
+        "context": {"algorithm_level": "medium"},
+        "attachments": [],
+        "work_list": [],
+        "output_hint": output_hint,
+    }
+
+
+def test_openapi_excludes_removed_frontend_demo_routes():
+    paths = set(main.app.openapi()["paths"])
+
+    assert {
+        "/demo/frame",
+        "/demo/state",
+        "/demo/reset",
+        "/demo/start",
+        "/demo/stop",
+        "/debug/reset",
+    }.isdisjoint(paths)
+    assert "/ws" not in {route.path for route in main.app.routes}
+    assert "/sendMessage" in paths
+    assert "/state/summary" in paths
 
 
 def test_a2a_agent_card_compatibility_endpoint():
@@ -40,8 +79,21 @@ def test_models_endpoint_reports_agent_loaded_models():
 
     assert payload["deployment_status"] in {"ready", "partial"}
     assert payload["count"] >= 7
-    assert "trajectory_imm" in {model["id"] for model in payload["models"]}
+    model_ids = {model["id"] for model in payload["models"]}
+    assert "trajectory_adaptive_multi_model_physics" in model_ids
+    assert "trajectory_imm" not in model_ids
+    assert "local_graph_message_passing" not in model_ids
+    assert "trajectory_numpy_sequence_predictor" not in model_ids
     assert all(model["status"] in {"ready", "unavailable"} for model in payload["models"])
+    dbn = next(model for model in payload["models"] if model["id"] == "dbn_risk_state_calibration")
+    assert dbn["version"] == "dbn-risk-attention-v1"
+
+
+def test_output_schema_exposes_group_lifecycle_and_versioned_dbn_fields():
+    schema = main.output_schema()
+
+    assert "metadata.lifecycle_state" in schema["group_fields"]
+    assert "parameter_model.sha256" in schema["dbn_fields"]
 
 
 def test_commander_camel_case_required_skill_is_supported():
@@ -88,7 +140,9 @@ async def test_send_message_accepts_a2a_task_payload():
     assert body["artifact"]["artifact_schema_version"] == "track_threat_group_artifact/v1"
     assert body["artifact"]["trace"]["task_id"] == body["task_id"]
     assert body["artifact"]["summary"]["schema"]["artifact_schema_version"] == "track_threat_group_artifact/v1"
-    assert body["artifact"]["tracks"][0]["predicted_path"][0]["st_gnn_inspired"] in {True, False}
+    prediction = body["artifact"]["tracks"][0]["predicted_path"][0]
+    assert prediction["prediction_provenance"]["algorithm"] == "adaptive_multi_model_physics"
+    assert "st_gnn_inspired" not in prediction
     assert body["artifact"]["summary"]["execution"]["mode"] == "in_process_model_execution"
     assert body["artifact"]["summary"]["execution"]["network_algorithm_calls"] is False
 
@@ -132,8 +186,110 @@ async def test_send_message_accepts_required_skills_context_and_output_hint():
 
 
 @pytest.mark.anyio
+async def test_commander_trajectory_tracking_skill_returns_requested_output_key():
+    main.reset_runtime_state()
+    payload = json.loads((DATA_DIR / "frame_1.json").read_text())
+    task = _commander_task(
+        work_item="wi-commander-tracking",
+        required_skill="trajectory_tracking",
+        output_hint="tracking_result",
+        input_payload={
+            "cognition_result": [
+                {
+                    "activity_id": "cognition-1",
+                    "value": {
+                        "task_id": payload["task_id"],
+                        "scene": payload["scene"],
+                        "detections": payload["detections"],
+                    },
+                }
+            ]
+        },
+    )
+
+    body = await send_message(task, token="unit-test")
+
+    validate_task_response(task, body)
+    assert body["schema_version"] == "1.0"
+    assert body["status"] == "completed"
+    tracking_result = body["output"]["tracking_result"]
+    assert tracking_result["schema_version"] == "tracking_result/v1"
+    assert len(tracking_result["tracks"]) == len(payload["detections"])
+    assert tracking_result["scene"] == payload["scene"]
+    assert body["executed_skills"] == ["trajectory_tracking"]
+
+
+@pytest.mark.anyio
+async def test_commander_threat_ranking_consumes_tracking_context_without_retracking():
+    main.reset_runtime_state()
+    payload = json.loads((DATA_DIR / "group_scene.json").read_text())
+    tracking_task = _commander_task(
+        work_item="wi-commander-track-first",
+        required_skill="trajectory_tracking",
+        output_hint="tracking_result",
+        input_payload={
+            "scene": payload["scene"],
+            "detections": payload["detections"],
+        },
+    )
+    tracking_response = await send_message(tracking_task, token="unit-test")
+    tracking_result = tracking_response["output"]["tracking_result"]
+    history_lengths_before = {
+        item["track_id"]: len(item["history_path"])
+        for item in tracking_result["tracks"]
+    }
+
+    ranking_task = _commander_task(
+        work_item="wi-commander-rank-second",
+        required_skill="threat_ranking",
+        output_hint="threat_assessment_result",
+        input_payload={
+            "tracking_result": [
+                {
+                    "activity_id": "tracking-1",
+                    "work_item": "wi-commander-track-first",
+                    "value": tracking_result,
+                }
+            ]
+        },
+    )
+    ranking_response = await send_message(ranking_task, token="unit-test")
+
+    validate_task_response(ranking_task, ranking_response)
+    assessment = ranking_response["output"]["threat_assessment_result"]
+    assert ranking_response["schema_version"] == "1.0"
+    assert assessment["schema_version"] == "threat_assessment_result/v1"
+    assert assessment["threats"]
+    assert assessment["unified_threat_ranking"]
+    assert assessment["decision_risk_assessments"]
+    assert {
+        track_id: len(main.tracker.tracks[track_id].history_path)
+        for track_id in history_lengths_before
+    } == history_lengths_before
+
+
+@pytest.mark.anyio
+async def test_full_pipeline_honors_string_output_hint():
+    main.reset_runtime_state()
+    payload = json.loads((DATA_DIR / "frame_1.json").read_text())
+    task = _commander_task(
+        work_item="wi-commander-full",
+        required_skill="track_threat_situation_analysis",
+        output_hint="track_threat_group_artifact",
+        input_payload=payload,
+    )
+
+    body = await send_message(task, token="unit-test")
+
+    validate_task_response(task, body)
+    artifact = body["output"]["track_threat_group_artifact"]
+    assert artifact["artifact_schema_version"] == "track_threat_group_artifact/v1"
+    assert artifact["summary"]["track_count"] == len(payload["detections"])
+
+
+@pytest.mark.anyio
 async def test_state_summary_exposes_runtime_and_last_artifact():
-    await main.demo_reset()
+    main.reset_runtime_state()
     payload = json.loads((DATA_DIR / "frame_1.json").read_text())
     result = main._process_payload(main.PerceptionResultRequest.model_validate(payload))
 
@@ -143,7 +299,8 @@ async def test_state_summary_exposes_runtime_and_last_artifact():
     assert summary["schema"]["state_schema_version"] >= 1
     assert summary["last_artifact"]["task_id"] == result["task_id"]
     assert summary["last_artifact"]["track_count"] == result["artifact"]["summary"]["track_count"]
-    assert summary["model_status"]["learned_trajectory_predictor"]["loaded"] in {True, False}
+    assert "learned_trajectory_predictor" not in summary["model_status"]
+    assert summary["model_status"]["physics_fallback"]["is_trained_model"] is False
 
 
 def test_send_message_requires_bearer_token():
@@ -190,9 +347,8 @@ def test_input_output_schemas_document_assets_and_ranking_fields():
 
 
 @pytest.mark.anyio
-async def test_send_message_applies_learned_predictor_after_track_history_is_available():
-    assert main.learned_predictor.loaded is True
-    await main.demo_reset()
+async def test_send_message_does_not_apply_legacy_ridge_or_untrained_graph_predictors():
+    main.reset_runtime_state()
 
     bodies = []
     for frame_index in range(4):
@@ -219,7 +375,7 @@ async def test_send_message_applies_learned_predictor_after_track_history_is_ava
                     "heading": 58.0,
                     "confidence": 0.96,
                     "source_agent": "opensky_replay",
-                    "metadata": {"demo": "learned_predictor_online"},
+                    "metadata": {"demo": "formal_prediction_chain"},
                 }
             ],
         }
@@ -234,19 +390,12 @@ async def test_send_message_applies_learned_predictor_after_track_history_is_ava
 
     artifact = bodies[-1]["artifact"]
     assert artifact["summary"]["track_count"] == 1
-    assert artifact["summary"]["algorithm_provider"]["training_status"]["learned_trajectory_predictor"]["loaded"] is True
+    assert "learned_trajectory_predictor" not in artifact["summary"]["algorithm_provider"]["training_status"]
 
     track = artifact["tracks"][0]
-    learned_points = [
-        point
-        for point in track["predicted_path"]
-        if point.get("model_used") == "learned_numpy_sequence_predictor"
-    ]
-    assert learned_points
-    assert {point["dt_s"] for point in learned_points} >= {10.0, 20.0, 30.0, 60.0}
-    assert all(point["learned_model"]["loaded"] is True for point in learned_points)
-    assert track["metadata"]["learned_predictor"]["applied"] is True
-    assert track["metadata"]["plan_algorithms"]["trajectory_prediction"]["trained_model_loaded"] is True
+    assert all(point.get("model_used") != "learned_numpy_sequence_predictor" for point in track["predicted_path"])
+    assert all(not str(point.get("model_used", "")).endswith("_graph_refined") for point in track["predicted_path"])
+    assert "learned_predictor" not in track["metadata"]
 
 
 def test_process_payload_applies_embedded_torchscript_st_gnn_when_history_is_available():
@@ -291,7 +440,7 @@ def test_process_payload_applies_embedded_torchscript_st_gnn_when_history_is_ava
     track = result["artifact"]["tracks"][0]
     by_horizon = {point["dt_s"]: point for point in track["predicted_path"]}
     assert by_horizon[10.0]["model_used"] == "st_gnn_torchscript"
-    assert by_horizon[10.0]["model_version"] == "st_gnn_aircraft_kaggle_v1_candidate"
+    assert by_horizon[10.0]["model_version"] == "st_gnn_aircraft_kaggle_v1"
     assert by_horizon[10.0]["uncertainty_radius_m"] > 0.0
     assert by_horizon[10.0]["fallback_reason"] is None
     assert by_horizon[10.0]["st_gnn"]["runtime_provider"] == "torchscript_pytorch"

@@ -61,7 +61,7 @@ def test_asset_impact_analysis_scores_protected_asset_relationships():
     assert impacts[0].evidence
 
 
-def test_semantic_relations_raise_asset_impact_score():
+def test_external_semantic_relations_do_not_change_core_asset_impact_score():
     asset = ProtectedAsset(
         asset_id="mission-area",
         asset_name="Mission Area",
@@ -89,9 +89,9 @@ def test_semantic_relations_raise_asset_impact_score():
     )
     by_track = {impact.source_track_id: impact for impact in impacts}
 
-    assert by_track["semantic"].score > by_track["baseline"].score
-    assert by_track["semantic"].factors["semantic_asset_factor"] > 0.8
-    assert any("情报" in evidence or "knowledge" in evidence.lower() for evidence in by_track["semantic"].evidence)
+    assert by_track["semantic"].score == by_track["baseline"].score
+    assert "semantic_asset_factor" not in by_track["semantic"].factors
+    assert not any("知识图谱" in evidence or "knowledge" in evidence.lower() for evidence in by_track["semantic"].evidence)
 
 
 def test_asset_impact_reports_closest_time_priority_and_vulnerability():

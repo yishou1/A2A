@@ -1,4 +1,4 @@
-"""Explainability helpers for simulation-only risk-priority outputs."""
+"""Explainability helpers for situation-awareness priority outputs."""
 
 from __future__ import annotations
 
@@ -8,9 +8,16 @@ from .models import TrackState
 
 
 class XAIExplanationBuilder:
-    """Build compact evidence chains and model traces for reports/events."""
+    """Build Chinese evidence chains and auditable model traces."""
 
-    SAFETY_NOTE = "simulation-only attention priority; no weapon control, targeting, or engagement advice"
+    SAFETY_NOTE = "仅表示态势关注优先级，不包含武器控制、目标选择、制导、交战或打击建议"
+    PATTERN_LABELS = {
+        "protected_zone_approach": "接近保护区域",
+        "sustained_presence": "持续稳定出现",
+        "coordinated_motion": "协同运动",
+        "anomalous_motion": "异常运动",
+        "non_closing_motion": "未持续接近",
+    }
 
     def threat_metadata(
         self,
@@ -25,9 +32,8 @@ class XAIExplanationBuilder:
             "type": round(0.18 * factors.get("type_factor", 0.0), 4),
             "anomaly": round(0.18 * factors.get("anomaly_factor", 0.0), 4),
             "quality": round(0.12 * factors.get("quality_factor", 0.0), 4),
-            "dbn_state": round(0.28 * float(dbn_result.get("state_factor", 0.0)), 4),
+            "dbn_state": round(0.24 * float(dbn_result.get("state_factor", 0.0)), 4),
         }
-        graph_meta = track.metadata.get("st_gnn_inspired", {}) or {}
         dbn_transition = dbn_result.get("state_transition", {}) or {}
         pattern_transition = dbn_result.get("risk_pattern_transition", {}) or {}
         factor_chain = [
@@ -37,7 +43,8 @@ class XAIExplanationBuilder:
         return {
             "xai": {
                 "algorithm": "XAI",
-                "contract": "sitrep_explainable_evidence_chain",
+                "contract": "situation_attention_explainable_evidence_chain",
+                "language": "zh-CN",
                 "evidence_chain": self.threat_evidence_chain(track, factors, weighted_score, dbn_result),
                 "factor_contributions": contributions,
                 "factor_chain": factor_chain,
@@ -45,22 +52,16 @@ class XAIExplanationBuilder:
                     "observation_reliability": dbn_result.get("observation_reliability"),
                     "posterior_entropy": dbn_result.get("posterior_entropy"),
                     "high_delta": dbn_transition.get("high_delta"),
-                    "dominant_risk_pattern": dbn_result.get("dominant_risk_pattern"),
-                    "risk_pattern_changed": pattern_transition.get("dominant_changed"),
+                    "dominant_observable_pattern": dbn_result.get("dominant_risk_pattern"),
+                    "observable_pattern_changed": pattern_transition.get("dominant_changed"),
+                    "parameter_model": dbn_result.get("parameter_model"),
                 },
                 "safety_chain": [
-                    "该结果仅表示仿真态势关注优先级",
-                    "不包含武器控制、制导、交战或打击建议",
-                    "风险模式概率仅用于态势理解和排序解释",
+                    "该结果仅表示仿真或接入态势中的关注优先级",
+                    "模式概率只描述可观测的运动与接近状态",
+                    "不包含武器控制、目标选择、制导、交战或打击建议",
                 ],
-                "model_trace": [
-                    "prediction_gated_nearest_neighbor_tracking",
-                    str((track.metadata.get("prediction") or {}).get("model", "adaptive_motion_prediction")),
-                    "ST-GNN trajectory prediction with baseline fallback" if graph_meta.get("enabled") else "ST-GNN trajectory prediction without active graph neighbors",
-                    "weighted_multi_factor_attention_score",
-                    "DBN threat-state posterior smoothing",
-                    "DBN risk-pattern probability calibration",
-                ],
+                "model_trace": self._model_trace(track, dbn_result),
                 "safety_note": self.SAFETY_NOTE,
             }
         }
@@ -72,23 +73,53 @@ class XAIExplanationBuilder:
         weighted_score: float,
         dbn_result: Dict[str, object],
     ) -> List[str]:
-        graph_meta = track.metadata.get("st_gnn_inspired", {}) or {}
         posterior = dbn_result.get("posterior", {}) or {}
         state_transition = dbn_result.get("state_transition", {}) or {}
-        evidence = [
-            f"track {track.track_id} is a simulated {track.object_type} with quality {track.track_quality:.2f}",
-            f"distance factor {factors.get('distance_factor', 0.0):.2f} and closing factor {factors.get('closing_factor', 0.0):.2f}",
-            f"adaptive prediction model: {(track.metadata.get('prediction') or {}).get('model', 'unknown')}",
-            f"graph refinement neighbors: {graph_meta.get('neighbor_count', 0)}, influence {graph_meta.get('graph_influence', 0.0)}",
+        pattern = str(dbn_result.get("dominant_risk_pattern", "unknown"))
+        parameter_model = dbn_result.get("parameter_model", {}) or {}
+        prediction = track.metadata.get("prediction", {}) or {}
+        return [
+            f"航迹 {track.track_id} 类型为 {track.object_type}，航迹质量 {track.track_quality:.2f}",
+            (
+                f"距离因子 {factors.get('distance_factor', 0.0):.2f}，"
+                f"接近因子 {factors.get('closing_factor', 0.0):.2f}，"
+                f"异常因子 {factors.get('anomaly_factor', 0.0):.2f}"
+            ),
+            f"航线预测模型为 {prediction.get('model', 'adaptive_multi_model_physics')}",
+            f"DBN 平滑前加权分数为 {weighted_score:.2f}",
+            f"DBN 观测可信度为 {float(dbn_result.get('observation_reliability', 0.0)):.2f}",
+            f"DBN 高关注状态概率变化量为 {float(state_transition.get('high_delta', 0.0)):.2f}",
+            (
+                "DBN 后验低/中/高概率为 "
+                f"{posterior.get('low', 0.0):.2f}/"
+                f"{posterior.get('medium', 0.0):.2f}/"
+                f"{posterior.get('high', 0.0):.2f}"
+            ),
+            f"当前主导可观测模式为 {self.PATTERN_LABELS.get(pattern, pattern)}",
+            (
+                f"DBN 参数版本 {parameter_model.get('model_version', 'unknown')}，"
+                f"校验哈希 {str(parameter_model.get('sha256', 'unknown'))[:12]}"
+            ),
+            self.SAFETY_NOTE,
         ]
-        evidence.extend(
+
+    @staticmethod
+    def _model_trace(track: TrackState, dbn_result: Dict[str, object]) -> List[str]:
+        prediction = track.metadata.get("prediction", {}) or {}
+        trace = [
+            "全局最近邻关联与 Kalman/alpha-beta 航迹更新",
+            f"{prediction.get('model', 'adaptive_multi_model_physics')} 航线预测",
+        ]
+        st_gnn_runtime = track.metadata.get("st_gnn_runtime", {}) or {}
+        if st_gnn_runtime.get("applied"):
+            trace.append(f"ST-GNN TorchScript 残差修正 {st_gnn_runtime.get('model_version', '')}".strip())
+        else:
+            trace.append("ST-GNN 未启用，本帧使用物理模型回退")
+        trace.extend(
             [
-                f"weighted score before DBN smoothing: {weighted_score:.2f}",
-                f"DBN observation reliability: {float(dbn_result.get('observation_reliability', 0.0)):.2f}",
-                f"DBN high-state delta: {float(state_transition.get('high_delta', 0.0)):.2f}",
-                f"DBN posterior low/medium/high: {posterior.get('low', 0.0):.2f}/{posterior.get('medium', 0.0):.2f}/{posterior.get('high', 0.0):.2f}",
-                f"dominant risk pattern: {dbn_result.get('dominant_risk_pattern', 'unknown')}",
-                self.SAFETY_NOTE,
+                "多因子态势关注基础评分",
+                f"DBN 三状态后验平滑 {((dbn_result.get('parameter_model') or {}).get('model_version', 'unknown'))}",
+                "可观测运动模式概率校准",
             ]
         )
-        return evidence
+        return trace
