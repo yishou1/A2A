@@ -88,8 +88,8 @@ class AgentHeartbeatTest(unittest.TestCase):
             metadata={"role": "recon", "status": "idle"},
             heartbeat_interval=0.05,
             metadata_provider=lambda: {
-                "resource_state": "warn",
                 "resource_cpu_percent": 88.5,
+                "resource_memory_percent": 61.0,
             },
         )
 
@@ -102,8 +102,8 @@ class AgentHeartbeatTest(unittest.TestCase):
 
         heartbeat_metadata = fake_registry.calls[0]["kwargs"]["metadata"]
         self.assertEqual(heartbeat_metadata["status"], "idle")
-        self.assertEqual(heartbeat_metadata["resource_state"], "warn")
         self.assertEqual(heartbeat_metadata["resource_cpu_percent"], 88.5)
+        self.assertEqual(heartbeat_metadata["resource_memory_percent"], 61.0)
 
     def test_filter_instances_discards_stale_instances(self):
         registry = NacosRegistry(server_addresses="127.0.0.1:8848")

@@ -7,6 +7,7 @@
         <variable name="StrikeResult" type="String"/>
         <variable name="EvalScore" type="Integer"/>
         <variable name="CommanderDecision" type="String"/>
+        <variable name="AssaultResult" type="String"/>
     </variables>
 
     <!-- 流程主体序列 -->
@@ -42,7 +43,7 @@
                 <sequence>
                     <invoke partnerLink="LLMCommanderAgent" operation="analyzeAndReplanning"
                             requiredSkill="analyze_and_replanning"
-                            inputVariable="ReconReport + StrikeResult" outputVariable="CommanderDecision"/>
+                            inputVariables="ReconReport,StrikeResult" outputVariable="CommanderDecision"/>
                     
                     <!-- 中止当前突击流程，抛出重规划事件或进行异常打断 -->
                     <throw faultName="InsufficientSuppressionFault"/>
@@ -53,7 +54,7 @@
             <otherwise>
                 <invoke partnerLink="AssaultAgent" operation="captureBeachhead"
                         requiredSkill="capture_beachhead"
-                        inputVariable="StrikeCoordinates"/>
+                        inputVariable="StrikeCoordinates" outputVariable="AssaultResult"/>
             </otherwise>
         </switch>
         

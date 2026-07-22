@@ -1,0 +1,11 @@
+<process name="IntegratedDemoWorkflow" targetNamespace="http://a2a.project613/workflow">
+  <sequence>
+    <invoke name="Cognition" partnerLink="TacticalIntelligenceAgent" operation="buildSituationSummary" requiredSkill="semantic_intelligence" inputVariable="MissionInput" outputVariable="CognitionResult" />
+    <invoke name="Tracking" partnerLink="TrackThreatAgent" operation="updateTracks" requiredSkill="trajectory_tracking" inputVariable="CognitionResult" outputVariable="TrackingResult" />
+    <invoke name="ThreatAssessment" partnerLink="TrackThreatAgent" operation="rankThreats" requiredSkill="threat_ranking" inputVariable="TrackingResult" outputVariable="ThreatAssessmentResult" />
+    <invoke name="DecisionPlanning" partnerLink="DecisionPlanningAgent" operation="generateDecisionPlan" requiredSkill="decision_planning" inputVariable="ThreatAssessmentResult" outputVariable="DecisionPlanningResult" />
+    <invoke name="ComplianceAuthorization" partnerLink="ComplianceAuthorizationAgent" operation="checkComplianceAuthorization" requiredSkill="compliance_authorization" inputVariable="DecisionPlanningResult" outputVariable="ComplianceAuthorizationResult" />
+    <invoke name="ExecutionSimulation" partnerLink="SimulationExecutionAgent" operation="simulateExecutionControl" requiredSkill="execution_control" inputVariable="ComplianceAuthorizationResult" outputVariable="ExecutionSimulationResult" />
+    <invoke name="EffectEvaluation" partnerLink="ClosedLoopAgent" operation="evaluateMissionEffect" requiredSkill="closed_loop_optimization" inputVariable="ExecutionSimulationResult" outputVariable="EffectEvaluationResult" />
+  </sequence>
+</process>

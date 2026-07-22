@@ -76,6 +76,7 @@ A2A/
 │   ├── workflow_manager.py  # 常驻多 Workflow 调度器
 │   ├── manager_api.py       # 常驻调度器 HTTP API
 │   └── agent_leases.py      # Agent 租约与资源锁
+├── commander_gateway/       # AMOS 数据包接入和 Commander 状态投影
 ├── recon_agent/             # 侦察兵 Agent
 ├── artillery_agent/         # 火力打击 Agent
 ├── assault_agent/           # 登陆突击 Agent
@@ -229,6 +230,119 @@ cd /home/yl/yl/jzz/A2A
 - `demo_workflow_manager.py` 用于展示常驻 Manager 的多 Workflow 并发、排队、租约和独立 checkpoint。
 - `demo_resume_after_restart.py` 用于演示同一个 workflow 在进程重启后继续执行。
 - `demo_commander_failover_resume.py` 用于演示主 Commander 宕机后，在新端口启动备用 Commander 并 resume。
+
+## 🌉 Commander Gateway
+
+Commander Gateway 是 AMOS 与 Commander 之间的独立接入层，默认监听 `8030`。它从 AMOS 读取同一时间切片的 Snapshot 和 Event，生成带 SHA-256 校验的数据包，再以 HTTP 附件引用提交给 Commander。Gateway 不修改 AMOS 数据，不在后台轮询，也不依赖 MinIO。
+
+```text
+AMOS :5000 ── Snapshot/Event ──> Gateway :8030 ── /workflows ──> Commander :8021
+                                      │                              │
+                                      └── package/status projection <┘
+```
+
+### 本地启动顺序
+
+1. 启动 AMOS，并在 Dashboard 或 API 中启动海上防御场景、生成模拟链路：
+
+```bash
+cd /home/dministrator/work/amos-simulation-platform
+bash scripts/run_offline_platform.sh
+
+curl -X POST http://127.0.0.1:5000/api/v1/sim/start \
+  -H 'Content-Type: application/json' \
+  -d '{"scenario_id":"maritime-defense-interception-event"}'
+
+curl -X POST http://127.0.0.1:5000/api/v1/sim/maritime-chain/generate \
+  -H 'Content-Type: application/json' \
+  -d '{}'
+```
+
+2. 启动常驻 Commander Manager。只验证流程时可使用 local 模式：
+
+```bash
+cd /home/dministrator/work/A2A
+python commander_agent/main.py \
+  --mode local \
+  --serve-workflow-manager \
+  --manager-host 127.0.0.1 \
+  --manager-port 8021
+```
+
+3. 启动 Gateway：
+
+```bash
+cd /home/dministrator/work/A2A
+python -m commander_gateway --host 127.0.0.1 --port 8030
+```
+
+Gateway 首版只支持单 worker。状态默认保存到 `.a2a_state/commander_gateway/`，包括数据包、workflow 映射、幂等记录和数据包校验文件。
+
+### 环境变量
+
+| 变量 | 默认值 | 用途 |
+|---|---|---|
+| `AMOS_BASE_URL` | `http://127.0.0.1:5000` | AMOS API 地址 |
+| `COMMANDER_BASE_URL` | `http://127.0.0.1:8021` | Commander Manager 地址 |
+| `GATEWAY_PUBLIC_BASE_URL` | `http://127.0.0.1:8030` | Commander 下载数据包时使用的 Gateway 地址 |
+| `GATEWAY_STATE_DIR` | `.a2a_state/commander_gateway` | 本地持久化目录 |
+| `GATEWAY_API_TOKEN` | 空 | 非空时，workflow 控制接口要求 Bearer Token |
+| `COMMANDER_TOKEN` | 空 | 非空时，Gateway 向 Commander 转发 Bearer Token |
+| `GATEWAY_REQUEST_TIMEOUT_SEC` | `5.0` | AMOS、Commander 请求超时秒数 |
+
+`GET /gateway/v1/health` 和数据包下载接口不要求 Gateway Token。提交、查询、恢复、work-list 和 trace 接口在配置 Token 后统一使用：
+
+```bash
+export GATEWAY_API_TOKEN='replace-with-local-secret'
+curl http://127.0.0.1:8030/gateway/v1/health
+```
+
+### 提交和查询
+
+先通过 `GET /api/v1/sim/snapshot` 确认当前 `run_id` 和 `simulation_chains[].chain_id`，再提交：
+
+```bash
+curl -X POST http://127.0.0.1:8030/gateway/v1/workflows \
+  -H 'Authorization: Bearer replace-with-local-secret' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "schema_version":"amos.commander.gateway.submit.v1",
+    "run_id":"<current-run-id>",
+    "chain_id":"<current-chain-id>",
+    "workflow":"bpel",
+    "workflow_file":"beachhead_workflow",
+    "max_steps":10,
+    "max_workers":3,
+    "max_retries":1,
+    "retry_backoff":0.2,
+    "request_timeout":5.0
+  }'
+```
+
+响应中的 `workflow_id` 是由运行、链路、快照游标、数据包校验和及工作流参数计算出的确定性 ID。相同请求重复提交不会再次创建 workflow。
+
+```bash
+curl -H 'Authorization: Bearer replace-with-local-secret' \
+  http://127.0.0.1:8030/gateway/v1/workflows/<workflow-id>
+
+curl -H 'Authorization: Bearer replace-with-local-secret' \
+  http://127.0.0.1:8030/gateway/v1/workflows/<workflow-id>/work-list
+
+curl -H 'Authorization: Bearer replace-with-local-secret' \
+  http://127.0.0.1:8030/gateway/v1/workflows/<workflow-id>/trace
+
+curl -X POST -H 'Authorization: Bearer replace-with-local-secret' \
+  http://127.0.0.1:8030/gateway/v1/workflows/<workflow-id>/resume
+```
+
+未设置 `GATEWAY_API_TOKEN` 时，上述 Authorization 头可以省略。数据包下载响应包含 `ETag` 和 `X-Checksum-SHA256`，响应字节与提交给 Commander 的校验和一致。
+
+### 测试
+
+```bash
+python -m unittest tests.test_commander_gateway -v
+python -m unittest discover -s tests -v
+```
 
 ## 🤝 团队协作与合并
 

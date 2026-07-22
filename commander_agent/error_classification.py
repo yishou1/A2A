@@ -13,8 +13,10 @@ class AgentErrorCode(str, Enum):
     AGENT_NOT_READY = "AGENT_NOT_READY"
     AGENT_HEARTBEAT_LOST = "AGENT_HEARTBEAT_LOST"
     AGENT_HTTP_5XX = "AGENT_HTTP_5XX"
+    AGENT_RESOURCE_EXHAUSTED = "AGENT_RESOURCE_EXHAUSTED"
     AGENT_PROTOCOL_ERROR = "AGENT_PROTOCOL_ERROR"
     AGENT_BUSINESS_ERROR = "AGENT_BUSINESS_ERROR"
+    MODEL_INVOCATION_ERROR = "MODEL_INVOCATION_ERROR"
     AGENT_LATE_RESPONSE = "AGENT_LATE_RESPONSE"
     AGENT_UNKNOWN_ERROR = "AGENT_UNKNOWN_ERROR"
 
@@ -25,6 +27,7 @@ FAILOVER_ERROR_CODES = {
     AgentErrorCode.AGENT_NOT_READY.value,
     AgentErrorCode.AGENT_HEARTBEAT_LOST.value,
     AgentErrorCode.AGENT_HTTP_5XX.value,
+    AgentErrorCode.AGENT_RESOURCE_EXHAUSTED.value,
 }
 
 
@@ -74,6 +77,31 @@ def classify_agent_error(error: Any) -> AgentErrorInfo:
         return _info(AgentErrorCode.AGENT_TIMEOUT, message, failover=True, retryable=True)
     if "heartbeat lost" in text:
         return _info(AgentErrorCode.AGENT_HEARTBEAT_LOST, message, failover=True, retryable=True)
+    if any(
+        marker in text
+        for marker in (
+            "resource exhausted",
+            "resource insufficient",
+            "insufficient resource",
+            "out of memory",
+            "资源不足",
+            "内存不足",
+        )
+    ):
+        return _info(AgentErrorCode.AGENT_RESOURCE_EXHAUSTED, message, failover=True, retryable=True)
+    if any(
+        marker in text
+        for marker in (
+            "model invocation",
+            "model call failed",
+            "inference failed",
+            "model error",
+            "模型调用",
+            "模型异常",
+            "推理失败",
+        )
+    ):
+        return _info(AgentErrorCode.MODEL_INVOCATION_ERROR, message, failover=False, retryable=False)
     if "agent is not ready" in text or "service unavailable" in text:
         return _info(AgentErrorCode.AGENT_NOT_READY, message, failover=True, retryable=True)
     if "late response ignored" in text:
@@ -120,6 +148,10 @@ def _info(code: AgentErrorCode, message: str, *, failover: bool, retryable: bool
 
 
 def _category_for_code(code: str) -> str:
+    if code == AgentErrorCode.AGENT_RESOURCE_EXHAUSTED.value:
+        return "resource"
+    if code == AgentErrorCode.MODEL_INVOCATION_ERROR.value:
+        return "model"
     if code in FAILOVER_ERROR_CODES:
         return "system"
     if code == AgentErrorCode.AGENT_BUSINESS_ERROR.value:

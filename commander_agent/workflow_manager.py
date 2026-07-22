@@ -9,9 +9,12 @@ from typing import Any, Callable, Optional
 from commander_agent.agent_leases import AgentLeaseManager
 from commander_agent.distributed_lock import RedisDistributedLock
 from commander_agent.main import CommanderAgent, PROJECT_ROOT
+from commander_agent.scheduling_policy import JsonSchedulerFeedbackStore, SchedulingPolicy
+from commander_agent.task_decomposer import TaskDecomposer
 from registry.nacos_manager import NacosRegistry
 from workflow_payloads import normalize_attachments
 from workflow_state_store import WorkflowStateStore, new_workflow_id, utc_now_iso
+from telemetry import traced_method
 
 
 class CommanderWorkflowManager:
@@ -36,14 +39,20 @@ class CommanderWorkflowManager:
         self.max_workflows = max(1, int(max_workflows))
         self.state_store = WorkflowStateStore(self.state_dir)
         self.registry = None if mode == "local" else (registry or NacosRegistry())
+        self.feedback_store = JsonSchedulerFeedbackStore(
+            os.path.join(self.state_dir, "scheduling_feedback.json")
+        )
+        self.scheduling_policy = SchedulingPolicy(feedback_store=self.feedback_store)
         self.lease_manager = (
             AgentLeaseManager(
                 self.registry,
                 distributed_lock=RedisDistributedLock.from_env(),
+                scheduling_policy=self.scheduling_policy,
             )
             if self.registry is not None
             else None
         )
+        self.task_decomposer = TaskDecomposer()
         self.commander_factory = commander_factory
         self._executor = ThreadPoolExecutor(
             max_workers=self.max_workflows,
@@ -70,10 +79,23 @@ class CommanderWorkflowManager:
         mock_eval_score: Optional[int] = None,
         mock_decision: Optional[str] = None,
         attachments: Optional[list[dict]] = None,
+        task_goal: Optional[str] = None,
+        required_skills: Optional[list[str]] = None,
+        auto_decompose: bool = False,
     ) -> dict:
         if workflow not in {"bpel", "dynamic"}:
             raise ValueError("workflow must be either 'bpel' or 'dynamic'")
         workflow_id = workflow_id or new_workflow_id()
+        generated_workflow_file = None
+        if task_goal and (auto_decompose or not workflow_file):
+            generated_workflow_file = self.task_decomposer.write_bpel(
+                task_goal,
+                output_dir=os.path.join(self.state_dir, "generated_workflows"),
+                workflow_id=workflow_id,
+                required_skills=required_skills,
+            )
+            workflow = "bpel"
+            workflow_file = str(generated_workflow_file)
         with self._lock:
             if self._closed:
                 raise RuntimeError("workflow manager is already shut down")
@@ -95,6 +117,8 @@ class CommanderWorkflowManager:
                 "finished_at": None,
                 "last_error": None,
                 "state_path": str(self.state_store.state_path(workflow_id)),
+                "task_goal": task_goal,
+                "generated_workflow_file": str(generated_workflow_file) if generated_workflow_file else None,
             }
             self._jobs[workflow_id] = job
             future = self._executor.submit(
@@ -195,6 +219,14 @@ class CommanderWorkflowManager:
         if self.registry is not None:
             self.registry.close()
 
+    @traced_method(
+        "a2a.workflow.run",
+        lambda self, workflow_id, workflow, *args, **kwargs: {
+            "a2a.workflow_id": str(workflow_id),
+            "a2a.workflow_type": str(workflow),
+            "a2a.mode": str(self.mode),
+        },
+    )
     def _run_workflow(
         self,
         workflow_id: str,
@@ -245,6 +277,7 @@ class CommanderWorkflowManager:
                 current_activity=context.get("current_activity") or context.get("current_activatity"),
                 last_error=context.get("last_error"),
                 trace_count=len(context.get("trace", [])),
+                result=deepcopy(context.get("workflow_result")),
             )
         except Exception as exc:
             self._update_job(

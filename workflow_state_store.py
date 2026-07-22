@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import sqlite3
 import threading
 import time
 from datetime import datetime, timezone
@@ -23,17 +24,57 @@ class WorkflowStateStore:
     def __init__(self, base_dir: str):
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
+        self.database_path = self.base_dir / "workflow_state.db"
         self._lock = threading.RLock()
+        self._initialize_database()
+
+    @contextlib.contextmanager
+    def _connect(self):
+        connection = sqlite3.connect(str(self.database_path), timeout=10)
+        try:
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("PRAGMA busy_timeout=10000")
+            yield connection
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def _initialize_database(self) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS workflow_checkpoints (
+                    workflow_id TEXT PRIMARY KEY,
+                    state_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
 
     def state_path(self, workflow_id: str) -> Path:
         return self.base_dir / f"{workflow_id}.json"
 
     def exists(self, workflow_id: str) -> bool:
-        return self.state_path(workflow_id).exists()
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM workflow_checkpoints WHERE workflow_id=?",
+                (workflow_id,),
+            ).fetchone()
+        return bool(row) or self.state_path(workflow_id).exists()
 
     def load(self, workflow_id: str) -> Dict[str, Any]:
-        path = self.state_path(workflow_id)
-        with self._lock:
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT state_json FROM workflow_checkpoints WHERE workflow_id=?",
+                (workflow_id,),
+            ).fetchone()
+            if row:
+                return json.loads(row[0])
+            path = self.state_path(workflow_id)
             with path.open("r", encoding="utf-8") as state_file:
                 return json.load(state_file)
 
@@ -46,6 +87,20 @@ class WorkflowStateStore:
             payload["workflow_id"] = workflow_id
             payload.setdefault("created_at", utc_now_iso())
             payload["updated_at"] = utc_now_iso()
+
+            encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+            with self._connect() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO workflow_checkpoints(
+                        workflow_id, state_json, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?)
+                    ON CONFLICT(workflow_id) DO UPDATE SET
+                        state_json=excluded.state_json,
+                        updated_at=excluded.updated_at
+                    """,
+                    (workflow_id, encoded, payload["created_at"], payload["updated_at"]),
+                )
 
             tmp_path = path.with_suffix(path.suffix + f".{uuid4().hex}.tmp")
             with tmp_path.open("w", encoding="utf-8") as tmp_file:
@@ -67,6 +122,11 @@ class WorkflowStateStore:
 
     def delete(self, workflow_id: str) -> None:
         with self._lock:
+            with self._connect() as connection:
+                connection.execute(
+                    "DELETE FROM workflow_checkpoints WHERE workflow_id=?",
+                    (workflow_id,),
+                )
             path = self.state_path(workflow_id)
             if path.exists():
                 path.unlink()

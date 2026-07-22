@@ -9,6 +9,7 @@ import requests
 from bpel_workflow import BPELWorkflowCatalog
 from commander_agent.agent_leases import AgentLeaseManager
 from commander_agent.main import CommanderAgent
+from protocol_contracts import ContractValidationError
 from scripts.demo_bpel_workflows import main as demo_bpel_workflows_main
 
 
@@ -57,6 +58,32 @@ class BPELWorkflowTest(unittest.TestCase):
         self.assertEqual(invoked_roles, ["recon", "artillery", "assault"])
         self.assertNotIn("evaluator", invoked_roles)
 
+    def test_integrated_workflow_partner_links_map_to_new_agent_roles(self):
+        definition = BPELWorkflowCatalog(PROJECT_ROOT).load(
+            "integrated_system/workflows/integrated_demo_workflow.bpel"
+        )
+        work_list = definition.initial_work_list("wf-integrated")
+        invoked_roles = [
+            item["role"]
+            for item in work_list
+            if item["type"] == "invoke"
+        ]
+
+        self.assertEqual(
+            invoked_roles,
+            [
+                "tactical_intelligence",
+                "track_threat",
+                "track_threat",
+                "decision_planning",
+                "compliance_authorization",
+                "simulation_execution",
+                "closed_loop",
+            ],
+        )
+        self.assertEqual(work_list[1]["required_skill"], "semantic_intelligence")
+        self.assertEqual(work_list[-1]["required_skill"], "closed_loop_optimization")
+
     def test_bpel_invokes_different_roles_in_workflow_order(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             commander = CommanderAgent(
@@ -68,10 +95,14 @@ class BPELWorkflowTest(unittest.TestCase):
                 max_workers=2,
             )
             calls = []
+            original_single = commander.delegate_task
+            original_parallel = commander.delegate_parallel_task
 
             def fake_delegate(role, payload, stream=False):
                 calls.append(role)
-                return True
+                if payload.get("required_skill") == "suppress_beach_sector_A":
+                    return original_parallel(role, payload, stream=stream)
+                return original_single(role, payload, stream=stream)
 
             commander.delegate_task = fake_delegate
             commander.delegate_parallel_task = fake_delegate
@@ -112,6 +143,28 @@ class BPELWorkflowTest(unittest.TestCase):
 
             self.assertEqual(payload["required_skill"], "scan_beach_defenses")
             self.assertEqual(payload["required_skills"], ["scan_beach_defenses"])
+
+    def test_bpel_payload_rejects_missing_upstream_input(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            commander = CommanderAgent(
+                mode="local",
+                workflow="bpel",
+                workflow_file="beachhead_workflow",
+                state_dir=temp_dir,
+            )
+            replanning_activity = next(
+                activity
+                for activity in commander.bpel_definition.activatities
+                if activity.required_skill == "analyze_and_replanning"
+            )
+
+            with self.assertRaises(ContractValidationError) as raised:
+                commander._build_bpel_task_payload(
+                    replanning_activity,
+                    commander.workflow_context,
+                )
+
+            self.assertEqual(raised.exception.code, "MISSING_ACTIVITY_INPUT")
 
     def test_skill_only_bpel_can_orchestrate_without_partner_link_role(self):
         with tempfile.TemporaryDirectory() as temp_dir:

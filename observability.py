@@ -53,4 +53,16 @@ def append_trace(
     if limit and len(trace) > limit:
         trace = trace[-limit:]
     context["trace"] = trace
+    try:
+        from opentelemetry import trace as otel_trace
+
+        span = otel_trace.get_current_span()
+        if span and span.is_recording():
+            span.add_event(event_type, {
+                key: value
+                for key, value in fields.items()
+                if isinstance(value, (str, bool, int, float))
+            })
+    except Exception:
+        pass
     return event

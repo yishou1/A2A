@@ -14,6 +14,12 @@ PARTNER_ROLE_MAP = {
     "EvaluatorAgent": "evaluator",
     "AssaultAgent": "assault",
     "LLMCommanderAgent": "commander",
+    "TacticalIntelligenceAgent": "tactical_intelligence",
+    "TrackThreatAgent": "track_threat",
+    "DecisionPlanningAgent": "decision_planning",
+    "ComplianceAuthorizationAgent": "compliance_authorization",
+    "SimulationExecutionAgent": "simulation_execution",
+    "ClosedLoopAgent": "closed_loop",
 }
 
 OPERATION_COMMAND_MAP = {
@@ -22,6 +28,13 @@ OPERATION_COMMAND_MAP = {
     "evaluateStrike": "evaluate_strike",
     "captureBeachhead": "capture_beachhead",
     "analyzeAndReplanning": "analyze_and_replanning",
+    "buildSituationSummary": "build_situation_summary",
+    "updateTracks": "update_tracks",
+    "rankThreats": "rank_threats",
+    "generateDecisionPlan": "generate_decision_plan",
+    "checkComplianceAuthorization": "check_compliance_authorization",
+    "simulateExecutionControl": "simulate_execution_control",
+    "evaluateMissionEffect": "evaluate_mission_effect",
 }
 
 
@@ -58,6 +71,7 @@ class BPELActivatity:
     required_skills: list[str] = field(default_factory=list)
     dispatch_mode: str = "single"
     input_variable: str | None = None
+    input_variables: list[str] = field(default_factory=list)
     output_variable: str | None = None
     condition: str | None = None
     fault_name: str | None = None
@@ -96,6 +110,7 @@ class BPELActivatity:
             "required_skills": list(self.required_skills),
             "dispatch_mode": self.dispatch_mode,
             "input_variable": self.input_variable,
+            "input_variables": list(self.input_variables),
             "output_variable": self.output_variable,
             "retry_count": self.retry_count,
             "timeout_seconds": self.timeout_seconds,
@@ -107,14 +122,22 @@ class BPELActivatity:
 
 
 class BPELWorkflowDefinition:
-    def __init__(self, source_path: Path, process_name: str, root_activatity: BPELActivatity):
+    def __init__(
+        self,
+        source_path: Path,
+        process_name: str,
+        root_activatity: BPELActivatity,
+        variables: set[str] | None = None,
+    ):
         self.source_path = source_path
         self.process_name = process_name
         self.root_activatity = root_activatity
+        self.variables = set(variables or [])
         self._activatities = list(self._walk(root_activatity))
         self.activatities_by_id = {
             activatity.activatity_id: activatity for activatity in self._activatities
         }
+        self.validate()
 
     @property
     def activatities(self) -> list[BPELActivatity]:
@@ -125,6 +148,13 @@ class BPELWorkflowDefinition:
         path = Path(source_path).expanduser().resolve()
         process = ElementTree.parse(path).getroot()
         process_name = process.attrib.get("name", path.stem)
+        variables = {
+            child.attrib.get("name")
+            for container in process
+            if _local_name(container.tag) == "variables"
+            for child in container
+            if _local_name(child.tag) == "variable" and child.attrib.get("name")
+        }
 
         body = next(
             (
@@ -177,6 +207,15 @@ class BPELWorkflowDefinition:
             )
             if required_skill and required_skill not in required_skills:
                 required_skills.insert(0, required_skill)
+            input_variable = element.attrib.get("inputVariable")
+            input_variables = _split_list_attribute(element.attrib.get("inputVariables"))
+            if input_variable:
+                if any(separator in input_variable for separator in ("+", ",", ";")):
+                    raise ValueError(
+                        f"BPEL invoke '{raw_name}' must use inputVariables for multiple inputs"
+                    )
+                if input_variable not in input_variables:
+                    input_variables.insert(0, input_variable)
             assign_from = None
             assign_to = None
 
@@ -211,7 +250,8 @@ class BPELWorkflowDefinition:
                 required_skill=required_skill,
                 required_skills=required_skills,
                 dispatch_mode=element.attrib.get("dispatchMode", "single"),
-                input_variable=element.attrib.get("inputVariable"),
+                input_variable=input_variable,
+                input_variables=input_variables,
                 output_variable=element.attrib.get("outputVariable"),
                 condition=element.attrib.get("condition"),
                 fault_name=element.attrib.get("faultName"),
@@ -236,7 +276,76 @@ class BPELWorkflowDefinition:
             ]
             return activatity
 
-        return cls(path, process_name, parse_element(body))
+        return cls(path, process_name, parse_element(body), variables=variables)
+
+    def validate(self) -> None:
+        names = {activity.name for activity in self._activatities}
+        ids = set(self.activatities_by_id)
+        errors = []
+        name_counts = {
+            name: sum(1 for activity in self._activatities if activity.name == name)
+            for name in names
+        }
+        for activity in self._activatities:
+            if activity.type == "invoke":
+                if not activity.operation:
+                    errors.append(f"invoke '{activity.name}' is missing operation")
+                if not activity.required_skills:
+                    errors.append(f"invoke '{activity.name}' is missing requiredSkill(s)")
+                if not activity.output_variable:
+                    errors.append(f"invoke '{activity.name}' is missing outputVariable")
+                elif self.variables and activity.output_variable not in self.variables:
+                    errors.append(
+                        f"invoke '{activity.name}' writes undeclared variable "
+                        f"'{activity.output_variable}'"
+                    )
+                if activity.dispatch_mode not in {"single", "parallel"}:
+                    errors.append(
+                        f"invoke '{activity.name}' has invalid dispatchMode={activity.dispatch_mode}"
+                    )
+                for variable in activity.input_variables:
+                    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]*", variable):
+                        errors.append(
+                            f"invoke '{activity.name}' has invalid input variable '{variable}'"
+                        )
+            if activity.failure_policy not in {"pause", "skip", "fail"}:
+                errors.append(
+                    f"activity '{activity.name}' has invalid failurePolicy={activity.failure_policy}"
+                )
+            for dependency in activity.depends_on:
+                if dependency not in names and dependency not in ids:
+                    errors.append(
+                        f"activity '{activity.name}' depends on unknown activity '{dependency}'"
+                    )
+                if dependency in name_counts and name_counts[dependency] > 1:
+                    errors.append(
+                        f"activity '{activity.name}' has ambiguous dependency '{dependency}'"
+                    )
+        dependency_graph = {
+            activity.name: set(activity.depends_on)
+            for activity in self._activatities
+            if activity.depends_on
+        }
+        visiting = set()
+        visited = set()
+
+        def visit(name):
+            if name in visiting:
+                errors.append(f"dependency cycle detected at '{name}'")
+                return
+            if name in visited:
+                return
+            visiting.add(name)
+            for dependency in dependency_graph.get(name, set()):
+                if dependency in names:
+                    visit(dependency)
+            visiting.remove(name)
+            visited.add(name)
+
+        for name in dependency_graph:
+            visit(name)
+        if errors:
+            raise ValueError("Invalid BPEL workflow: " + "; ".join(errors))
 
     @staticmethod
     def _walk(activatity: BPELActivatity) -> Iterable[BPELActivatity]:

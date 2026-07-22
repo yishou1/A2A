@@ -1,5 +1,6 @@
 from a2a_protocol.server import A2ABaseAgent, skills_metadata
 from registry.nacos_manager import NacosRegistry, get_host_ip
+from model_registry import build_model
 import asyncio
 import json
 import os
@@ -12,7 +13,8 @@ class ArtilleryAgent(A2ABaseAgent):
         await asyncio.sleep(1)
         yield f"data: {json.dumps({'status': 'Working', 'message': 'Impact confirmed. Adjusting aim.', 'progress': '60%'})}\n\n"
         await asyncio.sleep(1)
-        yield f"data: {json.dumps({'status': 'Completed', 'message': 'Target suppression complete', 'progress': '100%'})}\n\n"
+        output, message = self.execute_task(payload)
+        yield f"data: {json.dumps({'status': 'Completed', 'message': message, 'progress': '100%', 'output': output})}\n\n"
 
 if __name__ == "__main__":
     port = int(os.environ.get("ARTILLERY_AGENT_PORT", "8003"))
@@ -22,7 +24,15 @@ if __name__ == "__main__":
         name="Artillery_Agent",
         description="Assigned heavy artillery forces for beach suppression.",
         role="artillery",
-        port=port
+        port=port,
+        models=[
+            build_model(
+                "fire_control_v1",
+                name="Fire Control Model",
+                model_type="target_assignment",
+                tags=["target_assignment", "route_planning"],
+            ),
+        ],
     )
     
     registry = NacosRegistry()

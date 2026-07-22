@@ -3,9 +3,12 @@ from __future__ import annotations
 from typing import Any, Dict, Literal, Optional
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from commander_agent.workflow_manager import CommanderWorkflowManager
+from commander_agent.task_decomposer import TaskDecomposer
+from monitoring import SUPERVISOR_HTML, SupervisorMonitor
 
 
 class WorkflowSubmitRequest(BaseModel):
@@ -23,6 +26,17 @@ class WorkflowSubmitRequest(BaseModel):
     mock_eval_score: Optional[int] = None
     mock_decision: Optional[Literal["ASSAULT", "RE-PLAN"]] = None
     attachments: list[Dict[str, Any]] = Field(default_factory=list)
+    task_goal: Optional[str] = None
+    required_skills: list[str] = Field(default_factory=list)
+    auto_decompose: bool = False
+
+
+class TaskDecomposeRequest(BaseModel):
+    task_goal: str
+    required_skills: list[str] = Field(default_factory=list)
+    workflow_name: Optional[str] = None
+    evaluation_threshold: Optional[int] = None
+    strike_coordinates: str = "120.5E, 35.1N"
 
 
 def _request_payload(request: BaseModel) -> dict:
@@ -44,6 +58,7 @@ def build_workflow_manager_app(
         state_dir=state_dir,
         max_workflows=max_workflows,
     )
+    app.state.supervisor_monitor = SupervisorMonitor()
 
     @app.on_event("shutdown")
     async def shutdown_manager():
@@ -61,6 +76,23 @@ def build_workflow_manager_app(
             "agent_count": len(workflow_manager.list_agents()),
         }
 
+    @app.get("/supervisor", response_class=HTMLResponse)
+    async def supervisor_dashboard():
+        return SUPERVISOR_HTML
+
+    @app.get("/supervisor/snapshot")
+    async def supervisor_snapshot():
+        return app.state.supervisor_monitor.snapshot(app.state.workflow_manager)
+
+    @app.get("/alerts")
+    async def active_alerts():
+        return app.state.supervisor_monitor.snapshot(app.state.workflow_manager)["alerts"]
+
+    @app.get("/metrics")
+    async def prometheus_metrics():
+        payload = app.state.supervisor_monitor.prometheus(app.state.workflow_manager)
+        return Response(payload, media_type="text/plain; version=0.0.4; charset=utf-8")
+
     @app.get("/workflows")
     async def list_workflows():
         return app.state.workflow_manager.list_workflows()
@@ -73,6 +105,20 @@ def build_workflow_manager_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except (RuntimeError, ValueError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/planning/decompose")
+    async def decompose_task(request: TaskDecomposeRequest):
+        try:
+            plan = TaskDecomposer().decompose(
+                request.task_goal,
+                required_skills=request.required_skills,
+                workflow_name=request.workflow_name,
+                evaluation_threshold=request.evaluation_threshold,
+                strike_coordinates=request.strike_coordinates,
+            )
+            return plan.snapshot()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/workflows/{workflow_id}")
     async def get_workflow(workflow_id: str, checkpoint: bool = False):
@@ -99,6 +145,11 @@ def build_workflow_manager_app(
     @app.get("/leases")
     async def list_agent_leases():
         return app.state.workflow_manager.list_agent_leases()
+
+    @app.get("/scheduling/feedback")
+    async def scheduling_feedback():
+        lease_manager = app.state.workflow_manager.lease_manager
+        return lease_manager.feedback_snapshot() if lease_manager is not None else {}
 
     @app.get("/agents")
     async def list_agents():

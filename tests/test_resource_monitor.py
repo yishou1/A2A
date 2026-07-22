@@ -32,27 +32,28 @@ def fake_sampler(cpu=10.0, memory=20.0, disk=30.0):
 
 
 class ResourceMonitorTest(unittest.TestCase):
-    def test_snapshot_contains_system_process_and_state(self):
+    def test_snapshot_contains_system_and_process_values(self):
         monitor = ResourceMonitor(sampler=lambda: fake_sampler())
 
         snapshot = monitor.snapshot(force=True)
 
         self.assertTrue(snapshot["monitor_available"])
-        self.assertEqual(snapshot["resource_state"], "ok")
         self.assertEqual(snapshot["system"]["cpu_percent"], 10.0)
+        self.assertEqual(snapshot["system"]["memory_percent"], 20.0)
+        self.assertEqual(snapshot["system"]["disk_percent"], 30.0)
         self.assertEqual(snapshot["process"]["memory_rss_mb"], 64.0)
 
-    def test_thresholds_mark_critical_and_not_ready(self):
-        monitor = ResourceMonitor(
-            sampler=lambda: fake_sampler(cpu=99.0),
-            cpu_critical_percent=95.0,
-        )
+    def test_high_values_are_reported_without_classification(self):
+        monitor = ResourceMonitor(sampler=lambda: fake_sampler(cpu=99.0, memory=96.0, disk=98.0))
 
         snapshot = monitor.snapshot(force=True)
 
-        self.assertEqual(snapshot["resource_state"], "critical")
-        self.assertFalse(monitor.ready())
-        self.assertEqual(snapshot["violations"][0]["resource"], "cpu")
+        self.assertEqual(snapshot["system"]["cpu_percent"], 99.0)
+        self.assertEqual(snapshot["system"]["memory_percent"], 96.0)
+        self.assertEqual(snapshot["system"]["disk_percent"], 98.0)
+        self.assertNotIn("resource_state", snapshot)
+        self.assertNotIn("thresholds", snapshot)
+        self.assertNotIn("violations", snapshot)
 
     def test_heartbeat_metadata_is_flat_for_nacos(self):
         monitor = ResourceMonitor(sampler=lambda: fake_sampler(memory=88.0))
@@ -60,11 +61,11 @@ class ResourceMonitorTest(unittest.TestCase):
         metadata = monitor.heartbeat_metadata()
 
         self.assertEqual(metadata["resource_monitor_available"], "true")
-        self.assertEqual(metadata["resource_state"], "warn")
         self.assertEqual(metadata["resource_memory_percent"], 88.0)
+        self.assertNotIn("resource_state", metadata)
         self.assertIn("resource_sampled_at", metadata)
 
-    def test_agent_metrics_and_readiness_include_resources(self):
+    def test_agent_metrics_include_resources_without_rejecting_tasks(self):
         monitor = ResourceMonitor(sampler=lambda: fake_sampler(cpu=99.0))
         agent = A2ABaseAgent(
             name="TestAgent",
@@ -76,12 +77,12 @@ class ResourceMonitorTest(unittest.TestCase):
 
         metrics = agent.metrics_snapshot()
 
-        self.assertEqual(metrics["resources"]["resource_state"], "critical")
-        self.assertFalse(metrics["resource_ready"])
+        self.assertEqual(metrics["resources"]["system"]["cpu_percent"], 99.0)
+        self.assertNotIn("resource_ready", metrics)
         accepted, error, code = agent.can_accept_task()
-        self.assertFalse(accepted)
-        self.assertEqual(code, "AGENT_RESOURCE_EXHAUSTED")
-        self.assertIn("critical", error)
+        self.assertTrue(accepted)
+        self.assertIsNone(error)
+        self.assertIsNone(code)
 
 
 if __name__ == "__main__":

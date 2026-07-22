@@ -1982,7 +1982,14 @@ trace 负责把整个故障和恢复过程解释清楚。
 
 ## 19. 资源监控模块实现说明
 
-当前系统已经补齐 Agent 资源监控模块。它不是单独的演示脚本，而是接入了 Agent Runtime、Nacos 心跳 metadata 和 Commander 租约调度。
+当前资源监控模块按最新需求调整为 **只采集和上报资源数值**：
+
+```text
+不设置 warn/critical 阈值
+不计算 resource_state
+不根据资源等级影响 Commander 调度
+不因为资源过载拒绝 sendMessage
+```
 
 ### 19.1 监控内容
 
@@ -1991,6 +1998,7 @@ trace 负责把整个故障和恢复过程解释清楚。
 ```text
 系统级资源：
 - CPU 使用率
+- CPU 核心数
 - 内存总量、可用量、使用率
 - 磁盘总量、已用量、剩余量、使用率
 - 平台信息
@@ -2010,18 +2018,17 @@ trace 负责把整个故障和恢复过程解释清楚。
 resource_monitor.py
 a2a_protocol/server.py
 registry/nacos_manager.py
-commander_agent/agent_leases.py
 ```
 
 ### 19.2 Agent Runtime 暴露的接口
 
-每个 Agent 现在都可以通过下面接口查看资源状态：
+每个 Agent 可以通过下面接口查看资源数值：
 
 ```text
 GET /resources
 GET /metrics
-GET /ready
 GET /health
+GET /ready
 GET /.well-known/agent-card
 ```
 
@@ -2030,18 +2037,17 @@ GET /.well-known/agent-card
 ```text
 /resources：只看资源监控快照。
 /metrics：任务指标 + resources。
-/ready：manual ready + resource_ready，资源 critical 时 ready=false。
-/health：返回资源状态摘要。
+/health：返回 Agent 健康摘要和 resource_monitor_available。
+/ready：保持原 ready 语义，额外返回 resource_monitor_available。
 /.well-known/agent-card：声明 resourcesEndpoint=/resources。
 ```
 
 ### 19.3 Nacos metadata 中的资源字段
 
-Agent 注册和心跳时，会把资源状态同步到 Nacos metadata：
+Agent 注册和心跳时，会把资源数值同步到 Nacos metadata：
 
 ```text
 resource_monitor_available=true/false
-resource_state=ok/warn/critical/unknown
 resource_cpu_percent=...
 resource_memory_percent=...
 resource_disk_percent=...
@@ -2050,90 +2056,24 @@ process_memory_mb=...
 resource_sampled_at=...
 ```
 
-也就是说，Nacos 前端不仅能看到 Agent 是否 `idle/busy/unavailable`，还可以看到该 Agent 当前资源负载。
+也就是说，Nacos 前端可以看到 Agent 当前 CPU、内存、磁盘和进程资源占用。
 
-### 19.4 阈值与状态
+### 19.4 当前不做的事情
 
-资源监控会根据阈值计算 `resource_state`：
-
-```text
-ok：资源正常
-warn：超过 warning 阈值，但仍可运行
-critical：超过 critical 阈值，不建议再接新任务
-unknown：监控不可用，例如缺少 psutil
-```
-
-默认阈值可以通过环境变量调整：
-
-```powershell
-$env:A2A_RESOURCE_CPU_WARN_PERCENT="85"
-$env:A2A_RESOURCE_CPU_CRITICAL_PERCENT="95"
-$env:A2A_RESOURCE_MEMORY_WARN_PERCENT="85"
-$env:A2A_RESOURCE_MEMORY_CRITICAL_PERCENT="95"
-$env:A2A_RESOURCE_DISK_WARN_PERCENT="90"
-$env:A2A_RESOURCE_DISK_CRITICAL_PERCENT="97"
-```
-
-### 19.5 调度如何使用资源状态
-
-Commander 的 AgentLeaseManager 在选择 Agent 时会过滤掉：
+根据最新需求，资源监控模块当前不再包含：
 
 ```text
-resource_state=critical
-```
-
-内部逻辑：
-
-```text
-Commander 查询 role=xxx 且 status=idle 的 Agent
--> LeaseManager 检查 Nacos metadata
--> 如果 resource_state=critical，则跳过该 Agent
--> 选择资源状态 ok/warn/unknown 的同 role Agent
--> 获取租约并派发任务
-```
-
-时序图：
-
-```mermaid
-sequenceDiagram
-    participant A as Agent Runtime
-    participant M as ResourceMonitor
-    participant N as Nacos
-    participant C as Commander
-    participant L as LeaseManager
-
-    A->>M: collect cpu/memory/disk/process metrics
-    M-->>A: resource_state
-    A->>N: heartbeat metadata with resource_state
-    C->>L: acquire role=artillery
-    L->>N: discover idle Agents
-    N-->>L: candidates with resource metadata
-    L->>L: skip resource_state=critical
-    L-->>C: lease healthy resource Agent
-```
-
-### 19.6 资源过载时的行为
-
-资源过载有两层保护：
-
-```text
-第一层：调度前过滤
-Commander 不优先选择 resource_state=critical 的 Agent。
-
-第二层：Agent Runtime 自保护
-如果 Agent 本机已经 critical，并且启用资源拒绝策略，
-sendMessage 会返回 AGENT_RESOURCE_EXHAUSTED。
-```
-
-开关：
-
-```powershell
-$env:A2A_REJECT_WHEN_RESOURCE_CRITICAL="true"
+resource_state=ok/warn/critical/unknown
+CPU/内存/磁盘 warn 阈值
+CPU/内存/磁盘 critical 阈值
+Commander 根据资源状态跳过 Agent
+Agent Runtime 根据资源状态拒绝任务
 ```
 
 讲解时可以这样说：
 
 ```text
-心跳机制解决“Agent 是否活着”，资源监控解决“Agent 是否适合继续接任务”。
-现在 Commander 不只是看 idle/busy，还会结合 resource_state 做资源感知调度。
+当前资源监控模块只做指标采集与上报。
+Agent 自己采集资源，通过 Runtime 接口返回，也通过心跳写入 Nacos metadata。
+Commander 可以读取这些数值，但当前不基于这些数值自动做调度决策。
 ```
