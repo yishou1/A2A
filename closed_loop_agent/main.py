@@ -6,8 +6,8 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from a2a_protocol.server import A2ABaseAgent
-from closed_loop_agent.closed_loop_core import _closed_loop_optimization
-from registry.nacos_manager import NacosRegistry, get_host_ip
+from a2a_sdk import AgentRuntimeSDK
+from closed_loop_agent.algolib_runtime import run_closed_loop_with_backend
 
 CLOSED_LOOP_COMMAND = "closed_loop_optimization"
 PASSTHROUGH_INPUT_KEYS = (
@@ -65,7 +65,7 @@ class ClosedLoopAgent(A2ABaseAgent):
         if command != CLOSED_LOOP_COMMAND:
             raise ValueError(f"Unsupported command: {command}")
 
-        result = _closed_loop_optimization(build_closed_loop_arguments(payload))
+        result = run_closed_loop_with_backend(build_closed_loop_arguments(payload))
         output_hint = payload.get("output_hint") or "closed_loop_result"
         output_data = result.get("output_data", {}) if isinstance(result, dict) else {}
         meets_requirements = output_data.get("meets_requirements")
@@ -98,6 +98,7 @@ class ClosedLoopAgent(A2ABaseAgent):
             "meets_requirements": result.get("output_data", {}).get("meets_requirements")
             if isinstance(result, dict)
             else None,
+            "backend": result.get("output_data", {}).get("backend") if isinstance(result, dict) else None,
         }
         yield "data: " + json.dumps(summary, ensure_ascii=False) + "\n\n"
 
@@ -106,14 +107,12 @@ if __name__ == "__main__":
     port = int(os.environ.get("CLOSED_LOOP_AGENT_PORT", "8016"))
     heartbeat_interval = float(os.environ.get("A2A_HEARTBEAT_INTERVAL", "5"))
     agent = ClosedLoopAgent(port=port)
-
-    registry = NacosRegistry()
-    ip = get_host_ip()
-    registry.register_service(
-        service_name="A2A-Agent",
-        ip=ip,
-        port=port,
-        metadata={"role": "closed_loop", "status": "idle"},
+    runtime = AgentRuntimeSDK.from_agent(
+        agent,
         heartbeat_interval=heartbeat_interval,
+        extra_metadata={"capability": "closed_loop"},
     )
-    agent.start()
+    try:
+        runtime.serve()
+    finally:
+        runtime.close()

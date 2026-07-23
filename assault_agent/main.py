@@ -1,5 +1,4 @@
-from a2a_protocol.server import A2ABaseAgent, skills_metadata
-from registry.nacos_manager import NacosRegistry, get_host_ip
+from a2a_protocol.server import A2ABaseAgent
 from model_registry import build_model
 import os
 import time
@@ -67,21 +66,14 @@ if __name__ == "__main__":
             ),
         ],
     )
-    
-    registry = NacosRegistry()
-    ip = get_host_ip()
-    
-    registry.register_service(
-        service_name="A2A-Agent",
-        ip=ip,
-        port=port,
-        metadata={
-            "role": "assault",
-            "status": "idle",
-            **skills_metadata(agent.skills),
-            **agent.heartbeat_metadata(),
-        },
+    from a2a_sdk import AgentRuntimeSDK
+
+    runtime = AgentRuntimeSDK.from_agent(
+        agent,
         heartbeat_interval=heartbeat_interval,
-        metadata_provider=agent.heartbeat_metadata,
+        extra_metadata={"capability": "assault"},
     )
-    agent.start()
+    try:
+        runtime.serve()
+    finally:
+        runtime.close()

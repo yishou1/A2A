@@ -167,9 +167,29 @@ python scripts/run_sc2le_closed_loop_demo.py
 3. **SC2LE** 从 metadata 公式推进到 event-level 特征  
 4. 为 EC / Closed Loop 补 **双实例 failover** 演示，与主框架能力对齐  
 5. 增加最小 CI（至少跑上述三组测试）
+6. algolib 模式下补齐闭环多 cycle 与完整训练指标回传（当前 algolib 路径为单轮服务编排）
 
 ---
 
-## 7. 一句话总结
+## 7. 本轮算法库对接与心跳
 
-`zh` 已与最新 `main` 对齐，并在此基础上完成 skill 发现契约修复、仓库瘦身与文档补齐；领域算法链路（执行控制 + 无泄漏闭环代理模型）保持可用，可按第 5 节命令做回归验证。
+详细修改说明见：
+
+[`doc/ZH_ALGOLIB_HEARTBEAT_CHANGES.md`](doc/ZH_ALGOLIB_HEARTBEAT_CHANGES.md)
+
+摘要：
+
+- 新增 `algolib_bridge/`，支持 `local/algolib` 后端与 `direct/gateway` 传输
+- EC 整包调用 `execution_control_planner`；CL 分调四个算法服务
+- 默认仍 local；算法库失败默认可降级
+- EC/CL/recon/artillery/assault 统一 `AgentRuntimeSDK` 注册与心跳
+
+```powershell
+python -m unittest tests.test_algolib_bridge tests.test_execution_control_integration tests.test_closed_loop_integration -q
+```
+
+---
+
+## 8. 一句话总结
+
+`zh` 已与最新 `main` 对齐，并在此基础上完成 skill 发现契约修复、仓库瘦身、文档补齐，以及 **local/algolib 双后端 + 双传输 + 心跳 SDK**；领域算法链路（执行控制 + 无泄漏闭环代理模型）保持可用，可按第 5/7 节与详细修改文档做回归验证。

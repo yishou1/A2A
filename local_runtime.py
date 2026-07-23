@@ -189,10 +189,10 @@ class LocalAgentRuntime:
         if role == "recon":
             value = "Sector_A is heavily fortified with overlapping machine gun nests."
         elif role == "execution_control":
-            from execution_control_agent.execution_control_core import run_execution_control
+            from execution_control_agent.algolib_runtime import run_execution_control_with_backend
             from execution_control_agent.main import build_execution_control_arguments
 
-            value = run_execution_control(build_execution_control_arguments(payload))
+            value = run_execution_control_with_backend(build_execution_control_arguments(payload))
         elif role == "artillery":
             from artillery_agent.main import execute_artillery_command
 
@@ -206,10 +206,10 @@ class LocalAgentRuntime:
             structured, _message = execute_assault_command(payload)
             value = structured
         elif role == "closed_loop":
-            from closed_loop_agent.closed_loop_core import _closed_loop_optimization
+            from closed_loop_agent.algolib_runtime import run_closed_loop_with_backend
             from closed_loop_agent.main import build_closed_loop_arguments
 
-            value = _closed_loop_optimization(build_closed_loop_arguments(payload))
+            value = run_closed_loop_with_backend(build_closed_loop_arguments(payload))
         else:
             value = message
         return {output_hint: value}, message

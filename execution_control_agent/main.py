@@ -6,8 +6,8 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from a2a_protocol.server import A2ABaseAgent
-from execution_control_agent.execution_control_core import run_execution_control
-from registry.nacos_manager import NacosRegistry, get_host_ip
+from a2a_sdk import AgentRuntimeSDK
+from execution_control_agent.algolib_runtime import run_execution_control_with_backend
 
 EXECUTION_CONTROL_COMMAND = "generate_execution_commands"
 PASSTHROUGH_INPUT_KEYS = (
@@ -95,7 +95,7 @@ class ExecutionControlAgent(A2ABaseAgent):
             input_data["phase"] = "assault"
             payload["input"] = input_data
 
-        result = run_execution_control(build_execution_control_arguments(payload))
+        result = run_execution_control_with_backend(build_execution_control_arguments(payload))
         output_hint = payload.get("output_hint") or "execution_control_result"
         return {output_hint: result}, "Execution control commands generated"
 
@@ -114,6 +114,7 @@ class ExecutionControlAgent(A2ABaseAgent):
             "progress": "100%",
             "message": message,
             "command_count": len(next(iter(output.values()), {}).get("output_data", {}).get("commands", [])),
+            "backend": next(iter(output.values()), {}).get("output_data", {}).get("backend"),
         }
         yield "data: " + json.dumps(summary, ensure_ascii=False) + "\n\n"
 
@@ -122,14 +123,12 @@ if __name__ == "__main__":
     port = int(os.environ.get("EXECUTION_CONTROL_AGENT_PORT", "8017"))
     heartbeat_interval = float(os.environ.get("A2A_HEARTBEAT_INTERVAL", "5"))
     agent = ExecutionControlAgent(port=port)
-
-    registry = NacosRegistry()
-    ip = get_host_ip()
-    registry.register_service(
-        service_name="A2A-Agent",
-        ip=ip,
-        port=port,
-        metadata={"role": "execution_control", "status": "idle"},
+    runtime = AgentRuntimeSDK.from_agent(
+        agent,
         heartbeat_interval=heartbeat_interval,
+        extra_metadata={"capability": "execution_control"},
     )
-    agent.start()
+    try:
+        runtime.serve()
+    finally:
+        runtime.close()

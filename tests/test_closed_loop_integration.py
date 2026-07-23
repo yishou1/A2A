@@ -94,7 +94,7 @@ class ClosedLoopIntegrationTest(unittest.TestCase):
                 "Assault unit captured the beachhead.",
             )
 
-    @patch("closed_loop_agent.main._closed_loop_optimization", return_value=sample_closed_loop_result())
+    @patch("closed_loop_agent.main.run_closed_loop_with_backend", return_value=sample_closed_loop_result())
     def test_closed_loop_agent_send_message_returns_standard_response(self, _mock_opt):
         agent, temp_dir = _agent_with_temp_store(8016)
         self.addCleanup(temp_dir.cleanup)
@@ -131,7 +131,7 @@ class ClosedLoopIntegrationTest(unittest.TestCase):
         self.assertIn("metrics", body)
         self.assertEqual(body["metrics"]["duration_ms"], body["metrics"]["latency_ms"])
 
-    @patch("closed_loop_agent.main._closed_loop_optimization", return_value=sample_closed_loop_result())
+    @patch("closed_loop_agent.main.run_closed_loop_with_backend", return_value=sample_closed_loop_result())
     def test_closed_loop_agent_reuses_work_item_cache(self, mock_opt):
         agent, temp_dir = _agent_with_temp_store(8016)
         self.addCleanup(temp_dir.cleanup)
