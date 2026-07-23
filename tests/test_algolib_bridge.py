@@ -93,6 +93,61 @@ class ClosedLoopBackendTest(unittest.TestCase):
             self.assertEqual(result["output_data"].get("backend"), "local_fallback")
 
 
+class DamageInputModeInterfaceTest(unittest.TestCase):
+    def test_auto_prefers_images_when_complete(self):
+        from closed_loop_agent.algolib_runtime import (
+            build_damage_assessor_inputs,
+            has_images_inputs,
+            resolve_damage_input_mode,
+        )
+
+        target = {
+            "target_id": "T-1",
+            "pre_image": {"path": "pre.png"},
+            "post_image": {"path": "post.png"},
+            "polygon": [[0, 0], [10, 0], [10, 10], [0, 10]],
+            "spectral_delta": 0.2,
+        }
+        self.assertTrue(has_images_inputs(target))
+        self.assertEqual(resolve_damage_input_mode(target), "images")
+        inputs, mode, warnings = build_damage_assessor_inputs(target, sample_id="T-1")
+        self.assertEqual(mode, "images")
+        self.assertEqual(inputs["input_mode"], "images")
+        self.assertEqual(inputs["polygon"][0], [0, 0])
+        self.assertFalse(warnings)
+
+    def test_auto_falls_back_to_features(self):
+        from closed_loop_agent.algolib_runtime import build_damage_assessor_inputs
+
+        target = {
+            "target_id": "T-2",
+            "pre_image": {"path": "pre.png"},
+            # missing post + polygon
+            "spectral_delta": 0.3,
+            "texture_delta": 0.1,
+            "heat_signature": 0.2,
+        }
+        inputs, mode, _warnings = build_damage_assessor_inputs(target, preferred_mode="auto")
+        self.assertEqual(mode, "features")
+        self.assertEqual(inputs["input_mode"], "features")
+        self.assertIn("spectral_delta", inputs["handcrafted_features"])
+
+    def test_nested_image_pair_and_force_features(self):
+        from closed_loop_agent.algolib_runtime import build_damage_assessor_inputs
+
+        target = {
+            "image_pair": {"pre": "base64pre", "post": "base64post"},
+            "geometry": {"polygon": [[1, 1], [2, 1], [2, 2]]},
+            "pre_area": 0.1,
+            "spectral_delta": 0.4,
+        }
+        inputs, mode, _ = build_damage_assessor_inputs(target, preferred_mode="images")
+        self.assertEqual(mode, "images")
+        inputs_f, mode_f, _ = build_damage_assessor_inputs(target, preferred_mode="features")
+        self.assertEqual(mode_f, "features")
+        self.assertEqual(inputs_f["input_mode"], "features")
+
+
 class AgentRuntimeSdkTest(unittest.TestCase):
     def test_from_agent_builds_registration_metadata(self):
         agent = ExecutionControlAgent(port=18017)

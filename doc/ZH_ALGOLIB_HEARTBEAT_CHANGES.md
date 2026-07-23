@@ -279,6 +279,30 @@ python -m unittest tests.test_algolib_bridge tests.test_closed_loop_integration 
 ## 8. 已知限制 / 后续可做
 
 1. Closed Loop 的 algolib 路径目前是单轮编排，不含本地模式里的完整多 cycle 训练与聚类过程。  
-2. 毁伤评估 algolib 路径当前按目标 `features` 模式调用；`images + polygon` 模式需上游提供图像输入后再接。  
+2. ~~毁伤评估仅 features~~ **已支持可选 images**：默认 `auto`——target 带齐 `pre_image`/`post_image`/`polygon` 时走 images，否则走 features；可用 `damage_input_mode` 或 `CLOSED_LOOP_DAMAGE_INPUT_MODE=auto|features|images` 强制。  
 3. 网关模式依赖本机 algolib 网关可用；直连模式依赖各 `python_http_service` 已启动。  
 4. 可继续把更多子步骤做成可观测 metrics（每个算法包耗时分别上报）。
+
+### 8.1 毁伤 images 可选接口（target 字段）
+
+任选一种写法即可：
+
+```json
+{
+  "target_id": "T-001",
+  "pre_image": {"path": "data/xbd/.../pre.png"},
+  "post_image": {"path": "data/xbd/.../post.png"},
+  "polygon": [[10, 10], [50, 10], [50, 50], [10, 50]]
+}
+```
+
+或：
+
+```json
+{
+  "image_pair": {"pre": "<base64>", "post": "<base64>"},
+  "geometry": {"polygon": [[...], [...], [...]]}
+}
+```
+
+images 不完整时自动回退 features（若有手工特征）；服务端 images 返回 `insufficient_data` 时也会再试 features。

@@ -18,7 +18,12 @@ PASSTHROUGH_INPUT_KEYS = (
     "cycles",
     "seed",
     "target_count",
+    "damage_input_mode",
+    "xbd_input_mode",
+    "device",
+    "feature_mode",
 )
+
 
 
 def build_closed_loop_arguments(payload: dict) -> dict:
