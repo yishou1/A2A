@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import sys
 
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +45,8 @@ def predict_decision_planning_core(inputs: dict[str, Any], params: dict[str, Any
         request,
         target_trends,
     )
+    scored, rag_payload = planning_algorithms.enhance_plans_with_rag(scored, request)
+    plan_scores = planning_algorithms.enrich_plan_scores(plan_scores, scored)
     recommended = scored[0] if scored else None
     return {
         "candidate_plans": [plan.model_dump(mode="json") for plan in scored],
@@ -56,6 +57,7 @@ def predict_decision_planning_core(inputs: dict[str, Any], params: dict[str, Any
         "algorithm_stages": [
             "decision_planning_logistic",
             "decision_planning_lstm",
+            "structured_rule_rag_adjustment",
         ],
         "scoring_weights": weights,
         "weight_source": weight_source,
@@ -67,10 +69,7 @@ def predict_decision_planning_core(inputs: dict[str, Any], params: dict[str, Any
             "Plans are simulation-only decision-support candidates.",
             "Compliance and authorization checks are required before any downstream handoff.",
         ],
-        "rag_evidence": [],
-        "rag_answer": "",
-        "rag_model_profile": {"enabled": False, "backend": "out_of_scope"},
-        "rag_warnings": ["rag_out_of_scope"],
+        **rag_payload,
     }
 
 
@@ -83,25 +82,20 @@ def predict_compliance_authorization_core(
     if not request.candidate_plans:
         raise ValueError("candidate_plans is required.")
 
-    with _without_compliance_rag_evidence():
-        result = compliance_algorithms.evaluate_compliance(request, use_rule_table=True)
+    result = compliance_algorithms.evaluate_compliance(request, use_rule_table=True)
     payload = {
         **result.model_dump(mode="json"),
-        "method": "rule_table_logistic_calibration",
-        "algorithm_stages": ["compliance_authorization_logistic"],
+        "method": "rule_table_rag_logistic_calibration",
+        "algorithm_stages": [
+            "structured_rule_evidence_retrieval",
+            "compliance_authorization_logistic",
+        ],
         "rule_table_version": "law-of-war-demo-v1",
     }
     calibration, runtime = _calibrate_compliance_with_onnx(result, request)
     payload.update(calibration)
-    payload.update(
-        {
-            "model_runtime": {"compliance_authorization_lr": runtime},
-            "rag_evidence": [],
-            "rag_answer": "",
-            "rag_model_profile": {"enabled": False, "backend": "out_of_scope"},
-            "rag_warnings": ["rag_out_of_scope"],
-        }
-    )
+    payload.update(compliance_algorithms._compliance_rag_payload(result, request))
+    payload["model_runtime"] = {"compliance_authorization_lr": runtime}
     return payload
 
 
@@ -292,13 +286,3 @@ def _feature_order(model_name: str, fallback: list[str]) -> list[str]:
     if isinstance(feature_order, list) and all(isinstance(item, str) for item in feature_order):
         return feature_order
     return fallback
-
-
-@contextmanager
-def _without_compliance_rag_evidence():
-    original = compliance_algorithms._collect_evidence
-    compliance_algorithms._collect_evidence = lambda *_args, **_kwargs: []
-    try:
-        yield
-    finally:
-        compliance_algorithms._collect_evidence = original

@@ -27,7 +27,9 @@ Request envelope:
 }
 ```
 
-Output includes compliance decision, selected plan id, authorization status, violations, risk probability, `model_runtime`, and non-RAG warnings.
+Output includes compliance decision, selected plan id, authorization status,
+violations with evidence IDs, risk probability, `model_runtime`,
+`rag_evidence`, and `rag_duration_ms`.
 
 The service loads `models/compliance_authorization_lr.onnx` for compliance risk calibration. If
 the model is unavailable, it falls back to the Python formula and records the reason in

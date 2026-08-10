@@ -36,6 +36,21 @@
     },
     "model_runtime": {
       "type": "object"
+    },
+    "rag_evidence": {
+      "type": "array"
+    },
+    "rag_answer": {
+      "type": "string"
+    },
+    "rag_model_profile": {
+      "type": "object"
+    },
+    "rag_warnings": {
+      "type": "array"
+    },
+    "rag_duration_ms": {
+      "type": "number"
     }
   },
   "additionalProperties": true

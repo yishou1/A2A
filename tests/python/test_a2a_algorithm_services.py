@@ -190,7 +190,7 @@ def test_closed_loop_advisor_action():
     assert outputs["action"] == "confirm_effect_and_shift"
 
 
-def test_decision_planning_core_outputs_non_rag_core():
+def test_decision_planning_core_outputs_rule_adjusted_rag_core():
     request_path = ROOT / "examples" / "decision_planning_core" / "1.0.0" / "golden_cases" / "case_001_request.json"
     payload = json.loads(request_path.read_text(encoding="utf-8"))
     outputs = predict_decision_planning_core(payload["inputs"], payload["params"])
@@ -199,10 +199,12 @@ def test_decision_planning_core_outputs_non_rag_core():
     assert outputs["plan_scores"]
     assert outputs["target_trends"]
     assert outputs["model_runtime"]["decision_planning_lr"]["plans"]
-    assert outputs["rag_warnings"] == ["rag_out_of_scope"]
+    assert outputs["rag_model_profile"]["backend"] == "local"
+    assert "rag_duration_ms" in outputs
+    assert all("rag_rule_adjustment" in item for item in outputs["plan_scores"])
 
 
-def test_compliance_authorization_core_outputs_non_rag_core():
+def test_compliance_authorization_core_outputs_rule_evidence_core():
     request_path = ROOT / "examples" / "compliance_authorization_core" / "1.0.0" / "golden_cases" / "case_001_request.json"
     payload = json.loads(request_path.read_text(encoding="utf-8"))
     outputs = predict_compliance_authorization_core(payload["inputs"], payload["params"])
@@ -210,7 +212,30 @@ def test_compliance_authorization_core_outputs_non_rag_core():
     assert outputs["selected_plan_id"] == "PLAN-1"
     assert "risk_probability" in outputs
     assert outputs["model_runtime"]["compliance_authorization_lr"]["model"] == "compliance_authorization_lr.onnx"
-    assert outputs["rag_warnings"] == ["rag_out_of_scope"]
+    assert outputs["rag_model_profile"]["backend"] == "local"
+    assert "rag_duration_ms" in outputs
+    assert outputs["logistic_features"]["rag_evidence_count"] >= 0.0
+
+
+def test_decision_agent_cores_apply_conservative_disabled_rag_policy(monkeypatch):
+    monkeypatch.setenv("RAG_BACKEND", "disabled")
+    planning_path = ROOT / "examples" / "decision_planning_core" / "1.0.0" / "golden_cases" / "case_001_request.json"
+    compliance_path = ROOT / "examples" / "compliance_authorization_core" / "1.0.0" / "golden_cases" / "case_001_request.json"
+    planning_payload = json.loads(planning_path.read_text(encoding="utf-8"))
+    compliance_payload = json.loads(compliance_path.read_text(encoding="utf-8"))
+
+    planning_outputs = predict_decision_planning_core(
+        planning_payload["inputs"], planning_payload["params"]
+    )
+    compliance_outputs = predict_compliance_authorization_core(
+        compliance_payload["inputs"], compliance_payload["params"]
+    )
+
+    assert planning_outputs["rag_warnings"] == ["rag_disabled"]
+    assert all("rag_rule_adjustment" in item for item in planning_outputs["plan_scores"])
+    assert compliance_outputs["decision"] == "review_required"
+    assert compliance_outputs["approved_for_demo_handoff"] is False
+    assert compliance_outputs["rag_warnings"] == ["rag_disabled"]
 
 
 def test_decision_agent_core_http_endpoints():

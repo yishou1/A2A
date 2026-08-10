@@ -15,18 +15,19 @@ capabilities:
   - rule_table_matching
   - authorization_checking
   - logistic_risk_calibration
+  - synapserag_rule_evidence
 
 agent_card:
   summary: >
-    Non-RAG core algorithm for the A2A compliance and authorization agent.
+    Compliance core with authoritative rule matching, SynapseRAG evidence, and ONNX calibration.
   when_to_use:
     - Candidate plans must be checked against rule tables, authorization state, and constraints.
   when_not_to_use:
-    - Candidate plans have not been generated yet or RAG evidence retrieval is required.
+    - Candidate plans have not been generated yet.
   input_description: >
     A structured AgentRequest-like object containing candidate_plans and authorization.
   output_description: >
-    Compliance decision, authorization status, violations, risk probabilities, and review guidance.
+    Compliance decision, violations, bound citations, risk probabilities, and review guidance.
 
 machine_spec:
   input_schema_ref: input.schema.json
@@ -36,7 +37,7 @@ machine_spec:
     endpoint: http://127.0.0.1:9021/predict
     health_endpoint: http://127.0.0.1:9021/health
     metadata_endpoint: http://127.0.0.1:9021/metadata
-    timeout_ms: 5000
+    timeout_ms: 65000
 
 constraints:
   max_input_chars: 20000

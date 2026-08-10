@@ -15,18 +15,20 @@ capabilities:
   - candidate_plan_generation
   - logistic_plan_scoring
   - lstm_trend_scoring
+  - structured_rule_matching
+  - synapserag_rule_evidence
 
 agent_card:
   summary: >
-    Non-RAG core algorithm for the A2A decision planning agent.
+    Decision planning core with ONNX scoring, structured rules, and optional SynapseRAG evidence.
   when_to_use:
     - Candidate plans must be generated or ranked from structured tasks, resources, risks, and constraints.
   when_not_to_use:
-    - Compliance, authorization, or RAG evidence retrieval is required.
+    - Compliance or final authorization decisions are required.
   input_description: >
     A structured AgentRequest-like object containing scheduled_tasks and resources.
   output_description: >
-    Candidate plans, recommended plan id, plan scores, target trends, and handoff notes.
+    Candidate plans, rule-adjusted scores, recommendation, target trends, evidence, and handoff notes.
 
 machine_spec:
   input_schema_ref: input.schema.json
@@ -36,7 +38,7 @@ machine_spec:
     endpoint: http://127.0.0.1:9020/predict
     health_endpoint: http://127.0.0.1:9020/health
     metadata_endpoint: http://127.0.0.1:9020/metadata
-    timeout_ms: 5000
+    timeout_ms: 65000
 
 constraints:
   max_input_chars: 20000

@@ -27,7 +27,8 @@ Request envelope:
 }
 ```
 
-Output includes candidate plans, recommended plan id, plan scores, target trends, `model_runtime`, and non-RAG warnings.
+Output includes candidate plans, recommended plan id, rule-adjusted plan scores,
+target trends, `model_runtime`, `rag_evidence`, and `rag_duration_ms`.
 
 The service loads `models/decision_planning_lr.onnx` for candidate-plan scoring. It also loads
 `models/decision_planning_lstm.onnx` when a target has 12 history steps; shorter histories fall
