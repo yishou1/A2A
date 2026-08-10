@@ -86,6 +86,11 @@ class CandidatePlan(BaseModel):
     rationale: str = ""
     assumptions: list[str] = Field(default_factory=list)
     risk_notes: list[str] = Field(default_factory=list)
+    base_score: float | None = Field(default=None, ge=0.0, le=100.0)
+    rag_rule_adjustment: float = Field(default=0.0, ge=-30.0, le=0.0)
+    matched_rule_ids: list[str] = Field(default_factory=list)
+    evidence_rule_ids: list[str] = Field(default_factory=list)
+    final_score: float | None = Field(default=None, ge=0.0, le=100.0)
 
 
 class AuthorizationState(BaseModel):
@@ -140,6 +145,10 @@ class ComplianceCheckResult(PlanComplianceResult):
     selected_plan_id: str
     authorization_status: AuthorizationState = Field(default_factory=AuthorizationState)
     per_plan_results: list[PlanComplianceResult] = Field(default_factory=list)
+    rag_answer: str = ""
+    rag_model_profile: dict[str, Any] = Field(default_factory=dict)
+    rag_warnings: list[str] = Field(default_factory=list)
+    rag_duration_ms: float = Field(default=0.0, ge=0.0)
 
 
 class AgentRequest(BaseModel):

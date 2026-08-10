@@ -46,6 +46,12 @@ class Settings:
     rag_onnx_providers: str
     rag_top_k_recall: int
     rag_top_k_final: int
+    rag_backend: str
+    synapserag_base_url: str
+    synapserag_api_token: str
+    synapserag_timeout_seconds: float
+    synapserag_top_k_planning: int
+    synapserag_top_k_compliance: int
     rag_document_dir: str
     rag_index_path: str
     enable_rag_ocr: bool
@@ -111,6 +117,20 @@ def get_settings() -> Settings:
         rag_onnx_providers=os.getenv("RAG_ONNX_PROVIDERS", "CPUExecutionProvider"),
         rag_top_k_recall=int(os.getenv("RAG_TOP_K_RECALL", "20")),
         rag_top_k_final=int(os.getenv("RAG_TOP_K_FINAL", "6")),
+        rag_backend=os.getenv("RAG_BACKEND", "local").strip().lower(),
+        synapserag_base_url=os.getenv(
+            "SYNAPSERAG_BASE_URL", "http://127.0.0.1:8000"
+        ).rstrip("/"),
+        synapserag_api_token=os.getenv("SYNAPSERAG_API_TOKEN", "").strip(),
+        synapserag_timeout_seconds=float(
+            os.getenv("SYNAPSERAG_TIMEOUT_SECONDS", "60")
+        ),
+        synapserag_top_k_planning=max(
+            1, min(10, int(os.getenv("SYNAPSERAG_TOP_K_PLANNING", "3")))
+        ),
+        synapserag_top_k_compliance=max(
+            1, min(10, int(os.getenv("SYNAPSERAG_TOP_K_COMPLIANCE", "3")))
+        ),
         rag_document_dir=os.getenv("RAG_DOCUMENT_DIR", "data/roe_docs"),
         rag_index_path=os.getenv("RAG_INDEX_PATH", ".a2a_state/rag/rag_index.sqlite"),
         enable_rag_ocr=os.getenv("ENABLE_RAG_OCR", "false").lower() == "true",

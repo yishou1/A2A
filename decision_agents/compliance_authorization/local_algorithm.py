@@ -23,12 +23,14 @@ from decision_agents.common.schemas import (
     RuleEvidence,
     RuleViolation,
 )
-from decision_agents.knowledge.retrieval import retrieve_rag_result
+from decision_agents.knowledge.retrieval import retrieve_rule_rag_result
 from decision_agents.knowledge.rule_tables import (
     BLOCKING_ACTION_TERMS,
     REVIEW_TERMS,
-    load_rule_table,
+    match_rule_table,
 )
+from decision_agents.knowledge.synapserag_client import EvidenceQuery
+from decision_agents.rag.pipeline import RagResult
 
 
 COMPLIANCE_LOGISTIC_WEIGHTS = {
@@ -58,7 +60,10 @@ def _medium_compliance_authorization(request: AgentRequest) -> dict:
     payload = {
         **result.model_dump(mode="json"),
         "method": "rule_table_rag_logistic_calibration",
-        "algorithm_stages": ["compliance_authorization_logistic"],
+        "algorithm_stages": [
+            "structured_rule_evidence_retrieval",
+            "compliance_authorization_logistic",
+        ],
         "rule_table_version": "law-of-war-demo-v1",
     }
     payload.update(_calibrate_compliance_result(result, request))
@@ -156,6 +161,7 @@ def run_compliance_authorization(request: AgentRequest) -> AgentResponse:
         if fallback_algorithm_id and fallback_algorithm_id not in selected_algorithms:
             selected_algorithms.append(fallback_algorithm_id)
         warnings.append(f"onnx_fallback:{onnx_info.get('reason', 'unavailable')}")
+    warnings.extend(result.get("rag_warnings", []))
     return AgentResponse(
         agent="compliance_authorization_agent",
         selected_algorithms=selected_algorithms,
@@ -175,10 +181,31 @@ def evaluate_compliance(
     use_rule_table: bool = False,
 ) -> ComplianceCheckResult:
     selected_plan = _select_plan(request.candidate_plans)
-    per_plan_results = [
+    static_results = [
         _evaluate_plan(plan, request, use_rule_table=use_rule_table)
         for plan in request.candidate_plans
     ]
+    rag_result = _retrieve_compliance_evidence(static_results, request)
+    evidence_by_rule: dict[str, list[RuleEvidence]] = {}
+    for item in rag_result.evidence:
+        evidence_by_rule.setdefault(item.rule_id, []).append(item)
+    rag_failed = _rag_retrieval_failed(rag_result)
+    per_plan_results = []
+    for result in static_results:
+        evidence = _merge_evidence(
+            *[evidence_by_rule.get(item.rule_id, []) for item in result.violations]
+        )
+        violations = _bind_evidence_to_violations(result.violations, evidence)
+        updates: dict[str, Any] = {"violations": violations, "evidence": evidence}
+        if rag_failed and result.decision != "blocked":
+            updates.update(
+                {
+                    "decision": "review_required",
+                    "approved_for_demo_handoff": False,
+                    "requires_human_approval": True,
+                }
+            )
+        per_plan_results.append(result.model_copy(update=updates))
     selected_result = next(
         result for result in per_plan_results if result.plan_id == selected_plan.id
     )
@@ -188,6 +215,10 @@ def evaluate_compliance(
         selected_plan_id=selected_plan.id,
         authorization_status=request.authorization,
         per_plan_results=per_plan_results,
+        rag_answer=rag_result.answer,
+        rag_model_profile=rag_result.model_profile,
+        rag_warnings=rag_result.warnings,
+        rag_duration_ms=rag_result.duration_ms,
     )
 
 
@@ -221,22 +252,20 @@ def _compliance_rag_payload(
     result: ComplianceCheckResult,
     request: AgentRequest,
 ) -> dict[str, Any]:
-    rag_result = retrieve_rag_result(
-        _compliance_rag_query(result, request),
-        purpose="compliance",
-        top_k=6,
+    del request
+    evidence = _merge_evidence(
+        result.evidence,
+        *[item.evidence for item in result.per_plan_results],
     )
-    evidence = _merge_evidence(result.evidence, rag_result.evidence)
     return {
         "rag_evidence": [
             item.model_dump(mode="json")
             for item in evidence
         ],
-        "rag_answer": rag_result.answer,
-        "rag_model_profile": rag_result.model_profile,
-        "rag_warnings": rag_result.warnings,
-        "rag_query": rag_result.rewritten_query,
-        "rag_keywords": rag_result.keywords,
+        "rag_answer": result.rag_answer,
+        "rag_model_profile": result.rag_model_profile,
+        "rag_warnings": result.rag_warnings,
+        "rag_duration_ms": result.rag_duration_ms,
     }
 
 
@@ -359,8 +388,6 @@ def _evaluate_plan(
         decision = "approved"
         approved = True
 
-    evidence = _collect_evidence(plan, request, violations)
-    violations = _bind_evidence_to_violations(violations, evidence)
     for violation in violations:
         if violation.severity == "blocking":
             blocked_items.append(violation.item)
@@ -375,7 +402,7 @@ def _evaluate_plan(
         requires_human_approval=requires_review,
         violations=violations,
         blocked_items=sorted(set(blocked_items)),
-        evidence=evidence,
+        evidence=[],
         adjustment_suggestions=sorted(set(suggestions)),
     )
 
@@ -387,10 +414,11 @@ def _check_rule_table(
     include_law_of_war: bool = False,
 ) -> list[RuleViolation]:
     violations = []
-    context = _rule_context(plan, request)
-    for rule in load_rule_table(include_law_of_war=include_law_of_war):
-        if not _rule_matches(rule["condition"], context):
-            continue
+    for rule in match_rule_table(
+        plan,
+        request,
+        include_law_of_war=include_law_of_war,
+    ):
         item = plan.id
         if rule["rule_id"] == "RULE-BLOCK-001":
             item = _first_matching_action(plan, BLOCKING_ACTION_TERMS) or plan.id
@@ -405,66 +433,6 @@ def _check_rule_table(
         )
     violations.extend(_approved_scope_violations(plan, request))
     return violations
-
-
-def _rule_context(plan: CandidatePlan, request: AgentRequest) -> dict[str, Any]:
-    combined = " ".join(
-        [
-            plan.name,
-            *plan.actions,
-            *plan.expected_effects,
-            *plan.risk_notes,
-            *[_constraint_text(constraint) for constraint in request.constraints],
-        ]
-    ).lower()
-    risk_notes = " ".join(plan.risk_notes).lower()
-    target_or_effect = " ".join(
-        [
-            plan.name,
-            " ".join(plan.target_ids),
-            *plan.actions,
-            *plan.expected_effects,
-            *plan.risk_notes,
-        ]
-    ).lower()
-    return {
-        "actions": [action.lower() for action in plan.actions],
-        "combined": combined,
-        "risk_notes": risk_notes,
-        "target_or_effect": target_or_effect,
-        "authorization_status": request.authorization.status,
-        "authorization_scope": [item.lower() for item in request.authorization.scope],
-    }
-
-
-def _rule_matches(condition: dict[str, Any], context: dict[str, Any]) -> bool:
-    if "authorization_status_in" in condition:
-        return context["authorization_status"] in condition["authorization_status_in"]
-    if "requires_any_scope" in condition:
-        scopes = " ".join(context.get("authorization_scope", []))
-        return not any(term in scopes for term in condition["requires_any_scope"])
-    if "risk_note_contains_any" in condition:
-        risk_notes = context.get("risk_notes", "")
-        return any(term in risk_notes for term in condition["risk_note_contains_any"])
-    if "target_or_effect_contains_any" in condition:
-        target_or_effect = context.get("target_or_effect", "")
-        terms = condition["target_or_effect_contains_any"]
-        if not any(term in target_or_effect for term in terms):
-            return False
-        if "missing_all" in condition:
-            return all(term not in target_or_effect for term in condition["missing_all"])
-        return True
-
-    field_value = context.get(condition.get("field"), "")
-    if isinstance(field_value, list):
-        field_text = " ".join(field_value)
-    else:
-        field_text = str(field_value)
-    if "contains_any" in condition:
-        return any(term in field_text for term in condition["contains_any"])
-    if "missing_all" in condition:
-        return all(term not in field_text for term in condition["missing_all"])
-    return False
 
 
 def _first_matching_action(
@@ -641,26 +609,80 @@ def _check_authorization(
     ]
 
 
+def _retrieve_compliance_evidence(
+    results: list[PlanComplianceResult],
+    request: AgentRequest,
+) -> RagResult:
+    violations_by_rule: dict[str, RuleViolation] = {}
+    for result in results:
+        for violation in result.violations:
+            violations_by_rule.setdefault(violation.rule_id, violation)
+    plans_by_id = {plan.id: plan for plan in request.candidate_plans}
+    queries = []
+    for rule_id, violation in sorted(violations_by_rule.items()):
+        affected = [
+            plans_by_id[result.plan_id]
+            for result in results
+            if any(item.rule_id == rule_id for item in result.violations)
+        ]
+        query = " ".join(
+            [
+                rule_id,
+                violation.message,
+                violation.suggestion,
+                request.authorization.status,
+                " ".join(request.authorization.scope),
+                " ".join(_constraint_text(item) for item in request.constraints),
+                " ".join(plan.name for plan in affected),
+                " ".join(action for plan in affected for action in plan.actions),
+            ]
+        )[:4000]
+        queries.append(EvidenceQuery(query_id=rule_id, text=query))
+    if not queries:
+        queries.append(
+            EvidenceQuery(
+                query_id="COMPLIANCE-CONTEXT",
+                text=" ".join(
+                    [
+                        "rules authorization law-of-war compliance review",
+                        request.authorization.status,
+                        " ".join(request.authorization.scope),
+                        " ".join(_constraint_text(item) for item in request.constraints),
+                    ]
+                ),
+            )
+        )
+    return retrieve_rule_rag_result(
+        queries,
+        purpose="compliance",
+        request_id=request.request_id,
+    )
+
+
 def _collect_evidence(
     plan: CandidatePlan,
     request: AgentRequest,
     violations: list[RuleViolation],
 ) -> list[RuleEvidence]:
-    query_parts = [
-        request.authorization.status,
-        " ".join(request.authorization.scope),
-        plan.name,
-        " ".join(plan.actions),
-        " ".join(_constraint_text(constraint) for constraint in request.constraints),
-        " ".join(violation.rule_id for violation in violations),
-        " ".join(violation.message for violation in violations),
-    ]
-    evidence = retrieve_rag_result(
-        " ".join(query_parts),
-        purpose="compliance",
-        top_k=6,
-    ).evidence
-    return _merge_evidence(evidence)
+    """Compatibility helper for focused rule-evidence tests."""
+    result = PlanComplianceResult(
+        plan_id=plan.id,
+        plan_status=plan.status,
+        decision="review_required",
+        approved_for_demo_handoff=False,
+        requires_human_approval=True,
+        violations=violations,
+    )
+    return _retrieve_compliance_evidence([result], request).evidence
+
+
+def _rag_retrieval_failed(rag_result: RagResult) -> bool:
+    if rag_result.model_profile.get("status") == "error":
+        return True
+    return any(
+        str(warning).startswith("RAG_RETRIEVAL_ERROR")
+        for warning in rag_result.warnings
+    )
 
 
 def _bind_evidence_to_violations(
@@ -717,21 +739,3 @@ def _constraint_text(constraint: dict[str, Any] | str) -> str:
     if isinstance(constraint, str):
         return constraint
     return " ".join(str(value) for value in constraint.values())
-
-
-def _compliance_rag_query(
-    result: ComplianceCheckResult,
-    request: AgentRequest,
-) -> str:
-    return " ".join(
-        [
-            "rules authorization law-of-war compliance review",
-            request.authorization.status,
-            " ".join(request.authorization.scope),
-            " ".join(_constraint_text(constraint) for constraint in request.constraints),
-            result.selected_plan_id,
-            " ".join(violation.rule_id for violation in result.violations),
-            " ".join(violation.message for violation in result.violations),
-            " ".join(result.blocked_items),
-        ]
-    )

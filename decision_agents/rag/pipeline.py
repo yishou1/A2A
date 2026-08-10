@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from time import perf_counter
 from typing import Any, Iterable
 
 from decision_agents.common.config import get_settings
@@ -25,6 +26,7 @@ class RagResult:
     warnings: list[str]
     rewritten_query: str
     keywords: list[str]
+    duration_ms: float = 0.0
 
 
 class RagPipeline:
@@ -42,6 +44,7 @@ class RagPipeline:
         document_scope: str | Iterable[str] | None = None,
         require_citations: bool = True,
     ) -> RagResult:
+        started = perf_counter()
         warnings = []
         final_top_k = top_k or self.settings.rag_top_k_final
         rewritten_query, rewrite_warnings = self.models.rewrite_query(query)
@@ -81,6 +84,7 @@ class RagPipeline:
             warnings=warnings,
             rewritten_query=rewritten_query,
             keywords=keywords,
+            duration_ms=round((perf_counter() - started) * 1000.0, 3),
         )
 
     def _retrieve_candidates(

@@ -23,7 +23,9 @@ from decision_agents.common.schemas import (
     RiskAssessment,
     ScheduledTask,
 )
-from decision_agents.knowledge.retrieval import retrieve_rag_result
+from decision_agents.knowledge.retrieval import retrieve_rule_rag_result
+from decision_agents.knowledge.rule_tables import match_rule_table
+from decision_agents.knowledge.synapserag_client import EvidenceQuery
 
 
 MIN_CANDIDATE_PLANS = 3
@@ -95,6 +97,7 @@ def _medium_decision_planning(request: AgentRequest) -> dict:
         target_trends,
     )
     scored, rag_payload = enhance_plans_with_rag(scored, request)
+    plan_scores = enrich_plan_scores(plan_scores, scored)
     recommended = scored[0] if scored else None
     return {
         "candidate_plans": [plan.model_dump(mode="json") for plan in scored],
@@ -105,6 +108,7 @@ def _medium_decision_planning(request: AgentRequest) -> dict:
         "algorithm_stages": [
             "decision_planning_logistic",
             "decision_planning_lstm",
+            "structured_rule_rag_adjustment",
         ],
         "scoring_weights": weights,
         "weight_source": weight_source,
@@ -211,6 +215,7 @@ def run_decision_planning(request: AgentRequest) -> AgentResponse:
         if fallback_algorithm_id and fallback_algorithm_id not in selected_algorithms:
             selected_algorithms.append(fallback_algorithm_id)
         warnings.append(f"onnx_fallback:{onnx_info.get('reason', 'unavailable')}")
+    warnings.extend(result.get("rag_warnings", []))
     return AgentResponse(
         agent="decision_planning_agent",
         selected_algorithms=selected_algorithms,
@@ -285,28 +290,139 @@ def enhance_plans_with_rag(
     plans: list[CandidatePlan],
     request: AgentRequest,
 ) -> tuple[list[CandidatePlan], dict[str, Any]]:
-    rag_result = retrieve_rag_result(
-        _planning_rag_query(plans, request),
+    matches_by_plan = {
+        plan.id: match_rule_table(plan, request, include_law_of_war=True)
+        for plan in plans
+    }
+    rules_by_id = {
+        rule["rule_id"]: rule
+        for matches in matches_by_plan.values()
+        for rule in matches
+    }
+    queries = [
+        EvidenceQuery(
+            query_id=rule_id,
+            text=_planning_rule_query(rule, plans, request),
+        )
+        for rule_id, rule in sorted(rules_by_id.items())
+    ]
+    if not queries:
+        queries = [
+            EvidenceQuery(
+                query_id="RAG-PLANNING-CONTEXT",
+                text=_planning_rag_query(plans, request),
+            )
+        ]
+    rag_result = retrieve_rule_rag_result(
+        queries,
         purpose="planning",
-        top_k=4,
+        request_id=request.request_id,
     )
-    evidence_summary = _evidence_summary(rag_result.evidence)
-    if not evidence_summary:
-        return plans, _rag_payload(rag_result)
+
+    evidence_by_rule: dict[str, list] = defaultdict(list)
+    for evidence in rag_result.evidence:
+        evidence_by_rule[evidence.rule_id].append(evidence)
 
     enhanced = []
-    assumption = f"RAG evidence considered: {evidence_summary}"
     for plan in plans:
-        assumptions = list(plan.assumptions)
-        if assumption not in assumptions:
-            assumptions.append(assumption)
+        matched_rules = matches_by_plan[plan.id]
+        base_score = plan.score
+        adjustment = 0.0
+        evidence_rule_ids = []
+        for rule in matched_rules:
+            rule_id = rule["rule_id"]
+            scores = [min(1.0, item.score) for item in evidence_by_rule.get(rule_id, [])]
+            evidence_factor = 0.75 + 0.25 * (max(scores) if scores else 0.0)
+            weight = -20.0 if rule["severity"] == "blocking" else -8.0
+            adjustment += weight * evidence_factor
+            if scores:
+                evidence_rule_ids.append(rule_id)
+        adjustment = round(max(-30.0, min(0.0, adjustment)), 2)
+        final_score = round(max(0.0, min(100.0, base_score + adjustment)), 2)
+        matched_ids = [rule["rule_id"] for rule in matched_rules]
         rationale = plan.rationale
-        if evidence_summary and evidence_summary not in rationale:
-            rationale = f"{rationale}; rag_evidence={evidence_summary}" if rationale else (
-                f"rag_evidence={evidence_summary}"
+        if matched_ids:
+            rationale = (
+                f"{rationale}; rule_adjustment={adjustment}, "
+                f"matched_rules={','.join(matched_ids)}"
             )
-        enhanced.append(plan.model_copy(update={"assumptions": assumptions, "rationale": rationale}))
+        enhanced.append(
+            plan.model_copy(
+                update={
+                    "score": final_score,
+                    "status": "candidate",
+                    "base_score": base_score,
+                    "rag_rule_adjustment": adjustment,
+                    "matched_rule_ids": matched_ids,
+                    "evidence_rule_ids": evidence_rule_ids,
+                    "final_score": final_score,
+                    "rationale": rationale,
+                }
+            )
+        )
+    enhanced.sort(key=lambda item: (-item.score, item.id))
+    if enhanced:
+        enhanced[0] = enhanced[0].model_copy(update={"status": "recommended"})
+
+    evidence_summary = _evidence_summary(rag_result.evidence)
+    if evidence_summary:
+        assumption = f"RAG evidence considered: {evidence_summary}"
+        enhanced = [
+            plan.model_copy(
+                update={
+                    "assumptions": [*plan.assumptions, assumption]
+                    if assumption not in plan.assumptions
+                    else plan.assumptions
+                }
+            )
+            for plan in enhanced
+        ]
     return enhanced, _rag_payload(rag_result)
+
+
+def enrich_plan_scores(
+    plan_scores: list[dict[str, Any]],
+    plans: list[CandidatePlan],
+) -> list[dict[str, Any]]:
+    by_id = {item["plan_id"]: dict(item) for item in plan_scores}
+    enriched = []
+    for plan in plans:
+        item = by_id.get(plan.id, {"plan_id": plan.id})
+        item.update(
+            {
+                "base_score": plan.base_score if plan.base_score is not None else plan.score,
+                "rag_rule_adjustment": plan.rag_rule_adjustment,
+                "matched_rule_ids": plan.matched_rule_ids,
+                "evidence_rule_ids": plan.evidence_rule_ids,
+                "final_score": plan.score,
+            }
+        )
+        enriched.append(item)
+    return enriched
+
+
+def _planning_rule_query(
+    rule: dict[str, Any],
+    plans: list[CandidatePlan],
+    request: AgentRequest,
+) -> str:
+    matching_plans = [
+        plan
+        for plan in plans
+        if rule in match_rule_table(plan, request, include_law_of_war=True)
+    ]
+    return " ".join(
+        [
+            rule["rule_id"],
+            rule["message"],
+            rule["suggestion"],
+            request.authorization.status,
+            " ".join(request.authorization.scope),
+            " ".join(_constraint_text(item) for item in request.constraints),
+            " ".join(plan.name for plan in matching_plans),
+            " ".join(action for plan in matching_plans for action in plan.actions),
+        ]
+    )[:4000]
 
 
 def score_candidate_plans_with_logistic(
@@ -543,6 +659,7 @@ def _rag_payload(rag_result) -> dict[str, Any]:
         "rag_warnings": rag_result.warnings,
         "rag_query": rag_result.rewritten_query,
         "rag_keywords": rag_result.keywords,
+        "rag_duration_ms": rag_result.duration_ms,
     }
 
 

@@ -5,6 +5,8 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from decision_agents.common.schemas import AgentRequest, CandidatePlan
+
 
 BLOCKING_ACTION_TERMS = (
     "execute",
@@ -166,3 +168,78 @@ def load_rule_table(include_law_of_war: bool = False) -> list[dict[str, Any]]:
     if include_law_of_war:
         table.extend(deepcopy(LAW_OF_WAR_RULE_TABLE))
     return table
+
+
+def match_rule_table(
+    plan: CandidatePlan,
+    request: AgentRequest,
+    *,
+    include_law_of_war: bool = False,
+) -> list[dict[str, Any]]:
+    """Return authoritative structured rules matched by a candidate plan."""
+    context = _rule_context(plan, request)
+    return [
+        rule
+        for rule in load_rule_table(include_law_of_war=include_law_of_war)
+        if _rule_matches(rule["condition"], context)
+    ]
+
+
+def _rule_context(plan: CandidatePlan, request: AgentRequest) -> dict[str, Any]:
+    combined = " ".join(
+        [
+            plan.name,
+            *plan.actions,
+            *plan.expected_effects,
+            *plan.risk_notes,
+            *[_constraint_text(constraint) for constraint in request.constraints],
+        ]
+    ).lower()
+    return {
+        "actions": [action.lower() for action in plan.actions],
+        "combined": combined,
+        "risk_notes": " ".join(plan.risk_notes).lower(),
+        "target_or_effect": " ".join(
+            [
+                plan.name,
+                " ".join(plan.target_ids),
+                *plan.actions,
+                *plan.expected_effects,
+                *plan.risk_notes,
+            ]
+        ).lower(),
+        "authorization_status": request.authorization.status,
+        "authorization_scope": [item.lower() for item in request.authorization.scope],
+    }
+
+
+def _rule_matches(condition: dict[str, Any], context: dict[str, Any]) -> bool:
+    if "authorization_status_in" in condition:
+        return context["authorization_status"] in condition["authorization_status_in"]
+    if "requires_any_scope" in condition:
+        scopes = " ".join(context.get("authorization_scope", []))
+        return not any(term in scopes for term in condition["requires_any_scope"])
+    if "risk_note_contains_any" in condition:
+        risk_notes = context.get("risk_notes", "")
+        return any(term in risk_notes for term in condition["risk_note_contains_any"])
+    if "target_or_effect_contains_any" in condition:
+        target_or_effect = context.get("target_or_effect", "")
+        if not any(term in target_or_effect for term in condition["target_or_effect_contains_any"]):
+            return False
+        return not condition.get("missing_all") or all(
+            term not in target_or_effect for term in condition["missing_all"]
+        )
+
+    field_value = context.get(condition.get("field"), "")
+    field_text = " ".join(field_value) if isinstance(field_value, list) else str(field_value)
+    if "contains_any" in condition:
+        return any(term in field_text for term in condition["contains_any"])
+    if "missing_all" in condition:
+        return all(term not in field_text for term in condition["missing_all"])
+    return False
+
+
+def _constraint_text(constraint: dict[str, Any] | str) -> str:
+    if isinstance(constraint, str):
+        return constraint
+    return " ".join(str(value) for value in constraint.values())
