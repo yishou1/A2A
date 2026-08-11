@@ -101,22 +101,29 @@ def _frames_from_input(input_payload: dict[str, Any]) -> list[SensorFrame]:
     return frames
 
 
-def _mock_visual_frame() -> SensorFrame:
-    """无附件时的 mock 联调帧（仅 use_mock 模式）。"""
-    return SensorFrame(
-        sensor_id="MOCK-EO",
-        modality=SensorModality.EO_IR,
-        payload={"image_base64": "mock"},
-        metadata={"source": "mock_fallback"},
-    )
+def _normalize_input_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """兼容飞书/lzh 外壳：业务字段可在 input 或 input.agent_request。"""
+    input_payload = dict(payload.get("input") or {})
+    agent_request = input_payload.get("agent_request")
+    if isinstance(agent_request, dict):
+        merged = dict(agent_request)
+        for key, value in input_payload.items():
+            if key == "agent_request":
+                continue
+            # 外层同名字段不覆盖 agent_request 内已有值
+            if key not in merged or merged.get(key) in (None, "", {}, []):
+                merged[key] = value
+        return merged
+    return input_payload
 
 
-def commander_payload_to_batch(payload: dict[str, Any], *, allow_mock_fallback: bool = True) -> SensorBatch:
+def commander_payload_to_batch(payload: dict[str, Any]) -> SensorBatch:
     """
     将 Commander sendMessage 载荷转为 SensorBatch。
 
     - attachments：仅接受对象存储引用（workflow_payloads 校验）
-    - input/context：来自 BPEL 上游变量（如 recon_report）
+    - input / input.agent_request：来自 BPEL/飞书外壳业务字段（如 recon_report）
+    - 无 mock 兜底：缺少附件与业务输入时直接失败，供真实场景演练
     """
     workflow_id = payload.get("workflow_id") or payload.get("work_item") or "WF-UNKNOWN"
     command = payload.get("command") or "process_intelligence"
@@ -124,14 +131,14 @@ def commander_payload_to_batch(payload: dict[str, Any], *, allow_mock_fallback: 
     attachments = normalize_attachments(payload.get("attachments"))
     frames = [_frame_from_attachment(item, index) for index, item in enumerate(attachments)]
 
-    input_payload = dict(payload.get("input") or {})
+    input_payload = _normalize_input_payload(payload)
     frames.extend(_frames_from_input(input_payload))
 
-    if not frames and allow_mock_fallback:
-        frames.append(_mock_visual_frame())
-
     if not frames:
-        raise ValueError("无法从 attachments 或 input 构建传感器帧")
+        raise ValueError(
+            "无法从 attachments 或 input 构建传感器帧："
+            "真实演练要求至少提供一张传感器附件，或 recon_report/sector/coordinates"
+        )
 
     upstream_context = dict(payload.get("context") or {})
     sensor_telemetry = upstream_context.get("sensor_telemetry") or {}

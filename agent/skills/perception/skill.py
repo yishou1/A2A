@@ -1,54 +1,90 @@
-"""感知探测技能：RT-DETR+ODConv → Siamese Mask2Former → EDL → MOTR+Neural Kalman。"""
+"""感知探测技能：RT-DETR+ODConv → Siamese Mask2Former → EDL → MOTR+Neural Kalman → MARL-PPO。"""
 
 from __future__ import annotations
 
 from typing import Any
 
-from agent.models.schemas import Detection, PerceptionOutput, SensorBatch
-from agent.skills.base import subskill_config
-from agent.skills.perception.edl import EDLEvidentialVerifier
-from agent.skills.perception.motr_neural_kalman_tracker import MOTRNeuralKalmanTracker
-from agent.skills.perception.rt_detr_odconv_detector import RTDETRODConvDetector
-from agent.skills.perception.siamese_mask2former_damage import SiameseMask2FormerDamage
+from agent.algorithm_library.factory import (
+    create_damage_assessor,
+    create_edl_verifier,
+    create_marl_ppo_scheduler,
+    create_motr_tracker,
+    create_rt_detr_detector,
+)
+from agent.algorithm_library.planner_runtime import AlgorithmPlan
+from agent.models.schemas import Detection, PerceptionOutput, SensorBatch, TaskSchedulePlan
+from agent.skills.perception.schedule_adapter import scheduler_result_to_plan
+
+
+def _as_list(value: Any, *keys: str) -> list:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        for key in keys:
+            item = value.get(key)
+            if isinstance(item, list):
+                return item
+    return []
 
 
 class PerceptionSkill:
     def __init__(self, *, use_mock: bool = True, config: dict[str, Any] | None = None):
         cfg = config or {}
-        self.detector = RTDETRODConvDetector(
-            use_mock=use_mock, config=subskill_config(cfg, "rt_detr_odconv")
-        )
-        self.damage = SiameseMask2FormerDamage(
-            use_mock=use_mock, config=subskill_config(cfg, "siamese_mask2former")
-        )
-        self.edl = EDLEvidentialVerifier(use_mock=use_mock, config=subskill_config(cfg, "edl"))
-        self.tracker = MOTRNeuralKalmanTracker(
-            use_mock=use_mock, config=subskill_config(cfg, "motr_neural_kalman")
-        )
+        self.detector = create_rt_detr_detector(use_mock=use_mock, config=cfg)
+        self.damage = create_damage_assessor(use_mock=use_mock, config=cfg)
+        self.edl = create_edl_verifier(use_mock=use_mock, config=cfg)
+        self.tracker = create_motr_tracker(use_mock=use_mock, config=cfg)
+        self.scheduler = create_marl_ppo_scheduler(use_mock=use_mock, config=cfg)
 
-    def execute(self, batch: SensorBatch, prior_tracks: list[dict[str, Any]] | None = None) -> PerceptionOutput:
+    def execute(
+        self,
+        batch: SensorBatch,
+        prior_tracks: list[dict[str, Any]] | None = None,
+        *,
+        plan: AlgorithmPlan | None = None,
+    ) -> PerceptionOutput:
         frame_dicts = [f.model_dump(mode="json") for f in batch.frames]
-        visual_frames = [
-            f for f in frame_dicts if f.get("modality") in ("eo_ir", "sar")
-        ]
+        visual_frames = [f for f in frame_dicts if f.get("modality") in ("eo_ir", "sar")]
 
-        raw_dets = self.detector.run({"frames": visual_frames})
+        def enabled(aid: str) -> bool:
+            return plan is None or plan.is_enabled(aid)
+
+        raw_dets = _as_list(self.detector.run({"frames": visual_frames}), "detections")
         trace = {self.detector.name: f"{len(raw_dets)} detections"}
 
-        ref = batch.context.get("reference_frame")
-        damage_reports = self.damage.run(
-            {"frames": visual_frames, "reference_frame": ref}
-        )
-        trace[self.damage.name] = f"{len(damage_reports)} damage masks"
+        damage_reports: list[dict[str, Any]] = []
+        if enabled("siamese_mask2former_damage"):
+            ref = batch.context.get("reference_frame")
+            damage_reports = _as_list(
+                self.damage.run({"frames": visual_frames, "reference_frame": ref}),
+                "damage_reports",
+            )
+            trace[self.damage.name] = f"{len(damage_reports)} damage masks"
+        else:
+            trace[self.damage.name] = "skipped"
 
-        damage_by_sensor = {d["sensor_id"]: d for d in damage_reports if "sensor_id" in d}
+        damage_by_sensor = {
+            d["sensor_id"]: d for d in damage_reports if isinstance(d, dict) and "sensor_id" in d
+        }
         for det in raw_dets:
+            if not isinstance(det, dict):
+                continue
             sid = det.get("sensor_id")
             if sid in damage_by_sensor:
                 det["damage_score"] = damage_by_sensor[sid].get("damage_score")
 
-        verified = self.edl.run({"detections": raw_dets})
-        trace[self.edl.name] = f"{len(verified)} verified"
+        if enabled("edl_evidential_verifier"):
+            verified = _as_list(
+                self.edl.run({"detections": raw_dets}),
+                "verified_detections",
+                "detections",
+            )
+            if not verified:
+                verified = list(raw_dets)
+            trace[self.edl.name] = f"{len(verified)} verified"
+        else:
+            verified = list(raw_dets)
+            trace[self.edl.name] = "skipped->passthrough"
 
         track_result = self.tracker.run(
             {
@@ -58,10 +94,35 @@ class PerceptionSkill:
                 "batch_context": batch.context,
             }
         )
-        trace[self.tracker.name] = f"{len(track_result.get('tracks', []))} tracks"
+        if not isinstance(track_result, dict):
+            track_result = {"tracks": []}
+        tracks = track_result.get("tracks", []) or []
+        trace[self.tracker.name] = f"{len(tracks)} tracks"
+
+        if enabled("marl_ppo_task_scheduler"):
+            schedule_result = self.scheduler.run(
+                {
+                    "tracks": tracks,
+                    "detections": verified,
+                    "batch_context": batch.context,
+                    "frames": frame_dicts,
+                }
+            )
+            if not isinstance(schedule_result, dict):
+                schedule_result = {}
+            task_schedule = scheduler_result_to_plan(schedule_result)
+            trace[self.scheduler.name] = (
+                f"{len(task_schedule.sensor_assignments)} sensor tasks, "
+                f"{len(task_schedule.reattack_plan)} reattack"
+            )
+        else:
+            task_schedule = TaskSchedulePlan(algorithm="skipped")
+            trace[self.scheduler.name] = "skipped"
 
         detections: list[Detection] = []
-        for det, track in zip(verified, track_result.get("tracks", [])):
+        for det, track in zip(verified, tracks):
+            if not isinstance(det, dict) or not isinstance(track, dict):
+                continue
             detections.append(
                 Detection(
                     track_id=track.get("track_id"),
@@ -77,7 +138,8 @@ class PerceptionSkill:
 
         return PerceptionOutput(
             detections=detections,
-            tracks=track_result.get("tracks", []),
-            verified_ids=[t["track_id"] for t in track_result.get("tracks", []) if "track_id" in t],
+            tracks=tracks,
+            verified_ids=[t["track_id"] for t in tracks if "track_id" in t],
+            task_schedule=task_schedule,
             algorithm_trace=trace,
         )

@@ -1,6 +1,38 @@
 # 战术情报智能体配置 — 真实神经网络推理（use_mock: false）
 use_mock: false
 
+# Agent 执行模式：algorithm_library（HTTP 调算法库）| in_process（本地直连，仅开发/单测）
+execution_mode: algorithm_library
+
+# 小模型工具调用
+tool_llm:
+  enable: false
+  url: ""
+  name: ""
+  api_key: EMPTY
+  provider: openai_compatible
+  timeout_seconds: 30
+  temperature: 0
+  json_mode: false
+  strip_thinking: true
+  json_retry_count: 0
+  allowed_models: []
+
+# 算法规划：fixed=完整默认管线；llm=小模型动态选子集（需 ENABLE_LLM + TOOL_LLM）
+algorithm_planner:
+  mode: fixed
+  fallback_to_fixed: true
+
+algorithm_library:
+  enabled: true
+  call_mode: run
+  base_url: http://127.0.0.1:8088
+  host: 127.0.0.1
+  timeout_ms: 30000
+  # 可选：覆盖默认端口映射（仅 call_mode=predict 时用）
+  # endpoints:
+  #   battlefield_rtdetr_detector: http://127.0.0.1:9020/predict
+
 inference:
   device: auto
   # 算力档位: auto | small | medium | large
@@ -17,6 +49,8 @@ inference:
   semantic_comm_model: google/flan-t5-small
   page_index_model: paraphrase-MiniLM-L6-v2
   embed_dim: 1024
+  # MOTR 跟踪：VisDrone 微调后的权重
+  motr_checkpoint: models/checkpoints/motr_tracker_battlefield.pt
   # 门限与跟踪
   confidence_threshold: 0.25
   edl_min_confidence: 0.35
@@ -56,6 +90,7 @@ skills:
     siamese_mask2former: {}
     edl: {}
     motr_neural_kalman: {}
+    marl_ppo_scheduler: {}
   cognition:
     imagebind: {}
     multimodal_mamba: {}

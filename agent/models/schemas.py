@@ -68,10 +68,38 @@ class Detection(BaseModel):
     epistemic_uncertainty: float | None = None
 
 
+class SensorAssignment(BaseModel):
+    sensor_id: str
+    target_id: str | None = None
+    task: str = "surveillance"
+    priority: str = "normal"
+    rationale: str = ""
+
+
+class ReattackAssignment(BaseModel):
+    asset_id: str
+    target_id: str
+    task: str = "reattack"
+    priority: str = "critical"
+    expected_damage: float | None = None
+    rationale: str = ""
+
+
+class TaskSchedulePlan(BaseModel):
+    """MARL-PPO 传感器任务分配与重攻击规划。"""
+
+    sensor_assignments: list[SensorAssignment] = Field(default_factory=list)
+    reattack_plan: list[ReattackAssignment] = Field(default_factory=list)
+    covered_targets: list[str] = Field(default_factory=list)
+    reattack_targets: list[str] = Field(default_factory=list)
+    algorithm: str = ""
+
+
 class PerceptionOutput(BaseModel):
     detections: list[Detection] = Field(default_factory=list)
     tracks: list[dict[str, Any]] = Field(default_factory=list)
     verified_ids: list[str] = Field(default_factory=list)
+    task_schedule: TaskSchedulePlan | None = None
     algorithm_trace: dict[str, str] = Field(default_factory=dict)
 
 
@@ -92,19 +120,38 @@ class CognitionOutput(BaseModel):
 
 
 class SemanticIntelligencePacket(BaseModel):
-    """供其他 Agent 消费的语义压缩情报。"""
+    """供其他 Agent 消费的语义压缩情报（下游标准输入）。"""
 
+    schema_version: str = Field(
+        default="1.0",
+        description="intelligence_packet 契约版本；下游按版本解析",
+    )
     packet_id: str = Field(default_factory=lambda: str(uuid4()))
     mission_id: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     summary: str
-    targets: list[dict[str, Any]] = Field(default_factory=list)
+    tracks: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "机器可读航迹层：含 object_type/lat/lon/speed/heading 与 history_path，"
+            "供 trajectory_predictor / track_threat 等直接消费"
+        ),
+    )
+    targets: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="语义目标层：威胁、敌我、类别，供决策/评估/火力使用",
+    )
     semantic_vector: list[float] = Field(default_factory=list)
     knowledge_graph: dict[str, Any] = Field(default_factory=dict)
     routing: dict[str, Any] = Field(default_factory=dict)
     provenance: dict[str, Any] = Field(default_factory=dict)
     raw_compression_ratio: float = 1.0
+    task_schedule: TaskSchedulePlan | None = None
     output_attachments: list[dict[str, Any]] = Field(
         default_factory=list,
         description="处理后产物（如标注图）的对象存储引用，供下游 Agent 通过 URI 读取",
+    )
+    consumer_guide: dict[str, Any] = Field(
+        default_factory=dict,
+        description="各字段应被哪些下游 Agent 消费的路由说明",
     )
