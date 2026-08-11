@@ -40,7 +40,7 @@ metadata.status=idle
 - ADE/FDE 回看评估：下一帧到达后记录上一帧预测误差，summary 中输出聚合评估。
 - DBN 动态态势关注校准：参数位于 `config/dbn_risk_model_v1.json`，输出 low / medium / high 后验概率、观测可信度、状态转移、可观测运动模式概率、参数版本和 SHA256。
 - XAI 可解释封装：输出 `evidence_chain`、`factor_chain`、`dbn_transition_evidence`、`safety_chain` 和 `model_trace`，用于解释排序原因并声明安全边界。
-- 下游决策 Agent 适配：artifact 中输出 `decision_risk_assessments`，字段对齐 lzh 决策规划 Agent 的 `RiskAssessment`，用于把咱们的风险排序交给下游知识/RAG/规划/合规模块。
+- 下游决策 Agent 适配：artifact 同时输出兼容字段 `decision_risk_assessments` 和标准字段 `risk_assessments`；Commander 可使用 `output_hint=risk_assessments` 取得 `output.risk_assessments`，其元素字段对齐 lzh 决策规划 Agent 的 `RiskAssessment`。
 - 疑似空中编队和海上编组识别，完整连接约束防止距离过远的链式误并，并使用 `tentative / confirmed / coasting` 生命周期稳定连续帧 `group_id`。
 - 威胁排序直接使用 ST-GNN 或自适应物理预测路径、预测置信度和不确定性半径。
 - 己方保护资产影响分析。
@@ -60,7 +60,7 @@ metadata.status=idle
 - 本地 JSON 状态快照，支持演示环境重启后恢复航迹、最近 artifact、幂等缓存和 workflow work list。
 - 独立 ST-GNN 模型包发现：默认发现 `models/track_threat` 下的内置模型包，也可通过 `ST_GNN_AIRCRAFT_MODEL_DIR`、`ST_GNN_SHIP_MODEL_DIR` 或旧 `ST_GNN_MODEL_DIR` 覆盖；模型不可用时安全回退。
 
-当前工程不再只是“预留接口”。`PlanAlgorithmProvider` 会在 Agent 进程内直接执行协方差 Kalman 跟踪、自适应 CV/CA/CT 物理预测、TorchScript ST-GNN、版本化 DBN 态势关注校准、保护资产影响分析、编队识别和 XAI 证据链。知识库/RAG/方案规划/合规授权不放在本 Agent 中，交由下游 Agent 消费 `decision_risk_assessments` 后继续处理。公共算法库只作为算法源码、模型包和 schema 的交付仓库，不是本 Agent 的运行时 HTTP 依赖。
+当前工程不再只是“预留接口”。`PlanAlgorithmProvider` 会在 Agent 进程内直接执行协方差 Kalman 跟踪、自适应 CV/CA/CT 物理预测、TorchScript ST-GNN、版本化 DBN 态势关注校准、保护资产影响分析、编队识别和 XAI 证据链。知识库/RAG/方案规划/合规授权不放在本 Agent 中，交由独立下游 Agent 消费 `risk_assessments` 后继续处理。公共算法库只作为算法源码、模型包和 schema 的交付仓库，不是本 Agent 的运行时 HTTP 依赖。
 
 ## 2.1 独立 ST-GNN 训练工程
 
@@ -477,7 +477,7 @@ protected_asset_impact_analysis
 
 `/sendMessage` 和 `/sendMessageStream` 支持 `required_skill`、`required_skills`、`input`、`context`、`output_hint`。不支持的 Skill 返回 `UNSUPPORTED_SKILL`。
 
-最新版 Commander 使用 `schema_version=1.0` 和字符串 `output_hint`。`trajectory_tracking` 返回 `output.tracking_result`；后续 `threat_ranking` 可直接消费上下文条目形式的 `input.tracking_result` 并返回 `output.threat_assessment_result`，不会重复推进航迹历史。完整调用使用 `output.track_threat_group_artifact`。算法均在 Agent 进程内执行，Nacos 只负责发现、调度状态和 Slot 信息。
+最新版 Commander 使用 `schema_version=1.0` 和字符串 `output_hint`。`trajectory_tracking` 返回 `output.tracking_result`；后续 `threat_ranking` 可直接消费上下文条目形式的 `input.tracking_result` 并返回 `output.threat_assessment_result`，不会重复推进航迹历史。需要交给 lzh 决策 Agent 时，调用方使用 `output_hint=risk_assessments`，然后把 `output.risk_assessments` 原样写入其 `input.risk_assessments`。完整调用仍可使用 `output.track_threat_group_artifact`。两个 Agent 独立部署和注册，Nacos 只负责发现、调度状态和 Slot 信息。
 
 ## 12. 当前限制
 

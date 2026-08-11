@@ -22,6 +22,8 @@ def test_nacos_metadata_exposes_ready_and_metrics_endpoints(monkeypatch):
     assert settings.metadata["object_types"] == "aircraft,ship,uav,unknown"
     assert "tactical_intelligence_result" in settings.metadata["input_message_types"]
     assert "asset_impact" in settings.metadata["ranking_item_types"]
+    assert settings.metadata["downstream_risk_field"] == "risk_assessments"
+    assert settings.metadata["downstream_risk_schema"] == "risk_assessment/v1[]"
     assert "protected_assets" in settings.metadata["scene_contract"]
     assert settings.metadata["dbn_parameter_schema"] == "dbn_risk_model/v1"
     assert settings.metadata["dbn_parameter_model"] == "dbn-risk-attention-v1"

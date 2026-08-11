@@ -177,6 +177,17 @@ input.cognition_result
 
 Both `cognition_result` and `tracking_result` may be Commander context-entry arrays containing a `value` field. The Agent unwraps the latest value. Threat ranking consumes TrackState directly, so the second stage does not replay the same frame through the tracker. A full pipeline call uses `required_skill=track_threat_situation_analysis` and `output_hint=track_threat_group_artifact`.
 
+For an independent lzh decision Agent, request the narrow projection instead of forwarding the complete artifact:
+
+```text
+Track Threat Agent: output_hint=risk_assessments
+→ output.risk_assessments
+→ Commander copies the list without transformation
+→ lzh Agent: input.risk_assessments
+```
+
+Each item matches the lzh `RiskAssessment` fields: `target_id`, `priority`, `risk`, `threat_score` (0–100), `probability` (0–1), `rationale`, and `triggered_rules`. The legacy artifact key `decision_risk_assessments` remains available. The Agents remain separately deployed and separately registered in Nacos; no direct Agent-to-Agent HTTP dependency is required.
+
 Successful responses always include `schema_version=1.0` and must contain `output[output_hint]`, as required by the shared protocol validator.
 
 They also report `selected_algorithms` and per-stage `algorithm_duration_ms`. When the single stateful TrackStore slot is occupied, the Agent returns `error_code=AGENT_RESOURCE_EXHAUSTED`; the Commander should retry or dispatch another idle `track_threat` instance.

@@ -275,6 +275,14 @@ def _agent_card_payload() -> Dict[str, Any]:
         "algorithm_levels": ["small", "medium", "large"],
         "input_message_types": ["perception_result", "tactical_intelligence"],
         "output_message_types": ["track_threat_group_artifact"],
+        "downstreamContracts": {
+            "riskAssessments": {
+                "outputHint": "risk_assessments",
+                "outputField": "output.risk_assessments",
+                "schema": "risk_assessment/v1[]",
+                "legacyArtifactField": "decision_risk_assessments",
+            }
+        },
         "defaultInputModes": ["application/json"],
         "defaultOutputModes": ["application/json"],
         "skills": agent_card_skills(),
@@ -506,6 +514,7 @@ def output_schema() -> Dict[str, Any]:
             "groups",
             "unified_threat_ranking",
             "decision_risk_assessments",
+            "risk_assessments",
             "events",
             "summary",
         ],
@@ -1051,6 +1060,8 @@ def _build_artifact_from_tracks(
         "groups": [group.model_dump() for group in groups],
         "unified_threat_ranking": unified_ranking,
         "decision_risk_assessments": decision_risk_assessments,
+        # Stable downstream alias matching lzh AgentRequest.risk_assessments.
+        "risk_assessments": decision_risk_assessments,
         "events": events,
         "summary": {
             "protected_asset_count": len(protected_assets),
@@ -1241,6 +1252,8 @@ def _build_a2a_output(
         output_value = _tracking_output(artifact)
     elif output_key == "threat_assessment_result":
         output_value = _threat_assessment_output(artifact)
+    elif output_key == "risk_assessments":
+        output_value = artifact.get("risk_assessments", [])
     else:
         output_value = artifact
     output[output_key] = output_value
@@ -1285,6 +1298,7 @@ def _threat_assessment_output(artifact: Dict[str, Any]) -> Dict[str, Any]:
         "groups": artifact.get("groups", []),
         "unified_threat_ranking": artifact.get("unified_threat_ranking", []),
         "decision_risk_assessments": artifact.get("decision_risk_assessments", []),
+        "risk_assessments": artifact.get("risk_assessments", []),
         "events": [
             event
             for event in artifact.get("events", [])

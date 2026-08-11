@@ -128,6 +128,8 @@ class NacosSettings:
             "input_message_types": "perception_result,tactical_intelligence_result,a2a_task",
             "output_message_types": "track_threat_group_artifact,track.updated,threat.updated,track.group.updated,threat.group.updated,threat.ranking.updated,asset.impact.updated",
             "ranking_item_types": "track,group,asset_impact",
+            "downstream_risk_field": "risk_assessments",
+            "downstream_risk_schema": "risk_assessment/v1[]",
             "scene_contract": "protected_zone_lat,protected_zone_lon,protected_radius_m,protected_assets",
             "minimum_detection_fields": "detection_id,object_type,timestamp,lat,lon,speed,heading,confidence",
             "dbn_parameter_schema": "dbn_risk_model/v1",

@@ -222,7 +222,9 @@ CognitionResult
 }
 ```
 
-当 `output_hint=threat_assessment_result` 时，`output.threat_assessment_result` 包含 `threats`、`groups`、`asset_impacts`、`unified_threat_ranking`、`decision_risk_assessments` 和 AMOS 事件。完整流水线建议使用 `output_hint=track_threat_group_artifact`。
+当 `output_hint=threat_assessment_result` 时，`output.threat_assessment_result` 包含 `threats`、`groups`、`asset_impacts`、`unified_threat_ranking`、`decision_risk_assessments`、`risk_assessments` 和 AMOS 事件。完整流水线建议使用 `output_hint=track_threat_group_artifact`。
+
+当独立部署的 lzh 决策 Agent 只需要风险摘要时，使用 `output_hint=risk_assessments`。本 Agent 返回 `output.risk_assessments` 数组；Commander 将该数组原样放入下游 `input.risk_assessments`。此方式不合并两个 Agent，也不要求两个 Agent 互相硬编码服务地址。`decision_risk_assessments` 是旧字段名，保留用于兼容。
 
 兼容说明：为了方便旧版脚本和本地 curl 调试，响应仍保留 `output.artifact`、顶层 `artifact` 和 `artifact_summary`；最新版 Commander 必须读取 `output[output_hint]`。
 
@@ -324,7 +326,7 @@ predicted_path
 metadata
 ```
 
-本 Agent 不输出 `metadata.semantic_sitrep`。KG/RAG/规则推理和方案规划属于下游决策/合规 Agent；本 Agent 通过 `decision_risk_assessments` 交付它们需要的风险摘要。
+本 Agent 不输出 `metadata.semantic_sitrep`。KG/RAG/规则推理和方案规划属于下游决策/合规 Agent；本 Agent 通过标准字段 `risk_assessments` 交付它们需要的风险摘要，同时保留 `decision_risk_assessments` 兼容字段。
 
 `threats[].metadata.dbn` 对应版本化 DBN 态势关注校准输出。参数来自 `config/dbn_risk_model_v1.json`，启动时校验概率矩阵和权重，输出携带版本与 SHA256：
 

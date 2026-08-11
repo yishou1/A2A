@@ -68,6 +68,12 @@ def test_a2a_agent_card_compatibility_endpoint():
     assert card["execution"]["mode"] == "in_process_model_execution"
     assert card["execution"]["internal_workflow_engine"] is False
     assert card["modelsEndpoint"] == "/models"
+    assert card["downstreamContracts"]["riskAssessments"] == {
+        "outputHint": "risk_assessments",
+        "outputField": "output.risk_assessments",
+        "schema": "risk_assessment/v1[]",
+        "legacyArtifactField": "decision_risk_assessments",
+    }
     assert card["model_registry"]["count"] >= 7
     assert "track_state_kalman_cv" in {
         model["id"] for model in card["model_registry"]["models"]
@@ -92,6 +98,7 @@ def test_models_endpoint_reports_agent_loaded_models():
 def test_output_schema_exposes_group_lifecycle_and_versioned_dbn_fields():
     schema = main.output_schema()
 
+    assert "risk_assessments" in schema["artifact_fields"]
     assert "metadata.lifecycle_state" in schema["group_fields"]
     assert "parameter_model.sha256" in schema["dbn_fields"]
 
@@ -125,6 +132,7 @@ async def test_send_message_accepts_a2a_task_payload():
     assert body["artifact"]["summary"]["track_count"] == len(payload["detections"])
     assert "prediction_eval" in body["artifact"]["summary"]
     assert body["artifact"]["decision_risk_assessments"]
+    assert body["artifact"]["risk_assessments"] == body["artifact"]["decision_risk_assessments"]
     risk = body["artifact"]["decision_risk_assessments"][0]
     assert {
         "target_id",
@@ -262,10 +270,43 @@ async def test_commander_threat_ranking_consumes_tracking_context_without_retrac
     assert assessment["threats"]
     assert assessment["unified_threat_ranking"]
     assert assessment["decision_risk_assessments"]
+    assert assessment["risk_assessments"] == assessment["decision_risk_assessments"]
     assert {
         track_id: len(main.tracker.tracks[track_id].history_path)
         for track_id in history_lengths_before
     } == history_lengths_before
+
+
+@pytest.mark.anyio
+async def test_commander_can_request_lzh_risk_assessment_projection():
+    main.reset_runtime_state()
+    payload = json.loads((DATA_DIR / "group_scene.json").read_text())
+    task = _commander_task(
+        work_item="wi-commander-lzh-risk-projection",
+        required_skill="threat_ranking",
+        output_hint="risk_assessments",
+        input_payload=payload,
+    )
+
+    body = await send_message(task, token="unit-test")
+
+    validate_task_response(task, body)
+    risks = body["output"]["risk_assessments"]
+    assert risks
+    assert risks == body["artifact"]["decision_risk_assessments"]
+    assert {
+        "target_id",
+        "priority",
+        "risk",
+        "threat_score",
+        "probability",
+        "rationale",
+        "triggered_rules",
+    } <= set(risks[0])
+    assert body["output"]["executed_skill_projection"] == {
+        "required_skills": ["threat_ranking"],
+        "output_key": "risk_assessments",
+    }
 
 
 @pytest.mark.anyio
