@@ -1,4 +1,7 @@
-"""感知探测技能：RT-DETR+ODConv → Siamese Mask2Former → EDL → MOTR+Neural Kalman → MARL-PPO。"""
+"""感知探测技能：RT-DETR+ODConv → Siamese Mask2Former → EDL → MOTR+Neural Kalman。
+
+任务调度已拆至独立 `task_scheduling_agent`，本技能不再运行 MARL-PPO。
+"""
 
 from __future__ import annotations
 
@@ -7,13 +10,11 @@ from typing import Any
 from agent.algorithm_library.factory import (
     create_damage_assessor,
     create_edl_verifier,
-    create_marl_ppo_scheduler,
     create_motr_tracker,
     create_rt_detr_detector,
 )
 from agent.algorithm_library.planner_runtime import AlgorithmPlan
-from agent.models.schemas import Detection, PerceptionOutput, SensorBatch, TaskSchedulePlan
-from agent.skills.perception.schedule_adapter import scheduler_result_to_plan
+from agent.models.schemas import Detection, PerceptionOutput, SensorBatch
 
 
 def _as_list(value: Any, *keys: str) -> list:
@@ -34,7 +35,6 @@ class PerceptionSkill:
         self.damage = create_damage_assessor(use_mock=use_mock, config=cfg)
         self.edl = create_edl_verifier(use_mock=use_mock, config=cfg)
         self.tracker = create_motr_tracker(use_mock=use_mock, config=cfg)
-        self.scheduler = create_marl_ppo_scheduler(use_mock=use_mock, config=cfg)
 
     def execute(
         self,
@@ -98,26 +98,8 @@ class PerceptionSkill:
             track_result = {"tracks": []}
         tracks = track_result.get("tracks", []) or []
         trace[self.tracker.name] = f"{len(tracks)} tracks"
-
-        if enabled("marl_ppo_task_scheduler"):
-            schedule_result = self.scheduler.run(
-                {
-                    "tracks": tracks,
-                    "detections": verified,
-                    "batch_context": batch.context,
-                    "frames": frame_dicts,
-                }
-            )
-            if not isinstance(schedule_result, dict):
-                schedule_result = {}
-            task_schedule = scheduler_result_to_plan(schedule_result)
-            trace[self.scheduler.name] = (
-                f"{len(task_schedule.sensor_assignments)} sensor tasks, "
-                f"{len(task_schedule.reattack_plan)} reattack"
-            )
-        else:
-            task_schedule = TaskSchedulePlan(algorithm="skipped")
-            trace[self.scheduler.name] = "skipped"
+        # 调度由独立 task_scheduling_agent 负责，避免与 TIA 冲突
+        trace["task_scheduling"] = "delegated_to_task_scheduling_agent"
 
         detections: list[Detection] = []
         for det, track in zip(verified, tracks):
@@ -140,6 +122,6 @@ class PerceptionSkill:
             detections=detections,
             tracks=tracks,
             verified_ids=[t["track_id"] for t in tracks if "track_id" in t],
-            task_schedule=task_schedule,
+            task_schedule=None,
             algorithm_trace=trace,
         )

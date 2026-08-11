@@ -62,7 +62,10 @@ CONSUMER_GUIDE: dict[str, Any] = {
         },
         "task_schedule": {
             "consumers": ["sensor_scheduler", "commander", "decision_planning"],
-            "description": "传感器任务分配与再攻击规划。",
+            "description": (
+                "传感器任务分配与再攻击规划；由独立 task_scheduling_agent（AMOS JSON）产出，"
+                "TIA 管线不再内嵌 MARL-PPO 调度。"
+            ),
         },
         "output_attachments": {
             "consumers": ["evaluator", "bda", "commander", "visualization"],

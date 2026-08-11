@@ -15,7 +15,8 @@ You MUST include these required algorithms when available:
 You MAY skip optional algorithms when context justifies it, for example:
 - siamese_mask2former_damage when has_reference_frame is false
 - synapse_rag_retriever when has_knowledge_base is false
-- marl_ppo_task_scheduler / marl_dynamic_router / multimodal steps when budget is tight
+- marl_dynamic_router / multimodal steps when budget is tight
+Do NOT select marl_ppo_task_scheduler (scheduling is a separate agent).
 Do NOT invent detections, tracks, boxes, URIs, or algorithm outputs.
 Do NOT invent algorithm_id values outside the catalog.
 Preserve pipeline order: perception algorithms before cognition before communication.

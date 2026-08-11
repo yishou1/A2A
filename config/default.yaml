@@ -90,7 +90,6 @@ skills:
     siamese_mask2former: {}
     edl: {}
     motr_neural_kalman: {}
-    marl_ppo_scheduler: {}
   cognition:
     imagebind: {}
     multimodal_mamba: {}

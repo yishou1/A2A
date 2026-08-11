@@ -165,8 +165,8 @@ class TacticalIntelligenceCommanderAgent(A2ABaseAgent):
         yield self._sse_event(
             status="Working",
             progress="30%",
-            stage="scheduling",
-            message="Scheduling: MARL-PPO sensor assignment and reattack planning",
+            stage="perception",
+            message="Perception complete; task scheduling delegated to task_scheduling_agent",
             work_item=work_item,
             role=self.role,
         )

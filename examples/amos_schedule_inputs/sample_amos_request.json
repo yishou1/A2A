@@ -1,0 +1,116 @@
+{
+  "mission_id": "amos-demo-001",
+  "phase": "recon",
+  "jamming_level": 0.2,
+  "base_lat": 30.512,
+  "base_lon": 114.381,
+  "now": "2026-08-11T08:05:00Z",
+  "tasks": [
+    {
+      "task_id": "T-1",
+      "task_type": "surveillance",
+      "target_id": "E-01",
+      "priority": 0.8,
+      "threat_score": 0.7,
+      "damage_score": 0.2,
+      "confidence": 0.85,
+      "class_name": "armor",
+      "lat": 30.51,
+      "lon": 114.38,
+      "time_window": {
+        "start": "2026-08-11T08:00:00Z",
+        "end": "2026-08-11T08:30:00Z"
+      }
+    },
+    {
+      "task_id": "T-2",
+      "task_type": "strike",
+      "target_id": "E-02",
+      "priority": 0.9,
+      "threat_score": 0.85,
+      "damage_score": 0.35,
+      "confidence": 0.9,
+      "class_name": "artillery",
+      "lat": 30.52,
+      "lon": 114.39,
+      "time_window": {
+        "start": "2026-08-11T08:00:00Z",
+        "end": "2026-08-11T08:20:00Z"
+      }
+    },
+    {
+      "task_id": "T-3",
+      "task_type": "surveillance",
+      "target_id": "E-03",
+      "priority": 0.4,
+      "threat_score": 0.45,
+      "damage_score": 0.0,
+      "confidence": 0.6,
+      "class_name": "infantry",
+      "lat": 30.505,
+      "lon": 114.375,
+      "time_window": {
+        "start": "2026-08-11T09:00:00Z",
+        "end": "2026-08-11T10:00:00Z"
+      }
+    }
+  ],
+  "platforms": [
+    {
+      "platform_id": "UAV-1",
+      "role": "sensor",
+      "modality": "eo_ir",
+      "available": true,
+      "battery": 0.72,
+      "ammo": null,
+      "link_quality": 0.9,
+      "lat": 30.50,
+      "lon": 114.37
+    },
+    {
+      "platform_id": "SAR-1",
+      "role": "sensor",
+      "modality": "sar",
+      "available": true,
+      "battery": 0.55,
+      "ammo": null,
+      "link_quality": 0.75,
+      "lat": 30.498,
+      "lon": 114.365
+    },
+    {
+      "platform_id": "UAV-LOWBAT",
+      "role": "sensor",
+      "modality": "eo_ir",
+      "available": true,
+      "battery": 0.08,
+      "ammo": null,
+      "link_quality": 0.95,
+      "lat": 30.501,
+      "lon": 114.371
+    },
+    {
+      "platform_id": "ARTY-1",
+      "role": "strike",
+      "asset_type": "artillery",
+      "available": true,
+      "battery": 0.95,
+      "ammo": 0.6,
+      "link_quality": 0.85
+    },
+    {
+      "platform_id": "ATGM-1",
+      "role": "strike",
+      "asset_type": "atgm",
+      "available": true,
+      "battery": 0.9,
+      "ammo": 0.4,
+      "link_quality": 0.8
+    }
+  ],
+  "links": [
+    { "from": "UAV-1", "to": "C2", "quality": 0.9, "latency_ms": 40 },
+    { "from": "SAR-1", "to": "C2", "quality": 0.75, "latency_ms": 80 },
+    { "from": "ARTY-1", "to": "C2", "quality": 0.85, "latency_ms": 55 }
+  ]
+}

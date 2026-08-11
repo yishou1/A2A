@@ -205,7 +205,7 @@ class PlannerRuntimeTest(unittest.TestCase):
 
 
 class PerceptionSkipTest(unittest.TestCase):
-    def test_skip_damage_and_scheduler(self):
+    def test_skip_damage_and_no_scheduler(self):
         from agent.algorithm_library.planner_runtime import AlgorithmCall, AlgorithmPlan
 
         plan = AlgorithmPlan(
@@ -245,15 +245,16 @@ class PerceptionSkipTest(unittest.TestCase):
                 ]
             },
         )
-        skill.scheduler = Stub("sch", {})
 
         out = skill.execute(_batch(), prior_tracks=[], plan=plan)
         self.assertEqual(skill.damage.calls, 0)
-        self.assertEqual(skill.scheduler.calls, 0)
+        self.assertFalse(hasattr(skill, "scheduler"))
         self.assertEqual(skill.detector.calls, 1)
         self.assertEqual(skill.tracker.calls, 1)
         self.assertEqual(len(out.tracks), 1)
-        self.assertEqual(out.algorithm_trace.get("Siamese-Mask2Former") or out.algorithm_trace.get(skill.damage.name), "skipped")
+        self.assertIsNone(out.task_schedule)
+        self.assertEqual(out.algorithm_trace.get("task_scheduling"), "delegated_to_task_scheduling_agent")
+        self.assertEqual(out.algorithm_trace.get(skill.damage.name), "skipped")
 
 
 class OrchestratorPlanProvenanceTest(unittest.TestCase):

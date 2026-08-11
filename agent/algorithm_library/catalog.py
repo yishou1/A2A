@@ -6,14 +6,14 @@ from typing import Any
 
 from agent.algorithm_library.endpoints import TIA_ALGORITHM_PORTS, TIA_ALGORITHM_VERSIONS
 
-TIA_ALLOWED_ALGORITHMS: set[str] = set(TIA_ALGORITHM_PORTS)
+TIA_ALLOWED_ALGORITHMS: set[str] = set(TIA_ALGORITHM_PORTS) - {"marl_ppo_task_scheduler"}
 
 TIA_DEFAULT_PIPELINE: list[str] = [
     "battlefield_rtdetr_detector",
     "siamese_mask2former_damage",
     "edl_evidential_verifier",
     "motr_neural_kalman_tracker",
-    "marl_ppo_task_scheduler",
+    # marl_ppo_task_scheduler 已拆至独立 task_scheduling_agent，不在 TIA 管线内
     "imagebind_multimodal_encoder",
     "multimodal_mamba_fusion",
     "supcon_meta_classifier",
@@ -34,7 +34,6 @@ ALGORITHM_STAGE: dict[str, str] = {
     "siamese_mask2former_damage": "perception",
     "edl_evidential_verifier": "perception",
     "motr_neural_kalman_tracker": "perception",
-    "marl_ppo_task_scheduler": "perception",
     "imagebind_multimodal_encoder": "cognition",
     "multimodal_mamba_fusion": "cognition",
     "supcon_meta_classifier": "cognition",
@@ -71,13 +70,6 @@ _ALGORITHM_CARDS: dict[str, dict[str, Any]] = {
         "summary": "多目标跟踪与定位，产出 tracks",
         "required_fields": ["verified_detections"],
         "optional": False,
-    },
-    "marl_ppo_task_scheduler": {
-        "task_family": "scheduling",
-        "capabilities": ["sensor_assignment", "reattack"],
-        "summary": "传感器任务与再攻击调度；可跳过",
-        "required_fields": ["tracks"],
-        "optional": True,
     },
     "imagebind_multimodal_encoder": {
         "task_family": "embedding",
