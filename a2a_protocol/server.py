@@ -64,6 +64,34 @@ DEFAULT_ROLE_SKILLS = {
             "tags": ["assault", "capture", "突击", "占领"],
         }
     ],
+    "execution_control": [
+        {
+            "id": "generate_execution_commands",
+            "name": "Execution Control Planning",
+            "description": "基于态势与规则生成可执行 strike/assault 指令。",
+            "tags": ["execution_control", "planning", "command", "执行控制"],
+        },
+        {
+            "id": "plan_strike_control",
+            "name": "Strike Execution Control",
+            "description": "火力压制阶段：关联规则 + 运动预测，生成 strike 指令。",
+            "tags": ["execution_control", "strike", "planning", "火力控制"],
+        },
+        {
+            "id": "plan_assault_control",
+            "name": "Assault Execution Control",
+            "description": "突击阶段：关联规则 + 运动预测，生成 assault 指令。",
+            "tags": ["execution_control", "assault", "planning", "突击控制"],
+        },
+    ],
+    "closed_loop": [
+        {
+            "id": "closed_loop_optimization",
+            "name": "Closed Loop Optimization",
+            "description": "执行闭环评估与优化并返回结构化结果。",
+            "tags": ["closed_loop", "optimization", "闭环", "优化"],
+        }
+    ],
 }
 
 
@@ -169,7 +197,7 @@ class A2ABaseAgent:
     def get_agent_card(self):
         auth_server_base = os.environ.get("A2A_AUTH_SERVER_BASE", "http://127.0.0.1:8080")
         auth_server_base = auth_server_base.rstrip("/") + "/"
-        return {
+        card = {
             "protocolVersion": PROTOCOL_VERSION,
             "name": self.name,
             "description": self.description,
@@ -193,6 +221,16 @@ class A2ABaseAgent:
             "modelsEndpoint": "/models",
             "recoveryEndpoint": "/recovery/notify",
             "maxConcurrentTasks": self.max_concurrent_tasks,
+        }
+        if self.skills:
+            card["skills"] = self.skills
+        return card
+
+    async def handle_message(self, payload: dict):
+        return {
+            "task_id": self._task_id_from_payload(payload),
+            "status": "Accepted",
+            "message": f"{self.name} received task {payload.get('command')}"
         }
 
     def skill_definition(self, skill_id: str | None) -> dict | None:

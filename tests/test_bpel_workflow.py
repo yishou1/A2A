@@ -23,9 +23,10 @@ class BPELWorkflowTest(unittest.TestCase):
 
         self.assertEqual(definition.process_name, "BeachheadAssaultWorkflow")
         self.assertTrue(any(item["role"] == "recon" for item in work_list))
+        self.assertTrue(any(item["role"] == "execution_control" for item in work_list))
         self.assertTrue(any(item["role"] == "artillery" for item in work_list))
         artillery = next(item for item in work_list if item["role"] == "artillery")
-        self.assertEqual(artillery["dispatch_mode"], "parallel")
+        self.assertEqual(artillery["dispatch_mode"], "single")
         self.assertEqual(artillery["required_skill"], "suppress_beach_sector_A")
         self.assertIn("suppress_beach_sector_A", artillery["required_skills"])
         self.assertTrue(all("work_item" in item for item in work_list))
@@ -95,20 +96,45 @@ class BPELWorkflowTest(unittest.TestCase):
                 max_workers=2,
             )
             calls = []
-            original_single = commander.delegate_task
-            original_parallel = commander.delegate_parallel_task
 
-            def fake_delegate(role, payload, stream=False):
+            def fake_delegate(dispatch_key, payload, stream=False):
+                role = payload.get("activatity_role") or CommanderAgent._runtime_role_for_dispatch(dispatch_key)
                 calls.append(role)
-                if payload.get("required_skill") == "suppress_beach_sector_A":
-                    return original_parallel(role, payload, stream=stream)
-                return original_single(role, payload, stream=stream)
+                output_hint = payload.get("output_hint") or "result"
+                if role == "evaluator":
+                    output_value = payload.get("input", {}).get("mock_eval_score", 75)
+                elif role == "execution_control":
+                    from execution_control_agent.execution_control_core import run_execution_control
+
+                    output_value = run_execution_control(
+                        {
+                            "phase": payload.get("input", {}).get("phase", "strike"),
+                            "results": payload.get("input", {}).get("results", {}),
+                        }
+                    )
+                elif role == "closed_loop":
+                    output_value = {
+                        "task_type": "closed_loop_optimization",
+                        "output_data": {"meets_requirements": True},
+                    }
+                else:
+                    output_value = f"{role}-result"
+                commander._remember_task_response(
+                    payload["work_item"],
+                    {"status": "completed", "output": {output_hint: output_value}},
+                    role=role,
+                    target="test",
+                )
+                return True
 
             commander.delegate_task = fake_delegate
             commander.delegate_parallel_task = fake_delegate
             context = commander.run_bpel_workflow()
 
-            self.assertEqual(calls, ["recon", "artillery", "evaluator", "assault"])
+            self.assertEqual(
+                calls,
+                ["recon", "execution_control", "artillery", "evaluator", "execution_control", "assault", "closed_loop"],
+            )
             self.assertEqual(context["workflow_status"], "completed")
             self.assertEqual(context["active_activatities"], [])
             self.assertTrue(context["work_list"])
@@ -640,7 +666,8 @@ class BPELWorkflowTest(unittest.TestCase):
             )
             timing = {}
 
-            def fake_delegate(role, payload, stream=False):
+            def fake_delegate(dispatch_key, payload, stream=False):
+                role = payload.get("activatity_role") or CommanderAgent._runtime_role_for_dispatch(dispatch_key)
                 timing[f"{role}_start"] = time.perf_counter()
                 time.sleep(0.2 if role in {"recon", "evaluator"} else 0.01)
                 timing[f"{role}_end"] = time.perf_counter()
@@ -702,7 +729,8 @@ class BPELWorkflowTest(unittest.TestCase):
             )
             timing = {}
 
-            def fake_delegate(role, payload, stream=False):
+            def fake_delegate(dispatch_key, payload, stream=False):
+                role = payload.get("activatity_role") or CommanderAgent._runtime_role_for_dispatch(dispatch_key)
                 timing[f"{role}_start"] = time.perf_counter()
                 time.sleep(0.1)
                 timing[f"{role}_end"] = time.perf_counter()
@@ -746,7 +774,8 @@ class BPELWorkflowTest(unittest.TestCase):
             )
             calls = []
 
-            def fake_delegate(role, payload, stream=False):
+            def fake_delegate(dispatch_key, payload, stream=False):
+                role = payload.get("activatity_role") or CommanderAgent._runtime_role_for_dispatch(dispatch_key)
                 calls.append(role)
                 commander._remember_task_response(
                     payload["work_item"],
@@ -808,7 +837,8 @@ class BPELWorkflowTest(unittest.TestCase):
             )
             evaluator_inputs = []
 
-            def fake_delegate(role, payload, stream=False):
+            def fake_delegate(dispatch_key, payload, stream=False):
+                role = payload.get("activatity_role") or CommanderAgent._runtime_role_for_dispatch(dispatch_key)
                 if role == "evaluator":
                     evaluator_inputs.append(payload["input"]["recon_report"])
                 output_value = (
@@ -862,7 +892,8 @@ class BPELWorkflowTest(unittest.TestCase):
             timing = {}
             evaluator_inputs = []
 
-            def fake_delegate(role, payload, stream=False):
+            def fake_delegate(dispatch_key, payload, stream=False):
+                role = payload.get("activatity_role") or CommanderAgent._runtime_role_for_dispatch(dispatch_key)
                 calls.append(role)
                 timing[f"{role}_start"] = time.perf_counter()
                 if role == "recon":
@@ -927,7 +958,8 @@ class BPELWorkflowTest(unittest.TestCase):
             eval_item = next(item for item in commander.workflow_context["work_list"] if item["name"] == "EvalBranch")
             self.assertEqual(eval_item["depends_on"], ["ReconBranch"])
 
-            def fake_delegate(role, payload, stream=False):
+            def fake_delegate(dispatch_key, payload, stream=False):
+                role = payload.get("activatity_role") or CommanderAgent._runtime_role_for_dispatch(dispatch_key)
                 calls.append(role)
                 timing[f"{role}_start"] = time.perf_counter()
                 if role == "recon":
@@ -1126,7 +1158,8 @@ class BPELWorkflowTest(unittest.TestCase):
             )
             calls = []
 
-            def fake_delegate(role, payload, stream=False):
+            def fake_delegate(dispatch_key, payload, stream=False):
+                role = payload.get("activatity_role") or CommanderAgent._runtime_role_for_dispatch(dispatch_key)
                 calls.append(role)
                 output_value = payload["input"].get("mock_eval_score", f"new-{role}")
                 commander_response = {
@@ -1179,9 +1212,8 @@ class BPELWorkflowTest(unittest.TestCase):
             self.assertIn("BeachheadAssaultWorkflow", output)
             self.assertIn("ReinforcedBeachheadWorkflow", output)
             self.assertIn("QuickStrikeWorkflow", output)
-            self.assertIn("recon[single] -> artillery[parallel]", output)
-            self.assertIn("recon[parallel] -> artillery[parallel]", output)
-            self.assertIn("artillery[parallel] -> assault[single]", output)
+            self.assertIn("execution_control[single]", output)
+            self.assertIn("closed_loop[single]", output)
 
 
 if __name__ == "__main__":

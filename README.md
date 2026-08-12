@@ -23,9 +23,11 @@
 在一场抢滩登陆战役中，面临复杂的敌防信息、火力配属和登陆时机等挑战。整个作战流程被分解给多个不同专长的智能体：
 - **指控大脑 (Commander Agent)**：负责全局统筹、任务分解与下发。
 - **侦察单位 (Reconnaissance Agent)**：负责收集敌军火力部署、气象水文信息。
+- **执行控制单位 (Execution Control Agent)**：基于上游态势做关联规则匹配与运动预测，生成 strike/assault 可执行指令。
 - **火力打击单位 (Artillery Agent)**：负责实施精准的炮火覆盖与压制。
 - **突击步兵单位 (Assault Agent)**：负责滩头阵地的抢占。
 - **战果评估单位 (Evaluator Agent)**：负责对前序任务的执行效果进行评估。
+- **闭环优化单位 (Closed Loop Agent)**：接入 xBD / SC2LE 特征与代理任务模型，做毁伤评估与闭环优化。
 
 ---
 
@@ -78,16 +80,20 @@ A2A/
 │   └── agent_leases.py      # Agent 租约与资源锁
 ├── commander_gateway/       # AMOS 数据包接入和 Commander 状态投影
 ├── recon_agent/             # 侦察兵 Agent
+├── execution_control_agent/ # 执行控制（规则匹配 + 运动预测）
 ├── artillery_agent/         # 火力打击 Agent
 ├── assault_agent/           # 登陆突击 Agent
 ├── evaluator_agent/         # 战果评估 & 策略重算 Agent
+├── closed_loop_agent/       # 闭环优化（xBD / SC2LE）
 ├── track_threat_agent/      # 下游态势分析 Agent：航迹预测、编组识别、保护资产影响和关注排序
 ├── decision_agents/         # 方案生成、规则授权、RAG 与算法适配库
 ├── decision_planning_agent/ # 方案生成 Agent
 ├── compliance_authorization_agent/ # 规则/合规授权 Agent
 ├── registry/                # Nacos 相关配置与客户端封装
-├── scripts/                 # 恢复 / failover 演示脚本
+├── scripts/                 # 恢复 / failover / 闭环演示脚本
 ├── tests/                   # 回归测试
+├── models/                  # 冻结的代理任务模型（如 SC2LE proxy）
+├── data/                    # 小规模 fixtures；大数据集请本地生成，勿提交
 ├── attachment_uploader.py   # 本地文件上传成附件引用
 ├── bpel_workflow.py         # BPEL 动态发现、解析与 work_list 生成
 ├── beachhead_workflow.bpel  # 可动态加载的抢滩登陆 BPEL
@@ -101,6 +107,61 @@ A2A/
 ### Track Threat Agent
 
 `track_threat_agent/` 是新增的近真实下游态势分析 Agent Demo，推荐注册为 `SERVICE_NAME=A2A-Agent`、`role=track_threat`。它支持 `/.well-known/agent-card`、`/sendMessage`、`/sendMessageStream`、`/workflows/{workflow_id}/work-list` 和 `/health`，可接收上游 `perception_result`，输出航迹、预测航线、疑似编队/编组、保护资产影响和统一关注排序。当前算法以内置 Demo 实现为主，预留 `AlgorithmProvider` 方便后续接入公共算法库或训练版 GNN/ST-GNN。详细说明见 `track_threat_agent/README.md`。
+
+## 🧠 Execution Control 与 Closed Loop
+
+`beachhead_workflow.bpel` 在标准侦察/火力/评估链路中插入了执行控制与闭环节点：
+
+```text
+recon
+  -> execution_control (plan_strike_control)
+  -> artillery
+  -> evaluator
+  -> (score >= 60) execution_control (plan_assault_control)
+  -> assault
+  -> closed_loop (closed_loop_optimization)
+```
+
+### 端口与启动
+
+| Agent | 默认端口 | 环境变量 |
+|---|---|---|
+| Closed Loop | `8016` | `CLOSED_LOOP_AGENT_PORT` |
+| Execution Control | `8017` | `EXECUTION_CONTROL_AGENT_PORT` |
+
+`start_agents.sh` 已包含这两个进程。单独启动：
+
+```bash
+python execution_control_agent/main.py
+python closed_loop_agent/main.py
+```
+
+### Skill 约定
+
+Execution Control 在 Agent Card 中同时注册：
+
+- `generate_execution_commands`（通用入口，用 `phase=strike|assault`）
+- `plan_strike_control`（BPEL 火力阶段）
+- `plan_assault_control`（BPEL 突击阶段）
+
+Closed Loop 注册：`closed_loop_optimization`。
+
+### Local 模式快速验证
+
+```bash
+python -u commander_agent/main.py --mode local --workflow bpel --workflow-file beachhead_workflow --mock-eval-score 75
+```
+
+### 闭环 / 特征脚本（可选）
+
+```bash
+python scripts/run_xbd_closed_loop_demo.py
+python scripts/run_sc2le_closed_loop_demo.py
+python scripts/extract_sc2le_task_features.py
+python scripts/train_sc2le_proxy_mission_model.py
+```
+
+原始 xBD / SC2 数据包和大型中间结果默认被 `.gitignore` 忽略；仓库只保留小规模 fixtures 与可复现脚本。
 
 ## 🔄 工作流恢复与接管
 
@@ -127,7 +188,7 @@ cd /home/yl/yl/jzz/A2A
 - `40` 会触发 `RE-PLAN` 分支。
 - `75` 会触发 `ASSAULT` 分支。
 
-`beachhead_workflow.bpel` 中不同角色严格按 `recon -> artillery -> evaluator -> assault` 顺序推进。炮兵节点使用 `dispatchMode="parallel"`，Commander 会把同一个火力任务并发派发给多个 `role=artillery` 实例。`--max-workers` 控制最大并发数。
+`beachhead_workflow.bpel` 中不同角色按 `recon -> execution_control(strike) -> artillery -> evaluator -> execution_control(assault) -> assault -> closed_loop` 顺序推进。炮兵节点使用 `dispatchMode="parallel"`，Commander 会把同一个火力任务并发派发给多个 `role=artillery` 实例。`--max-workers` 控制最大并发数。
 
 `decision_support_workflow.bpel` 只保留两步决策支持流程：`decision_planning -> compliance_authorization`。外部输入通过 `--input-json`、Manager API 的 `initial_context` 或 `CommanderAgent(initial_context=...)` 注入，字段包括 `scheduled_tasks`、`resources`、`risk_assessments`、`constraints`、`authorization`、`target_histories` 和 `planning_objectives`。方案生成侧当前提供模板生成、逻辑回归评分、轻量 LSTM 趋势预测和本地 RAG 证据增强；规则侧提供规则表/RAG 证据绑定和逻辑回归风险校准。两个 Agent 都输出 main 风格的标准 `output`，其中包含 `agent_response`、`selected_algorithms`、`warnings` 和 `rag_evidence`。
 
@@ -144,7 +205,6 @@ export RAG_ONNX_PROVIDERS=CPUExecutionProvider
 ```
 
 PDF ROE 文档放入 `data/roe_docs/` 后，执行 `python -m decision_agents.rag.ingest --source data/roe_docs --rebuild` 入库。`pypdf` 用于可复制文本 PDF 抽取，`numpy` 和 `onnxruntime` 只在启用 ONNX 模型增强时使用。ONNX 模型不可用或签名不匹配时，RAG 会记录 warning 并降级到关键词检索。
-
 项目中可以提前保存多套 BPEL，并在运行前选择：
 
 ```bash

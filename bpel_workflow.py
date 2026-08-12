@@ -10,9 +10,11 @@ from xml.etree import ElementTree
 
 PARTNER_ROLE_MAP = {
     "ReconAgent": "recon",
+    "ExecutionControlAgent": "execution_control",
     "ArtilleryAgent": "artillery",
     "EvaluatorAgent": "evaluator",
     "AssaultAgent": "assault",
+    "ClosedLoopAgent": "closed_loop",
     "LLMCommanderAgent": "commander",
     "TacticalIntelligenceAgent": "tactical_intelligence",
     "TrackThreatAgent": "track_threat",
@@ -24,9 +26,12 @@ PARTNER_ROLE_MAP = {
 
 OPERATION_COMMAND_MAP = {
     "scanBeachDefenses": "scan_beach_defenses",
+    "planStrikeControl": "plan_strike_control",
+    "planAssaultControl": "plan_assault_control",
     "suppressBeachSector": "suppress_beach_sector_A",
     "evaluateStrike": "evaluate_strike",
     "captureBeachhead": "capture_beachhead",
+    "closedLoopOptimization": "closed_loop_optimization",
     "analyzeAndReplanning": "analyze_and_replanning",
     "buildSituationSummary": "build_situation_summary",
     "updateTracks": "update_tracks",
