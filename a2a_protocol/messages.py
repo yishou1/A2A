@@ -7,7 +7,13 @@ from protocol_contracts import PROTOCOL_VERSION
 
 
 TERMINAL_SUCCESS_STATUSES = {"completed", "succeeded", "success", "accepted"}
-TERMINAL_FAILURE_STATUSES = {"failed", "error", "rejected", "timeout"}
+TERMINAL_FAILURE_STATUSES = {
+    "failed",
+    "error",
+    "rejected",
+    "timeout",
+    "input_required",
+}
 
 
 def normalize_status(status: Any, default: str = "completed") -> str:
@@ -86,6 +92,7 @@ def build_task_error_response(
     error_code: Optional[str] = None,
     attempts: int = 1,
     metrics: Optional[Dict[str, Any]] = None,
+    output: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     return build_task_response(
         workflow_id=workflow_id,
@@ -94,7 +101,7 @@ def build_task_error_response(
         role=role,
         command=command,
         status="failed",
-        output={},
+        output=output or {},
         metrics=metrics,
         error=error,
         error_code=error_code,

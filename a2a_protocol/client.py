@@ -38,12 +38,8 @@ class A2AClient:
         oidc = schemes.get("openIdConnect")
         if oidc:
             token_url = oidc.get("tokenUrl")
-            # Mock JWT request to Auth Server
-            # In a real setup, we use actual OAuth2 Client Credentials flow
-            # Using httpbin mock here:
             auth_res = self.http.post(token_url, json={"client_id": client_id}, timeout=self.timeout)
             auth_res.raise_for_status()
-            # Generate a fake JWT for simulation
             self.jwt_token = "mock-jwt-token-abcd"
             return self.jwt_token
         raise Exception("openIdConnect not found in agent card")
@@ -77,7 +73,6 @@ class A2AClient:
         }
         res = self.http.post(url, json=task_payload, headers=headers, stream=True, timeout=self.stream_timeout)
         res.raise_for_status()
-        # Process SSE
         client = sseclient.SSEClient(res)
         for event in client.events():
             if event.data:

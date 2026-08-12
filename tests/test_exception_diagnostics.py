@@ -52,33 +52,40 @@ class ExceptionDiagnosticsTest(unittest.TestCase):
             self.assertIn("agent card unavailable", event["traceback"])
 
     def test_agent_keeps_traceback_server_side_only(self):
-        agent = FailingAgent("Failing_Agent", "test", "recon", 8012)
-        send_message_endpoint = next(
-            route.endpoint
-            for route in agent.app.routes
-            if getattr(route, "path", None) == "/sendMessage"
-        )
-        response = asyncio.run(
-            send_message_endpoint(
-                {
-                    "schema_version": "1.0",
-                    "workflow_id": "wf-1",
-                    "work_item": "wf-1:recon",
-                    "command": "scan_beach_defenses",
-                    "required_skill": "scan_beach_defenses",
-                    "input": {"sector": "Sector_A"},
-                    "output_hint": "recon_report",
-                },
-                token="test-token",
+        with tempfile.TemporaryDirectory() as state_dir:
+            agent = FailingAgent(
+                "Failing_Agent",
+                "test",
+                "recon",
+                8012,
+                idempotency_db_path=f"{state_dir}/idempotency.db",
             )
-        )
+            send_message_endpoint = next(
+                route.endpoint
+                for route in agent.app.routes
+                if getattr(route, "path", None) == "/sendMessage"
+            )
+            response = asyncio.run(
+                send_message_endpoint(
+                    {
+                        "schema_version": "1.0",
+                        "workflow_id": "wf-1",
+                        "work_item": "wf-1:recon",
+                        "command": "scan_beach_defenses",
+                        "required_skill": "scan_beach_defenses",
+                        "input": {"sector": "Sector_A"},
+                        "output_hint": "recon_report",
+                    },
+                    token="test-token",
+                )
+            )
 
-        self.assertEqual(response["status"], "failed")
-        self.assertNotIn("traceback", response)
-        self.assertNotIn("last_error_details", agent.metrics_snapshot())
-        details = agent.last_error_diagnostics()
-        self.assertEqual(details["error_type"], "ValueError")
-        self.assertIn("execute_task", details["traceback"])
+            self.assertEqual(response["status"], "failed")
+            self.assertNotIn("traceback", response)
+            self.assertNotIn("last_error_details", agent.metrics_snapshot())
+            details = agent.last_error_diagnostics()
+            self.assertEqual(details["error_type"], "ValueError")
+            self.assertIn("execute_task", details["traceback"])
 
 
 if __name__ == "__main__":

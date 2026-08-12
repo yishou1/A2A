@@ -513,6 +513,7 @@ class AgentHeartbeatSupervisor(threading.Thread):
         with self._metadata_lock:
             heartbeat_metadata = dict(self.metadata)
 
+        latest_metadata = {}
         finder = getattr(self.registry, "find_instance", None)
         if finder is not None:
             try:
@@ -526,6 +527,7 @@ class AgentHeartbeatSupervisor(threading.Thread):
                 latest_metadata = dict(latest.get("metadata", {}) or {})
                 heartbeat_metadata.update(latest_metadata)
 
+        provider_metadata = {}
         if self.metadata_provider is not None:
             try:
                 provider_metadata = self.metadata_provider() or {}
@@ -536,9 +538,69 @@ class AgentHeartbeatSupervisor(threading.Thread):
                 }
             heartbeat_metadata.update(provider_metadata)
 
+        heartbeat_metadata = self._reconcile_scheduler_state(
+            heartbeat_metadata,
+            latest_metadata,
+            provider_metadata,
+        )
+
         heartbeat_metadata["heartbeat_ts"] = int(time.time())
         heartbeat_metadata["heartbeat_at"] = utc_now_iso()
         return heartbeat_metadata
+
+    @staticmethod
+    def _metadata_int(metadata, key, default=0):
+        try:
+            return int(float(metadata.get(key, default)))
+        except (TypeError, ValueError):
+            return default
+
+    @classmethod
+    def _reconcile_scheduler_state(cls, metadata, latest, provider):
+        reconciled = dict(metadata)
+        scheduler_keys = {
+            key: value
+            for key, value in latest.items()
+            if key.startswith("lease_") or key.startswith("unavailable_")
+        }
+        reconciled.update(scheduler_keys)
+
+        local_active = cls._metadata_int(provider, "active_tasks", 0)
+        scheduler_active = cls._metadata_int(latest, "active_tasks", 0)
+        has_lease = any(key.startswith("lease_") for key in latest)
+        unavailable = (
+            str(latest.get("status", "")).lower() == "unavailable"
+            or any(key.startswith("unavailable_") for key in latest)
+        )
+        active_tasks = (
+            max(local_active, scheduler_active, 1)
+            if has_lease
+            else local_active
+        )
+        max_concurrent = max(
+            1,
+            cls._metadata_int(
+                provider or latest,
+                "max_concurrent_tasks",
+                cls._metadata_int(latest, "max_concurrent_tasks", 1),
+            ),
+        )
+
+        reconciled["active_tasks"] = str(active_tasks)
+        reconciled["max_concurrent_tasks"] = str(max_concurrent)
+        reconciled["available_task_slots"] = str(max(0, max_concurrent - active_tasks))
+        if unavailable:
+            reconciled["status"] = "unavailable"
+            reconciled["task_execution_status"] = "unavailable"
+        elif active_tasks <= 0:
+            reconciled["status"] = "idle"
+            reconciled["task_execution_status"] = "idle"
+        else:
+            reconciled["status"] = "busy"
+            reconciled["task_execution_status"] = (
+                "saturated" if active_tasks >= max_concurrent else "busy"
+            )
+        return reconciled
 
     def run(self):
         heartbeat_key = f"{self.service_name}#{self.ip}#{self.port}"

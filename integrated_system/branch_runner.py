@@ -396,8 +396,8 @@ def _decision_request(blackboard: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def run_decision_planning(blackboard: Dict[str, Any]) -> Dict[str, Any]:
-    from decision_agents.agents.decision_planning import DecisionPlanningAgent
-    from decision_agents.a2a_payloads import run_agent_payload
+    from decision_agents.common.a2a_payloads import run_agent_payload
+    from decision_agents.decision_planning.agent import DecisionPlanningAgent
 
     payload = {"workflow_id": blackboard["workflow_id"], "input": {"agent_request": _decision_request(blackboard)}}
     response = run_agent_payload(DecisionPlanningAgent(), "decision_planning_agent", payload)
@@ -420,8 +420,8 @@ def run_decision_planning(blackboard: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def run_compliance(blackboard: Dict[str, Any]) -> Dict[str, Any]:
-    from decision_agents.agents.compliance_authorization import ComplianceAuthorizationAgent
-    from decision_agents.a2a_payloads import run_agent_payload
+    from decision_agents.common.a2a_payloads import run_agent_payload
+    from decision_agents.compliance_authorization.agent import ComplianceAuthorizationAgent
 
     request_payload = _decision_request(blackboard)
     planning_result = blackboard.get("results", {}).get("decision_planning", {}).get("result", {})

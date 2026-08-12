@@ -25,6 +25,7 @@ class WorkflowSubmitRequest(BaseModel):
     request_timeout: float = Field(default=5.0, gt=0)
     mock_eval_score: Optional[int] = None
     mock_decision: Optional[Literal["ASSAULT", "RE-PLAN"]] = None
+    initial_context: Dict[str, Any] = Field(default_factory=dict)
     attachments: list[Dict[str, Any]] = Field(default_factory=list)
     task_goal: Optional[str] = None
     required_skills: list[str] = Field(default_factory=list)

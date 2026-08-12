@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from decision_agents.config import get_settings
+from decision_agents.common.config import get_settings
 from decision_agents.rag.documents import RagChunk
 from decision_agents.rag.store import (
     ensure_schema,

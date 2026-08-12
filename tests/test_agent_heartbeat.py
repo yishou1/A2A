@@ -105,6 +105,63 @@ class AgentHeartbeatTest(unittest.TestCase):
         self.assertEqual(heartbeat_metadata["resource_cpu_percent"], 88.5)
         self.assertEqual(heartbeat_metadata["resource_memory_percent"], 61.0)
 
+    def test_dynamic_provider_does_not_clobber_commander_lease(self):
+        metadata = AgentHeartbeatSupervisor._reconcile_scheduler_state(
+            {
+                "status": "idle",
+                "active_tasks": "0",
+                "max_concurrent_tasks": "2",
+                "resource_cpu_percent": 25.0,
+            },
+            {
+                "status": "busy",
+                "active_tasks": "1",
+                "max_concurrent_tasks": "2",
+                "available_task_slots": "1",
+                "lease_workflow_id": "wf-1",
+                "lease_work_item": "wf-1:planning",
+            },
+            {
+                "status": "idle",
+                "active_tasks": "0",
+                "max_concurrent_tasks": "2",
+                "resource_cpu_percent": 25.0,
+            },
+        )
+
+        self.assertEqual(metadata["status"], "busy")
+        self.assertEqual(metadata["active_tasks"], "1")
+        self.assertEqual(metadata["available_task_slots"], "1")
+        self.assertEqual(metadata["task_execution_status"], "busy")
+        self.assertEqual(metadata["lease_work_item"], "wf-1:planning")
+        self.assertEqual(metadata["resource_cpu_percent"], 25.0)
+
+    def test_dynamic_provider_preserves_unavailable_state(self):
+        metadata = AgentHeartbeatSupervisor._reconcile_scheduler_state(
+            {"status": "idle", "active_tasks": "0"},
+            {
+                "status": "unavailable",
+                "unavailable_reason": "heartbeat lost",
+                "active_tasks": "0",
+            },
+            {"status": "idle", "active_tasks": "0", "max_concurrent_tasks": "1"},
+        )
+
+        self.assertEqual(metadata["status"], "unavailable")
+        self.assertEqual(metadata["task_execution_status"], "unavailable")
+        self.assertEqual(metadata["unavailable_reason"], "heartbeat lost")
+
+    def test_dynamic_provider_returns_idle_after_lease_release(self):
+        metadata = AgentHeartbeatSupervisor._reconcile_scheduler_state(
+            {"status": "idle", "active_tasks": "0"},
+            {"status": "idle", "active_tasks": "0", "max_concurrent_tasks": "2"},
+            {"status": "idle", "active_tasks": "0", "max_concurrent_tasks": "2"},
+        )
+
+        self.assertEqual(metadata["status"], "idle")
+        self.assertEqual(metadata["available_task_slots"], "2")
+        self.assertEqual(metadata["task_execution_status"], "idle")
+
     def test_filter_instances_discards_stale_instances(self):
         registry = NacosRegistry(server_addresses="127.0.0.1:8848")
         registry.heartbeat_grace_seconds = 5

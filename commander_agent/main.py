@@ -13,6 +13,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from registry.nacos_manager import NacosRegistry
 from a2a_protocol.client import A2AClient
+from a2a_protocol.messages import is_success_response
 from a2a_protocol.messages import build_task_response
 from bpel_workflow import BPELActivatity, BPELWorkflowCatalog
 from commander_agent.agent_leases import AgentLeaseManager
@@ -68,6 +69,7 @@ class CommanderAgent:
         max_retries: int = None,
         retry_backoff: float = None,
         request_timeout: float = None,
+        initial_context: dict = None,
         registry=None,
         lease_manager=None,
         details: bool = False,
@@ -108,6 +110,7 @@ class CommanderAgent:
             failure_threshold=int(os.environ.get("A2A_CIRCUIT_FAILURE_THRESHOLD", "3")),
             recovery_timeout=float(os.environ.get("A2A_CIRCUIT_RECOVERY_TIMEOUT", "30")),
         )
+        self.initial_context = deepcopy(initial_context or {})
         self._checkpoint_lock = threading.RLock()
         self._last_task_responses = {}
         self._bpel_output_collection_writers = {}
@@ -132,6 +135,7 @@ class CommanderAgent:
         elif self.lease_manager is not None:
             self.lease_manager.circuit_breaker = self.circuit_breaker
         self.local_runtime = LocalAgentRuntime() if self.mode == "local" else None
+        self._last_agent_responses = {}
         self.mock_eval_score = mock_eval_score
         self.mock_decision = mock_decision
         self.api_key = os.environ.get("OPENAI_API_KEY", "")
@@ -913,7 +917,7 @@ class CommanderAgent:
                 work_item=task_payload.get("work_item"),
                 stream=stream,
             )
-            return True
+            return is_success_response(response)
         except Exception as e:
             print(f"[ERROR] Local task execution failed: {e}")
             self._trace(
@@ -923,6 +927,14 @@ class CommanderAgent:
                 **exception_diagnostics(e),
             )
             return False
+
+    def _record_agent_response(self, role: str, response: dict):
+        if isinstance(response, dict):
+            with self._checkpoint_lock:
+                self._last_agent_responses[role] = deepcopy(response)
+                work_item = response.get("work_item")
+                if work_item:
+                    self.workflow_context.setdefault("agent_results", {})[work_item] = deepcopy(response)
 
     def ask_llm(self, battle_log: list):
         log_str = "\n".join(battle_log)
@@ -1013,6 +1025,16 @@ class CommanderAgent:
             "compliance_authorization_result": [],
             "execution_simulation_result": [],
             "effect_evaluation_result": [],
+            "risk_assessments": [],
+            "scheduled_tasks": [],
+            "resources": [],
+            "target_histories": [],
+            "planning_objectives": [],
+            "candidate_plans": [],
+            "constraints": [],
+            "authorization": {},
+            "compliance_decision": None,
+            "agent_outputs": {},
             "battle_log": [],
             "completed_roles": [],
             "attachments": [],
@@ -1134,6 +1156,18 @@ class CommanderAgent:
         normalized["agent_results"] = dict(normalized.get("agent_results", {}) or {})
         normalized["trace"] = list(normalized.get("trace", []))
         normalized["work_list"] = list(normalized.get("work_list", []))
+        normalized["risk_assessments"] = list(normalized.get("risk_assessments", []))
+        normalized["scheduled_tasks"] = list(normalized.get("scheduled_tasks", []))
+        normalized["resources"] = list(normalized.get("resources", []))
+        normalized["target_histories"] = list(normalized.get("target_histories", []))
+        normalized["planning_objectives"] = list(
+            normalized.get("planning_objectives", [])
+        )
+        normalized["candidate_plans"] = list(normalized.get("candidate_plans", []))
+        normalized["constraints"] = list(normalized.get("constraints", []))
+        normalized["authorization"] = dict(normalized.get("authorization", {}) or {})
+        normalized["agent_outputs"] = dict(normalized.get("agent_outputs", {}) or {})
+        normalized["agent_results"] = dict(normalized.get("agent_results", {}) or {})
         if self.bpel_definition:
             existing_items = {
                 item.get("activatity_id") or item.get("activity_id"): item
@@ -1192,7 +1226,7 @@ class CommanderAgent:
         return recovered
 
     def _default_workflow_state(self):
-        context = self._normalize_context(self.initial_workflow_context())
+        context = self._normalize_context({**self.initial_workflow_context(), **self.initial_context})
         return {
             "workflow_id": self.workflow_id,
             "workflow": self.workflow,
@@ -1200,16 +1234,19 @@ class CommanderAgent:
             "status": context["workflow_status"],
             "created_at": utc_now_iso(),
             "updated_at": utc_now_iso(),
-                "current_activatity": None,
-                "current_activity": None,
-                "last_error": None,
-                "context": context,
-            }
+            "current_activatity": None,
+            "current_activity": None,
+            "last_error": None,
+            "context": context,
+        }
 
     def _load_or_initialize_workflow_state(self):
         if self.resume and self.state_store.exists(self.workflow_id):
             state = self.state_store.load(self.workflow_id)
             context = self._normalize_context(state.get("context", {}))
+            if self.initial_context:
+                context.update(self.initial_context)
+                context = self._normalize_context(context)
             self._recover_interrupted_activities(context)
             state["workflow_id"] = self.workflow_id
             state["workflow"] = self.workflow
@@ -1287,6 +1324,18 @@ class CommanderAgent:
         )
         return merged
 
+    def merge_initial_context(self, context_updates: dict | None):
+        if not context_updates:
+            return self.workflow_context
+        self.workflow_context.update(deepcopy(context_updates))
+        self._save_workflow_checkpoint(
+            self.workflow_context,
+            status=self.workflow_context.get("workflow_status", "running"),
+            current_activatity=self.workflow_context.get("current_activatity"),
+            last_error=self.workflow_context.get("last_error"),
+        )
+        return self.workflow_context
+
     def _work_item_for_activatity(self, role: str, activatity_index: int):
         return f"{self.workflow_id}:{activatity_index}:{role}"
 
@@ -1311,6 +1360,21 @@ class CommanderAgent:
             "commander_decision": context.get("commander_decision"),
             "assault_result": context.get("assault_result"),
             "replan_result": context.get("replan_result"),
+            "risk_assessments": deepcopy(context.get("risk_assessments", [])),
+            "scheduled_tasks": deepcopy(context.get("scheduled_tasks", [])),
+            "resources": deepcopy(context.get("resources", [])),
+            "target_histories": deepcopy(context.get("target_histories", [])),
+            "planning_objectives": deepcopy(context.get("planning_objectives", [])),
+            "candidate_plans": deepcopy(context.get("candidate_plans", [])),
+            "constraints": deepcopy(context.get("constraints", [])),
+            "authorization": deepcopy(context.get("authorization", {})),
+            "decision_planning_result": deepcopy(context.get("decision_planning_result")),
+            "compliance_authorization_result": deepcopy(
+                context.get("compliance_authorization_result")
+            ),
+            "compliance_decision": context.get("compliance_decision"),
+            "agent_outputs": deepcopy(context.get("agent_outputs", {})),
+            "agent_results": deepcopy(context.get("agent_results", {})),
             "completed_roles": list(context.get("completed_roles", [])),
             "battle_log": list(context.get("battle_log", [])),
             "last_work_item": context.get("last_work_item"),
@@ -1602,6 +1666,8 @@ class CommanderAgent:
                 duration_ms=duration_ms,
             )
             context["battle_log"].append(f"[Assault Report] {output_value}")
+        elif role in {"decision_planning", "compliance_authorization"}:
+            self._apply_decision_agent_result(role, context)
         else:
             target_key = output_key or self._default_output_key_for_role(role) or "result"
             output_value = self._required_output_value(output, target_key)
@@ -1632,6 +1698,59 @@ class CommanderAgent:
             duration_ms=duration_ms,
             output=output,
         )
+
+    def _apply_decision_agent_result(self, role: str, context: dict):
+        work_item = context.get("last_work_item")
+        raw_response = self._task_response_for_work_item(work_item, context)
+        if not isinstance(raw_response, dict):
+            raw_response = self._last_agent_responses.get(role, {})
+            work_item = raw_response.get("work_item") or work_item
+        raw_response = deepcopy(raw_response or {})
+
+        output = raw_response.get("output") if isinstance(raw_response, dict) else {}
+        if not isinstance(output, dict):
+            output = {}
+        if work_item and raw_response:
+            context.setdefault("agent_results", {})[work_item] = deepcopy(raw_response)
+
+        agent_response = raw_response.get("agent_response")
+        if not isinstance(agent_response, dict):
+            agent_response = output.get("agent_response")
+        if not isinstance(agent_response, dict):
+            agent_response = {
+                "status": raw_response.get("status"),
+                "agent": raw_response.get("agent"),
+                "selected_algorithms": raw_response.get("selected_algorithms", output.get("selected_algorithms", [])),
+                "result": raw_response.get("result", {}),
+                "rag_evidence": raw_response.get("rag_evidence", output.get("rag_evidence", [])),
+                "summary": raw_response.get("message", ""),
+                "warnings": raw_response.get("warnings", output.get("warnings", [])),
+            }
+        result = agent_response.get("result") if isinstance(agent_response, dict) else {}
+        if not isinstance(result, dict):
+            result = {}
+
+        output_result = output.get(f"{role}_result")
+        if isinstance(output_result, dict):
+            result = output_result
+            agent_response["result"] = result
+
+        context.setdefault("agent_outputs", {})[role] = agent_response
+        summary = agent_response.get("summary") or raw_response.get("message") or "completed"
+
+        if role == "decision_planning":
+            context["decision_planning_result"] = result
+            context["candidate_plans"] = result.get(
+                "candidate_plans",
+                context.get("candidate_plans", []),
+            )
+            context["battle_log"].append(f"[Decision Planning Report] {summary}")
+            return
+
+        if role == "compliance_authorization":
+            context["compliance_authorization_result"] = result
+            context["compliance_decision"] = result.get("decision")
+            context["battle_log"].append(f"[Compliance Authorization Report] {summary}")
 
     def rule_next_step(self, context: dict):
         """Fast state-machine planner. Returns an action dict or None when rules are unsure."""
@@ -1808,6 +1927,16 @@ class CommanderAgent:
             "CognitionResult": "cognition_result",
             "TrackingResult": "tracking_result",
             "ThreatAssessmentResult": "threat_assessment_result",
+            "AgentProfile": "agent_profile",
+            "RiskAssessments": "risk_assessments",
+            "ScheduledTasks": "scheduled_tasks",
+            "Resources": "resources",
+            "TargetHistories": "target_histories",
+            "PlanningObjectives": "planning_objectives",
+            "CandidatePlans": "candidate_plans",
+            "Constraints": "constraints",
+            "Authorization": "authorization",
+            "PlanningInput": "planning_input",
             "DecisionPlanningResult": "decision_planning_result",
             "ComplianceAuthorizationResult": "compliance_authorization_result",
             "ExecutionSimulationResult": "execution_simulation_result",
@@ -1830,6 +1959,13 @@ class CommanderAgent:
             "compliance_authorization_result",
             "execution_simulation_result",
             "effect_evaluation_result",
+            "risk_assessments",
+            "scheduled_tasks",
+            "resources",
+            "target_histories",
+            "planning_objectives",
+            "candidate_plans",
+            "constraints",
         }
 
     def _context_input_value(self, context: dict, key: str, default=None):
@@ -2766,6 +2902,11 @@ def parse_args():
         help="Reuse an existing workflow checkpoint id to resume a previous run.",
     )
     parser.add_argument(
+        "--input-json",
+        default=None,
+        help="JSON file merged into the workflow context before execution.",
+    )
+    parser.add_argument(
         "--state-dir",
         default=None,
         help="Directory used to persist workflow checkpoints.",
@@ -2870,8 +3011,19 @@ def parse_args():
     return parser.parse_args()
 
 
+def load_initial_context(path: str | None) -> dict:
+    if not path:
+        return {}
+    with open(path, "r", encoding="utf-8") as input_file:
+        payload = json.load(input_file)
+    if not isinstance(payload, dict):
+        raise ValueError("--input-json must contain a JSON object")
+    return payload
+
+
 if __name__ == "__main__":
     args = parse_args()
+    initial_context = load_initial_context(args.input_json)
 
     if args.list_workflows:
         catalog = BPELWorkflowCatalog(PROJECT_ROOT)
@@ -2935,6 +3087,7 @@ if __name__ == "__main__":
         max_retries=args.max_retries,
         retry_backoff=args.retry_backoff,
         request_timeout=args.request_timeout,
+        initial_context=initial_context,
         details=args.details,
     )
 

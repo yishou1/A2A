@@ -9,7 +9,11 @@ import time
 from copy import deepcopy
 from urllib.parse import urljoin
 
-from a2a_protocol.messages import build_task_error_response, build_task_response
+from a2a_protocol.messages import (
+    build_task_error_response,
+    build_task_response,
+    is_success_response,
+)
 from observability import exception_diagnostics, log_event
 from resource_monitor import ResourceMonitor, utc_now_iso
 from model_registry import ModelRegistry
@@ -502,6 +506,11 @@ class A2ABaseAgent:
                 cached_response = self._task_response_cache.get(work_item)
             if cached_response is None:
                 cached_response = self.idempotency_store.get(work_item)
+            if cached_response is not None and not is_success_response(cached_response):
+                with self._state_lock:
+                    self._task_response_cache.pop(work_item, None)
+                self.idempotency_store.delete(work_item)
+                cached_response = None
             if cached_response is not None:
                 try:
                     validate_task_response(
@@ -550,6 +559,16 @@ class A2ABaseAgent:
                     },
                     message=message,
                     work_list_size=len(self.get_work_list(payload.get("workflow_id"))),
+                    extra={
+                        key: output[key]
+                        for key in (
+                            "agent_response",
+                            "selected_algorithms",
+                            "warnings",
+                            "rag_evidence",
+                        )
+                        if isinstance(output, dict) and key in output
+                    },
                 )
                 validate_task_response(payload, response, self.skill_definition(skill_id))
                 with self._state_lock:
@@ -561,19 +580,34 @@ class A2ABaseAgent:
             except Exception as exc:
                 diagnostics = exception_diagnostics(exc)
                 duration_ms = round((time.perf_counter() - started) * 1000, 3)
-                response = build_task_error_response(
-                    workflow_id=payload.get("workflow_id"),
-                    work_item=work_item,
-                    agent=self.name,
-                    role=self.role,
-                    command=payload.get("command"),
-                    error=str(exc),
-                    error_code=getattr(exc, "code", "AGENT_BUSINESS_ERROR"),
-                    metrics={
-                        "latency_ms": duration_ms,
-                        "duration_ms": duration_ms,
-                    },
-                )
+                task_response = getattr(exc, "task_response", None)
+                if isinstance(task_response, dict):
+                    response = deepcopy(task_response)
+                    response.setdefault("metrics", {})
+                    response["metrics"].update(
+                        {
+                            "latency_ms": duration_ms,
+                            "duration_ms": duration_ms,
+                        }
+                    )
+                    response.setdefault(
+                        "error_code",
+                        getattr(exc, "code", "AGENT_BUSINESS_ERROR"),
+                    )
+                else:
+                    response = build_task_error_response(
+                        workflow_id=payload.get("workflow_id"),
+                        work_item=work_item,
+                        agent=self.name,
+                        role=self.role,
+                        command=payload.get("command"),
+                        error=str(exc),
+                        error_code=getattr(exc, "code", "AGENT_BUSINESS_ERROR"),
+                        metrics={
+                            "latency_ms": duration_ms,
+                            "duration_ms": duration_ms,
+                        },
+                    )
                 with self._state_lock:
                     self._metrics["tasks_failed"] += 1
                     self._metrics["total_duration_ms"] += duration_ms

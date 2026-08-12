@@ -4,6 +4,9 @@ from copy import deepcopy
 from typing import Dict, Iterable, Tuple
 
 from a2a_protocol.messages import build_task_response
+from decision_agents.common.a2a_payloads import agent_response_to_a2a_response, run_agent_payload
+from decision_agents.compliance_authorization.agent import ComplianceAuthorizationAgent
+from decision_agents.decision_planning.agent import DecisionPlanningAgent
 from protocol_contracts import validate_task_payload, validate_task_response
 from skill_catalog import skill_contract
 
@@ -21,6 +24,10 @@ class LocalAgentRuntime:
         self._task_response_cache = {}
         self._stream_response_cache = {}
         self._workflow_work_lists = {}
+        self._algorithm_agents = {
+            "decision_planning": DecisionPlanningAgent(),
+            "compliance_authorization": ComplianceAuthorizationAgent(),
+        }
 
     AGENTS = {
         "recon": {
@@ -42,6 +49,16 @@ class LocalAgentRuntime:
             "name": "Local_Assault_Agent",
             "description": "Local assault unit.",
             "role": "assault",
+        },
+        "decision_planning": {
+            "name": "Local_Decision_Planning_Agent",
+            "description": "Local decision planning unit.",
+            "role": "decision_planning",
+        },
+        "compliance_authorization": {
+            "name": "Local_Compliance_Authorization_Agent",
+            "description": "Local compliance and authorization unit.",
+            "role": "compliance_authorization",
         },
     }
 
@@ -75,6 +92,19 @@ class LocalAgentRuntime:
         work_item = self._work_item_from_payload(payload)
         if work_item in self._task_response_cache:
             return self._task_response_cache[work_item]
+
+        if role in self._algorithm_agents:
+            agent = self._algorithm_agents[role]
+            algorithm_response = run_agent_payload(agent, agent.agent_name, payload)
+            response = agent_response_to_a2a_response(
+                payload=payload,
+                response=algorithm_response,
+                agent_name=agent.agent_name,
+                work_list_size=len(self.get_work_list(payload.get("workflow_id"))),
+            )
+            response["mode"] = "local"
+            self._task_response_cache[work_item] = response
+            return response
 
         output, message = self._output_for(role, payload)
         response = build_task_response(

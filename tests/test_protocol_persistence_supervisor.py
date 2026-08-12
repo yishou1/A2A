@@ -136,7 +136,14 @@ class SupervisorApiTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_workflow_manager_app(mode="local", state_dir=temp_dir)
             with TestClient(app) as client:
-                self.assertEqual(client.get("/supervisor").status_code, 200)
+                dashboard = client.get("/supervisor")
+                self.assertEqual(dashboard.status_code, 200)
+                self.assertIn("Slots", dashboard.text)
+                self.assertIn("Success Rate", dashboard.text)
+                self.assertIn("Avg Latency", dashboard.text)
+                self.assertIn("available_task_slots", dashboard.text)
+                self.assertIn("quality_success_rate", dashboard.text)
+                self.assertIn("quality_avg_latency_ms", dashboard.text)
                 snapshot = client.get("/supervisor/snapshot")
                 self.assertEqual(snapshot.status_code, 200)
                 self.assertIn("summary", snapshot.json())
