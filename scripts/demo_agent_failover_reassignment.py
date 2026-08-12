@@ -205,6 +205,18 @@ def interesting_trace(context: dict) -> list[dict]:
     ]
 
 
+def latest_context_value(context: dict, key: str):
+    value = context.get(key)
+    if isinstance(value, list):
+        if not value:
+            return None
+        latest = value[-1]
+        if isinstance(latest, dict):
+            return latest.get("value")
+        return latest
+    return value
+
+
 def main() -> None:
     args = parse_args()
     state_dir = Path(args.state_dir).expanduser().resolve()

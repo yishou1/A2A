@@ -36,7 +36,7 @@ def _task_payload(work_item: str = "wi-track-threat-001") -> dict:
 
 @pytest.mark.anyio
 async def test_send_message_is_idempotent_by_work_item():
-    await main.demo_reset()
+    main.reset_runtime_state()
     task_payload = _task_payload()
 
     first = await main.send_message(task_payload, token="unit-test")
@@ -54,7 +54,7 @@ async def test_send_message_is_idempotent_by_work_item():
 
 @pytest.mark.anyio
 async def test_workflow_work_list_is_captured_and_queryable():
-    await main.demo_reset()
+    main.reset_runtime_state()
     task_payload = _task_payload("wi-track-threat-002")
 
     await main.send_message(task_payload, token="unit-test")
@@ -95,7 +95,7 @@ def test_metrics_endpoint_exposes_runtime_counters():
 
 @pytest.mark.anyio
 async def test_send_message_returns_standard_a2a_response_envelope():
-    await main.demo_reset()
+    main.reset_runtime_state()
     task_payload = _task_payload("wi-envelope-001")
 
     response = await main.send_message(task_payload, token="unit-test")
@@ -116,7 +116,7 @@ async def test_send_message_returns_standard_a2a_response_envelope():
 
 @pytest.mark.anyio
 async def test_send_message_ready_false_returns_standard_failure_envelope():
-    await main.demo_reset()
+    main.reset_runtime_state()
     task_payload = _task_payload("wi-not-ready-001")
 
     main.set_ready({"ready": False})
@@ -136,7 +136,7 @@ async def test_send_message_ready_false_returns_standard_failure_envelope():
 
 
 def test_local_builtin_algorithm_provider_has_stable_mode_name():
-    provider = LocalBuiltInAlgorithmProvider(main.tracker, main.graph_predictor, main.ranker, main.impact_analyzer, main.group_detector)
+    provider = LocalBuiltInAlgorithmProvider(main.tracker, main.ranker, main.impact_analyzer, main.group_detector)
 
     assert provider.mode == "local_builtin"
 
@@ -176,7 +176,7 @@ async def test_send_message_saves_and_restores_agent_state_snapshot(tmp_path):
     old_store = main.state_store
     main.state_store = FileStateStore(tmp_path / "agent_state.json")
     try:
-        await main.demo_reset()
+        main.reset_runtime_state()
         task_payload = _task_payload("wi-persist-001")
         first = await main.send_message(task_payload, token="unit-test")
         track_id = first["artifact"]["tracks"][0]["track_id"]
@@ -196,4 +196,4 @@ async def test_send_message_saves_and_restores_agent_state_snapshot(tmp_path):
         assert main.last_artifact["summary"]["track_count"] == 7
     finally:
         main.state_store = old_store
-        await main.demo_reset()
+        main.reset_runtime_state()

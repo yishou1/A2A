@@ -42,26 +42,115 @@ def test_threat_ranking_is_sorted_by_score_descending():
     assert ranked[0].evidence
 
 
-def test_semantic_fields_raise_attention_score():
+def test_upstream_semantic_fields_do_not_drive_core_threat_score():
     scene = {
         "protected_zone_lat": 31.2304,
         "protected_zone_lon": 121.4737,
         "protected_radius_m": 25000,
     }
     baseline = make_track("baseline", 31.45, 121.62, "unknown")
-    semantic = make_track("semantic", 31.45, 121.62, "unknown")
-    semantic.metadata.update(
+    enriched = make_track("enriched", 31.45, 121.62, "unknown")
+    enriched.metadata.update(
         {
             "label": "hostile",
             "affiliation": "red",
             "threat_level": "high",
             "knowledge_relations": [{"predicate": "threat_of", "object": "mission_area"}],
+            "knowledge_graph": {
+                "nodes": [
+                    {"id": "enriched", "type": "track"},
+                    {"id": "recon-cell", "type": "formation"},
+                    {"id": "mission_area", "type": "asset"},
+                ],
+                "edges": [
+                    {"source": "enriched", "predicate": "member_of", "target": "recon-cell"},
+                    {"source": "recon-cell", "predicate": "threat_of", "target": "mission_area"},
+                ],
+            },
         }
     )
 
-    ranked = ThreatRanker().rank([baseline, semantic], scene)
+    ranked = ThreatRanker().rank([baseline, enriched], scene)
     by_track = {item.track_id: item for item in ranked}
 
-    assert by_track["semantic"].score > by_track["baseline"].score
-    assert by_track["semantic"].factors["semantic_factor"] > 0.8
-    assert any("semantic" in evidence.lower() or "情报" in evidence for evidence in by_track["semantic"].evidence)
+    assert by_track["enriched"].score == by_track["baseline"].score
+    assert "semantic_factor" not in by_track["enriched"].factors
+    assert "semantic_sitrep" not in by_track["enriched"].metadata
+    assert "semantic_reasoning" not in by_track["enriched"].metadata
+    assert by_track["enriched"].metadata["dbn"]["risk_state_probabilities"]
+    assert by_track["enriched"].metadata["xai"]["evidence_chain"]
+    assert by_track["enriched"].metadata["xai"]["factor_chain"]
+    assert by_track["enriched"].metadata["xai"]["safety_chain"]
+    assert by_track["enriched"].metadata["dbn"]["observation_reliability"] > 0
+    assert any("DBN 高关注状态概率变化量" in evidence for evidence in by_track["enriched"].metadata["xai"]["evidence_chain"])
+    assert not any("KG" in evidence or "semantic" in evidence.lower() or "语义" in evidence for evidence in by_track["enriched"].evidence)
+
+
+def test_predicted_path_changes_priority_for_approaching_track():
+    scene = {
+        "protected_zone_lat": 31.0,
+        "protected_zone_lon": 121.0,
+        "protected_radius_m": 10_000,
+    }
+    approaching = make_track("approaching", 31.12, 121.0)
+    departing = make_track("departing", 31.12, 121.0)
+    approaching.predicted_path = [
+        {
+            "dt_s": 60.0,
+            "lat": 31.02,
+            "lon": 121.0,
+            "prediction_confidence": 0.9,
+            "uncertainty_radius_m": 150.0,
+            "model_used": "st_gnn",
+            "model_version": "aircraft-v1",
+        }
+    ]
+    departing.predicted_path = [
+        {
+            "dt_s": 60.0,
+            "lat": 31.22,
+            "lon": 121.0,
+            "prediction_confidence": 0.9,
+            "uncertainty_radius_m": 150.0,
+            "model_used": "st_gnn",
+            "model_version": "aircraft-v1",
+        }
+    ]
+
+    approaching_assessment = ThreatRanker().rank([approaching], scene)[0]
+    departing_assessment = ThreatRanker().rank([departing], scene)[0]
+
+    assert approaching_assessment.score > departing_assessment.score
+    assert approaching_assessment.factors["predicted_closest_horizon_s"] == 60.0
+    assert approaching_assessment.factors["predicted_min_distance_m"] < 3_000.0
+    assert approaching_assessment.factors["prediction_confidence"] == 0.9
+    assert approaching_assessment.metadata["prediction_risk_context"]["model_version"] == "aircraft-v1"
+    assert any("ST-GNN" in item and "60s" in item for item in approaching_assessment.evidence)
+
+
+def test_prediction_uncertainty_is_exposed_and_used_conservatively():
+    scene = {
+        "protected_zone_lat": 31.0,
+        "protected_zone_lon": 121.0,
+        "protected_radius_m": 10_000,
+    }
+    precise = make_track("precise", 31.12, 121.0)
+    uncertain = make_track("uncertain", 31.12, 121.0)
+    common_point = {
+        "dt_s": 30.0,
+        "lat": 31.06,
+        "lon": 121.0,
+        "prediction_confidence": 0.8,
+        "model_used": "adaptive_multi_model_fused",
+    }
+    precise.predicted_path = [{**common_point, "uncertainty_radius_m": 100.0}]
+    uncertain.predicted_path = [{**common_point, "uncertainty_radius_m": 2_000.0}]
+
+    precise_assessment = ThreatRanker().rank([precise], scene)[0]
+    uncertain_assessment = ThreatRanker().rank([uncertain], scene)[0]
+
+    assert uncertain_assessment.factors["uncertainty_adjusted_distance_m"] < precise_assessment.factors[
+        "uncertainty_adjusted_distance_m"
+    ]
+    assert uncertain_assessment.score >= precise_assessment.score
+    assert any("不确定性半径" in item for item in uncertain_assessment.evidence)

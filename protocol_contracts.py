@@ -66,9 +66,7 @@ def validate_value(value: Any, schema: dict | None, path: str = "value") -> None
 def validate_task_payload(payload: dict, skill: dict | None = None) -> dict:
     version = validate_protocol_version(payload)
     missing = sorted(
-        field
-        for field in TASK_REQUIRED_FIELDS
-        if payload.get(field) in (None, "")
+        field for field in TASK_REQUIRED_FIELDS if payload.get(field) in (None, "")
     )
     if missing:
         raise ContractValidationError(f"task is missing required fields: {missing}")
@@ -88,8 +86,14 @@ def validate_task_response(
 ) -> dict:
     validate_protocol_version(response)
     required_response_fields = {
-        "schema_version", "workflow_id", "work_item", "agent", "role", "status",
-        "output", "metrics",
+        "schema_version",
+        "workflow_id",
+        "work_item",
+        "agent",
+        "role",
+        "status",
+        "output",
+        "metrics",
     }
     missing = sorted(field for field in required_response_fields if field not in response)
     if missing:
@@ -106,8 +110,14 @@ def validate_task_response(
     output_hint = task_payload.get("output_hint")
     status = str(response.get("status") or "").lower()
     if status not in {
-        "completed", "succeeded", "success", "accepted",
-        "failed", "error", "rejected", "timeout",
+        "completed",
+        "succeeded",
+        "success",
+        "accepted",
+        "failed",
+        "error",
+        "rejected",
+        "timeout",
     }:
         raise ContractValidationError(f"response.status is invalid: {status}")
     if status in {"completed", "succeeded", "success"} and output_hint:

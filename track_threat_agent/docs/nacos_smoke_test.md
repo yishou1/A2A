@@ -9,7 +9,7 @@
 在仓库根目录启动 Nacos：
 
 ```bash
-cd /Users/mac/Desktop/yishou1-A2A
+cd /path/to/yishou1-A2A
 docker compose up -d nacos
 ```
 
@@ -29,8 +29,10 @@ curl http://127.0.0.1:8848/nacos/v1/ns/operator/metrics
 
 ## 2. 启动 Track Threat Agent
 
+算法和 TorchScript 模型由 Agent 本进程加载，不需要额外启动算法库 HTTP 服务。
+
 ```bash
-cd /Users/mac/Desktop/yishou1-A2A/track_threat_agent
+cd /path/to/yishou1-A2A/track_threat_agent
 
 NACOS_ENABLED=true \
 NACOS_SERVER=127.0.0.1:8848 \
@@ -46,10 +48,13 @@ PYTHONPATH=.. uv run --with-requirements ../requirements.txt --with-requirements
   uvicorn app.main:app --host 127.0.0.1 --port 8102
 ```
 
-## 3. 验证 Agent 健康状态
+如需替换模型，设置 `ST_GNN_AIRCRAFT_MODEL_DIR` 或 `ST_GNN_SHIP_MODEL_DIR`；不设置时使用仓库内置 bundle。
+
+## 3. 验证 Agent 健康和模型状态
 
 ```bash
 curl http://127.0.0.1:8102/health
+curl http://127.0.0.1:8102/models
 ```
 
 关键字段应为：
@@ -85,10 +90,12 @@ heartbeat_ts=<recent unix timestamp>
 
 `heartbeat_ts` 必须持续刷新。师兄仓库的 `NacosRegistry` 会用该字段判断实例是否新鲜。
 
+注册、SDK heartbeat、HTTP heartbeat、metadata 更新和注销统一使用 `clusterName=DEFAULT`。如果发现健康检查正常但 `heartbeat_ts` 不变，应先检查实例是否被错误注册到 `clusterName=None`。
+
 ## 5. 验证师兄仓库发现逻辑
 
 ```bash
-cd /Users/mac/Desktop/yishou1-A2A
+cd /path/to/yishou1-A2A
 
 PYTHONPATH=. uv run --with-requirements requirements.txt python - <<'PY'
 from registry.nacos_manager import NacosRegistry
@@ -125,7 +132,7 @@ PY
 ## 6. 通过发现到的 endpoint 调用 A2A
 
 ```bash
-cd /Users/mac/Desktop/yishou1-A2A
+cd /path/to/yishou1-A2A
 
 PYTHONPATH=. uv run --with-requirements requirements.txt python - <<'PY'
 import json
@@ -195,6 +202,6 @@ PY
 停止 Nacos：
 
 ```bash
-cd /Users/mac/Desktop/yishou1-A2A
+cd /path/to/yishou1-A2A
 docker compose stop nacos
 ```

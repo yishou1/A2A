@@ -7,6 +7,8 @@ venv/
 logs/
 .pytest_cache/
 docs/
+!track_threat_agent/docs/
+!track_threat_agent/docs/**
 __pycache__/
 *.py[cod]
 *.log
