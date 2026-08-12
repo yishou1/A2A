@@ -3,6 +3,13 @@
 !.env.example
 
 venv/
+.venv/
+models/checkpoints/
+*.pt
+rtdetr-l.pt
+data/output/
+datasets/
+scripts/simulation/_cache/
 .a2a_state/
 logs/
 .pytest_cache/
@@ -30,3 +37,9 @@ data/sc2/processed/sc2le_task_features_report.json
 data/sc2/processed/sc2le_closed_loop_result.json
 *.npz
 *.zip
+
+# Training run artifacts (bulky binaries; keep csv/yaml/meta in runs/)
+runs/**/weights/
+runs/**/*.jpg
+runs/**/*.png
+runs/model_profile/

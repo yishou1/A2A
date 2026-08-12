@@ -29,6 +29,20 @@ def _modality_for_attachment(attachment: dict[str, Any]) -> SensorModality:
     return SensorModality.EO_IR
 
 
+_SENSOR_META_KEYS = (
+    "platform_lat",
+    "platform_lon",
+    "altitude_m",
+    "heading_deg",
+    "depression_angle_deg",
+    "gimbal_pitch_deg",
+    "fov_deg",
+    "ground_elevation_m",
+    "sea_surface_elevation_m",
+    "resolution",
+)
+
+
 def _frame_from_attachment(attachment: dict[str, Any], index: int) -> SensorFrame:
     attachment_id = attachment.get("id") or f"att-{index:03d}"
     modality = _modality_for_attachment(attachment)
@@ -87,22 +101,29 @@ def _frames_from_input(input_payload: dict[str, Any]) -> list[SensorFrame]:
     return frames
 
 
-def _mock_visual_frame() -> SensorFrame:
-    """无附件时的 mock 联调帧（仅 use_mock 模式）。"""
-    return SensorFrame(
-        sensor_id="MOCK-EO",
-        modality=SensorModality.EO_IR,
-        payload={"image_base64": "mock"},
-        metadata={"source": "mock_fallback"},
-    )
+def _normalize_input_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """兼容飞书/lzh 外壳：业务字段可在 input 或 input.agent_request。"""
+    input_payload = dict(payload.get("input") or {})
+    agent_request = input_payload.get("agent_request")
+    if isinstance(agent_request, dict):
+        merged = dict(agent_request)
+        for key, value in input_payload.items():
+            if key == "agent_request":
+                continue
+            # 外层同名字段不覆盖 agent_request 内已有值
+            if key not in merged or merged.get(key) in (None, "", {}, []):
+                merged[key] = value
+        return merged
+    return input_payload
 
 
-def commander_payload_to_batch(payload: dict[str, Any], *, allow_mock_fallback: bool = True) -> SensorBatch:
+def commander_payload_to_batch(payload: dict[str, Any]) -> SensorBatch:
     """
     将 Commander sendMessage 载荷转为 SensorBatch。
 
     - attachments：仅接受对象存储引用（workflow_payloads 校验）
-    - input/context：来自 BPEL 上游变量（如 recon_report）
+    - input / input.agent_request：来自 BPEL/飞书外壳业务字段（如 recon_report）
+    - 无 mock 兜底：缺少附件与业务输入时直接失败，供真实场景演练
     """
     workflow_id = payload.get("workflow_id") or payload.get("work_item") or "WF-UNKNOWN"
     command = payload.get("command") or "process_intelligence"
@@ -110,16 +131,17 @@ def commander_payload_to_batch(payload: dict[str, Any], *, allow_mock_fallback: 
     attachments = normalize_attachments(payload.get("attachments"))
     frames = [_frame_from_attachment(item, index) for index, item in enumerate(attachments)]
 
-    input_payload = dict(payload.get("input") or {})
+    input_payload = _normalize_input_payload(payload)
     frames.extend(_frames_from_input(input_payload))
 
-    if not frames and allow_mock_fallback:
-        frames.append(_mock_visual_frame())
-
     if not frames:
-        raise ValueError("无法从 attachments 或 input 构建传感器帧")
+        raise ValueError(
+            "无法从 attachments 或 input 构建传感器帧："
+            "真实演练要求至少提供一张传感器附件，或 recon_report/sector/coordinates"
+        )
 
     upstream_context = dict(payload.get("context") or {})
+    sensor_telemetry = upstream_context.get("sensor_telemetry") or {}
     batch_context: dict[str, Any] = {
         "command": command,
         "work_item": payload.get("work_item"),
@@ -135,6 +157,9 @@ def commander_payload_to_batch(payload: dict[str, Any], *, allow_mock_fallback: 
         "sea_surface_elevation_m": upstream_context.get("sea_surface_elevation_m"),
         "laser_range_m": upstream_context.get("laser_range_m"),
         "radar_range_m": upstream_context.get("radar_range_m"),
+        "sensor_telemetry": sensor_telemetry,
+        "georef": upstream_context.get("georef"),
+        "output_storage_prefix": upstream_context.get("output_storage_prefix"),
         "recon_report": input_payload.get("recon_report") or upstream_context.get("recon_report"),
         "sector": input_payload.get("sector") or upstream_context.get("sector"),
         "coordinates": input_payload.get("coordinates") or upstream_context.get("coordinates"),

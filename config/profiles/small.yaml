@@ -1,0 +1,20 @@
+# 小档 (S)：边缘 / CPU / 8GB 显存
+description: 低延迟、低显存；检测用 RT-DETR-N + 416，嵌入维度 256
+target_device: "8GB GPU / 边缘机"
+
+inference:
+  detection_model: rtdetr-n.pt
+  # 训练完成后可改为: models/checkpoints/battlefield_rtdetr_n.pt
+  detection_imgsz: 416
+  embed_dim: 256
+  mask2former_model: facebook/mask2former-swin-tiny-ade-semantic
+  semantic_comm_model: google/flan-t5-small
+  page_index_model: paraphrase-MiniLM-L6-v2
+  odconv_crop_size: 96
+  odconv_checkpoint: models/checkpoints/odconv_refiner.pt
+  edl_checkpoint: models/checkpoints/edl_head.pt
+  motr_checkpoint: models/checkpoints/motr_tracker_battlefield.pt
+  mamba_checkpoint: models/checkpoints/mamba_fusion_s.pt
+  supcon_checkpoint: models/checkpoints/supcon_meta_s.pt
+  marl_checkpoint: models/checkpoints/marl_policy.pt
+  confidence_threshold: 0.30

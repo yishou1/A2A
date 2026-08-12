@@ -1,0 +1,11 @@
+train_root=D:\软件\dataset\VisDrone2019-MOT-train
+val_root=D:\软件\dataset\VisDrone2019-MOT-val
+device=cuda
+train_positive_pairs=1154132
+val_positive_pairs=116270
+epochs=10
+batch_size=16
+samples_per_epoch=3000
+elapsed_ms=6302854
+checkpoint=D:\a2a_project\A2A-main\models\checkpoints\motr_tracker_battlefield.pt
+source_log=C:\Users\33840\.cursor\projects\d-a2a-project-A2A-main\terminals\408052.txt

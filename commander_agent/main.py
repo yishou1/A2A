@@ -1711,6 +1711,7 @@ class CommanderAgent:
             "commander": "commander_decision",
             "assault": "assault_result",
             "closed_loop": "closed_loop_result",
+            "tactical_intelligence": "intelligence_packet",
         }.get(role)
 
     @staticmethod
@@ -1876,6 +1877,13 @@ class CommanderAgent:
                     "status": "completed",
                     "message": "Closed-loop optimization completed, but no structured result was returned.",
                 }
+        elif role == "tactical_intelligence":
+            target_key = output_key or "intelligence_packet"
+            output_value = output.get(target_key)
+            if output_value is None:
+                output_value = output.get("intelligence_packet")
+            if output_value is None:
+                output_value = self._first_output_value(output)
             self._append_output_collection(
                 context,
                 target_key,
@@ -1888,17 +1896,26 @@ class CommanderAgent:
                 error=response_error,
                 duration_ms=duration_ms,
             )
-            result_payload = output_value if isinstance(output_value, dict) else {}
-            output_data = result_payload.get("output_data", {}) if isinstance(result_payload, dict) else {}
-            requirement_report = output_data.get("requirement_report", {})
-            meets_requirements = output_data.get("meets_requirements")
-            processed_targets = output_data.get("execution_control", {}).get("processed_targets")
-            context["battle_log"].append(
-                "[Closed Loop Report] "
-                f"processed_targets={processed_targets}, "
-                f"meets_requirements={meets_requirements}, "
-                f"requirement_report={requirement_report}"
-            )
+            if role == "closed_loop":
+                result_payload = output_value if isinstance(output_value, dict) else {}
+                output_data = result_payload.get("output_data", {}) if isinstance(result_payload, dict) else {}
+                requirement_report = output_data.get("requirement_report", {})
+                meets_requirements = output_data.get("meets_requirements")
+                processed_targets = output_data.get("execution_control", {}).get("processed_targets")
+                context["battle_log"].append(
+                    "[Closed Loop Report] "
+                    f"processed_targets={processed_targets}, "
+                    f"meets_requirements={meets_requirements}, "
+                    f"requirement_report={requirement_report}"
+                )
+            else:
+                target_count = output.get("target_count")
+                summary = output.get("summary") or (
+                    output_value.get("summary") if isinstance(output_value, dict) else None
+                )
+                context["battle_log"].append(
+                    f"[Tactical Intelligence] targets={target_count}; summary={summary}"
+                )
         else:
             target_key = output_key or self._default_output_key_for_role(role) or "result"
             output_value = self._required_output_value(output, target_key)

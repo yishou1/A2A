@@ -1,0 +1,23 @@
+# 无 MinIO / 无 GPU 权重时的 URI 链路验证配置（mock 推理 + 本地产物）
+use_mock: true
+
+inference:
+  device: cpu
+  ground_elevation_m: 120.0
+  default_platform_altitude_m: 3200.0
+  default_platform_heading_deg: 0.0
+  default_depression_angle_deg: 75.0
+  default_fov_h_deg: 45.0
+
+skills:
+  perception: {}
+  cognition: {}
+  communication: {}
+
+artifact_storage:
+  enabled: true
+  # 也可在 payload.context.output_storage_prefix 里按任务指定
+  uri_prefix: ""
+  local_staging_dir: data/output/artifacts
+  mime_type: image/jpeg
+  kind: image
