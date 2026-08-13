@@ -204,12 +204,9 @@ def ensure_infrastructure(args: argparse.Namespace, files_dir: Path) -> None:
     print(f"[INFRA] Started Nacos at {args.nacos_addr} and auth-server at {args.auth_server_base}")
 
 
-DEMO_AGENT_SPECS = [
-    ("recon-a", "recon_agent/main.py", "RECON_AGENT_PORT", 18112, "recon"),
-    ("recon-b", "recon_agent/main.py", "RECON_AGENT_PORT", 18116, "recon"),
-    ("evaluator", "evaluator_agent/main.py", "EVALUATOR_AGENT_PORT", 18115, "evaluator"),
-    ("assault", "assault_agent/main.py", "ASSAULT_AGENT_PORT", 18114, "assault"),
-]
+# Legacy recon/artillery/assault/evaluator demo agents were retired. The formal
+# integrated workflow starts its production-path agents through start_agents.sh.
+DEMO_AGENT_SPECS = []
 
 
 class DemoAgentProcesses:
