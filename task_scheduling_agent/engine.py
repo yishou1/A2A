@@ -1,4 +1,4 @@
-"""调度引擎：AMOS 态势 → MARL-PPO 或 mock 启发式。"""
+"""调度引擎：本地 mock/MARL，algolib（小模型选算法 + /run）。"""
 
 from __future__ import annotations
 
@@ -85,14 +85,20 @@ def run_schedule(
     use_mock: bool = True,
     config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    cfg = config or {}
+    from task_scheduling_agent.algolib_runtime import run_with_algolib, use_algolib_backend
+
+    if use_algolib_backend(cfg):
+        return run_with_algolib(amos_payload, config=cfg)
+
     situation = situation_from_amos(amos_payload)
     if use_mock:
         raw = mock_schedule_from_situation(situation)
     else:
-        raw = marl_schedule_from_situation(situation, config=config)
+        raw = marl_schedule_from_situation(situation, config=cfg)
 
     plan = scheduler_result_to_plan(raw)
-    result = {
+    return {
         "mission_id": str(amos_payload.get("mission_id", "")),
         "phase": situation.phase,
         "jamming_level": situation.jamming_level,
@@ -102,4 +108,3 @@ def run_schedule(
         **raw,
         "task_schedule": plan.model_dump(mode="json"),
     }
-    return result

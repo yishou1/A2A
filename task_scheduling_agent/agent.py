@@ -1,4 +1,9 @@
-"""独立任务调度 / 资源分配 Agent（AMOS JSON 输入）。"""
+"""独立任务调度 / 资源分配 Agent（AMOS JSON 输入）。
+
+支持：
+- local：进程内 mock / MARL-PPO
+- algolib：小模型选算法 + GET /algorithms + POST /run
+"""
 
 from __future__ import annotations
 
@@ -14,8 +19,8 @@ class TaskSchedulingAgent:
 
     name = "Task_Scheduling_Agent"
     description = (
-        "Standalone MARL-PPO / heuristic task scheduling agent. "
-        "Consumes AMOS JSON (tasks, platforms, battery, ammo, links, time windows)."
+        "Standalone task scheduling agent. "
+        "Supports local mock/MARL-PPO or lzh-style algolib LLM planning + /run."
     )
 
     def __init__(self, *, use_mock: bool = True, config: dict[str, Any] | None = None):

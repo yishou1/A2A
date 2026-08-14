@@ -8,6 +8,9 @@ from agent.algorithm_library.endpoints import TIA_ALGORITHM_PORTS, TIA_ALGORITHM
 
 TIA_ALLOWED_ALGORITHMS: set[str] = set(TIA_ALGORITHM_PORTS) - {"marl_ppo_task_scheduler"}
 
+# 独立任务调度 Agent 白名单（经 algolib /algorithms 发现）
+SCHEDULING_ALLOWED_ALGORITHMS: set[str] = {"marl_ppo_task_scheduler"}
+
 TIA_DEFAULT_PIPELINE: list[str] = [
     "battlefield_rtdetr_detector",
     "siamese_mask2former_damage",
@@ -34,6 +37,7 @@ ALGORITHM_STAGE: dict[str, str] = {
     "siamese_mask2former_damage": "perception",
     "edl_evidential_verifier": "perception",
     "motr_neural_kalman_tracker": "perception",
+    "marl_ppo_task_scheduler": "planning",
     "imagebind_multimodal_encoder": "cognition",
     "multimodal_mamba_fusion": "cognition",
     "supcon_meta_classifier": "cognition",
@@ -43,6 +47,13 @@ ALGORITHM_STAGE: dict[str, str] = {
 }
 
 _ALGORITHM_CARDS: dict[str, dict[str, Any]] = {
+    "marl_ppo_task_scheduler": {
+        "task_family": "task_scheduling",
+        "capabilities": ["sensor_tasking", "reattack_planning", "resource_allocation"],
+        "summary": "MARL-PPO 传感器任务调度与再攻击规划",
+        "required_fields": ["tracks", "batch_context"],
+        "optional": False,
+    },
     "battlefield_rtdetr_detector": {
         "task_family": "detection",
         "capabilities": ["eo_ir", "sar", "object_detection"],
@@ -120,12 +131,21 @@ def build_algorithm_catalog(
     *,
     host: str = "127.0.0.1",
     allowed: set[str] | None = None,
+    include_scheduling: bool = False,
 ) -> list[dict[str, Any]]:
-    """生成本地 11 算法目录卡片，供小模型规划（对齐 lzh /algorithms 摘要）。"""
+    """生成本地算法目录卡片，供小模型规划（对齐 lzh /algorithms 摘要）。"""
     allow = allowed or TIA_ALLOWED_ALGORITHMS
     catalog: list[dict[str, Any]] = []
-    for algorithm_id in TIA_DEFAULT_PIPELINE:
+    pipeline = list(TIA_DEFAULT_PIPELINE)
+    if include_scheduling:
+        # 调度算法不在 TIA 管线内，但网关需对外暴露给 task_scheduling_agent
+        if "marl_ppo_task_scheduler" not in pipeline:
+            pipeline = ["marl_ppo_task_scheduler", *pipeline]
+        allow = set(allow) | SCHEDULING_ALLOWED_ALGORITHMS
+    for algorithm_id in pipeline:
         if algorithm_id not in allow:
+            continue
+        if algorithm_id not in TIA_ALGORITHM_PORTS:
             continue
         card = _ALGORITHM_CARDS.get(algorithm_id, {})
         catalog.append(
