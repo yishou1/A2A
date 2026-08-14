@@ -45,6 +45,14 @@ class AlgolibSettings:
     fallback_local: bool
     default_version: str
     default_backend_type: str
+    enable_llm: bool = False
+    llm_provider: str = "azure"
+    llm_base_url: str = "https://wysengine.openai.azure.com"
+    llm_model: str = "gpt-4o-min"
+    llm_api_key: str = ""
+    llm_api_version: str = "2024-12-01-preview"
+    llm_timeout_seconds: float = 20.0
+    llm_temperature: float = 0.0
 
     @classmethod
     def load(cls, *, agent_backend_env: Optional[str] = None) -> "AlgolibSettings":
@@ -67,6 +75,26 @@ class AlgolibSettings:
             fallback_local=_env_bool("ALGOLIB_FALLBACK_LOCAL", True),
             default_version=os.environ.get("ALGOLIB_DEFAULT_VERSION", "1.0.0"),
             default_backend_type=os.environ.get("ALGOLIB_BACKEND_TYPE", "python_http_service"),
+            enable_llm=_env_bool("ALGOLIB_ENABLE_LLM", False),
+            llm_provider=os.environ.get("ALGOLIB_LLM_PROVIDER", "azure").strip().lower() or "azure",
+            llm_base_url=os.environ.get(
+                "AZURE_OPENAI_ENDPOINT",
+                os.environ.get("ALGOLIB_LLM_BASE_URL", "https://wysengine.openai.azure.com/"),
+            ).rstrip("/"),
+            llm_model=os.environ.get(
+                "AZURE_OPENAI_DEPLOYMENT",
+                os.environ.get("ALGOLIB_LLM_MODEL", "gpt-4o-min"),
+            ),
+            llm_api_key=os.environ.get(
+                "AZURE_OPENAI_API_KEY",
+                os.environ.get("ALGOLIB_LLM_API_KEY", ""),
+            ),
+            llm_api_version=os.environ.get(
+                "AZURE_OPENAI_API_VERSION",
+                os.environ.get("ALGOLIB_LLM_API_VERSION", "2024-12-01-preview"),
+            ),
+            llm_timeout_seconds=float(os.environ.get("ALGOLIB_LLM_TIMEOUT_SECONDS", "20")),
+            llm_temperature=float(os.environ.get("ALGOLIB_LLM_TEMPERATURE", "0")),
         )
 
 

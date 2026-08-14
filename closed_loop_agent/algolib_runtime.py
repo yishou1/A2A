@@ -7,7 +7,11 @@ import uuid
 from typing import Any, List, Optional, Sequence, Tuple
 
 from algolib_bridge import AlgorithmLibraryClient, AlgorithmLibraryError, AlgolibSettings
-from closed_loop_agent.closed_loop_core import _closed_loop_optimization
+from closed_loop_agent.closed_loop_core import (
+    _apply_action,
+    _build_live_targets,
+    _closed_loop_optimization,
+)
 
 AGENT_BACKEND_ENV = "CLOSED_LOOP_BACKEND"
 
@@ -33,6 +37,13 @@ HANDCRAFTED_KEYS = (
     "detection_confidence",
     "threat_score",
 )
+
+ALLOWED_CLOSED_LOOP_ALGORITHMS = [
+    "mission_feature_adapter",
+    "mission_completion_scorer",
+    "xbd_damage_assessor",
+    "closed_loop_decision_advisor",
+]
 
 
 def use_closed_loop_algolib() -> bool:
@@ -229,6 +240,7 @@ def assess_target_damage_via_algolib(
     request_id: str,
     preferred_mode: str = DAMAGE_INPUT_MODE_AUTO,
     device: Optional[str] = None,
+    llm_plans: Optional[List[dict]] = None,
 ) -> Tuple[float, str, dict, List[str]]:
     """Call xbd_damage_assessor for one target; returns prob, mode, raw_out, warnings."""
     sample_id = str(target.get("sample_id") or target.get("target_id") or request_id)
@@ -245,12 +257,16 @@ def assess_target_damage_via_algolib(
     params = {}
     if device:
         params["device"] = device
-    damage_out = client.run_outputs(
+    damage_out = _run_outputs_maybe_planned(
+        client,
+        settings=client.settings,
         algorithm_id="xbd_damage_assessor",
         inputs=inputs,
         params=params,
         request_id=request_id,
         trace_id=request_id,
+        task="xbd_damage_assessment",
+        llm_plans=llm_plans,
     )
     if damage_out.get("assessment_status") == "insufficient_data":
         warnings.append(f"xbd_damage_assessor:insufficient_data:{sample_id}:{mode}")
@@ -263,12 +279,16 @@ def assess_target_damage_via_algolib(
             )
             warnings.extend(feature_warnings)
             if feature_inputs is not None:
-                damage_out = client.run_outputs(
+                damage_out = _run_outputs_maybe_planned(
+                    client,
+                    settings=client.settings,
                     algorithm_id="xbd_damage_assessor",
                     inputs=feature_inputs,
                     params=params,
                     request_id=f"{request_id}-features",
                     trace_id=request_id,
+                    task="xbd_damage_assessment_features_fallback",
+                    llm_plans=llm_plans,
                 )
                 mode = feature_mode
                 if damage_out.get("assessment_status") != "insufficient_data":
@@ -278,26 +298,28 @@ def assess_target_damage_via_algolib(
     return float(damage_out.get("damage_probability") or 0.0), mode, damage_out, warnings
 
 
-def run_closed_loop_via_algolib(arguments: dict) -> dict:
-    settings = AlgolibSettings.load(agent_backend_env=AGENT_BACKEND_ENV)
-    client = AlgorithmLibraryClient(settings)
-    request_id = str(arguments.get("request_id") or f"cl-{uuid.uuid4().hex[:10]}")
-    start = time.perf_counter()
-    upstream = _extract_upstream_results(arguments)
-    feature_mode = str(arguments.get("feature_mode") or "hybrid")
-    damage_mode_pref = preferred_damage_input_mode(arguments)
-    device = str(arguments.get("device") or os.environ.get("CLOSED_LOOP_DAMAGE_DEVICE") or "").strip() or None
+def _score_mission_via_algolib(
+    client: AlgorithmLibraryClient,
+    *,
+    agent_results: dict,
+    feature_mode: str,
+    request_id: str,
+    llm_plans: Optional[List[dict]] = None,
+) -> Tuple[dict, dict, List[str]]:
     warnings: List[str] = []
-
-    adapter_out = client.run_outputs(
+    adapter_out = _run_outputs_maybe_planned(
+        client,
+        settings=client.settings,
         algorithm_id="mission_feature_adapter",
         inputs={
             "source_type": "agent_results",
             "mode": feature_mode if feature_mode in {"strict", "fixture", "hybrid"} else "hybrid",
-            "agent_results": upstream,
+            "agent_results": agent_results,
         },
         request_id=request_id,
         trace_id=request_id,
+        task="mission_feature_adaptation",
+        llm_plans=llm_plans,
     )
     if adapter_out.get("assessment_status") == "insufficient_data":
         warnings.append("mission_feature_adapter:insufficient_data")
@@ -310,100 +332,308 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
         "warnings": list(adapter_out.get("warnings") or []),
     }
     if feature_values and adapter_out.get("assessment_status") != "insufficient_data":
-        mission_out = client.run_outputs(
+        mission_out = _run_outputs_maybe_planned(
+            client,
+            settings=client.settings,
             algorithm_id="mission_completion_scorer",
             inputs={"features": feature_values},
             request_id=request_id,
             trace_id=request_id,
+            task="mission_completion_scoring",
+            llm_plans=llm_plans,
         )
     else:
         warnings.append("mission_completion_scorer:skipped_missing_features")
+    return adapter_out, mission_out, warnings
 
-    mission_completion = float(mission_out.get("mission_completion") or 0.0)
 
-    targets = arguments.get("targets")
-    if not isinstance(targets, list):
-        targets = []
-    targets = [dict(item) for item in targets if isinstance(item, dict)]
+def _run_outputs_maybe_planned(
+    client: AlgorithmLibraryClient,
+    *,
+    settings: AlgolibSettings,
+    algorithm_id: str,
+    inputs: dict[str, Any],
+    params: Optional[dict[str, Any]] = None,
+    request_id: str,
+    trace_id: str,
+    task: str,
+    llm_plans: Optional[List[dict]] = None,
+) -> dict:
+    if not settings.enable_llm:
+        return client.run_outputs(
+            algorithm_id=algorithm_id,
+            inputs=inputs,
+            params=params,
+            request_id=request_id,
+            trace_id=trace_id,
+        )
+    outputs, plan = client.run_outputs_with_planning(
+        default_algorithm_id=algorithm_id,
+        allowed_algorithm_ids=ALLOWED_CLOSED_LOOP_ALGORITHMS,
+        inputs=inputs,
+        params=params,
+        request_id=request_id,
+        trace_id=trace_id,
+        task=task,
+    )
+    if llm_plans is not None:
+        llm_plans.append({"task": task, "default_algorithm_id": algorithm_id, "plan": plan})
+    return outputs
 
-    assessments: List[dict] = []
-    commands: List[dict] = []
-    probs: List[float] = []
+
+def _enrich_results_with_damage(upstream: dict, probs: Sequence[float], targets: Sequence[dict]) -> dict:
+    enriched = dict(upstream)
+    confirmed = sum(1 for prob in probs if float(prob) >= 0.5)
+    enriched["damage_confirmation"] = {
+        "output_data": {
+            "engaged_targets": len(targets),
+            "confirmed_destroyed": confirmed,
+            "mean_damage_probability": round(sum(probs) / len(probs), 4) if probs else 0.0,
+        }
+    }
+    return enriched
+
+
+def run_closed_loop_via_algolib(arguments: dict) -> dict:
+    settings = AlgolibSettings.load(agent_backend_env=AGENT_BACKEND_ENV)
+    client = AlgorithmLibraryClient(settings)
+    request_id = str(arguments.get("request_id") or f"cl-{uuid.uuid4().hex[:10]}")
+    start = time.perf_counter()
+    seed = int(arguments.get("seed") or 20260412)
+    cycles = max(1, min(8, int(arguments.get("cycles") or 3)))
+    upstream = _extract_upstream_results(arguments)
+    feature_mode = str(arguments.get("feature_mode") or "hybrid")
+    damage_mode_pref = preferred_damage_input_mode(arguments)
+    device = str(arguments.get("device") or os.environ.get("CLOSED_LOOP_DAMAGE_DEVICE") or "").strip() or None
+    warnings: List[str] = []
+
+    # Beachhead often sends target_count without targets; reuse local synthesizer.
+    targets, source_info = _build_live_targets(arguments, seed)
+    if not arguments.get("targets"):
+        warnings.append(f"targets_synthesized_from_target_count:{len(targets)}")
+
+    history: List[dict] = []
+    final_commands: List[dict] = []
+    final_assessments: List[dict] = []
+    adapter_out: dict = {}
+    mission_out: dict = {}
+    initial_completion = 0.0
+    final_completion = 0.0
+    update_latencies: List[float] = []
     damage_mode_counts = {"images": 0, "features": 0}
+    probs: List[float] = []
+    llm_plans: List[dict] = []
 
-    for index, target in enumerate(targets):
-        sample_id = str(target.get("sample_id") or target.get("target_id") or f"target-{index}")
-        damage_prob, used_mode, damage_out, damage_warnings = assess_target_damage_via_algolib(
-            client,
-            target,
-            request_id=f"{request_id}-{index}",
-            preferred_mode=damage_mode_pref,
-            device=device,
-        )
-        warnings.extend(damage_warnings)
-        damage_mode_counts[used_mode] = damage_mode_counts.get(used_mode, 0) + 1
+    for cycle in range(1, cycles + 1):
+        cycle_start = time.perf_counter()
+        cycle_results = _enrich_results_with_damage(upstream, probs, targets) if probs else dict(upstream)
+        try:
+            adapter_out, mission_out, mission_warnings = _score_mission_via_algolib(
+                client,
+                agent_results=cycle_results,
+                feature_mode=feature_mode,
+                request_id=f"{request_id}-m{cycle}",
+                llm_plans=llm_plans,
+            )
+            warnings.extend(mission_warnings)
+        except AlgorithmLibraryError as exc:
+            warnings.append(f"mission_services_failed_cycle_{cycle}:{exc}")
+            mission_out = {
+                "mission_completion": final_completion if cycle > 1 else 0.0,
+                "assessment_status": "service_error",
+                "warnings": [str(exc)],
+            }
+            adapter_out = adapter_out or {}
 
-        probs.append(damage_prob)
-        threat_score = float(target.get("threat_score") or 0.5)
-        situation = _situation_label(threat_score, damage_prob)
-        advice = client.run_outputs(
-            algorithm_id="closed_loop_decision_advisor",
-            inputs={
-                "target": target,
-                "damage_probability": damage_prob,
-                "situation": situation,
-                "mission_completion": mission_completion,
-            },
-            request_id=f"{request_id}-adv-{index}",
-            trace_id=request_id,
-        )
-        action = str(advice.get("action") or advice.get("recommended_action") or "observe")
-        effect_delta = float(advice.get("effect_delta") or advice.get("priority") or 0.0)
-        assessments.append(
-            {
-                "target_id": target.get("target_id") or sample_id,
-                "damage_probability": round(damage_prob, 4),
-                "damage_input_mode": used_mode,
-                "damage_assessment": {
-                    "assessment_status": damage_out.get("assessment_status"),
-                    "damage_label": damage_out.get("damage_label"),
-                    "damage_result": damage_out.get("damage_result"),
+        mission_completion = float(mission_out.get("mission_completion") or 0.0)
+        if cycle == 1:
+            initial_completion = mission_completion
+        final_completion = mission_completion
+
+        assessments: List[dict] = []
+        commands: List[dict] = []
+        probs = []
+        action_counts: dict[str, int] = {}
+
+        for index, target in enumerate(targets):
+            sample_id = str(target.get("sample_id") or target.get("target_id") or f"target-{index}")
+            try:
+                damage_prob, used_mode, damage_out, damage_warnings = assess_target_damage_via_algolib(
+                    client,
+                    target,
+                    request_id=f"{request_id}-c{cycle}-{index}",
+                    preferred_mode=damage_mode_pref,
+                    device=device,
+                    llm_plans=llm_plans,
+                )
+            except AlgorithmLibraryError as exc:
+                damage_prob = float(target.get("damage_probability") or target.get("threat_score") or 0.5)
+                used_mode = "features"
+                damage_out = {}
+                damage_warnings = [f"xbd_damage_assessor:error:{sample_id}:{exc}"]
+            warnings.extend(damage_warnings)
+            damage_mode_counts[used_mode] = damage_mode_counts.get(used_mode, 0) + 1
+            probs.append(damage_prob)
+
+            threat_score = float(target.get("threat_score") or 0.5)
+            situation = _situation_label(threat_score, damage_prob)
+            try:
+                advice = _run_outputs_maybe_planned(
+                    client,
+                    settings=settings,
+                    algorithm_id="closed_loop_decision_advisor",
+                    inputs={
+                        "target": target,
+                        "damage_probability": damage_prob,
+                        "situation": situation,
+                        "mission_completion": mission_completion,
+                    },
+                    request_id=f"{request_id}-c{cycle}-adv-{index}",
+                    trace_id=request_id,
+                    task="closed_loop_decision_advice",
+                    llm_plans=llm_plans,
+                )
+            except AlgorithmLibraryError as exc:
+                advice = {"action": "continue_tracking", "effect_delta": 0.04}
+                warnings.append(f"closed_loop_decision_advisor:error:{sample_id}:{exc}")
+
+            action = str(advice.get("action") or advice.get("recommended_action") or "continue_tracking")
+            effect_delta = float(advice.get("effect_delta") or 0.0)
+            priority = max(0.0, min(1.0, threat_score * (1.0 - damage_prob) + float(target.get("uncertainty") or 0.0)))
+            damage_confirmed = bool(damage_out.get("damage_label") == 1) if damage_out else damage_prob >= 0.5
+
+            commands.append(
+                {
+                    "command_id": f"CL-ALG-C{cycle}-{index + 1:03d}",
+                    "target_id": target.get("target_id") or sample_id,
+                    "action": action,
+                    "priority": round(priority, 4),
+                    "expected_effect_delta": round(effect_delta, 4),
+                    "situation_cluster": situation,
+                    "source": "closed_loop_decision_advisor",
+                    "damage_input_mode": used_mode,
                 }
-                if damage_out
-                else {},
-                "situation": situation,
-                "action": action,
-                "effect_delta": effect_delta,
-                "advice": advice,
-            }
-        )
-        commands.append(
-            {
-                "command_id": f"CL-ALG-{index + 1:03d}",
-                "target_id": target.get("target_id") or sample_id,
-                "action": action,
-                "priority": round(max(damage_prob, threat_score), 4),
-                "source": "closed_loop_decision_advisor",
-                "damage_input_mode": used_mode,
-            }
-        )
+            )
+            assessments.append(
+                {
+                    "target_id": target.get("target_id") or sample_id,
+                    "damage_probability": round(damage_prob, 4),
+                    "damage_confirmed": damage_confirmed,
+                    "damage_input_mode": used_mode,
+                    "situation_cluster": situation,
+                    "threat_score": round(threat_score, 4),
+                    "uncertainty": round(float(target.get("uncertainty") or 0.0), 4),
+                    "action": action,
+                    "effect_delta": round(effect_delta, 4),
+                    "damage_assessment": {
+                        "assessment_status": damage_out.get("assessment_status"),
+                        "damage_label": damage_out.get("damage_label"),
+                        "damage_result": damage_out.get("damage_result"),
+                    }
+                    if damage_out
+                    else {},
+                    "advice": advice,
+                }
+            )
+            action_counts[action] = action_counts.get(action, 0) + 1
+            _apply_action(target, action, effect_delta)
 
-    latency_ms = round((time.perf_counter() - start) * 1000.0, 3)
-    mean_damage = round(sum(probs) / len(probs), 4) if probs else 0.0
-    meets = mission_completion >= float(mission_out.get("threshold") or 0.5) if mission_out.get("mission_completion") is not None else False
+        update_latency = time.perf_counter() - cycle_start
+        update_latencies.append(update_latency)
+        history.append(
+            {
+                "cycle": cycle,
+                "mission_completion": round(mission_completion, 4),
+                "mission_assessment": mission_out,
+                "mean_damage_probability": round(sum(probs) / len(probs), 4) if probs else 0.0,
+                "critical_targets": sum(1 for item in assessments if item.get("situation_cluster") == "critical"),
+                "action_counts": action_counts,
+                "update_latency_seconds": round(update_latency, 6),
+            }
+        )
+        final_commands = sorted(commands, key=lambda item: float(item["priority"]), reverse=True)
+        final_assessments = assessments
+
+    total_latency = time.perf_counter() - start
+    max_update_latency = max(update_latencies) if update_latencies else total_latency
+    mean_damage = (
+        round(sum(float(item["damage_probability"]) for item in final_assessments) / len(final_assessments), 4)
+        if final_assessments
+        else 0.0
+    )
+    mission_threshold = float(mission_out.get("threshold") or 0.5)
+    meets_mission_threshold = (
+        mission_out.get("mission_completion") is not None and final_completion >= mission_threshold
+    )
+    requirement_report = {
+        "assessment_mode": "algolib_service_orchestration",
+        "xbd_damage_accuracy_requirement": 0.92,
+        "xbd_damage_accuracy_actual": None,
+        "meets_xbd_damage_accuracy": False,
+        "xbd_damage_accuracy_note": "not_evaluated_in_algolib_mode_use_local_for_offline_gates",
+        "situation_update_frequency_requirement_seconds": 1.0,
+        "situation_update_latency_actual_seconds": round(max_update_latency, 6),
+        "meets_situation_update_frequency": bool(max_update_latency <= 1.0),
+        "target_count_requirement": 50,
+        "target_count_actual": len(targets),
+        "meets_target_count": bool(len(targets) >= 50),
+        "sc2le_proxy_model_loaded": bool(mission_out.get("mission_completion") is not None),
+        "meets_mission_completion_threshold": meets_mission_threshold,
+        "mission_completion_threshold": mission_threshold,
+        "mission_completion_final": round(final_completion, 4),
+        "feature_version": str(mission_out.get("feature_version") or adapter_out.get("feature_version") or "mission_features_v2"),
+    }
+    # Operational gates that algolib can honestly claim (exclude offline xBD accuracy).
+    meets_requirements = all(
+        bool(requirement_report[key])
+        for key in (
+            "meets_situation_update_frequency",
+            "meets_target_count",
+            "sc2le_proxy_model_loaded",
+        )
+    )
 
     output_data = {
-        "cycles": 1,
+        "algorithm": {
+            "damage_assessment": "xbd_damage_assessor (features or images+polygon)",
+            "mission_evaluation": "mission_feature_adapter + mission_completion_scorer",
+            "closed_loop_policy": "closed_loop_decision_advisor",
+            "backend": "algolib",
+        },
+        "source_info": source_info,
+        "execution_control": {
+            "control_cycles": cycles,
+            "processed_targets": len(targets),
+            "commands": final_commands,
+        },
+        "effect_assessment": {
+            "damage_confirmed_count": sum(1 for item in final_assessments if item.get("damage_confirmed")),
+            "mean_damage_probability": mean_damage,
+            "target_assessments": final_assessments,
+        },
+        "closed_loop_optimization": {
+            "mission_completion_initial": round(initial_completion, 4),
+            "mission_completion_final": round(final_completion, 4),
+            "mission_completion_improvement": round(final_completion - initial_completion, 4),
+            "history": history,
+        },
+        "performance_report": {
+            "max_update_latency_seconds": round(max_update_latency, 6),
+            "total_agent_latency_seconds": round(total_latency, 6),
+        },
+        "requirement_report": requirement_report,
+        "meets_requirements": meets_requirements,
+        "meets_mission_threshold": meets_mission_threshold,
+        # Flat aliases kept for older consumers / debugging.
         "targets": targets,
-        "assessments": assessments,
-        "commands": commands,
+        "assessments": final_assessments,
+        "commands": final_commands,
         "mission_assessment": mission_out,
         "feature_bundle": adapter_out,
-        "mission_completion_initial": round(mission_completion, 4),
-        "mission_completion_final": round(mission_completion, 4),
-        "mission_completion_improvement": 0.0,
+        "mission_completion_initial": round(initial_completion, 4),
+        "mission_completion_final": round(final_completion, 4),
+        "mission_completion_improvement": round(final_completion - initial_completion, 4),
         "mean_damage_probability": mean_damage,
-        "meets_requirements": meets,
         "backend": "algolib",
         "damage_input_mode_preferred": damage_mode_pref,
         "damage_input_mode_counts": damage_mode_counts,
@@ -413,8 +643,9 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
             "xbd_damage_assessor",
             "closed_loop_decision_advisor",
         ],
+        "llm_algorithm_plans": llm_plans,
         "warnings": warnings + list(mission_out.get("warnings") or []),
-        "latency_ms": latency_ms,
+        "latency_ms": round(total_latency * 1000.0, 3),
         "transport": settings.transport,
     }
     return {
@@ -422,7 +653,7 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
         "input_data": arguments,
         "output_data": output_data,
         "accuracy": mean_damage,
-        "latency": latency_ms / 1000.0,
+        "latency": total_latency,
     }
 
 

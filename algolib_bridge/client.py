@@ -117,3 +117,41 @@ class AlgorithmLibraryClient:
         if not isinstance(outputs, dict):
             raise AlgorithmLibraryError(f"{algorithm_id} response missing outputs object.")
         return outputs
+
+    def run_outputs_with_planning(
+        self,
+        *,
+        default_algorithm_id: str,
+        allowed_algorithm_ids: list[str],
+        inputs: dict[str, Any],
+        params: Optional[dict[str, Any]] = None,
+        request_id: str = "zh-agent",
+        trace_id: str = "zh-agent",
+        task: str = "algorithm_call",
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        from algolib_bridge.llm_planner import AlgolibLLMPlannerError, plan_algorithm_call
+
+        try:
+            algorithms = self.list_algorithms()
+            call, plan = plan_algorithm_call(
+                settings=self.settings,
+                algorithms=algorithms,
+                default_algorithm_id=default_algorithm_id,
+                allowed_algorithm_ids=allowed_algorithm_ids,
+                inputs=inputs,
+                params=params,
+                task=task,
+            )
+        except AlgolibLLMPlannerError as exc:
+            raise AlgorithmLibraryError(f"LLM algorithm planning failed: {exc}") from exc
+
+        result = self.run_algorithm(request_id=request_id, trace_id=trace_id, call=call)
+        if not result.get("ok", False):
+            error = result.get("error") if isinstance(result.get("error"), dict) else {}
+            raise AlgorithmLibraryError(
+                f"{call.algorithm_id} failed: {error.get('code', 'UNKNOWN')}: {error.get('message', '')}"
+            )
+        outputs = result.get("outputs")
+        if not isinstance(outputs, dict):
+            raise AlgorithmLibraryError(f"{call.algorithm_id} response missing outputs object.")
+        return outputs, plan

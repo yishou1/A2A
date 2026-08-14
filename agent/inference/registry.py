@@ -92,9 +92,18 @@ def get_siamese_mask2former(config: dict[str, Any]):
 
     from agent.inference.models.siamese_mask2former import SiameseMask2Former
 
-    model_id = config.get("mask2former_model", "facebook/mask2former-swin-tiny-ade-semantic")
+    model_id = config.get(
+        "mask2former_model",
+        os.environ.get("MASK2FORMER_MODEL_PATH", "facebook/mask2former-swin-tiny-ade-semantic"),
+    )
+    local_files_only = str(config.get("local_files_only", os.environ.get("A2A_OFFLINE_MODE", "true"))).lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     device = get_device(config)
-    model = SiameseMask2Former(model_id).to_device(device)
+    model = SiameseMask2Former(model_id, local_files_only=local_files_only).to_device(device)
     _CACHE[key] = model
     return model
 

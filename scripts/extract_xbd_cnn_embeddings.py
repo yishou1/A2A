@@ -64,12 +64,17 @@ def _tensor_from_crop(crop: Image.Image, transform, diff_from=None):
     return diff
 
 
-def _build_backbone(device: str):
+def _build_backbone(device: str, weights_path: str = ""):
     import torch
     import torch.nn as nn
-    from torchvision.models import ResNet18_Weights, resnet18
+    from torchvision.models import resnet18
 
-    backbone = resnet18(weights=ResNet18_Weights.DEFAULT)
+    backbone = resnet18(weights=None)
+    if weights_path:
+        state = torch.load(weights_path, map_location="cpu")
+        if isinstance(state, dict) and "state_dict" in state:
+            state = state["state_dict"]
+        backbone.load_state_dict(state, strict=False)
     backbone.fc = nn.Identity()
     backbone.eval()
     backbone.to(device)
@@ -82,13 +87,14 @@ def extract_embeddings(
     batch_size: int = 32,
     limit: int = 0,
     device: str = "cpu",
+    weights_path: str = "",
 ) -> dict:
     import torch
 
     images_dir = input_root / "images"
     labels_dir = input_root / "labels"
     pairs = _image_pairs(images_dir)
-    backbone = _build_backbone(device)
+    backbone = _build_backbone(device, weights_path=weights_path)
 
     keys: List[str] = []
     vectors: List[np.ndarray] = []
@@ -174,6 +180,7 @@ def extract_embeddings(
         "rows": len(keys),
         "sample_pairs": processed_pairs,
         "skipped_items": skipped,
+        "weights_path": weights_path or "",
     }
 
 
@@ -184,6 +191,11 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--limit", type=int, default=0, help="Stop after N building rows (0 = all).")
     parser.add_argument("--device", default="cpu")
+    parser.add_argument(
+        "--weights-path",
+        default="",
+        help="Optional local ResNet18 state_dict path. Default is offline/no pretrained download.",
+    )
     args = parser.parse_args()
 
     report = extract_embeddings(
@@ -192,6 +204,7 @@ def main() -> None:
         batch_size=max(1, int(args.batch_size)),
         limit=max(0, int(args.limit)),
         device=str(args.device),
+        weights_path=str(args.weights_path),
     )
     print(json.dumps(report, ensure_ascii=False, indent=2))
 

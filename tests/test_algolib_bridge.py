@@ -7,6 +7,7 @@ from unittest import mock
 
 from algolib_bridge.client import AlgorithmLibraryClient, AlgorithmLibraryError
 from algolib_bridge.config import AlgolibSettings, use_algolib_backend
+from algolib_bridge.llm_planner import AlgolibLLMPlannerError, plan_algorithm_call
 from closed_loop_agent.algolib_runtime import run_closed_loop_with_backend
 from execution_control_agent.algolib_runtime import run_execution_control_with_backend
 from a2a_sdk import AgentRuntimeSDK
@@ -33,6 +34,115 @@ class AlgolibBridgeConfigTest(unittest.TestCase):
             settings = AlgolibSettings.load(agent_backend_env="EXECUTION_CONTROL_BACKEND")
             self.assertEqual(settings.backend, "algolib")
             self.assertEqual(settings.transport, "direct")
+
+    def test_llm_settings_from_environment(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "ALGOLIB_ENABLE_LLM": "true",
+                "AZURE_OPENAI_ENDPOINT": "https://example.openai.azure.com/",
+                "AZURE_OPENAI_DEPLOYMENT": "gpt-4o-min",
+                "AZURE_OPENAI_API_KEY": "secret",
+            },
+            clear=False,
+        ):
+            settings = AlgolibSettings.load()
+            self.assertTrue(settings.enable_llm)
+            self.assertEqual(settings.llm_base_url, "https://example.openai.azure.com")
+            self.assertEqual(settings.llm_model, "gpt-4o-min")
+
+
+class _FakePlannerClient:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def chat_json(self, *, system_prompt: str, user_prompt: str):
+        return self.payload
+
+
+class AlgolibLLMPlannerTest(unittest.TestCase):
+    def test_planner_uses_llm_call_but_preserves_structured_inputs(self):
+        settings = AlgolibSettings(
+            backend="algolib",
+            transport="direct",
+            base_url="http://127.0.0.1:8088",
+            timeout_seconds=5.0,
+            fallback_local=True,
+            default_version="1.0.0",
+            default_backend_type="python_http_service",
+            enable_llm=True,
+            llm_api_key="secret",
+        )
+        call, plan = plan_algorithm_call(
+            settings=settings,
+            algorithms=[
+                {
+                    "algorithm_id": "execution_control_planner",
+                    "version": "1.0.0",
+                    "backend_type": "python_http_service",
+                }
+            ],
+            default_algorithm_id="execution_control_planner",
+            allowed_algorithm_ids=["execution_control_planner"],
+            inputs={"phase": "strike"},
+            task="execution_control",
+            client=_FakePlannerClient(
+                {
+                    "intent": "run_planner",
+                    "algorithm_calls": [
+                        {
+                            "algorithm_id": "execution_control_planner",
+                            "version": "1.0.0",
+                            "backend_type": "python_http_service",
+                            "inputs": {"bad": "llm must not own this"},
+                            "params": {"mode": "fast"},
+                            "reason": "fits task",
+                        }
+                    ],
+                }
+            ),
+        )
+        self.assertEqual(call.inputs, {"phase": "strike"})
+        self.assertEqual(call.params, {"mode": "fast"})
+        self.assertEqual(plan["algorithm_calls"][0]["inputs"]["_source"], "caller_structured_inputs")
+
+    def test_planner_rejects_disallowed_algorithm(self):
+        settings = AlgolibSettings(
+            backend="algolib",
+            transport="direct",
+            base_url="http://127.0.0.1:8088",
+            timeout_seconds=5.0,
+            fallback_local=True,
+            default_version="1.0.0",
+            default_backend_type="python_http_service",
+            enable_llm=True,
+            llm_api_key="secret",
+        )
+        with self.assertRaises(AlgolibLLMPlannerError):
+            plan_algorithm_call(
+                settings=settings,
+                algorithms=[
+                    {
+                        "algorithm_id": "other_algorithm",
+                        "version": "1.0.0",
+                        "backend_type": "python_http_service",
+                    }
+                ],
+                default_algorithm_id="execution_control_planner",
+                allowed_algorithm_ids=["execution_control_planner"],
+                inputs={},
+                client=_FakePlannerClient(
+                    {
+                        "algorithm_calls": [
+                            {
+                                "algorithm_id": "other_algorithm",
+                                "version": "1.0.0",
+                                "backend_type": "python_http_service",
+                            }
+                        ]
+                    }
+                ),
+            )
 
 
 class ExecutionControlBackendTest(unittest.TestCase):

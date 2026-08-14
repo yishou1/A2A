@@ -11,12 +11,12 @@ import torch
 class SiameseMask2Former(torch.nn.Module):
     """孪生 Mask2Former：对参考帧/当前帧分割掩码做差分得到毁伤区域。"""
 
-    def __init__(self, model_id: str = "facebook/mask2former-swin-tiny-ade-semantic"):
+    def __init__(self, model_id: str = "facebook/mask2former-swin-tiny-ade-semantic", *, local_files_only: bool = True):
         super().__init__()
         from transformers import Mask2FormerForUniversalSegmentation, Mask2FormerImageProcessor
 
-        self.processor = Mask2FormerImageProcessor.from_pretrained(model_id)
-        self.model = Mask2FormerForUniversalSegmentation.from_pretrained(model_id)
+        self.processor = Mask2FormerImageProcessor.from_pretrained(model_id, local_files_only=local_files_only)
+        self.model = Mask2FormerForUniversalSegmentation.from_pretrained(model_id, local_files_only=local_files_only)
         self.model.eval()
 
     @property
