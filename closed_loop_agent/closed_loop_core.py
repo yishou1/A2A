@@ -9,6 +9,9 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 MCP_PROTOCOL_VERSION = "2024-11-05"
+SC2LE_TASK_COMPLETION_ACCURACY_REQUIREMENT = float(
+    os.environ.get("CLOSED_LOOP_SC2LE_THRESHOLD", "0.55")
+)
 
 
 def json_dumps(value: Any) -> str:
@@ -2194,6 +2197,7 @@ def _closed_loop_optimization(arguments: dict) -> dict:
     targets, source_info = _build_live_targets(arguments, seed)
     upstream_results = _extract_upstream_results(arguments)
 
+    from closed_loop_agent.agent_results_mapping import execution_gate_from_results
     from closed_loop_agent.mission_feature_adapter import build_features_from_agent_results
     from closed_loop_agent.mission_model_service import predict_mission_assessment
 
@@ -2341,24 +2345,31 @@ def _closed_loop_optimization(arguments: dict) -> dict:
         "target_count_requirement": 50,
         "target_count_actual": len(targets),
         "meets_target_count": bool(len(targets) >= 50),
-        "sc2le_task_completion_accuracy_requirement": 0.90,
+        "sc2le_task_completion_accuracy_requirement": SC2LE_TASK_COMPLETION_ACCURACY_REQUIREMENT,
         "sc2le_task_completion_accuracy_actual": round(float(metrics.get("classification_accuracy", metrics["task_completion_accuracy"])), 4),
         "meets_sc2le_task_completion_accuracy": bool(
-            mission_metadata.get("metrics") and float(metrics.get("classification_accuracy", 0.0)) >= 0.55
+            mission_metadata.get("metrics")
+            and float(metrics.get("classification_accuracy", 0.0))
+            >= SC2LE_TASK_COMPLETION_ACCURACY_REQUIREMENT
         ),
         "sc2le_proxy_model_loaded": bool(mission_metadata),
         "feature_version": mission_metadata.get("feature_version", "mission_features_v2"),
         "label_leakage_check_passed": bool((mission_metadata.get("label_leakage_check") or {}).get("passed")),
     }
-    meets_all = all(
+    metric_requirements_met = all(
         bool(requirement_report[key])
         for key in (
             "meets_xbd_damage_accuracy",
             "meets_situation_update_frequency",
             "meets_target_count",
+            "meets_sc2le_task_completion_accuracy",
             "sc2le_proxy_model_loaded",
         )
     )
+    execution_gate = execution_gate_from_results(upstream_results)
+    requirement_report["meets_execution_requirement"] = execution_gate["meets_execution_requirement"]
+    requirement_report["execution_gate"] = execution_gate
+    meets_all = bool(metric_requirements_met and execution_gate["meets_execution_requirement"])
 
     output = {
         "algorithm": {
@@ -2421,6 +2432,8 @@ def _closed_loop_optimization(arguments: dict) -> dict:
             "total_agent_latency_seconds": round(total_latency, 6),
         },
         "requirement_report": requirement_report,
+        "metric_requirements_met": metric_requirements_met,
+        "execution_gate": execution_gate,
         "meets_requirements": meets_all,
     }
     accuracy = min(float(metrics["damage_accuracy"]), float(metrics["task_completion_accuracy"]))

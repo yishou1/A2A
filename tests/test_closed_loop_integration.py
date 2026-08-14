@@ -285,6 +285,73 @@ class ClosedLoopIntegrationTest(unittest.TestCase):
 
 
 class AgentResultsMappingTest(unittest.TestCase):
+    def test_execution_gate_rejects_compliance_blocked_empty_execution(self):
+        from closed_loop_agent.agent_results_mapping import execution_gate_from_results
+
+        gate = execution_gate_from_results(
+            {
+                "execution_control": {
+                    "output_data": {
+                        "commands": [],
+                        "execution_mode": "preview_only",
+                        "authorization": {
+                            "decision": "review_required",
+                            "approved_for_demo_handoff": False,
+                            "execution_blocked": True,
+                        },
+                    }
+                }
+            }
+        )
+
+        self.assertFalse(gate["meets_execution_requirement"])
+        self.assertTrue(gate["execution_blocked"])
+        self.assertEqual(gate["executed_command_count"], 0)
+        self.assertEqual(gate["reason"], "execution_blocked")
+
+    def test_execution_gate_rejects_approved_but_empty_execution(self):
+        from closed_loop_agent.agent_results_mapping import execution_gate_from_results
+
+        gate = execution_gate_from_results(
+            {
+                "execution_control": {
+                    "output_data": {
+                        "commands": [],
+                        "execution_mode": "simulation",
+                        "authorization": {
+                            "decision": "approved",
+                            "approved_for_demo_handoff": True,
+                        },
+                    }
+                }
+            }
+        )
+
+        self.assertFalse(gate["meets_execution_requirement"])
+        self.assertEqual(gate["reason"], "no_commands_executed")
+
+    def test_execution_gate_accepts_authorized_execution_with_commands(self):
+        from closed_loop_agent.agent_results_mapping import execution_gate_from_results
+
+        gate = execution_gate_from_results(
+            {
+                "execution_control": {
+                    "output_data": {
+                        "commands": [{"command_id": "CMD-1"}],
+                        "execution_mode": "simulation",
+                        "authorization": {
+                            "decision": "approved",
+                            "approved_for_demo_handoff": True,
+                        },
+                    }
+                }
+            }
+        )
+
+        self.assertTrue(gate["meets_execution_requirement"])
+        self.assertEqual(gate["executed_command_count"], 1)
+        self.assertEqual(gate["reason"], "authorized_execution_with_commands")
+
     def test_mission_vector_from_results_doc_example(self):
         from closed_loop_agent.agent_results_mapping import mission_vector_from_results
 

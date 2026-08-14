@@ -48,4 +48,4 @@ py-modules = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["a2a_sdk*", "a2a_protocol*", "registry*", "commander_agent*"]
+include = ["a2a_sdk*", "a2a_protocol*", "registry*", "commander_agent*", "algolib_bridge*"]

@@ -49,6 +49,52 @@ def _result_block(results: dict, *keys: str) -> dict:
     return {}
 
 
+def execution_gate_from_results(results: Optional[dict]) -> dict:
+    """Evaluate whether upstream produced an authorized, non-empty execution."""
+    results = _safe_dict(results)
+    execution = _result_block(results, "execution_control", "simulation_execution")
+    output = _safe_dict(execution.get("output_data")) or execution
+    authorization = _safe_dict(output.get("authorization"))
+    commands = _safe_list(output.get("commands"))
+
+    decision = str(
+        authorization.get("decision")
+        or output.get("compliance_decision")
+        or "unknown"
+    ).strip().lower()
+    approved = authorization.get("approved_for_demo_handoff")
+    explicitly_blocked = bool(
+        output.get("execution_blocked")
+        or authorization.get("execution_blocked")
+        or decision in {"blocked", "review_required", "pending_review", "denied"}
+        or approved is False
+    )
+    evidence_present = bool(execution) and any(
+        key in output for key in ("commands", "execution_mode", "execution_blocked", "authorization")
+    )
+    gate_passed = bool(evidence_present and not explicitly_blocked and commands)
+
+    if not evidence_present:
+        reason = "missing_execution_evidence"
+    elif explicitly_blocked:
+        reason = "execution_blocked"
+    elif not commands:
+        reason = "no_commands_executed"
+    else:
+        reason = "authorized_execution_with_commands"
+
+    return {
+        "execution_evidence_present": evidence_present,
+        "execution_blocked": explicitly_blocked,
+        "execution_mode": output.get("execution_mode"),
+        "compliance_decision": decision,
+        "approved_for_demo_handoff": approved,
+        "executed_command_count": len(commands),
+        "meets_execution_requirement": gate_passed,
+        "reason": reason,
+    }
+
+
 def control_latency_ms_from_results(results: Optional[dict], default_ms: float = 0.0) -> float:
     results = _safe_dict(results)
     execution = _result_block(results, "execution_control", "artillery", "assault")
@@ -237,9 +283,11 @@ def build_standard_results_from_context(
     assault_result = latest_value(context, "assault_result")
     commander_decision = latest_value(context, "commander_decision")
 
+    simulation_output = _safe_dict(latest_value(context, "execution_simulation_result"))
+    simulation_output = _safe_dict(simulation_output.get("output_data")) or simulation_output
     strike_ec_output = _latest_execution_control_output(context, phase="strike")
     assault_ec_output = _latest_execution_control_output(context, phase="assault")
-    execution_output = assault_ec_output or strike_ec_output
+    execution_output = simulation_output or assault_ec_output or strike_ec_output
 
     threat_score = _normalize_score(eval_score, 0.70)
     structured = context.get("structured_detections")
@@ -263,6 +311,8 @@ def build_standard_results_from_context(
             mission_kpi = 0.35
 
     track_history = context.get("structured_track_history")
+    if not isinstance(track_history, list) and execution_output.get("tracks"):
+        track_history = execution_output.get("tracks")
     if not isinstance(track_history, list):
         try:
             from execution_control_agent.motion_prediction import load_track_fixture
@@ -280,6 +330,7 @@ def build_standard_results_from_context(
     execution_payload.setdefault("prediction_details", execution_output.get("prediction_details") or [])
     execution_payload["strike_summary"] = _structured_summary(strike_result)
     execution_payload["assault_summary"] = _structured_summary(assault_result)
+    execution_payload["source_workflow_id"] = context.get("workflow_id")
 
     return {
         "perception_detection": {

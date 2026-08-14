@@ -278,10 +278,11 @@ python -m unittest tests.test_algolib_bridge tests.test_closed_loop_integration 
 
 ## 8. 已知限制 / 后续可做
 
-1. Closed Loop 的 algolib 路径目前是单轮编排，不含本地模式里的完整多 cycle 训练与聚类过程。  
-2. ~~毁伤评估仅 features~~ **已支持可选 images**：默认 `auto`——target 带齐 `pre_image`/`post_image`/`polygon` 时走 images，否则走 features；可用 `damage_input_mode` 或 `CLOSED_LOOP_DAMAGE_INPUT_MODE=auto|features|images` 强制。  
-3. 网关模式依赖本机 algolib 网关可用；直连模式依赖各 `python_http_service` 已启动。  
-4. 可继续把更多子步骤做成可观测 metrics（每个算法包耗时分别上报）。
+1. Algolib 闭环已支持 `target_count` 合成目标、多 cycle（1–8）与 Commander 可读信封（`execution_control` / `effect_assessment` / `closed_loop_optimization` / `requirement_report`）。离线 xBD 准确率门槛在 algolib 模式标记为未评估（`meets_xbd_damage_accuracy=false` + note）。
+2. 毁伤评估支持可选 images：默认 `auto`——target 带齐图+polygon 时走 images，否则 features。
+3. EC algolib 会对 planner 输出做契约校验（`executor_role`/`action` 必填）；失败可降级 local。
+4. 网关模式仍依赖本机 algolib 网关；直连依赖各 `python_http_service`。
+5. 后续可做：按服务级 metrics、心跳暴露 `local_fallback`、拆分 `closed_loop_core.py`。
 
 ### 8.1 毁伤 images 可选接口（target 字段）
 
@@ -306,3 +307,7 @@ python -m unittest tests.test_algolib_bridge tests.test_closed_loop_integration 
 ```
 
 images 不完整时自动回退 features（若有手工特征）；服务端 images 返回 `insufficient_data` 时也会再试 features。
+
+### 8.2 Algolib 闭环与 beachhead
+
+Commander 常见输入只有 `target_count` + `results`（无 `targets`）时，algolib 路径会调用与本地相同的 `_build_live_targets` 合成目标，并按 `cycles` 迭代更新目标状态。
