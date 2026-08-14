@@ -47,6 +47,12 @@ SKILL_TO_ROLE = {
     "capture_beachhead": "assault",
     "closed_loop_optimization": "closed_loop",
     "analyze_and_replanning": "commander",
+    "tactical_intelligence_analysis": "tactical_intelligence",
+    "trajectory_tracking": "track_threat",
+    "threat_ranking": "track_threat",
+    "task_scheduling_resource_allocation": "task_scheduling",
+    "execution_control": "simulation_execution",
+    "simulate_execution_control": "simulation_execution",
 }
 
 def load_env_file(path=os.path.join(PROJECT_ROOT, ".env")):
@@ -250,6 +256,16 @@ class CommanderAgent:
         for item in work_list:
             work_item = item.get("work_item")
             response = deepcopy(agent_results.get(work_item, {}))
+            response_output = response.get("output", {})
+            output_keys_for_activity = (
+                sorted(str(key) for key in response_output)
+                if isinstance(response_output, dict)
+                else []
+            )
+            output_ref = next(
+                (f"outputs.{key}" for key in output_keys_for_activity if key in outputs),
+                None,
+            )
             activity_results.append(
                 {
                     "activity_id": item.get("activity_id") or item.get("activatity_id"),
@@ -260,7 +276,8 @@ class CommanderAgent:
                     "status": item.get("status"),
                     "error": item.get("error"),
                     "agent": response.get("agent"),
-                    "output": response.get("output", {}),
+                    "output_ref": output_ref,
+                    "output_keys": output_keys_for_activity,
                     "metrics": response.get("metrics", {}),
                 }
             )
@@ -606,6 +623,28 @@ class CommanderAgent:
                     error = RuntimeError(f"Lease no longer active for {lease.instance_key}")
                     return False, error
                 if not self.lease_manager.is_lease_fresh(lease):
+                    # Nacos metadata can lag while an agent is inside a long
+                    # synchronous LLM/RAG call. Give the lease heartbeat a
+                    # bounded grace window before triggering failover.
+                    registry_grace = getattr(self.registry, "heartbeat_grace_seconds", 0.0)
+                    configured_grace = float(
+                        os.environ.get("A2A_LEASE_HEARTBEAT_GRACE_SECONDS", "45")
+                    )
+                    grace = max(0.0, min(configured_grace, float(registry_grace or configured_grace)))
+                    deadline = time.monotonic() + grace
+                    recovered = False
+                    while time.monotonic() < deadline:
+                        if not self.lease_manager.is_current(lease):
+                            break
+                        if self.lease_manager.is_lease_fresh(lease):
+                            recovered = True
+                            break
+                        time.sleep(min(self.lease_heartbeat_check_interval, 1.0))
+                    if recovered:
+                        continue
+                    if not self.lease_manager.is_current(lease):
+                        error = RuntimeError(f"Lease no longer active for {lease.instance_key}")
+                        return False, error
                     error = RuntimeError(f"heartbeat lost for {lease.instance_key}")
                     error_info = classify_agent_error(error)
                     self._trace(
@@ -1034,6 +1073,7 @@ class CommanderAgent:
             "assault_result": [],
             "closed_loop_result": [],
             "replan_result": [],
+            "task_scheduling_result": [],
             "cognition_result": [],
             "tracking_result": [],
             "threat_assessment_result": [],
@@ -1041,6 +1081,7 @@ class CommanderAgent:
             "compliance_authorization_result": [],
             "execution_simulation_result": [],
             "effect_evaluation_result": [],
+            "planning_input": {},
             "risk_assessments": [],
             "scheduled_tasks": [],
             "resources": [],
@@ -1311,6 +1352,39 @@ class CommanderAgent:
             context.update(normalized)
             normalized = context
 
+            # Keep running checkpoints fully resumable. Once a workflow is
+            # terminal, the stage outputs and workflow_result already retain
+            # the useful payload; the per-work-item raw responses are a large
+            # duplicate and can be omitted from the persisted snapshot.
+            persisted_context = normalized
+            if normalized.get("workflow_status") == "completed":
+                persisted_context = deepcopy(normalized)
+                agent_results = persisted_context.get("agent_results")
+                if isinstance(agent_results, dict) and agent_results:
+                    persisted_context["agent_results_summary"] = {
+                        work_item: {
+                            "role": response.get("role"),
+                            "status": response.get("status"),
+                            "agent": response.get("agent"),
+                            "metrics": response.get("metrics", {}),
+                        }
+                        for work_item, response in agent_results.items()
+                        if isinstance(response, dict)
+                    }
+                    persisted_context["agent_results"] = {}
+                workflow_result = persisted_context.get("workflow_result")
+                if isinstance(workflow_result, dict) and isinstance(workflow_result.get("outputs"), dict):
+                    output_keys = list(workflow_result["outputs"])
+                    workflow_result["output_refs"] = {
+                        key: f"context.{key}" for key in output_keys
+                    }
+                    workflow_result["outputs"] = {
+                        key: {"$ref": f"context.{key}"} for key in output_keys
+                    }
+                closed_loop = persisted_context.get("closed_loop_result")
+                if isinstance(closed_loop, list) and closed_loop and isinstance(closed_loop[0], dict):
+                    persisted_context["closed_loop_result"] = [{"$ref": "effect_evaluation_result"}]
+
             state = {
                 "workflow_id": self.workflow_id,
                 "workflow": self.workflow,
@@ -1321,7 +1395,7 @@ class CommanderAgent:
                 "current_activatity": normalized.get("current_activatity"),
                 "current_activity": normalized.get("current_activatity"),
                 "last_error": normalized.get("last_error"),
-                "context": normalized,
+                "context": persisted_context,
             }
             self.workflow_state = state
             self.workflow_context = normalized
@@ -1371,6 +1445,8 @@ class CommanderAgent:
             "active_activities": list(context.get("active_activities", context.get("active_activatities", []))),
             "sector": context.get("sector"),
             "coordinates": context.get("coordinates"),
+            "mission_input": deepcopy(context.get("mission_input", {})),
+            "perception_frames": deepcopy(context.get("perception_frames", [])),
             "recon_report": context.get("recon_report"),
             "execution_control_result": context.get("execution_control_result"),
             "strike_result": context.get("strike_result"),
@@ -1379,6 +1455,8 @@ class CommanderAgent:
             "assault_result": context.get("assault_result"),
             "closed_loop_result": context.get("closed_loop_result"),
             "replan_result": context.get("replan_result"),
+            "task_scheduling_result": deepcopy(context.get("task_scheduling_result", [])),
+            "planning_input": deepcopy(context.get("planning_input", {})),
             "risk_assessments": deepcopy(context.get("risk_assessments", [])),
             "scheduled_tasks": deepcopy(context.get("scheduled_tasks", [])),
             "resources": deepcopy(context.get("resources", [])),
@@ -1461,6 +1539,28 @@ class CommanderAgent:
             return output_data.get("message") or value.get("message") or str(value)
         return value
 
+    @staticmethod
+    def _simulation_result_summary(value):
+        payload = value if isinstance(value, dict) else {}
+        output_data = payload.get("output_data") if isinstance(payload.get("output_data"), dict) else {}
+        commands = output_data.get("commands") if isinstance(output_data.get("commands"), list) else []
+        tracks = output_data.get("tracks") if isinstance(output_data.get("tracks"), list) else []
+        return (
+            f"phase={output_data.get('phase')}; commands={len(commands)}; "
+            f"tracks={len(tracks)}; latency_ms={output_data.get('latency_ms')}; "
+            f"backend={output_data.get('backend', 'local')}"
+        )
+
+    @staticmethod
+    def _trace_output_summary(output):
+        if not isinstance(output, dict):
+            return {"type": type(output).__name__}
+        return {
+            "keys": sorted(str(key) for key in output),
+            "status": output.get("status"),
+            "error": output.get("error"),
+        }
+
     @classmethod
     def build_closed_loop_results_from_context(cls, context: dict) -> dict:
         return build_standard_results_from_context(
@@ -1523,6 +1623,48 @@ class CommanderAgent:
                 "output_hint": "execution_control_result",
             }, False
 
+        if role == "simulation_execution":
+            # Preserve the decision chain explicitly.  The BPEL input variable
+            # is the compliance result, but execution control also needs the
+            # selected plan, scheduled resources, and current targets.
+            plan_result = self._latest_context_value(context, "decision_planning_result") or {}
+            compliance_result = self._latest_context_value(context, "compliance_authorization_result") or {}
+            planning = deepcopy(context.get("planning_input", {}))
+            plan_output = plan_result.get("output_data", plan_result) if isinstance(plan_result, dict) else {}
+            compliance_output = compliance_result.get("output_data", compliance_result) if isinstance(compliance_result, dict) else {}
+            results = self.build_closed_loop_results_from_context(context)
+            results["plan_decision"] = {"output_data": deepcopy(plan_output)}
+            results["resource_allocation"] = {
+                "output_data": {
+                    "scheduled_tasks": deepcopy(planning.get("scheduled_tasks", [])),
+                    "resources": deepcopy(planning.get("resources", [])),
+                    "target_histories": deepcopy(planning.get("target_histories", [])),
+                }
+            }
+            results["compliance_authorization"] = {"output_data": deepcopy(compliance_output)}
+            return {
+                "schema_version": PROTOCOL_VERSION,
+                "workflow_id": self.workflow_id,
+                "workflow": self.workflow,
+                "workflow_mode": self.mode,
+                "work_item": work_item,
+                "parent_work_item": context.get("last_work_item"),
+                "activatity_index": activatity_index,
+                "activatity_role": role,
+                "command": "simulate_execution_control",
+                "required_skill": "execution_control",
+                "required_skills": ["execution_control", "simulation_execution"],
+                "input": {
+                    "phase": "strike",
+                    "results": results,
+                    "context": {"workflow_id": self.workflow_id},
+                },
+                "context": context_snapshot,
+                "attachments": attachment_snapshot(context.get("attachments", [])),
+                "work_list": deepcopy(context.get("work_list", [])),
+                "output_hint": "execution_simulation_result",
+            }, False
+
         if role == "artillery":
             commands = self._commands_for_executor(context, "artillery", phase="strike")
             execution_command = commands[0] if commands else None
@@ -1532,6 +1674,7 @@ class CommanderAgent:
                 else None
             ) or "suppress_beach_sector_A"
             return {
+                "schema_version": PROTOCOL_VERSION,
                 "workflow_id": self.workflow_id,
                 "workflow": self.workflow,
                 "workflow_mode": self.mode,
@@ -1631,10 +1774,25 @@ class CommanderAgent:
                 "cycles": int(os.environ.get("CLOSED_LOOP_CYCLES", "3")),
                 "results": self.build_closed_loop_results_from_context(context),
             }
+            # Integrated workflow evaluation must use the current simulation
+            # artifacts. Do not silently manufacture the legacy 50-target
+            # fixture when the upstream simulation produced fewer targets.
+            simulation = self._latest_context_value(context, "execution_simulation_result")
+            if isinstance(simulation, dict):
+                sim_data = simulation.get("output_data") if isinstance(simulation.get("output_data"), dict) else simulation
+                commands = sim_data.get("commands") if isinstance(sim_data.get("commands"), list) else []
+                input_data["targets"] = [
+                    {"target_id": command.get("target_id")}
+                    for command in commands
+                    if isinstance(command, dict) and command.get("target_id")
+                ]
+                input_data["target_count"] = len(input_data["targets"])
+                input_data["enforce_min_target_count"] = False
             if dataset_paths:
                 input_data["dataset_paths"] = dataset_paths
 
             return {
+                "schema_version": PROTOCOL_VERSION,
                 "workflow_id": self.workflow_id,
                 "workflow": self.workflow,
                 "workflow_mode": self.mode,
@@ -1712,6 +1870,9 @@ class CommanderAgent:
             "assault": "assault_result",
             "closed_loop": "closed_loop_result",
             "tactical_intelligence": "intelligence_packet",
+            "track_threat": "threat_assessment_result",
+            "task_scheduling": "task_scheduling_result",
+            "simulation_execution": "execution_simulation_result",
         }.get(role)
 
     @staticmethod
@@ -1762,6 +1923,9 @@ class CommanderAgent:
             return
 
         output = response.get("output", {}) or {}
+        # #region debug-point D:apply-agent-result
+        import json, urllib.request; _p='.dbg/bpel-integration-failures.env'; _u,_s='http://127.0.0.1:7777/event','bpel-integration-failures'; exec("try:\n with open(_p, encoding='utf-8') as f: c=f.read(); _u=next((l.split('=',1)[1] for l in c.split('\\n') if l.startswith('DEBUG_SERVER_URL=')),_u); _s=next((l.split('=',1)[1] for l in c.split('\\n') if l.startswith('DEBUG_SESSION_ID=')),_s)\nexcept: pass"); _req=urllib.request.Request(_u, data=json.dumps({"sessionId":_s,"runId":"post-fix","hypothesisId":"D","location":"commander_agent/main.py:apply_agent_result","msg":"[DEBUG] apply agent result","data":{"role":role,"work_item":work_item,"requested_output_key":output_key,"default_output_key":self._default_output_key_for_role(role),"collection_key":self._output_collection_key_for_activity(activity_id) if activity_id else None,"response_status":response_status,"output_keys":sorted(list(output.keys()))},"ts":int(time.time()*1000)}).encode(), headers={"Content-Type":"application/json"}); exec("try:\n urllib.request.urlopen(_req, timeout=0.2).read()\nexcept: pass")
+        # #endregion
 
         if role == "recon":
             target_key = output_key or "recon_report"
@@ -1877,11 +2041,69 @@ class CommanderAgent:
                     "status": "completed",
                     "message": "Closed-loop optimization completed, but no structured result was returned.",
                 }
+            # #region debug-point B:closed-loop-branch
+            import json, urllib.request; _p='.dbg/bpel-integration-failures.env'; _u,_s='http://127.0.0.1:7777/event','bpel-integration-failures'; exec("try:\n with open(_p, encoding='utf-8') as f: c=f.read(); _u=next((l.split('=',1)[1] for l in c.split('\\n') if l.startswith('DEBUG_SERVER_URL=')),_u); _s=next((l.split('=',1)[1] for l in c.split('\\n') if l.startswith('DEBUG_SESSION_ID=')),_s)\nexcept: pass"); _req=urllib.request.Request(_u, data=json.dumps({"sessionId":_s,"runId":"post-fix","hypothesisId":"B","location":"commander_agent/main.py:apply_agent_result:closed_loop","msg":"[DEBUG] entered closed_loop branch","data":{"role":role,"target_key":target_key,"output_keys":sorted(list(output.keys())),"has_value":output_value is not None},"ts":int(time.time()*1000)}).encode(), headers={"Content-Type":"application/json"}); exec("try:\n urllib.request.urlopen(_req, timeout=0.2).read()\nexcept: pass")
+            # #endregion
+            self._append_output_collection(
+                context,
+                target_key,
+                output_value,
+                activity_id=activity_id,
+                work_item=work_item,
+                role=role,
+                output=output,
+                status=response_status,
+                error=response_error,
+                duration_ms=duration_ms,
+            )
+            # The BPEL variable is named effect_evaluation_result, while
+            # older consumers still look for closed_loop_result. Preserve a
+            # compatibility reference without duplicating the full payload.
+            if target_key != "closed_loop_result":
+                context["closed_loop_result"] = [{"$ref": target_key}]
+            result_payload = output_value if isinstance(output_value, dict) else {}
+            output_data = result_payload.get("output_data", {}) if isinstance(result_payload, dict) else {}
+            requirement_report = output_data.get("requirement_report", {})
+            meets_requirements = output_data.get("meets_requirements")
+            processed_targets = output_data.get("execution_control", {}).get("processed_targets")
+            context["battle_log"].append(
+                "[Closed Loop Report] "
+                f"processed_targets={processed_targets}, "
+                f"meets_requirements={meets_requirements}, "
+                f"requirement_report={requirement_report}"
+            )
         elif role == "tactical_intelligence":
             target_key = output_key or "intelligence_packet"
             output_value = output.get(target_key)
             if output_value is None:
                 output_value = output.get("intelligence_packet")
+            if output_value is None:
+                output_value = self._first_output_value(output)
+            # #region debug-point B:tactical-branch
+            import json, urllib.request; _p='.dbg/bpel-integration-failures.env'; _u,_s='http://127.0.0.1:7777/event','bpel-integration-failures'; exec("try:\n with open(_p, encoding='utf-8') as f: c=f.read(); _u=next((l.split('=',1)[1] for l in c.split('\\n') if l.startswith('DEBUG_SERVER_URL=')),_u); _s=next((l.split('=',1)[1] for l in c.split('\\n') if l.startswith('DEBUG_SESSION_ID=')),_s)\nexcept: pass"); _req=urllib.request.Request(_u, data=json.dumps({"sessionId":_s,"runId":"post-fix","hypothesisId":"B","location":"commander_agent/main.py:apply_agent_result:tactical_intelligence","msg":"[DEBUG] entered tactical_intelligence branch","data":{"role":role,"target_key":target_key,"output_keys":sorted(list(output.keys())),"summary":output.get("summary")},"ts":int(time.time()*1000)}).encode(), headers={"Content-Type":"application/json"}); exec("try:\n urllib.request.urlopen(_req, timeout=0.2).read()\nexcept: pass")
+            # #endregion
+            self._append_output_collection(
+                context,
+                target_key,
+                output_value,
+                activity_id=activity_id,
+                work_item=work_item,
+                role=role,
+                output=output,
+                status=response_status,
+                error=response_error,
+                duration_ms=duration_ms,
+            )
+            target_count = output.get("target_count")
+            summary = output.get("summary") or (
+                output_value.get("summary") if isinstance(output_value, dict) else None
+            )
+            context["battle_log"].append(
+                f"[Tactical Intelligence] targets={target_count}; summary={summary}"
+            )
+        elif role == "track_threat":
+            target_key = output_key or "threat_assessment_result"
+            output_value = output.get(target_key)
             if output_value is None:
                 output_value = self._first_output_value(output)
             self._append_output_collection(
@@ -1896,26 +2118,86 @@ class CommanderAgent:
                 error=response_error,
                 duration_ms=duration_ms,
             )
-            if role == "closed_loop":
-                result_payload = output_value if isinstance(output_value, dict) else {}
-                output_data = result_payload.get("output_data", {}) if isinstance(result_payload, dict) else {}
-                requirement_report = output_data.get("requirement_report", {})
-                meets_requirements = output_data.get("meets_requirements")
-                processed_targets = output_data.get("execution_control", {}).get("processed_targets")
+            if isinstance(output_value, dict):
+                if isinstance(output_value.get("risk_assessments"), list):
+                    context["risk_assessments"] = deepcopy(output_value["risk_assessments"])
+                if isinstance(output_value.get("target_histories"), list):
+                    context["target_histories"] = deepcopy(output_value["target_histories"])
+                if target_key == "tracking_result" and isinstance(output_value.get("tracks"), list):
+                    context["battle_log"].append(
+                        f"[Track Threat] tracks={len(output_value.get('tracks', []))}; stage=tracking"
+                    )
+                else:
+                    context["battle_log"].append(
+                        "[Track Threat] "
+                        f"risk_assessments={len(output_value.get('risk_assessments', []))}; "
+                        f"ranking={len(output_value.get('unified_threat_ranking', []))}"
+                    )
+            else:
+                context["battle_log"].append(f"[Track Threat] {self._result_display_text(output_value)}")
+        elif role == "task_scheduling":
+            target_key = output_key or "task_scheduling_result"
+            output_value = output.get(target_key)
+            if output_value is None:
+                output_value = self._first_output_value(output)
+            self._append_output_collection(
+                context,
+                target_key,
+                output_value,
+                activity_id=activity_id,
+                work_item=work_item,
+                role=role,
+                output=output,
+                status=response_status,
+                error=response_error,
+                duration_ms=duration_ms,
+            )
+            if isinstance(output_value, dict):
+                if isinstance(output_value.get("scheduled_tasks"), list):
+                    context["scheduled_tasks"] = deepcopy(output_value["scheduled_tasks"])
+                if isinstance(output_value.get("resources"), list):
+                    context["resources"] = deepcopy(output_value["resources"])
+                if isinstance(output_value.get("target_histories"), list):
+                    context["target_histories"] = deepcopy(output_value["target_histories"])
+                if isinstance(output_value.get("planning_objectives"), list):
+                    context["planning_objectives"] = list(output_value["planning_objectives"])
+                planning_input = {
+                    "risk_assessments": deepcopy(context.get("risk_assessments", [])),
+                    "scheduled_tasks": deepcopy(context.get("scheduled_tasks", [])),
+                    "resources": deepcopy(context.get("resources", [])),
+                    "target_histories": deepcopy(context.get("target_histories", [])),
+                    "planning_objectives": deepcopy(context.get("planning_objectives", [])),
+                    "constraints": deepcopy(context.get("constraints", [])),
+                    "authorization": deepcopy(context.get("authorization", {})),
+                }
+                context["planning_input"] = planning_input
                 context["battle_log"].append(
-                    "[Closed Loop Report] "
-                    f"processed_targets={processed_targets}, "
-                    f"meets_requirements={meets_requirements}, "
-                    f"requirement_report={requirement_report}"
+                    "[Task Scheduling] "
+                    f"scheduled_tasks={len(planning_input['scheduled_tasks'])}; "
+                    f"resources={len(planning_input['resources'])}"
                 )
             else:
-                target_count = output.get("target_count")
-                summary = output.get("summary") or (
-                    output_value.get("summary") if isinstance(output_value, dict) else None
-                )
-                context["battle_log"].append(
-                    f"[Tactical Intelligence] targets={target_count}; summary={summary}"
-                )
+                context["battle_log"].append(f"[Task Scheduling] {self._result_display_text(output_value)}")
+        elif role == "simulation_execution":
+            target_key = output_key or "execution_simulation_result"
+            output_value = output.get(target_key)
+            if output_value is None:
+                output_value = self._first_output_value(output)
+            self._append_output_collection(
+                context,
+                target_key,
+                output_value,
+                activity_id=activity_id,
+                work_item=work_item,
+                role=role,
+                output=output,
+                status=response_status,
+                error=response_error,
+                duration_ms=duration_ms,
+            )
+            context["battle_log"].append(
+                f"[Simulation Execution] {self._simulation_result_summary(output_value)}"
+            )
         else:
             target_key = output_key or self._default_output_key_for_role(role) or "result"
             output_value = self._required_output_value(output, target_key)
@@ -1944,7 +2226,7 @@ class CommanderAgent:
             status=response_status,
             error=response_error,
             duration_ms=duration_ms,
-            output=output,
+            output_summary=self._trace_output_summary(output),
         )
 
     def _apply_decision_agent_result(self, role: str, context: dict):
@@ -2209,6 +2491,8 @@ class CommanderAgent:
             "ComplianceAuthorizationResult": "compliance_authorization_result",
             "ExecutionSimulationResult": "execution_simulation_result",
             "EffectEvaluationResult": "effect_evaluation_result",
+            "TaskSchedulingResult": "task_scheduling_result",
+            "PlanningInput": "planning_input",
         }.get(variable_name, variable_name)
 
     @staticmethod
@@ -2229,6 +2513,7 @@ class CommanderAgent:
             "compliance_authorization_result",
             "execution_simulation_result",
             "effect_evaluation_result",
+            "task_scheduling_result",
             "risk_assessments",
             "scheduled_tasks",
             "resources",
@@ -2239,6 +2524,23 @@ class CommanderAgent:
         }
 
     def _context_input_value(self, context: dict, key: str, default=None):
+        if key == "mission_input" and not context.get(key):
+            # Integrated BPEL starts with MissionInput, while the remote
+            # commander stores its fields directly in the workflow context.
+            # Reconstruct that envelope so TIA can consume perception_frames,
+            # attachments, and recon_report instead of receiving only sector.
+            mission_fields = {
+                field: deepcopy(context[field])
+                for field in (
+                    "objective", "scenario_name", "mission_type", "contacts",
+                    "friendly_platforms", "constraints", "environment",
+                    "intelligence_text", "scene", "protected_assets",
+                    "perception_frames", "recon_report", "attachments",
+                )
+                if field in context
+            }
+            if mission_fields:
+                return mission_fields
         if key in self._result_collection_keys():
             entries = self._context_entries(context, key)
             if not entries:
@@ -2343,6 +2645,9 @@ class CommanderAgent:
                 for writer_id in writers:
                     previous[writer_id] = self._bpel_output_collection_writers.get(writer_id)
                     self._bpel_output_collection_writers[writer_id] = output_key
+        # #region debug-point A:flow-output-collections
+        import json, urllib.request; _p='.dbg/bpel-integration-failures.env'; _u,_s='http://127.0.0.1:7777/event','bpel-integration-failures'; exec("try:\n with open(_p, encoding='utf-8') as f: c=f.read(); _u=next((l.split('=',1)[1] for l in c.split('\\n') if l.startswith('DEBUG_SERVER_URL=')),_u); _s=next((l.split('=',1)[1] for l in c.split('\\n') if l.startswith('DEBUG_SESSION_ID=')),_s)\nexcept: pass"); _req=urllib.request.Request(_u, data=json.dumps({"sessionId":_s,"runId":"post-fix","hypothesisId":"A","location":"commander_agent/main.py:_register_flow_output_collections","msg":"[DEBUG] registered flow output collections","data":{"workflow_id":self.workflow_id,"groups":collection_groups,"previous":previous},"ts":int(time.time()*1000)}).encode(), headers={"Content-Type":"application/json"}); exec("try:\n urllib.request.urlopen(_req, timeout=0.2).read()\nexcept: pass")
+        # #endregion
         return previous
 
     def _restore_flow_output_collections(self, previous: dict):
@@ -2720,6 +3025,7 @@ class CommanderAgent:
                 "evaluator",
                 "assault",
                 "closed_loop",
+                "simulation_execution",
             }:
                 payload, stream = self.build_task_payload(
                     activatity.role,
@@ -2746,6 +3052,12 @@ class CommanderAgent:
                         },
                     }
                 )
+                output_hint = self._context_key_for_bpel_variable(activatity.output_variable)
+                if output_hint:
+                    payload["output_hint"] = output_hint
+                # #region debug-point A:role-payload
+                import json, urllib.request; _p='.dbg/bpel-integration-failures.env'; _u,_s='http://127.0.0.1:7777/event','bpel-integration-failures'; exec("try:\n with open(_p, encoding='utf-8') as f: c=f.read(); _u=next((l.split('=',1)[1] for l in c.split('\\n') if l.startswith('DEBUG_SERVER_URL=')),_u); _s=next((l.split('=',1)[1] for l in c.split('\\n') if l.startswith('DEBUG_SESSION_ID=')),_s)\nexcept: pass"); _req=urllib.request.Request(_u, data=json.dumps({"sessionId":_s,"runId":"post-fix","hypothesisId":"A","location":"commander_agent/main.py:_build_bpel_task_payload:role","msg":"[DEBUG] built role payload","data":{"activity_id":activatity.activatity_id,"role":activatity.role,"output_variable":activatity.output_variable,"output_hint":payload.get("output_hint"),"required_skill":payload.get("required_skill"),"command":payload.get("command"),"collection_key":self._output_collection_key_for_activity(activatity.activatity_id)},"ts":int(time.time()*1000)}).encode(), headers={"Content-Type":"application/json"}); exec("try:\n urllib.request.urlopen(_req, timeout=0.2).read()\nexcept: pass")
+                # #endregion
                 return payload, stream
 
             input_payload = {}
@@ -2756,10 +3068,18 @@ class CommanderAgent:
                         context, input_key, variable
                     )
             dispatch_key = self._activity_dispatch_key(activatity)
+            if dispatch_key == "tactical_intelligence":
+                mission_input = input_payload.get("mission_input")
+                if isinstance(mission_input, dict):
+                    # TIA's payload adapter consumes perception_frames and
+                    # recon_report at the input envelope level.
+                    for field in ("perception_frames", "attachments", "recon_report", "scene", "protected_assets"):
+                        if field in mission_input and field not in input_payload:
+                            input_payload[field] = deepcopy(mission_input[field])
             if dispatch_key == "evaluator" or activatity.required_skill == "evaluate_strike":
                 input_payload["mock_eval_score"] = self.mock_eval_score if self.mock_eval_score is not None else 40
 
-            return {
+            payload = {
                 "schema_version": PROTOCOL_VERSION,
                 "workflow_id": self.workflow_id,
                 "workflow": self.workflow,
@@ -2782,7 +3102,11 @@ class CommanderAgent:
                     "timeout_seconds": activatity.timeout_seconds or self.request_timeout,
                     "failure_policy": activatity.failure_policy,
                 },
-            }, dispatch_key == "artillery" or activatity.required_skill == "suppress_beach_sector_A"
+            }
+            # #region debug-point C:generic-payload
+            import json, urllib.request; _p='.dbg/bpel-integration-failures.env'; _u,_s='http://127.0.0.1:7777/event','bpel-integration-failures'; exec("try:\n with open(_p, encoding='utf-8') as f: c=f.read(); _u=next((l.split('=',1)[1] for l in c.split('\\n') if l.startswith('DEBUG_SERVER_URL=')),_u); _s=next((l.split('=',1)[1] for l in c.split('\\n') if l.startswith('DEBUG_SESSION_ID=')),_s)\nexcept: pass"); _req=urllib.request.Request(_u, data=json.dumps({"sessionId":_s,"runId":"post-fix","hypothesisId":"C","location":"commander_agent/main.py:_build_bpel_task_payload:generic","msg":"[DEBUG] built generic payload","data":{"activity_id":activatity.activatity_id,"dispatch_key":dispatch_key,"output_variable":activatity.output_variable,"output_hint":payload.get("output_hint"),"required_skill":payload.get("required_skill"),"command":payload.get("command"),"input_keys":sorted(input_payload.keys()),"collection_key":self._output_collection_key_for_activity(activatity.activatity_id)},"ts":int(time.time()*1000)}).encode(), headers={"Content-Type":"application/json"}); exec("try:\n urllib.request.urlopen(_req, timeout=0.2).read()\nexcept: pass")
+            # #endregion
+            return payload, dispatch_key == "artillery" or activatity.required_skill == "suppress_beach_sector_A"
 
     def _evaluate_bpel_condition(self, condition: str | None, context: dict):
         if not condition:

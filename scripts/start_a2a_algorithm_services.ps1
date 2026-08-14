@@ -41,19 +41,28 @@ if ($TiaOnly) {
     $Algorithms = $LegacyAlgorithms + $TiaAlgorithms
 }
 
-Write-Host "Installing Python service dependencies..."
-& $Python -m pip install -r (Join-Path $Services "requirements.txt")
+$Requirements = Join-Path $Services "requirements.txt"
+if (Test-Path $Requirements) {
+    Write-Host "Installing Python service dependencies..."
+    & $Python -m pip install -r $Requirements
+}
 
 $env:TIA_USE_MOCK = "1"
 
+$StartedCount = 0
 foreach ($item in $Algorithms) {
     $env:PORT = "$($item.Port)"
     $main = Join-Path $Services "$($item.Id)\app\main.py"
+    if (-not (Test-Path $main)) {
+        Write-Warning "Skipping $($item.Id): service entrypoint not found at $main"
+        continue
+    }
     Write-Host "Starting $($item.Id) on port $($item.Port)..."
-    Start-Process -FilePath $Python -ArgumentList $main -WorkingDirectory $Root -WindowStyle Minimized
+    Start-Process -FilePath $Python -ArgumentList $main -WorkingDirectory $Root -WindowStyle Hidden
+    $StartedCount++
 }
 
-Write-Host "Started $($Algorithms.Count) algorithm services."
+Write-Host "Started $StartedCount algorithm services."
 
 $GatewayPort = if ($env:TIA_ALGOLIB_GATEWAY_PORT) { $env:TIA_ALGOLIB_GATEWAY_PORT } else { "8088" }
 $gatewayMain = Join-Path $Services "tia_algolib_gateway\app\main.py"
@@ -61,5 +70,5 @@ if (Test-Path $gatewayMain) {
     $env:PORT = "$GatewayPort"
     $env:ALGOLIB_BASE_URL = "http://127.0.0.1:$GatewayPort"
     Write-Host "Starting TIA algolib gateway on port $GatewayPort (GET /algorithms, POST /run)..."
-    Start-Process -FilePath $Python -ArgumentList $gatewayMain -WorkingDirectory $Root -WindowStyle Minimized
+    Start-Process -FilePath $Python -ArgumentList $gatewayMain -WorkingDirectory $Root -WindowStyle Hidden
 }

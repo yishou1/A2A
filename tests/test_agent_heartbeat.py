@@ -162,6 +162,24 @@ class AgentHeartbeatTest(unittest.TestCase):
         self.assertEqual(metadata["available_task_slots"], "2")
         self.assertEqual(metadata["task_execution_status"], "idle")
 
+    def test_dynamic_provider_ignores_empty_lease_fields_after_release(self):
+        metadata = AgentHeartbeatSupervisor._reconcile_scheduler_state(
+            {"status": "busy", "active_tasks": "1"},
+            {
+                "status": "idle",
+                "active_tasks": "0",
+                "max_concurrent_tasks": "1",
+                "lease_workflow_id": "",
+                "lease_work_item": "",
+            },
+            {"status": "idle", "active_tasks": "0", "max_concurrent_tasks": "1"},
+        )
+
+        self.assertEqual(metadata["status"], "idle")
+        self.assertEqual(metadata["active_tasks"], "0")
+        self.assertEqual(metadata["available_task_slots"], "1")
+        self.assertEqual(metadata["task_execution_status"], "idle")
+
     def test_filter_instances_discards_stale_instances(self):
         registry = NacosRegistry(server_addresses="127.0.0.1:8848")
         registry.heartbeat_grace_seconds = 5

@@ -116,12 +116,12 @@ class NacosSettings:
             "capability_version": "track_threat_agent_v1",
             "artifact_schema_version": "track_threat_group_artifact/v1",
             "input_schema_version": "perception_result/v1",
-            "algorithm_profile": "kalman_stgnn_dbn_group_asset_xai",
+            "algorithm_profile": "gpt4o_mini_algolib_track_threat_with_local_fallback",
             "model_status": model_status,
             "preferred_transport": "A2A_HTTP_JSON,A2A_SSE,HTTP+JSON",
             "skills": nacos_skill_ids(),
             "algorithm_family": "kalman,st_gnn,dbn,asset_impact,group_detection,xai",
-            "runtime_providers": "covariance_kalman_cv_filter,torchscript_st_gnn,dbn_risk_state_calibration_runtime,physical_relation_complete_link_clustering,predicted_path_asset_proximity",
+            "runtime_providers": "zsl_algorithm_library,azure_gpt_4o_mini,covariance_kalman_cv_filter,torchscript_st_gnn,dbn_risk_state_calibration_runtime,physical_relation_complete_link_clustering,predicted_path_asset_proximity",
             "fallback_providers": "adaptive_cv_ca_ct_physics",
             "algorithm_levels": "small,medium,large",
             "object_types": "aircraft,ship,uav,unknown",
@@ -146,10 +146,21 @@ class NacosSettings:
             "st_gnn_max_inference_ms": os.getenv("ST_GNN_MAX_INFERENCE_MS", "200"),
             "asset_events": "asset.updated,asset.relationship.updated",
             "artifact_events": "track.updated,threat.updated,track.group.updated,threat.group.updated,threat.ranking.updated,protected.asset.updated,asset.impact.updated",
-            "algorithm_execution_location": "agent_process",
-            "algorithm_library_transport": "none",
-            "algorithm_loading_mode": "agent_local_model_bundle",
-            "remote_algorithm_execution": "false",
+            "algorithm_execution_location": "zsl_algorithm_library_with_agent_local_fallback",
+            "algorithm_library_transport": "HTTP+JSON",
+            "algorithm_library_url": os.getenv("ALGOLIB_BASE_URL", "http://127.0.0.1:8088"),
+            "algorithm_library_enabled": os.getenv("ALGORITHM_LIBRARY_ENABLED", "false"),
+            "algorithm_library_required": os.getenv("ALGORITHM_LIBRARY_REQUIRED", "false"),
+            "algorithm_loading_mode": "gpt_4o_mini_tool_plan_then_validated_algolib_run",
+            "remote_algorithm_execution": os.getenv("ALGORITHM_LIBRARY_ENABLED", "false"),
+            "tool_llm_enabled": os.getenv("ENABLE_LLM", "false"),
+            "tool_llm_provider": os.getenv("LLM_PROVIDER", "azure_openai"),
+            "tool_llm_deployment": os.getenv(
+                "AZURE_OPENAI_CHAT_DEPLOYMENT",
+                os.getenv("TOOL_LLM_NAME", "gpt-4o-mini"),
+            ),
+            "tool_llm_role": "validated_algorithm_selection_only",
+            "algorithm_library_allowed_ids": "multimodal_feature_fuser,target_type_classifier,track_state_updater,trajectory_predictor,graph_relation_reasoner",
             "algorithm_contract_version": "track_threat_algorithms/v1",
             "internal_workflow_engine": "false",
             "active_tasks": "0",
@@ -271,6 +282,11 @@ class NacosRegistrar:
         self.settings.metadata.update({key: str(value) for key, value in metadata_updates.items()})
         self.settings.metadata["heartbeat_ts"] = str(int(time.time()))
         self.settings.metadata["heartbeat_at"] = _utc_now_iso()
+        if self.registered:
+            try:
+                self._update_instance_metadata_http()
+            except Exception as exc:  # heartbeat will retry shortly
+                LOGGER.warning("Immediate Nacos status update failed: %s", exc)
 
     def update_runtime_metrics(
         self,
@@ -432,10 +448,30 @@ class NacosRegistrar:
             self._sync_metadata_prefixes(metadata, current, _CIRCUIT_METADATA_PREFIXES)
             self._sync_metadata_keys(metadata, current, _SCHEDULER_METADATA_KEYS)
 
+            # The Agent owns completion of its in-process task slot. Once the
+            # request finally block marks it idle, do not replay a stale busy
+            # lease fetched from Nacos on the next heartbeat.
+            if local_status == "idle":
+                for key in list(metadata):
+                    if key.startswith(_LEASE_METADATA_PREFIXES):
+                        metadata.pop(key, None)
+                metadata.update(
+                    {
+                        "status": "idle",
+                        "active_tasks": "0",
+                        "available_task_slots": "1",
+                        "task_execution_status": "idle",
+                    }
+                )
+                self.settings.status = "idle"
+
             if not local_ready_false:
                 self._sync_metadata_prefixes(metadata, current, _UNAVAILABLE_METADATA_PREFIXES)
                 scheduler_released_instance = current_status == "idle" and local_status in _SCHEDULER_STATUS_VALUES
-                scheduler_holds_instance = current_status in _SCHEDULER_STATUS_VALUES
+                scheduler_holds_instance = (
+                    current_status in _SCHEDULER_STATUS_VALUES
+                    and local_status != "idle"
+                )
                 if scheduler_holds_instance or scheduler_released_instance:
                     metadata["status"] = current_status
                     self.settings.status = current_status

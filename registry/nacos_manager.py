@@ -44,14 +44,25 @@ class NacosRegistry:
 
         self.server_addresses = server_addresses
         self.namespace = namespace
-        self.client = nacos.NacosClient(server_addresses, namespace=namespace)
+        log_dir = os.environ.get(
+            "NACOS_LOG_DIR",
+            os.path.join(PROJECT_ROOT, ".a2a_state", "nacos_logs"),
+        )
+        self.client = nacos.NacosClient(
+            server_addresses,
+            namespace=namespace,
+            logDir=log_dir,
+        )
         self.http = requests.Session()
         self.http.trust_env = False
         self.default_heartbeat_interval = float(os.environ.get("A2A_HEARTBEAT_INTERVAL", "5"))
         self.heartbeat_grace_seconds = float(
             os.environ.get(
                 "A2A_HEARTBEAT_GRACE_SECONDS",
-                str(max(12.0, self.default_heartbeat_interval * 2.0 + 2.0)),
+                # LLM/RAG calls can legitimately occupy an agent for tens of
+                # seconds. A missed metadata refresh is not immediate proof
+                # that the service has failed.
+                str(max(45.0, self.default_heartbeat_interval * 3.0 + 5.0)),
             )
         )
         self._heartbeat_supervisors = {}
@@ -466,6 +477,9 @@ class NacosRegistry:
         return matched
 
 def get_host_ip():
+    configured = os.environ.get("A2A_SERVICE_IP") or os.environ.get("SERVICE_IP")
+    if configured:
+        return configured.strip()
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(('10.255.255.255', 1))
@@ -567,7 +581,10 @@ class AgentHeartbeatSupervisor(threading.Thread):
 
         local_active = cls._metadata_int(provider, "active_tasks", 0)
         scheduler_active = cls._metadata_int(latest, "active_tasks", 0)
-        has_lease = any(key.startswith("lease_") for key in latest)
+        has_lease = any(
+            key.startswith("lease_") and str(value).strip()
+            for key, value in latest.items()
+        )
         unavailable = (
             str(latest.get("status", "")).lower() == "unavailable"
             or any(key.startswith("unavailable_") for key in latest)

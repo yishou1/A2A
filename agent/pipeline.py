@@ -23,6 +23,9 @@ def load_config() -> dict[str, Any]:
             cfg = yaml.safe_load(f) or {}
     else:
         cfg = {}
+    use_mock = os.environ.get("TIA_USE_MOCK")
+    if use_mock is not None:
+        cfg["use_mock"] = use_mock.strip().lower() in {"1", "true", "yes", "on"}
     return apply_compute_profile(cfg)
 
 

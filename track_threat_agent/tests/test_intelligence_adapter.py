@@ -299,6 +299,21 @@ def test_extract_scene_from_intelligence():
     assert "provenance_summary" in scene
 
 
+def test_extract_scene_accepts_compact_routing_destinations():
+    payload = {
+        "mission_id": "wf-llm-plan",
+        "targets": [],
+        "routing": {
+            "routes": ["commander", "artillery", "evaluator"],
+            "skipped": True,
+        },
+    }
+
+    scene = extract_scene_from_intelligence(payload)
+
+    assert scene["routing_destinations"] == ["commander", "artillery", "evaluator"]
+
+
 def test_extract_scene_with_override():
     override = {"protected_zone_lat": 31.0, "protected_zone_lon": 121.0, "protected_radius_m": 10000}
     scene = extract_scene_from_intelligence(INTEL_SAMPLE, override_scene=override)

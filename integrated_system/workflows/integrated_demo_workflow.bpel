@@ -1,9 +1,22 @@
 <process name="IntegratedDemoWorkflow" targetNamespace="http://a2a.project613/workflow">
+  <variables>
+    <variable name="MissionInput" type="JsonObject"/>
+    <variable name="CognitionResult" type="JsonObject"/>
+    <variable name="TrackingResult" type="JsonObject"/>
+    <variable name="ThreatAssessmentResult" type="JsonObject"/>
+    <variable name="TaskSchedulingResult" type="JsonObject"/>
+    <variable name="PlanningInput" type="JsonObject"/>
+    <variable name="DecisionPlanningResult" type="JsonObject"/>
+    <variable name="ComplianceAuthorizationResult" type="JsonObject"/>
+    <variable name="ExecutionSimulationResult" type="JsonObject"/>
+    <variable name="EffectEvaluationResult" type="JsonObject"/>
+  </variables>
   <sequence>
-    <invoke name="Cognition" partnerLink="TacticalIntelligenceAgent" operation="buildSituationSummary" requiredSkill="semantic_intelligence" inputVariable="MissionInput" outputVariable="CognitionResult" />
+    <invoke name="Cognition" partnerLink="TacticalIntelligenceAgent" operation="buildSituationSummary" requiredSkill="tactical_intelligence_analysis" inputVariable="MissionInput" outputVariable="CognitionResult" />
     <invoke name="Tracking" partnerLink="TrackThreatAgent" operation="updateTracks" requiredSkill="trajectory_tracking" inputVariable="CognitionResult" outputVariable="TrackingResult" />
     <invoke name="ThreatAssessment" partnerLink="TrackThreatAgent" operation="rankThreats" requiredSkill="threat_ranking" inputVariable="TrackingResult" outputVariable="ThreatAssessmentResult" />
-    <invoke name="DecisionPlanning" partnerLink="DecisionPlanningAgent" operation="generateDecisionPlan" requiredSkill="decision_planning_analysis" inputVariable="ThreatAssessmentResult" outputVariable="DecisionPlanningResult" />
+    <invoke name="TaskScheduling" partnerLink="TaskSchedulingAgent" operation="allocateTasksAndResources" requiredSkill="task_scheduling_resource_allocation" inputVariable="ThreatAssessmentResult" outputVariable="TaskSchedulingResult" />
+    <invoke name="DecisionPlanning" partnerLink="DecisionPlanningAgent" operation="generateDecisionPlan" requiredSkill="decision_planning_analysis" inputVariable="PlanningInput" outputVariable="DecisionPlanningResult" />
     <invoke name="ComplianceAuthorization" partnerLink="ComplianceAuthorizationAgent" operation="checkComplianceAuthorization" requiredSkill="compliance_authorization_analysis" inputVariable="DecisionPlanningResult" outputVariable="ComplianceAuthorizationResult" />
     <invoke name="ExecutionSimulation" partnerLink="SimulationExecutionAgent" operation="simulateExecutionControl" requiredSkill="execution_control" inputVariable="ComplianceAuthorizationResult" outputVariable="ExecutionSimulationResult" />
     <invoke name="EffectEvaluation" partnerLink="ClosedLoopAgent" operation="evaluateMissionEffect" requiredSkill="closed_loop_optimization" inputVariable="ExecutionSimulationResult" outputVariable="EffectEvaluationResult" />

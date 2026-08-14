@@ -37,6 +37,9 @@ if __name__ == "__main__":
             f"[TIA] starting role={role} port={port} "
             f"register={register} heartbeat={heartbeat_interval}s"
         )
-        runtime.serve(register=register)
+        if register:
+            runtime.serve()
+        else:
+            agent.start()
     finally:
         runtime.close()

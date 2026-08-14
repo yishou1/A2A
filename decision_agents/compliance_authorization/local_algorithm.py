@@ -138,6 +138,45 @@ def run_compliance_authorization(request: AgentRequest) -> AgentResponse:
             summary=str(exc),
             warnings=[f"unknown_algorithm:{exc.algorithm_id}"],
         )
+    no_action = next(
+        (plan for plan in request.candidate_plans if plan.id == "PLAN-NO-ACTION"),
+        None,
+    )
+    if no_action is not None and not no_action.target_ids and not no_action.assigned_resources:
+        approved = request.authorization.status == "approved"
+        decision = "approved" if approved else "review_required"
+        requires_review = not approved
+        plan_result = {
+            "plan_id": no_action.id,
+            "plan_status": no_action.status,
+            "decision": decision,
+            "approved_for_demo_handoff": approved,
+            "requires_human_approval": requires_review,
+            "violations": [],
+            "blocked_items": [],
+            "evidence": [],
+            "adjustment_suggestions": [],
+        }
+        result = {
+            **plan_result,
+            "selected_plan_id": no_action.id,
+            "authorization_status": request.authorization.model_dump(mode="json"),
+            "per_plan_results": [plan_result],
+            "method": "explicit_no_action_compliance_gate",
+            "risk_probability": 0.0,
+            "compliance_probability": 1.0,
+            "authorized": approved,
+            "rag_evidence": [],
+            "rag_answer": "No-action plan contains no targets, resources, or execution actions.",
+            "rag_warnings": [],
+            "rag_duration_ms": 0.0,
+        }
+        return AgentResponse(
+            agent="compliance_authorization_agent",
+            selected_algorithms=[algorithm.algorithm_id],
+            result=result,
+            summary=f"No-action plan compliance decision is {decision}.",
+        )
     missing = missing_required_fields(request, algorithm.required_fields)
     if missing:
         return AgentResponse(

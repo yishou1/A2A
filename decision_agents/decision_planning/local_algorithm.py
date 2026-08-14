@@ -191,6 +191,44 @@ def run_decision_planning(request: AgentRequest) -> AgentResponse:
             summary=str(exc),
             warnings=[f"unknown_algorithm:{exc.algorithm_id}"],
         )
+    # An empty schedule is a valid upstream outcome when perception confirms
+    # no targets. Keep this as an explicit no-action decision instead of
+    # manufacturing candidate targets or treating the handoff as malformed.
+    if not request.scheduled_tasks and request.resources:
+        no_action = CandidatePlan(
+            id="PLAN-NO-ACTION",
+            name="No action: continue monitoring",
+            status="recommended",
+            target_ids=[],
+            assigned_resources=[],
+            actions=["continue monitoring (simulation-only decision-support)"],
+            expected_effects=["preserve resources while awaiting confirmed targets"],
+            score=100.0,
+            rationale="No confirmed targets or schedulable tasks were produced upstream.",
+            assumptions=["No action is authorized until a target and task are confirmed."],
+            risk_notes=["This is a simulation-only no-action result; it is not an execution order."],
+        )
+        result = {
+            "candidate_plans": [no_action.model_dump(mode="json")],
+            "recommended_plan_id": no_action.id,
+            "recommended_plan": no_action.model_dump(mode="json"),
+            "method": "explicit_no_target_no_action",
+            "planning_state": "no_confirmed_targets",
+            "scheduled_tasks": [],
+            "resources": [resource.model_dump(mode="json") for resource in request.resources],
+            "targets": [],
+            "handoff_notes": [
+                "No confirmed targets or schedulable tasks; continue monitoring.",
+                "No resources are assigned and no execution action is generated.",
+                "Compliance and authorization checks still apply before any handoff.",
+            ],
+        }
+        return AgentResponse(
+            agent="decision_planning_agent",
+            selected_algorithms=[algorithm.algorithm_id],
+            result=result,
+            summary="No confirmed targets or schedulable tasks; returned PLAN-NO-ACTION.",
+        )
     missing = missing_required_fields(request, algorithm.required_fields)
     if missing:
         return AgentResponse(

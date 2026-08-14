@@ -145,6 +145,7 @@ class A2ABaseAgent:
         resource_monitor=None,
         models=None,
         idempotency_db_path: str | None = None,
+        idempotency_namespace: str | None = None,
         max_concurrent_tasks: int | None = None,
     ):
         self.name = name
@@ -172,7 +173,7 @@ class A2ABaseAgent:
         )
         self.idempotency_store = IdempotencyStore(
             state_db,
-            namespace=f"{self.name}:{self.port}",
+            namespace=idempotency_namespace or f"{self.name}:{self.port}",
         )
         self._task_response_cache = {}
         self._stream_response_cache = {}

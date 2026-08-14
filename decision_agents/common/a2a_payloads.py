@@ -25,6 +25,15 @@ AGENT_REQUEST_FIELDS = {
     "authorization",
 }
 
+NESTED_REQUEST_FIELDS = (
+    "planning_input",
+    "task_scheduling_result",
+    "decision_planning_result",
+    "compliance_authorization_result",
+    "threat_assessment_result",
+    "execution_simulation_result",
+)
+
 
 def build_agent_request_payload(agent_name: str, payload: dict[str, Any]) -> dict[str, Any]:
     explicit_request = _find_agent_request(payload)
@@ -39,8 +48,11 @@ def build_agent_request_payload(agent_name: str, payload: dict[str, Any]) -> dic
 
     _merge_request_fields(request_payload, context)
     _merge_previous_agent_outputs(request_payload, context)
+    _merge_nested_request_fields(request_payload, context)
     _merge_request_fields(request_payload, input_payload)
+    _merge_nested_request_fields(request_payload, input_payload)
     _merge_request_fields(request_payload, payload)
+    _merge_nested_request_fields(request_payload, payload)
 
     workflow_id = payload.get("workflow_id") or context.get("workflow_id")
     if workflow_id and "request_id" not in request_payload:
@@ -138,15 +150,34 @@ def _merge_request_fields(
         return
     for field in AGENT_REQUEST_FIELDS:
         if field in source and source[field] is not None:
-            if not allow_empty and source[field] in ([], {}):
+            normalized = _unwrap_context_value(source[field])
+            if not allow_empty and normalized in ([], {}):
                 continue
-            target[field] = source[field]
+            target[field] = normalized
 
 
 def _merge_previous_agent_outputs(target: dict[str, Any], context: dict[str, Any]) -> None:
     planning_result = _result_from_context(context, "decision_planning")
     if planning_result and planning_result.get("candidate_plans"):
         target["candidate_plans"] = planning_result["candidate_plans"]
+    if planning_result and planning_result.get("authorization"):
+        target["authorization"] = planning_result["authorization"]
+
+
+def _merge_nested_request_fields(target: dict[str, Any], source: dict[str, Any]) -> None:
+    if not isinstance(source, dict):
+        return
+    for field in NESTED_REQUEST_FIELDS:
+        if field not in source or source[field] is None:
+            continue
+        nested = _unwrap_context_value(source[field])
+        nested_items = nested if isinstance(nested, list) else [nested]
+        for item in nested_items:
+            if not isinstance(item, dict):
+                continue
+            if isinstance(item.get("result"), dict):
+                item = item["result"]
+            _merge_request_fields(target, item)
 
 
 def _result_from_context(context: dict[str, Any], role: str) -> dict[str, Any]:
@@ -165,3 +196,11 @@ def _result_from_context(context: dict[str, Any], role: str) -> dict[str, Any]:
             if isinstance(agent_response, dict) and isinstance(agent_response.get("result"), dict):
                 return agent_response["result"]
     return {}
+
+
+def _unwrap_context_value(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_unwrap_context_value(item) for item in value]
+    if isinstance(value, dict) and "value" in value:
+        return _unwrap_context_value(value["value"])
+    return value

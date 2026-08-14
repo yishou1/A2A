@@ -598,6 +598,18 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
     requirement_report["execution_gate"] = execution_gate
     meets_requirements = bool(metric_requirements_met and execution_gate["meets_execution_requirement"])
 
+    # A per-target/per-cycle fallback can emit the same dependency or
+    # service error many times. Keep one copy in the public warning list and
+    # retain multiplicity separately for diagnostics.
+    all_warnings = warnings + list(mission_out.get("warnings") or [])
+    warning_counts: dict[str, int] = {}
+    unique_warnings: list[str] = []
+    for warning in all_warnings:
+        warning = str(warning)
+        warning_counts[warning] = warning_counts.get(warning, 0) + 1
+        if warning not in unique_warnings:
+            unique_warnings.append(warning)
+
     output_data = {
         "algorithm": {
             "damage_assessment": "xbd_damage_assessor (features or images+polygon)",
@@ -651,7 +663,8 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
             "closed_loop_decision_advisor",
         ],
         "llm_algorithm_plans": llm_plans,
-        "warnings": warnings + list(mission_out.get("warnings") or []),
+        "warnings": unique_warnings,
+        "warning_counts": warning_counts,
         "latency_ms": round(total_latency * 1000.0, 3),
         "transport": settings.transport,
     }

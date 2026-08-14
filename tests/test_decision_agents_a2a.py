@@ -11,6 +11,7 @@ from commander_agent.main import CommanderAgent
 from decision_agents.common.a2a_adapter import DecisionAlgorithmA2AAgent
 from decision_agents.common.a2a_service import build_agent_card
 from decision_agents.common.definitions import AGENT_DEFINITIONS
+from decision_agents.common.a2a_payloads import build_agent_request_payload
 from decision_agents.common.base_agent import AlgorithmAgent
 from decision_agents.common.schemas import AgentResponse
 from decision_agents.compliance_authorization.agent import ComplianceAuthorizationAgent
@@ -29,6 +30,27 @@ def sample_payload(name: str) -> dict:
 
 
 class DecisionAgentsA2ATest(unittest.TestCase):
+    def test_bpel_result_collection_is_unwrapped_for_compliance(self):
+        planning = sample_payload("compliance_authorization_input.json")
+        request = build_agent_request_payload(
+            "compliance_authorization_agent",
+            {
+                "input": {
+                    "decision_planning_result": [
+                        {
+                            "value": {
+                                "candidate_plans": planning["candidate_plans"],
+                                "authorization": planning["authorization"],
+                            },
+                            "status": "completed",
+                        }
+                    ]
+                }
+            },
+        )
+        self.assertEqual(request["candidate_plans"], planning["candidate_plans"])
+        self.assertEqual(request["authorization"], planning["authorization"])
+
     def test_agent_cards_and_bpel_use_shared_skill_ids(self):
         definition = BPELWorkflowCatalog(PROJECT_ROOT).load("DecisionSupportWorkflow")
         invokes = [

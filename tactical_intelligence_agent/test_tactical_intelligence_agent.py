@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import unittest
+from unittest import mock
 from datetime import datetime, timezone
 
 os.environ.setdefault("TIA_CONFIG", "config/default.yaml")
@@ -17,6 +18,7 @@ from tactical_intelligence_agent.payload_adapter import commander_payload_to_bat
 from tactical_intelligence_agent.service import TacticalIntelligenceCommanderAgent
 from agent.track_packet import accumulate_track_history
 from workflow_payloads import build_attachment_ref
+from agent.pipeline import load_config
 
 
 class PayloadAdapterTest(unittest.TestCase):
@@ -43,6 +45,26 @@ class PayloadAdapterTest(unittest.TestCase):
     def test_empty_payload_rejects_without_mock(self):
         with self.assertRaises(ValueError):
             commander_payload_to_batch({"workflow_id": "wf-empty"})
+
+    def test_bpel_mission_input_is_unwrapped(self):
+        batch = commander_payload_to_batch(
+            {
+                "workflow_id": "wf-bpel",
+                "input": {
+                    "mission_input": {
+                        "recon_report": "Hostile UAV approaching Sector_A.",
+                        "sector": "Sector_A",
+                        "coordinates": "120.5E, 35.1N",
+                    }
+                },
+            }
+        )
+        self.assertEqual(len(batch.frames), 3)
+        self.assertEqual(batch.context["sector"], "Sector_A")
+
+    def test_tia_use_mock_environment_overrides_yaml(self):
+        with mock.patch.dict(os.environ, {"TIA_USE_MOCK": "1"}):
+            self.assertTrue(load_config()["use_mock"])
 
 
 class TrackPacketTest(unittest.TestCase):

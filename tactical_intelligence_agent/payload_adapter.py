@@ -66,6 +66,23 @@ def _frame_from_attachment(attachment: dict[str, Any], index: int) -> SensorFram
 
 def _frames_from_input(input_payload: dict[str, Any]) -> list[SensorFrame]:
     frames: list[SensorFrame] = []
+    perception_frames = input_payload.get("perception_frames")
+    if isinstance(perception_frames, list):
+        for index, raw in enumerate(perception_frames):
+            if not isinstance(raw, dict):
+                continue
+            detections = raw.get("detections")
+            if not isinstance(detections, list):
+                continue
+            scene = raw.get("scene") if isinstance(raw.get("scene"), dict) else {}
+            frames.append(
+                SensorFrame(
+                    sensor_id=str(raw.get("sensor_id") or raw.get("task_id") or f"PERCEPTION-{index:03d}"),
+                    modality=SensorModality.RADAR,
+                    payload={"detections": detections, "scene": scene},
+                    metadata={"source": "bpel_mission_input", "frame_index": raw.get("frame_index", index)},
+                )
+            )
     recon_report = input_payload.get("recon_report")
     if recon_report:
         frames.append(
@@ -104,11 +121,13 @@ def _frames_from_input(input_payload: dict[str, Any]) -> list[SensorFrame]:
 def _normalize_input_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """兼容飞书/lzh 外壳：业务字段可在 input 或 input.agent_request。"""
     input_payload = dict(payload.get("input") or {})
-    agent_request = input_payload.get("agent_request")
-    if isinstance(agent_request, dict):
-        merged = dict(agent_request)
+    nested_payload = input_payload.get("agent_request")
+    if not isinstance(nested_payload, dict):
+        nested_payload = input_payload.get("mission_input")
+    if isinstance(nested_payload, dict):
+        merged = dict(nested_payload)
         for key, value in input_payload.items():
-            if key == "agent_request":
+            if key in {"agent_request", "mission_input"}:
                 continue
             # 外层同名字段不覆盖 agent_request 内已有值
             if key not in merged or merged.get(key) in (None, "", {}, []):
@@ -132,6 +151,15 @@ def commander_payload_to_batch(payload: dict[str, Any]) -> SensorBatch:
     frames = [_frame_from_attachment(item, index) for index, item in enumerate(attachments)]
 
     input_payload = _normalize_input_payload(payload)
+    upstream_context = dict(payload.get("context") or {})
+    context_mission = upstream_context.get("mission_input")
+    if isinstance(context_mission, dict):
+        for key, value in context_mission.items():
+            if key not in input_payload or input_payload.get(key) in (None, "", {}, []):
+                input_payload[key] = value
+    for key in ("perception_frames", "recon_report", "sector", "coordinates"):
+        if key in upstream_context and (key not in input_payload or input_payload.get(key) in (None, "", {}, [])):
+            input_payload[key] = upstream_context[key]
     frames.extend(_frames_from_input(input_payload))
 
     if not frames:
@@ -140,7 +168,6 @@ def commander_payload_to_batch(payload: dict[str, Any]) -> SensorBatch:
             "真实演练要求至少提供一张传感器附件，或 recon_report/sector/coordinates"
         )
 
-    upstream_context = dict(payload.get("context") or {})
     sensor_telemetry = upstream_context.get("sensor_telemetry") or {}
     batch_context: dict[str, Any] = {
         "command": command,

@@ -51,7 +51,7 @@ class RunRequest(BaseModel):
 
 def _active_registry() -> list[dict[str, Any]]:
     """活跃算法目录。"""
-    cards = build_algorithm_catalog(host=HOST)
+    cards = build_algorithm_catalog(host=HOST, include_scheduling=True)
     out: list[dict[str, Any]] = []
     for card in cards:
         aid = card["algorithm_id"]

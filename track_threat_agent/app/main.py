@@ -18,6 +18,10 @@ from a2a_protocol.messages import build_task_error_response, build_task_response
 
 from .a2a_runtime import A2ARuntimeState
 from .agent_model_registry import build_agent_model_registry
+from .algorithm_library_runtime import (
+    AlgorithmLibrarySettings,
+    TrackThreatAlgorithmRuntime,
+)
 from .algorithm_provider import PlanAlgorithmProvider
 from .amos_adapter import build_integration_events
 from .asset_impact_analyzer import AssetImpactAnalyzer
@@ -69,16 +73,19 @@ app = FastAPI(
 )
 
 tracker = MultiTargetTracker()
+_active_workflow_id: str | None = None
 ranker = ThreatRanker()
 group_detector = GroupDetector()
 impact_analyzer = AssetImpactAnalyzer()
 trained_st_gnn_runtime = TrackSTGNNRuntime.from_env(BACKEND_DIR / "models" / "track_threat")
+algorithm_library_runtime = TrackThreatAlgorithmRuntime(AlgorithmLibrarySettings.from_env())
 algorithm_provider = PlanAlgorithmProvider(
     tracker,
     ranker,
     impact_analyzer,
     group_detector,
     trained_st_gnn_runtime=trained_st_gnn_runtime,
+    algorithm_library_runtime=algorithm_library_runtime,
 )
 model_registry = build_agent_model_registry(trained_st_gnn_runtime)
 registrar.set_model_registry(model_registry)
@@ -141,6 +148,7 @@ def health() -> Dict[str, Any]:
         "current_work_item": runtime_snapshot["current_work_item"],
         "algorithm_provider": runtime_snapshot["algorithm_provider"],
         "model_registry": model_registry.snapshot(),
+        "algorithm_library_runtime": algorithm_library_runtime.status(),
         "state_snapshot": {
             "path": str(state_store.path),
             "exists": state_store.path.exists(),
@@ -169,6 +177,7 @@ def ready() -> Dict[str, Any]:
         "current_work_item": runtime_snapshot["current_work_item"],
         "model_status": trained_st_gnn_runtime.status(),
         "model_registry": model_registry.snapshot(),
+        "algorithm_library_runtime": algorithm_library_runtime.status(),
     }
 
 
@@ -340,16 +349,17 @@ def _agent_card_payload() -> Dict[str, Any]:
         "model_status": _model_status(),
         "model_registry": model_registry.snapshot(),
         "execution": {
-            "mode": "in_process_model_execution",
-            "model_ownership": "track_threat_agent",
+            "mode": "llm_planned_algorithm_library_with_local_fallback",
+            "model_ownership": "algorithm_library_with_agent_local_fallback",
             "internal_workflow_engine": False,
-            "network_algorithm_calls": False,
+            "network_algorithm_calls": algorithm_library_runtime.settings.enabled,
             "note": "workflow_id/work_item are accepted only as external A2A correlation fields",
         },
         "algorithmExecution": {
-            "location": "agent_process",
-            "loading_mode": "agent_local_model_bundle",
-            "remote_execution": False,
+            "location": "zsl_algorithm_library_with_agent_local_fallback",
+            "loading_mode": "gpt_4o_mini_tool_plan_then_validated_algolib_run",
+            "remote_execution": algorithm_library_runtime.settings.enabled,
+            "runtime": algorithm_library_runtime.status(),
             "contract_version": "track_threat_algorithms/v1",
         },
         "algorithm_boundary": algorithm_provider.algorithm_contract()["algorithm_boundary"],
@@ -451,9 +461,10 @@ def algorithms() -> Dict[str, Any]:
         "agent": runtime.agent_name,
         "role": runtime.role,
         "contract_version": "track_threat_algorithms/v1",
-        "execution_location": "agent_process",
-        "loading_mode": "agent_local_model_bundle",
-        "network_algorithm_calls": False,
+        "execution_location": "zsl_algorithm_library_with_agent_local_fallback",
+        "loading_mode": "gpt_4o_mini_tool_plan_then_validated_algolib_run",
+        "network_algorithm_calls": algorithm_library_runtime.settings.enabled,
+        "algorithm_library_runtime": algorithm_library_runtime.status(),
         "primary_algorithms": contract["primary_algorithms"],
         "fallback_providers": contract["fallback_providers"],
         "algorithms": catalog,
@@ -971,13 +982,31 @@ def reset_runtime_state() -> Dict[str, Any]:
         "events": [],
         "summary": {"track_count": 0, "group_count": 0, "protected_asset_count": 0},
     }
-    global last_artifact
+    global last_artifact, _active_workflow_id
+    _active_workflow_id = None
     last_artifact = artifact
     state_store.clear()
     return {"status": "reset", "active_track_count": 0, "active_group_count": 0}
 
 
-def _process_payload(payload: PerceptionResultRequest) -> Dict[str, Any]:
+def _process_payload(
+    payload: PerceptionResultRequest,
+    *,
+    requested_skills: List[str] | None = None,
+    initialize_algorithm_runtime: bool = True,
+) -> Dict[str, Any]:
+    global _active_workflow_id
+    workflow_id = str(payload.task_id or "").strip()
+    if workflow_id and workflow_id != _active_workflow_id:
+        tracker.reset()
+        _active_workflow_id = workflow_id
+    effective_skills = requested_skills or ["track_threat_situation_analysis"]
+    if initialize_algorithm_runtime:
+        algorithm_provider.begin_request(
+            request_id=payload.task_id,
+            requested_skills=effective_skills,
+            request_summary=_algorithm_request_summary_from_perception(payload),
+        )
     tracking_started = time.perf_counter()
     tracks = algorithm_provider.update_tracks(payload.detections, algorithm_level=payload.algorithm_level)
     tracking_duration_ms = round((time.perf_counter() - tracking_started) * 1000, 3)
@@ -1052,6 +1081,7 @@ def _build_artifact_from_tracks(
             "algorithm_duration_ms": timings,
             "agent": runtime.agent_name,
             "role": runtime.role,
+            "algorithm_library": algorithm_provider.algorithm_execution_trace(),
         },
         "protected_assets": [asset.model_dump() for asset in protected_assets],
         "tracks": [track.model_dump() for track in tracks],
@@ -1077,10 +1107,11 @@ def _build_artifact_from_tracks(
             "model_status": _model_status(),
             "model_registry": model_registry.snapshot(),
             "execution": {
-                "mode": "in_process_model_execution",
-                "model_ownership": "track_threat_agent",
+                "mode": "llm_planned_algorithm_library_with_local_fallback",
+                "model_ownership": "algorithm_library_with_agent_local_fallback",
                 "internal_workflow_engine": False,
-                "network_algorithm_calls": False,
+                "network_algorithm_calls": algorithm_library_runtime.settings.enabled,
+                "algorithm_library_runtime": algorithm_library_runtime.status(),
             },
             "prediction_eval": _prediction_eval_summary(tracks),
             "tracking_diagnostics": tracker.diagnostics(),
@@ -1169,6 +1200,16 @@ def _process_a2a_task(
     task_payload: Dict[str, Any],
     requested_skills: List[str],
 ) -> Dict[str, Any]:
+    request_id = str(
+        task_payload.get("task_id")
+        or task_payload.get("work_item")
+        or "a2a-track-threat-task"
+    )
+    algorithm_provider.begin_request(
+        request_id=request_id,
+        requested_skills=requested_skills,
+        request_summary=_algorithm_request_summary_from_task(task_payload),
+    )
     tracking_skills = {"trajectory_tracking", "trajectory_prediction"}
     if set(requested_skills) <= tracking_skills:
         payload = _perception_from_a2a_task(task_payload)
@@ -1199,8 +1240,6 @@ def _process_a2a_task(
     }
     if tracking_result is not None and set(requested_skills) <= post_tracking_skills:
         raw_tracks = tracking_result.get("tracks") or []
-        if not raw_tracks:
-            raise ValueError("tracking_result.tracks must contain at least one track")
         tracks = [TrackState.model_validate(item) for item in raw_tracks]
         context = task_payload.get("context") or {}
         scene = tracking_result.get("scene") or context.get("scene") or {}
@@ -1228,7 +1267,11 @@ def _process_a2a_task(
             assessment_enabled=True,
         )
 
-    return _process_payload(_perception_from_a2a_task(task_payload))
+    return _process_payload(
+        _perception_from_a2a_task(task_payload),
+        requested_skills=requested_skills,
+        initialize_algorithm_runtime=False,
+    )
 
 
 def _build_a2a_output(
@@ -1404,6 +1447,48 @@ def _requested_skills(task_payload: Dict[str, Any]) -> List[str]:
         ).strip()
         values = [value] if value else ["track_threat_situation_analysis"]
     return list(dict.fromkeys(values))
+
+
+def _algorithm_request_summary_from_perception(
+    payload: PerceptionResultRequest,
+) -> Dict[str, Any]:
+    object_type_counts: Dict[str, int] = {}
+    for detection in payload.detections:
+        object_type_counts[detection.object_type] = (
+            object_type_counts.get(detection.object_type, 0) + 1
+        )
+    return {
+        "message_type": payload.message_type,
+        "algorithm_level": payload.algorithm_level,
+        "detection_count": len(payload.detections),
+        "object_type_counts": object_type_counts,
+        "scene_fields": sorted(payload.scene),
+        "protected_asset_count": len(payload.scene.get("protected_assets") or []),
+    }
+
+
+def _algorithm_request_summary_from_task(task_payload: Dict[str, Any]) -> Dict[str, Any]:
+    input_payload = task_payload.get("input")
+    if not isinstance(input_payload, dict):
+        input_payload = task_payload.get("payload")
+    if not isinstance(input_payload, dict):
+        input_payload = {}
+    detections = input_payload.get("detections") or []
+    tracks = input_payload.get("tracks") or []
+    tracking_result = input_payload.get("tracking_result")
+    if isinstance(tracking_result, dict):
+        tracks = tracking_result.get("tracks") or tracks
+    scene = input_payload.get("scene")
+    if not isinstance(scene, dict):
+        context = task_payload.get("context")
+        scene = context.get("scene", {}) if isinstance(context, dict) else {}
+    return {
+        "command": str(task_payload.get("command") or ""),
+        "detection_count": len(detections) if isinstance(detections, list) else 0,
+        "track_count": len(tracks) if isinstance(tracks, list) else 0,
+        "scene_fields": sorted(scene) if isinstance(scene, dict) else [],
+        "output_hint": str(task_payload.get("output_hint") or ""),
+    }
 
 
 def _selected_algorithms(requested_skills: List[str]) -> List[str]:

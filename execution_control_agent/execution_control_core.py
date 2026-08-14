@@ -21,6 +21,20 @@ def _safe_list(value: Any) -> list:
     return value if isinstance(value, list) else []
 
 
+def _input_summary(arguments: dict) -> dict:
+    """Keep execution envelopes inspectable without echoing upstream context."""
+    arguments = arguments if isinstance(arguments, dict) else {}
+    results = arguments.get("results") if isinstance(arguments.get("results"), dict) else {}
+    context = arguments.get("context") if isinstance(arguments.get("context"), dict) else {}
+    return {
+        "phase": arguments.get("phase") or arguments.get("control_phase"),
+        "result_keys": sorted(str(key) for key in results),
+        "context_keys": sorted(str(key) for key in context),
+        "result_count": len(results),
+        "context_count": len(context),
+    }
+
+
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
     return max(low, min(high, float(value)))
 
@@ -168,6 +182,17 @@ def run_execution_control(arguments: dict) -> dict:
 
     results = extract_upstream_results(arguments)
     context = _safe_dict(arguments.get("context"))
+    compliance = _result_block(results, "compliance_authorization", "authorization")
+    compliance_out = _safe_dict(compliance.get("output_data")) or compliance
+    compliance_decision = str(
+        compliance_out.get("decision")
+        or compliance_out.get("status")
+        or "review_required"
+    ).lower()
+    approved_for_handoff = compliance_out.get("approved_for_demo_handoff")
+    execution_blocked = compliance_decision in {"blocked", "review_required", "pending_review", "denied"}
+    if approved_for_handoff is False:
+        execution_blocked = True
     situation = build_situation(results, phase=phase, context=context)
     current_items = discretize_situation(situation, phase)
     rules = load_or_mine_rules()
@@ -175,7 +200,7 @@ def run_execution_control(arguments: dict) -> dict:
 
     tracks_source = build_track_histories(results)
     tracks, prediction_details = predict_tracks(tracks_source)
-    commands = synthesize_commands(
+    commands = [] if execution_blocked else synthesize_commands(
         phase=phase,
         matched_rules=matched_rules,
         prediction_details=prediction_details,
@@ -203,10 +228,17 @@ def run_execution_control(arguments: dict) -> dict:
         "latency_ms": latency_ms,
         "matched_rules": matched_rules,
         "prediction_details": prediction_details,
+        "authorization": {
+            "decision": compliance_decision,
+            "approved_for_demo_handoff": bool(approved_for_handoff),
+            "execution_blocked": execution_blocked,
+            "reason": "human approval required before execution" if execution_blocked else "approved",
+        },
+        "execution_mode": "preview_only" if execution_blocked else "simulation",
     }
     return {
         "task_type": "execution_control",
-        "input_data": arguments,
+        "input_data": _input_summary(arguments),
         "output_data": output_data,
         "accuracy": round(float(matched_rules[0]["confidence"]), 4) if matched_rules else 0.0,
         "latency": latency_ms / 1000.0,

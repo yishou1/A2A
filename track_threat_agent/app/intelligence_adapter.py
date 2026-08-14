@@ -377,7 +377,9 @@ def extract_scene_from_intelligence(
     scene["knowledge_graph_edges"] = len(kg.get("edges", []))
     scene["anti_jam_mode"] = routing.get("anti_jam_mode", False)
     scene["routing_destinations"] = [
-        r.get("destination") for r in routing.get("routes", [])
+        route.get("destination") if isinstance(route, dict) else str(route)
+        for route in routing.get("routes", [])
+        if isinstance(route, (dict, str))
     ]
     scene["provenance_summary"] = {
         "perception": list(provenance.get("perception", {}).keys()),

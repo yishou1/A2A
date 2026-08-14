@@ -111,6 +111,22 @@ class ExecutionControlCoreTest(unittest.TestCase):
         self.assertIn("aim_point", command)
         self.assertIn("rule_id", command)
 
+    def test_run_execution_control_does_not_echo_full_input(self):
+        marker = "large-upstream-payload-should-not-be-returned"
+        payload = run_execution_control(
+            {
+                "phase": "strike",
+                "results": {"threat_evaluation": {"output_data": {"blob": marker * 1000}}},
+                "context": {"agent_results": {"blob": marker * 1000}},
+            }
+        )
+
+        input_data = payload["input_data"]
+        self.assertEqual(input_data["phase"], "strike")
+        self.assertEqual(input_data["result_keys"], ["threat_evaluation"])
+        self.assertEqual(input_data["context_keys"], ["agent_results"])
+        self.assertNotIn(marker, str(input_data))
+
 
 class ExecutionControlCommanderIntegrationTest(unittest.TestCase):
     def setUp(self):
@@ -147,6 +163,63 @@ class ExecutionControlCommanderIntegrationTest(unittest.TestCase):
             ec_result["output_data"]["latency_ms"],
         )
         self.assertTrue(results["execution_control"]["output_data"]["commands"])
+
+    def test_simulation_observability_uses_bounded_summaries(self):
+        marker = "full-result-must-not-enter-observability"
+        result = {
+            "input_data": {"context": {"blob": marker * 1000}},
+            "output_data": {
+                "phase": "strike",
+                "commands": [{"command_id": "CMD-1"}],
+                "tracks": [{"track_id": "T-1"}],
+                "latency_ms": 12.5,
+            },
+        }
+
+        battle_summary = self.commander._simulation_result_summary(result)
+        trace_summary = self.commander._trace_output_summary(
+            {"execution_simulation_result": result}
+        )
+
+        self.assertIn("commands=1", battle_summary)
+        self.assertIn("tracks=1", battle_summary)
+        self.assertNotIn(marker, battle_summary)
+        self.assertEqual(trace_summary["keys"], ["execution_simulation_result"])
+        self.assertNotIn(marker, str(trace_summary))
+
+    def test_workflow_activity_results_reference_outputs_without_copying_them(self):
+        marker = "large-activity-output-must-not-be-duplicated"
+        context = self.commander.initial_workflow_context()
+        work_item = "wf-ec:simulation"
+        context["work_list"] = [
+            {
+                "activity_id": "simulation",
+                "work_item": work_item,
+                "type": "invoke",
+                "role": "simulation_execution",
+                "required_skills": ["execution_control"],
+                "status": "completed",
+                "error": None,
+            }
+        ]
+        value = {"output_data": {"blob": marker * 1000}}
+        context["execution_simulation_result"] = [{"value": value}]
+        context["agent_results"] = {
+            work_item: {
+                "agent": "simulation-agent",
+                "output": {"execution_simulation_result": value},
+                "metrics": {"duration_ms": 1.0},
+            }
+        }
+
+        workflow_result = self.commander._build_workflow_result(context)
+        activity = workflow_result["activity_results"][0]
+
+        self.assertEqual(activity["output_ref"], "outputs.execution_simulation_result")
+        self.assertEqual(activity["output_keys"], ["execution_simulation_result"])
+        self.assertNotIn("output", activity)
+        self.assertIn(marker, str(workflow_result["outputs"]))
+        self.assertNotIn(marker, str(activity))
 
 
 class ExecutionControlLocalRuntimeTest(unittest.TestCase):

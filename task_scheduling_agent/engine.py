@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent.skills.perception.schedule_adapter import scheduler_result_to_plan
 from agent.training.battlefield_scheduling_env import BattlefieldSchedulingState
 from task_scheduling_agent.amos_adapter import situation_from_amos
 
@@ -88,15 +87,41 @@ def run_schedule(
     cfg = config or {}
     from task_scheduling_agent.algolib_runtime import run_with_algolib, use_algolib_backend
 
+    # No-target situations are a valid scheduling outcome.  Do not ask the
+    # algorithm planner to invent a task when the upstream threat assessment
+    # is empty; preserve available platforms and return an idle schedule.
+    situation = situation_from_amos(amos_payload)
+    if not situation.targets:
+        raw = mock_schedule_from_situation(situation)
+        return {
+            "mission_id": str(amos_payload.get("mission_id", "")),
+            "phase": situation.phase,
+            "jamming_level": situation.jamming_level,
+            "n_targets": 0,
+            "n_sensors": len(situation.sensors),
+            "n_strike_assets": len(situation.strike_assets),
+            **raw,
+            "task_schedule": raw,
+            "algorithm": "explicit_no_target_idle_schedule",
+            "selected_algorithms": [],
+            "llm_plan": {
+                "mode": "skipped_no_targets",
+                "missing_fields": [],
+                "explanation": "No confirmed targets; scheduling planner was intentionally skipped.",
+            },
+        }
+
     if use_algolib_backend(cfg):
         return run_with_algolib(amos_payload, config=cfg)
 
-    situation = situation_from_amos(amos_payload)
     if use_mock:
         raw = mock_schedule_from_situation(situation)
     else:
         raw = marl_schedule_from_situation(situation, config=cfg)
 
+    # Import lazily: the perception skill package imports the TIA orchestrator,
+    # which can import this standalone agent during process startup.
+    from agent.skills.perception.schedule_adapter import scheduler_result_to_plan
     plan = scheduler_result_to_plan(raw)
     return {
         "mission_id": str(amos_payload.get("mission_id", "")),

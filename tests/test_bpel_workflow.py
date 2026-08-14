@@ -76,14 +76,60 @@ class BPELWorkflowTest(unittest.TestCase):
                 "tactical_intelligence",
                 "track_threat",
                 "track_threat",
+                "task_scheduling",
                 "decision_planning",
                 "compliance_authorization",
                 "simulation_execution",
                 "closed_loop",
             ],
         )
-        self.assertEqual(work_list[1]["required_skill"], "semantic_intelligence")
+        self.assertEqual(work_list[1]["required_skill"], "tactical_intelligence_analysis")
         self.assertEqual(work_list[-1]["required_skill"], "closed_loop_optimization")
+
+    def test_integrated_workflow_runs_end_to_end_in_local_mode(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            commander = CommanderAgent(
+                mode="local",
+                workflow="bpel",
+                workflow_file="integrated_system/workflows/integrated_demo_workflow.bpel",
+                workflow_id="wf-integrated-local",
+                state_dir=temp_dir,
+                initial_context={
+                    "mission_input": {
+                        "scene": {
+                            "sector": "Sector-A",
+                            "protected_assets": [
+                                {"asset_id": "ASSET-001", "asset_name": "Command Post"}
+                            ],
+                        }
+                    },
+                    "constraints": [
+                        {"type": "roe", "level": "warning", "text": "Avoid collateral damage."}
+                    ],
+                    "authorization": {
+                        "status": "approved",
+                        "scope": ["demo"],
+                        "approval_level": "mission-commander",
+                    },
+                    "planning_objectives": ["优先处置高威胁目标"],
+                },
+            )
+
+            context = commander.run_bpel_workflow()
+
+        self.assertEqual(context["workflow_status"], "completed")
+        self.assertTrue(context["cognition_result"])
+        self.assertTrue(context["tracking_result"])
+        self.assertTrue(context["threat_assessment_result"])
+        self.assertTrue(context["task_scheduling_result"])
+        self.assertTrue(context["decision_planning_result"])
+        self.assertTrue(context["compliance_authorization_result"])
+        self.assertTrue(context["execution_simulation_result"])
+        self.assertTrue(context["effect_evaluation_result"])
+        self.assertTrue(context["risk_assessments"])
+        self.assertTrue(context["scheduled_tasks"])
+        self.assertTrue(context["resources"])
+        self.assertTrue(context["planning_input"])
 
     def test_bpel_invokes_different_roles_in_workflow_order(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -15,11 +15,31 @@ CONTEXT_ENTRY_ARRAY_SCHEMA = {
 }
 
 SKILL_CONTRACTS = {
+    "tactical_intelligence_analysis": {
+        "input_schema": {"type": "object", "additionalProperties": True},
+        "output_schema": {"type": "object", "additionalProperties": True},
+    },
+    "trajectory_tracking": {
+        "input_schema": {"type": "object", "additionalProperties": True},
+        "output_schema": {"type": "object", "additionalProperties": True},
+    },
+    "threat_ranking": {
+        "input_schema": {"type": "object", "additionalProperties": True},
+        "output_schema": {"type": "object", "additionalProperties": True},
+    },
+    "task_scheduling_resource_allocation": {
+        "input_schema": {"type": "object", "additionalProperties": True},
+        "output_schema": {"type": "object", "additionalProperties": True},
+    },
     "decision_planning_analysis": {
         "input_schema": {"type": "object", "additionalProperties": True},
         "output_schema": {"type": "object", "additionalProperties": True},
     },
     "compliance_authorization_analysis": {
+        "input_schema": {"type": "object", "additionalProperties": True},
+        "output_schema": {"type": "object", "additionalProperties": True},
+    },
+    "execution_control": {
         "input_schema": {"type": "object", "additionalProperties": True},
         "output_schema": {"type": "object", "additionalProperties": True},
     },
@@ -69,10 +89,13 @@ SKILL_CONTRACTS = {
                 "strike_result": CONTEXT_ENTRY_ARRAY_SCHEMA,
                 "eval_score": CONTEXT_ENTRY_ARRAY_SCHEMA,
                 "commander_decision": CONTEXT_ENTRY_ARRAY_SCHEMA,
+                "execution_command": {"type": ["object", "null"], "additionalProperties": True},
+                "execution_commands": {"type": "array", "items": {"type": "object"}},
+                "execution_control_result": CONTEXT_ENTRY_ARRAY_SCHEMA,
             },
             "additionalProperties": False,
         },
-        "output_schema": {"type": "string"},
+        "output_schema": {"type": "object", "additionalProperties": True},
     },
     "analyze_and_replanning": {
         "input_schema": {

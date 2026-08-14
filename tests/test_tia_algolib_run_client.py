@@ -237,6 +237,7 @@ class GatewayAppTest(unittest.TestCase):
         self.assertEqual(listed.status_code, 200)
         algos = listed.json()["algorithms"]
         self.assertTrue(any(a["algorithm_id"] == "battlefield_rtdetr_detector" for a in algos))
+        self.assertTrue(any(a["algorithm_id"] == "marl_ppo_task_scheduler" for a in algos))
 
         with patch(
             "services.tia_algolib_gateway.app.main._forward_predict",

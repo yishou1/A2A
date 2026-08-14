@@ -10,6 +10,10 @@ from a2a_sdk import AgentRuntimeSDK
 from closed_loop_agent.algolib_runtime import run_closed_loop_with_backend
 
 CLOSED_LOOP_COMMAND = "closed_loop_optimization"
+CLOSED_LOOP_COMMAND_ALIASES = {
+    CLOSED_LOOP_COMMAND,
+    "evaluate_mission_effect",
+}
 PASSTHROUGH_INPUT_KEYS = (
     "targets",
     "results",
@@ -67,11 +71,16 @@ class ClosedLoopAgent(A2ABaseAgent):
 
     def execute_task(self, payload: dict):
         command = payload.get("command") or CLOSED_LOOP_COMMAND
-        if command != CLOSED_LOOP_COMMAND:
+        if command not in CLOSED_LOOP_COMMAND_ALIASES:
             raise ValueError(f"Unsupported command: {command}")
 
         result = run_closed_loop_with_backend(build_closed_loop_arguments(payload))
-        output_hint = payload.get("output_hint") or "closed_loop_result"
+        default_output = (
+            "effect_evaluation_result"
+            if command == "evaluate_mission_effect"
+            else "closed_loop_result"
+        )
+        output_hint = payload.get("output_hint") or default_output
         output_data = result.get("output_data", {}) if isinstance(result, dict) else {}
         meets_requirements = output_data.get("meets_requirements")
         message = (

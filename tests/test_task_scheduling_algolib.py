@@ -20,6 +20,7 @@ from task_scheduling_agent.algolib_runtime import (
     run_with_algolib,
 )
 from task_scheduling_agent.agent import TaskSchedulingAgent
+from task_scheduling_agent.main import normalize_task_scheduling_result
 
 SAMPLE = ROOT / "examples" / "amos_schedule_inputs" / "sample_amos_request.json"
 
@@ -40,6 +41,22 @@ class TestAlgolibInputs(unittest.TestCase):
 
 
 class TestRunWithAlgolib(unittest.TestCase):
+    def test_normalized_output_preserves_algorithm_planning_evidence(self):
+        result = normalize_task_scheduling_result(
+            {"workflow_id": "wf-1", "input": {}},
+            {
+                "mission_id": "wf-1",
+                "task_schedule": {},
+                "algorithm": "mock-heuristic",
+                "selected_algorithms": [DEFAULT_ALGORITHM],
+                "llm_plan": {"mode": "llm", "catalog_source": "algolib:/algorithms"},
+                "algolib_result": {"algorithm_id": DEFAULT_ALGORITHM},
+            },
+        )
+        self.assertEqual(result["selected_algorithms"], [DEFAULT_ALGORITHM])
+        self.assertEqual(result["llm_plan"]["mode"], "llm")
+        self.assertEqual(result["algolib_result"]["algorithm_id"], DEFAULT_ALGORITHM)
+
     def test_fixed_default_algorithm_without_llm(self):
         payload = json.loads(SAMPLE.read_text(encoding="utf-8"))
         mock_client = MagicMock()

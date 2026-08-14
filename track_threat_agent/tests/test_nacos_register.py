@@ -202,6 +202,41 @@ def test_heartbeat_metadata_does_not_replay_stale_busy_lease_after_release():
     assert "circuit_open_until_ts" not in metadata
 
 
+def test_heartbeat_metadata_honors_explicit_local_release_during_nacos_race():
+    settings = NacosSettings(
+        enabled=True,
+        status="idle",
+        metadata={
+            "agent_id": "track-threat-group-agent-01",
+            "role": "track_threat",
+            "status": "idle",
+            "active_tasks": "0",
+            "available_task_slots": "1",
+            "task_execution_status": "idle",
+            "lease_workflow_id": "",
+            "lease_work_item": "",
+        },
+    )
+    registrar = NacosRegistrar(settings)
+    registrar._fetch_current_instance_metadata_http = lambda: {
+        "status": "busy",
+        "active_tasks": "1",
+        "available_task_slots": "0",
+        "task_execution_status": "saturated",
+        "lease_workflow_id": "wf-completed",
+        "lease_work_item": "wf-completed:tracking",
+    }
+
+    metadata = registrar._build_heartbeat_metadata()
+
+    assert metadata["status"] == "idle"
+    assert metadata["active_tasks"] == "0"
+    assert metadata["available_task_slots"] == "1"
+    assert metadata["task_execution_status"] == "idle"
+    assert "lease_workflow_id" not in metadata
+    assert "lease_work_item" not in metadata
+
+
 def test_heartbeat_metadata_preserves_commander_scheduling_decision():
     settings = NacosSettings(
         enabled=True,

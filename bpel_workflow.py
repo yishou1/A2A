@@ -18,10 +18,10 @@ PARTNER_ROLE_MAP = {
     "LLMCommanderAgent": "commander",
     "TacticalIntelligenceAgent": "tactical_intelligence",
     "TrackThreatAgent": "track_threat",
+    "TaskSchedulingAgent": "task_scheduling",
     "DecisionPlanningAgent": "decision_planning",
     "ComplianceAuthorizationAgent": "compliance_authorization",
     "SimulationExecutionAgent": "simulation_execution",
-    "ClosedLoopAgent": "closed_loop",
 }
 
 OPERATION_COMMAND_MAP = {
@@ -36,6 +36,7 @@ OPERATION_COMMAND_MAP = {
     "buildSituationSummary": "build_situation_summary",
     "updateTracks": "update_tracks",
     "rankThreats": "rank_threats",
+    "allocateTasksAndResources": "allocate_tasks_and_resources",
     "generateDecisionPlan": "generate_decision_plan",
     "checkComplianceAuthorization": "check_compliance_authorization",
     "simulateExecutionControl": "simulate_execution_control",
