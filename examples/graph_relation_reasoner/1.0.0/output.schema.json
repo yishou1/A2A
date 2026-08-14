@@ -1,0 +1,12 @@
+{
+  "title": "Graph Relation Reasoner Output",
+  "type": "object",
+  "required": ["schema_version", "relations", "groups", "graph_summary"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "relations": { "type": "array" },
+    "groups": { "type": "array" },
+    "graph_summary": { "type": "object" }
+  },
+  "additionalProperties": true
+}

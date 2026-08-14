@@ -96,6 +96,14 @@ nlohmann::json ToAgentViewJson(const AlgorithmEntry& entry) {
         entry.card.performance.has_value() ? ToJson(entry.card).value("performance",
                                                                       nlohmann::json::object())
                                            : nlohmann::json::object();
+    agent_view["resource_requirements"] =
+        entry.card.resource_requirements.has_value()
+            ? ToJson(entry.card).value("resource_requirements", nlohmann::json::object())
+            : nlohmann::json::object();
+    agent_view["model_profile"] =
+        entry.card.model_profile.has_value()
+            ? ToJson(entry.card).value("model_profile", nlohmann::json::object())
+            : nlohmann::json::object();
     agent_view["safety"] =
         entry.card.safety.has_value() ? ToJson(entry.card).value("safety",
                                                                  nlohmann::json::object())

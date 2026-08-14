@@ -1,0 +1,33 @@
+{
+  "request_id": "tp-001",
+  "trace_id": "trace-track-threat-001",
+  "algorithm_id": "trajectory_predictor",
+  "version": "1.0.0",
+  "backend_type": "python_http_service",
+  "inputs": {
+    "tracks": [
+      {
+        "track_id": "trk-air-001",
+        "object_type": "aircraft",
+        "timestamp": 1718000050,
+        "lat": 31.242,
+        "lon": 121.512,
+        "alt": 8800,
+        "speed": 230,
+        "heading": 86,
+        "confidence": 0.92,
+        "history_path": [
+          { "timestamp": 1718000000, "lat": 31.230, "lon": 121.470, "alt": 8700, "speed": 225, "heading": 83, "confidence": 0.90 },
+          { "timestamp": 1718000010, "lat": 31.232, "lon": 121.478, "alt": 8720, "speed": 226, "heading": 84, "confidence": 0.91 },
+          { "timestamp": 1718000020, "lat": 31.235, "lon": 121.486, "alt": 8750, "speed": 228, "heading": 85, "confidence": 0.91 },
+          { "timestamp": 1718000030, "lat": 31.237, "lon": 121.495, "alt": 8780, "speed": 229, "heading": 86, "confidence": 0.92 },
+          { "timestamp": 1718000040, "lat": 31.240, "lon": 121.503, "alt": 8790, "speed": 230, "heading": 86, "confidence": 0.92 },
+          { "timestamp": 1718000050, "lat": 31.242, "lon": 121.512, "alt": 8800, "speed": 230, "heading": 86, "confidence": 0.92 }
+        ]
+      }
+    ]
+  },
+  "params": {
+    "horizons_s": [10, 20, 30, 60]
+  }
+}

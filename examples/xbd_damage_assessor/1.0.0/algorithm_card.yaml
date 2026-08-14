@@ -1,0 +1,59 @@
+algorithm_id: xbd_damage_assessor
+version: 1.0.0
+display_name: xBD Damage Assessor
+backend_type: python_http_service
+status: draft
+
+task_family: scoring
+modalities:
+  input:
+    - structured_json
+    - image_pair_with_polygon
+  output:
+    - structured_json
+
+capabilities:
+  - xbd_damage_assessor
+  - dual_input_mode
+
+agent_card:
+  summary: >
+    Frozen xBD damage assessor using handcrafted ROI features plus ResNet18 embeddings
+    and a persisted logistic-regression pipeline.
+  when_to_use:
+    - Precomputed handcrafted features and optional CNN embeddings are available.
+    - Pre/post disaster images and building polygon are available.
+  when_not_to_use:
+    - Image mode without a valid polygon ROI.
+    - Online retraining is required instead of frozen inference.
+  input_description: >
+    Use input_mode=features with handcrafted_features, or input_mode=images with
+    pre_image, post_image, and polygon.
+  output_description: >
+    Returns damage_probability, damage_label, and assessment_status.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  runtime:
+    backend_type: python_http_service
+    endpoint: http://127.0.0.1:9016/predict
+    health_endpoint: http://127.0.0.1:9016/health
+    metadata_endpoint: http://127.0.0.1:9016/metadata
+    timeout_ms: 15000
+
+constraints:
+  max_input_chars: 20000000
+  max_request_bytes: 33554432
+  batch_supported: false
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 80
+  latency_ms_p95: 2500
+  primary_metric: damage_accuracy
+  primary_score: 0.7938
+
+safety:
+  risk_level: medium
+  requires_human_review: true

@@ -1,0 +1,30 @@
+{
+  "ok": true,
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "edl_evidential_verifier",
+  "version": "1.0.0",
+  "outputs": {
+    "verified_detections": [
+      {
+        "sensor_id": "EO-1",
+        "class_name": "tank",
+        "confidence": 0.91,
+        "bbox": [
+          10,
+          20,
+          80,
+          90
+        ],
+        "verified": true,
+        "epistemic_uncertainty": 0.09,
+        "aleatoric_uncertainty": 0.054
+      }
+    ],
+    "count": 1
+  },
+  "usage": {
+    "latency_ms": 1
+  },
+  "error": null
+}

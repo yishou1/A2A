@@ -1,0 +1,130 @@
+# A2A Execution Control and Closed-Loop Algorithms
+
+This branch packages algorithms from the A2A `zh` branch as standalone `python_http_service` algorithm packages.
+
+## Algorithms
+
+| algorithm_id | Port | Description |
+|---|---:|---|
+| `execution_rule_matcher` | 9010 | Association-rule matching for execution control |
+| `trajectory_linear_predictor` | 9011 | Linear-regression track prediction |
+| `execution_control_planner` | 9012 | Rule matching + motion prediction + command synthesis |
+| `mission_feature_adapter` | 9013 | mission_features_v2 seven-dimensional adapter |
+| `mission_completion_scorer` | 9014 | Frozen SC2LE proxy random forest scorer |
+| `closed_loop_decision_advisor` | 9015 | Rule-based closed-loop action advisor |
+| `xbd_damage_assessor` | 9016 | Frozen xBD damage assessor (features or images + polygon) |
+| `decision_planning_core` | 9020 | Non-RAG decision planning core for candidate generation and ranking |
+| `compliance_authorization_core` | 9021 | Non-RAG compliance and authorization core for plan checking |
+
+## Native ONNX packages
+
+Three fine-grained model capabilities are also packaged for direct execution by
+the algorithm library. They coexist with the Python orchestration services and
+do not use HTTP ports.
+
+| algorithm_id | Model input | Output | Purpose |
+|---|---|---|---|
+| `decision_plan_recommender_onnx` | `features` `[1, 8]` | `recommendation_probability` `[1, 1]` | Candidate-plan recommendation score |
+| `target_trend_predictor_onnx` | `sequence` `[1, 12, 4]` | `trend_score` `[1, 1]` | Fixed-window target trend score |
+| `compliance_risk_scorer_onnx` | `features` `[1, 6]` | `risk_probability` `[1, 1]` | Compliance risk score |
+
+These packages copy, rather than move, the model assets used by
+`decision_planning_core` and `compliance_authorization_core`. The existing
+Python services therefore keep their current behavior and fallback paths.
+
+Register and run them with a build linked to the real ONNX Runtime SDK:
+
+```powershell
+./build/algolib.exe register ./examples/decision_plan_recommender_onnx/1.0.0
+./build/algolib.exe activate decision_plan_recommender_onnx 1.0.0 onnx
+./build/algolib.exe run ./examples/decision_plan_recommender_onnx/1.0.0/golden_cases/case_001_input.json
+
+./build/algolib.exe register ./examples/target_trend_predictor_onnx/1.0.0
+./build/algolib.exe activate target_trend_predictor_onnx 1.0.0 onnx
+./build/algolib.exe run ./examples/target_trend_predictor_onnx/1.0.0/golden_cases/case_001_input.json
+
+./build/algolib.exe register ./examples/compliance_risk_scorer_onnx/1.0.0
+./build/algolib.exe activate compliance_risk_scorer_onnx 1.0.0 onnx
+./build/algolib.exe run ./examples/compliance_risk_scorer_onnx/1.0.0/golden_cases/case_001_input.json
+```
+
+The current files are bootstrap models. Their package contracts are stable, but
+the model weights must still be replaced or re-evaluated before a production
+accuracy claim is made.
+
+## Start services
+
+```powershell
+pip install -r services/requirements.txt
+./scripts/start_a2a_algorithm_services.ps1
+```
+
+## Register / activate / run
+
+```powershell
+cmake -S . -B build
+cmake --build build
+
+./build/algolib.exe register ./examples/mission_completion_scorer/1.0.0
+./build/algolib.exe activate mission_completion_scorer 1.0.0 python_http_service
+./build/algolib.exe show-card mission_completion_scorer 1.0.0 python_http_service
+./build/algolib.exe run ./examples/mission_completion_scorer/1.0.0/golden_cases/case_001_request.json
+
+./build/algolib.exe register ./examples/decision_planning_core/1.0.0
+./build/algolib.exe activate decision_planning_core 1.0.0 python_http_service
+./build/algolib.exe run ./examples/decision_planning_core/1.0.0/golden_cases/case_001_request.json
+
+./build/algolib.exe register ./examples/compliance_authorization_core/1.0.0
+./build/algolib.exe activate compliance_authorization_core 1.0.0 python_http_service
+./build/algolib.exe run ./examples/compliance_authorization_core/1.0.0/golden_cases/case_001_request.json
+```
+
+## Python tests
+
+```powershell
+pip install -r services/requirements.txt
+pip install pytest
+pytest tests/python/test_a2a_algorithm_services.py -q
+```
+
+## Decision agent model assets
+
+The decision-agent packages include bootstrap ONNX assets exported from the
+current A2A agent weights:
+
+| model | Purpose | Input |
+|---|---|---|
+| `models/decision_planning_lr.onnx` | Candidate-plan recommendation probability | `features` shape `[1, 8]` |
+| `models/decision_planning_lstm.onnx` | Target trend score | `sequence` shape `[1, 12, 4]` |
+| `models/compliance_authorization_lr.onnx` | Compliance risk probability | `features` shape `[1, 6]` |
+
+Regenerate them with:
+
+```powershell
+python scripts/export_decision_agent_models.py
+```
+
+The `*.metadata.json` files record feature order and bootstrap weights. These
+files are not yet trained from labeled historical data; future training scripts
+can replace them with learned model exports while keeping the same service
+contracts.
+
+At runtime, `decision_planning_core` and `compliance_authorization_core` load
+these model assets through `onnxruntime` inside their Python HTTP services:
+
+- `decision_planning_core` uses `decision_planning_lr.onnx` to score candidate
+  plans. It uses `decision_planning_lstm.onnx` for target trend scoring when a
+  target has 12 history steps; shorter histories fall back to the existing
+  Python formula and are marked in `model_runtime`.
+- `compliance_authorization_core` uses `compliance_authorization_lr.onnx` to
+  calibrate compliance risk probability.
+- If a model file or `onnxruntime` is unavailable, the services fall back to the
+  current Python formula and report the reason in `model_runtime`.
+
+## Notes
+
+- `models/sc2le_proxy_mission_model.pkl` is a frozen proxy model trained without Result/completion leakage.
+- `models/xbd_damage_classifier.pkl` is a frozen xBD damage classifier trained offline from handcrafted features plus ResNet18 embeddings.
+- `data/execution_control/processed/mined_rules.json` is mined from fixture training records, not from TigerClaw or VisDrone datasets.
+- `decision_planning_core` and `compliance_authorization_core` intentionally exclude RAG; retrieval services should be packaged separately.
+- Services do not depend on Commander, BPEL, Nacos, or A2A Agent runtime.

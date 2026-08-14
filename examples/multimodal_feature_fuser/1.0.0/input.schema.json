@@ -1,0 +1,11 @@
+{
+  "title": "Multimodal Feature Fuser Input",
+  "type": "object",
+  "properties": {
+    "detections": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+    "tracks": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+    "scene": { "type": "object", "additionalProperties": true },
+    "protected_assets": { "type": "array", "items": { "type": "object", "additionalProperties": true } }
+  },
+  "additionalProperties": false
+}

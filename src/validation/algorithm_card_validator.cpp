@@ -331,6 +331,89 @@ Result<AlgorithmCard> ParseAlgorithmCard(const YAML::Node& root) {
         card.performance = std::move(performance);
     }
 
+    if (root["resource_requirements"] && root["resource_requirements"].IsMap()) {
+        ResourceRequirementsSpec resource_requirements;
+        if (root["resource_requirements"]["min_cpu_cores"]) {
+            resource_requirements.min_cpu_cores =
+                root["resource_requirements"]["min_cpu_cores"].as<int>();
+        }
+        if (root["resource_requirements"]["recommended_cpu_cores"]) {
+            resource_requirements.recommended_cpu_cores =
+                root["resource_requirements"]["recommended_cpu_cores"].as<int>();
+        }
+        if (root["resource_requirements"]["min_memory_mb"]) {
+            resource_requirements.min_memory_mb =
+                root["resource_requirements"]["min_memory_mb"].as<int>();
+        }
+        if (root["resource_requirements"]["recommended_memory_mb"]) {
+            resource_requirements.recommended_memory_mb =
+                root["resource_requirements"]["recommended_memory_mb"].as<int>();
+        }
+        if (root["resource_requirements"]["min_gpu_count"]) {
+            resource_requirements.min_gpu_count =
+                root["resource_requirements"]["min_gpu_count"].as<int>();
+        }
+        if (root["resource_requirements"]["gpu_type"]) {
+            resource_requirements.gpu_type =
+                root["resource_requirements"]["gpu_type"].as<std::string>();
+        }
+        if (root["resource_requirements"]["min_vram_mb"]) {
+            resource_requirements.min_vram_mb =
+                root["resource_requirements"]["min_vram_mb"].as<int>();
+        }
+        if (root["resource_requirements"]["recommended_vram_mb"]) {
+            resource_requirements.recommended_vram_mb =
+                root["resource_requirements"]["recommended_vram_mb"].as<int>();
+        }
+        if (root["resource_requirements"]["disk_mb"]) {
+            resource_requirements.disk_mb =
+                root["resource_requirements"]["disk_mb"].as<int>();
+        }
+        card.resource_requirements = std::move(resource_requirements);
+    }
+
+    if (root["model_profile"] && root["model_profile"].IsMap()) {
+        ModelProfileSpec model_profile;
+        if (root["model_profile"]["parameter_count"]) {
+            model_profile.parameter_count =
+                root["model_profile"]["parameter_count"].as<long long>();
+        }
+        if (root["model_profile"]["parameter_count_text"]) {
+            model_profile.parameter_count_text =
+                root["model_profile"]["parameter_count_text"].as<std::string>();
+        }
+        if (root["model_profile"]["flops"]) {
+            model_profile.flops = root["model_profile"]["flops"].as<long long>();
+        }
+        if (root["model_profile"]["flops_text"]) {
+            model_profile.flops_text =
+                root["model_profile"]["flops_text"].as<std::string>();
+        }
+        if (root["model_profile"]["flops_input_shape"]) {
+            if (!root["model_profile"]["flops_input_shape"].IsSequence()) {
+                return Status::Error(ErrorCode::kInvalidAlgorithmCard,
+                                     "model_profile.flops_input_shape must be an array.");
+            }
+            for (const auto& item : root["model_profile"]["flops_input_shape"]) {
+                if (!item.IsScalar()) {
+                    return Status::Error(
+                        ErrorCode::kInvalidAlgorithmCard,
+                        "model_profile.flops_input_shape must contain integer dimensions.");
+                }
+                model_profile.flops_input_shape.push_back(item.as<int>());
+            }
+        }
+        if (root["model_profile"]["model_size_mb"]) {
+            model_profile.model_size_mb =
+                root["model_profile"]["model_size_mb"].as<int>();
+        }
+        if (root["model_profile"]["precision"]) {
+            model_profile.precision =
+                root["model_profile"]["precision"].as<std::string>();
+        }
+        card.model_profile = std::move(model_profile);
+    }
+
     if (root["safety"] && root["safety"].IsMap()) {
         SafetySpec safety;
         if (root["safety"]["risk_level"]) {

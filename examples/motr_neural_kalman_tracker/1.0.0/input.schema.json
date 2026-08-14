@@ -1,0 +1,28 @@
+{
+  "title": "MOTR Neural Kalman Tracker Input",
+  "type": "object",
+  "required": [
+    "verified_detections"
+  ],
+  "properties": {
+    "verified_detections": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "prior_tracks": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "visual_frame": {
+      "type": "object"
+    },
+    "batch_context": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": true
+}

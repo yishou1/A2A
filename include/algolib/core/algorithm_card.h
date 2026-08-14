@@ -82,6 +82,28 @@ struct PerformanceSpec {
     std::string performance_notes;
 };
 
+struct ResourceRequirementsSpec {
+    std::optional<int> min_cpu_cores;
+    std::optional<int> recommended_cpu_cores;
+    std::optional<int> min_memory_mb;
+    std::optional<int> recommended_memory_mb;
+    std::optional<int> min_gpu_count;
+    std::string gpu_type;
+    std::optional<int> min_vram_mb;
+    std::optional<int> recommended_vram_mb;
+    std::optional<int> disk_mb;
+};
+
+struct ModelProfileSpec {
+    std::optional<long long> parameter_count;
+    std::string parameter_count_text;
+    std::optional<long long> flops;
+    std::string flops_text;
+    std::vector<int> flops_input_shape;
+    std::optional<int> model_size_mb;
+    std::string precision;
+};
+
 struct SafetySpec {
     std::string risk_level;
     std::optional<bool> requires_human_review;
@@ -101,6 +123,8 @@ struct AlgorithmCard {
     MachineSpec machine_spec;
     std::optional<ConstraintsSpec> constraints;
     std::optional<PerformanceSpec> performance;
+    std::optional<ResourceRequirementsSpec> resource_requirements;
+    std::optional<ModelProfileSpec> model_profile;
     std::optional<SafetySpec> safety;
 };
 

@@ -1,0 +1,26 @@
+{
+  "title": "Trajectory Linear Predictor Output",
+  "type": "object",
+  "required": [
+    "velocity",
+    "aim_point",
+    "execute_at"
+  ],
+  "properties": {
+    "velocity": {
+      "type": "object"
+    },
+    "aim_point": {
+      "type": "object"
+    },
+    "execute_at": {
+      "type": "number"
+    },
+    "future_t": {
+      "type": "number"
+    },
+    "model": {
+      "type": "string"
+    }
+  }
+}

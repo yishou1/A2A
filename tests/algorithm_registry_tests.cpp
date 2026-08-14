@@ -156,6 +156,14 @@ void TestRegisterAndPersistOnnxAlgorithm() {
            "Persisted entry should keep the performance block.");
     Expect(get_result.value().card.performance->time_complexity == "O(n)",
            "Persisted entry should keep the time complexity field.");
+    Expect(get_result.value().card.resource_requirements.has_value(),
+           "Persisted entry should keep the resource requirements block.");
+    Expect(get_result.value().card.resource_requirements->recommended_memory_mb == 1024,
+           "Persisted entry should keep recommended memory metadata.");
+    Expect(get_result.value().card.model_profile.has_value(),
+           "Persisted entry should keep the model profile block.");
+    Expect(get_result.value().card.model_profile->parameter_count_text == "120K",
+           "Persisted entry should keep human-readable parameter count.");
 }
 
 void TestServiceLifecycleAndAgentView() {
@@ -200,6 +208,14 @@ void TestServiceLifecycleAndAgentView() {
            "Agent view should expose space complexity for the service algorithm.");
     Expect(active_views.front()["performance"]["complexity_variable"].is_string(),
            "Agent view should expose the complexity variable description.");
+    Expect(active_views.front()["resource_requirements"]["recommended_memory_mb"] == 8192,
+           "Agent view should expose recommended memory requirements.");
+    Expect(active_views.front()["resource_requirements"]["gpu_type"] == "optional",
+           "Agent view should expose GPU type requirements.");
+    Expect(active_views.front()["model_profile"]["parameter_count_text"] == "7B",
+           "Agent view should expose human-readable parameter count.");
+    Expect(active_views.front()["model_profile"]["precision"] == "fp16",
+           "Agent view should expose model precision.");
 
     auto disable_result = registry.Disable(ServiceKey());
     Expect(disable_result.ok(), "Disable should succeed.");
@@ -302,7 +318,7 @@ void TestInvalidCardReturnsMissingRequiredField() {
 
     std::string card_content = ReadTextFile(fixture_dir / "algorithm_card.yaml");
     ReplaceAll(&card_content,
-               "    timeout_ms: 10000\n",
+               "    timeout_ms: 10000",
                "");
     WriteTextFile(fixture_dir / "algorithm_card.yaml", card_content);
 

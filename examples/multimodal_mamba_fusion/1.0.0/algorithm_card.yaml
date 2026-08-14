@@ -1,0 +1,72 @@
+algorithm_id: multimodal_mamba_fusion
+version: 1.0.0
+display_name: Multimodal Mamba Fusion
+backend_type: python_http_service
+status: draft
+
+task_family: fusion
+modalities:
+  input:
+    - structured_json
+  output:
+    - structured_json
+
+capabilities:
+  - temporal_fusion
+  - multimodal_mamba
+
+agent_card:
+  summary: >
+    Multimodal Mamba Fusion from the TIA tactical intelligence agent pipeline.
+  when_to_use:
+    - Embeddings and track history need temporal fusion.
+  when_not_to_use:
+    - No embeddings or tracks are available.
+  input_description: >
+    See input.schema.json for required structured fields.
+  output_description: >
+    See output.schema.json for structured outputs.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  runtime:
+    backend_type: python_http_service
+    endpoint: http://127.0.0.1:9026/predict
+    health_endpoint: http://127.0.0.1:9026/health
+    metadata_endpoint: http://127.0.0.1:9026/metadata
+    timeout_ms: 5000
+
+constraints:
+  max_input_chars: 20000000
+  max_request_bytes: 33554432
+  batch_supported: false
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 50
+  latency_ms_p95: 500
+  primary_metric: fusion_coherence
+  primary_score: 0.84
+
+resource_requirements:
+  min_cpu_cores: 2
+  recommended_cpu_cores: 4
+  min_memory_mb: 4096
+  recommended_memory_mb: 8192
+  min_gpu_count: 0
+  gpu_type: optional
+  min_vram_mb: 0
+  recommended_vram_mb: 8192
+  disk_mb: 4096
+
+model_profile:
+  parameter_count: 0
+  parameter_count_text: varies_by_submodel
+  flops: 0
+  flops_text: varies_by_submodel
+  precision: fp32
+
+safety:
+  risk_level: low
+  requires_human_review: true

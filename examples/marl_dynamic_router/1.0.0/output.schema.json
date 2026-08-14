@@ -1,0 +1,16 @@
+{
+  "title": "TIA Algorithm Output",
+  "type": "object",
+  "properties": {
+    "routes": {
+      "type": "array"
+    },
+    "anti_jam_mode": {
+      "type": "number"
+    },
+    "broadcast_summary": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

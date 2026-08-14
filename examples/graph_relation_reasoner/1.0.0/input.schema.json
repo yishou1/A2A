@@ -1,0 +1,25 @@
+{
+  "title": "Graph Relation Reasoner Input",
+  "type": "object",
+  "required": ["tracks"],
+  "properties": {
+    "tracks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["track_id", "lat", "lon", "speed", "heading"],
+        "properties": {
+          "track_id": { "type": "string" },
+          "object_type": { "type": "string" },
+          "lat": { "type": "number" },
+          "lon": { "type": "number" },
+          "speed": { "type": "number" },
+          "heading": { "type": "number" }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false
+}

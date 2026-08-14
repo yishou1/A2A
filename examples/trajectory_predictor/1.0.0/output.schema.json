@@ -1,0 +1,36 @@
+{
+  "title": "Trajectory Predictor Output",
+  "type": "object",
+  "required": ["schema_version", "predictions", "model_summary"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "predictions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["track_id", "object_type", "model_family", "model_version", "model_status", "fallback_used", "predicted_path"],
+        "properties": {
+          "track_id": { "type": "string" },
+          "object_type": { "type": "string" },
+          "model_family": { "type": "string" },
+          "model_version": { "type": "string" },
+          "model_status": { "type": "string" },
+          "baseline_model": { "type": "string" },
+          "fallback_used": { "type": "boolean" },
+          "fallback_reason": { "type": "string" },
+          "predicted_path": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["horizon_s", "lat", "lon", "uncertainty_radius_m", "prediction_confidence"],
+              "additionalProperties": true
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "model_summary": { "type": "object" }
+  },
+  "additionalProperties": true
+}

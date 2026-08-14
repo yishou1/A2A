@@ -181,6 +181,42 @@ json ToJson(const AlgorithmCard& card) {
         card_json["performance"] = std::move(performance_json);
     }
 
+    if (card.resource_requirements.has_value()) {
+        json resource_json;
+        WriteOptional(resource_json, "min_cpu_cores",
+                      card.resource_requirements->min_cpu_cores);
+        WriteOptional(resource_json, "recommended_cpu_cores",
+                      card.resource_requirements->recommended_cpu_cores);
+        WriteOptional(resource_json, "min_memory_mb",
+                      card.resource_requirements->min_memory_mb);
+        WriteOptional(resource_json, "recommended_memory_mb",
+                      card.resource_requirements->recommended_memory_mb);
+        WriteOptional(resource_json, "min_gpu_count",
+                      card.resource_requirements->min_gpu_count);
+        resource_json["gpu_type"] = card.resource_requirements->gpu_type;
+        WriteOptional(resource_json, "min_vram_mb",
+                      card.resource_requirements->min_vram_mb);
+        WriteOptional(resource_json, "recommended_vram_mb",
+                      card.resource_requirements->recommended_vram_mb);
+        WriteOptional(resource_json, "disk_mb", card.resource_requirements->disk_mb);
+        card_json["resource_requirements"] = std::move(resource_json);
+    }
+
+    if (card.model_profile.has_value()) {
+        json model_profile_json;
+        WriteOptional(model_profile_json, "parameter_count",
+                      card.model_profile->parameter_count);
+        model_profile_json["parameter_count_text"] =
+            card.model_profile->parameter_count_text;
+        WriteOptional(model_profile_json, "flops", card.model_profile->flops);
+        model_profile_json["flops_text"] = card.model_profile->flops_text;
+        model_profile_json["flops_input_shape"] = card.model_profile->flops_input_shape;
+        WriteOptional(model_profile_json, "model_size_mb",
+                      card.model_profile->model_size_mb);
+        model_profile_json["precision"] = card.model_profile->precision;
+        card_json["model_profile"] = std::move(model_profile_json);
+    }
+
     if (card.safety.has_value()) {
         json safety_json;
         safety_json["risk_level"] = card.safety->risk_level;
@@ -366,6 +402,56 @@ Result<AlgorithmCard> AlgorithmCardFromJson(const json& json_value) {
             performance.performance_notes =
                 performance_json.value("performance_notes", std::string());
             card.performance = std::move(performance);
+        }
+
+        if (json_value.contains("resource_requirements")) {
+            const json& resource_json = json_value.at("resource_requirements");
+            if (!resource_json.is_object()) {
+                return Status::Error(ErrorCode::kInvalidAlgorithmCard,
+                                     "resource_requirements must be an object.");
+            }
+            ResourceRequirementsSpec resource_requirements;
+            resource_requirements.min_cpu_cores =
+                ReadOptional<int>(resource_json, "min_cpu_cores");
+            resource_requirements.recommended_cpu_cores =
+                ReadOptional<int>(resource_json, "recommended_cpu_cores");
+            resource_requirements.min_memory_mb =
+                ReadOptional<int>(resource_json, "min_memory_mb");
+            resource_requirements.recommended_memory_mb =
+                ReadOptional<int>(resource_json, "recommended_memory_mb");
+            resource_requirements.min_gpu_count =
+                ReadOptional<int>(resource_json, "min_gpu_count");
+            resource_requirements.gpu_type =
+                resource_json.value("gpu_type", std::string());
+            resource_requirements.min_vram_mb =
+                ReadOptional<int>(resource_json, "min_vram_mb");
+            resource_requirements.recommended_vram_mb =
+                ReadOptional<int>(resource_json, "recommended_vram_mb");
+            resource_requirements.disk_mb = ReadOptional<int>(resource_json, "disk_mb");
+            card.resource_requirements = std::move(resource_requirements);
+        }
+
+        if (json_value.contains("model_profile")) {
+            const json& model_profile_json = json_value.at("model_profile");
+            if (!model_profile_json.is_object()) {
+                return Status::Error(ErrorCode::kInvalidAlgorithmCard,
+                                     "model_profile must be an object.");
+            }
+            ModelProfileSpec model_profile;
+            model_profile.parameter_count =
+                ReadOptional<long long>(model_profile_json, "parameter_count");
+            model_profile.parameter_count_text =
+                model_profile_json.value("parameter_count_text", std::string());
+            model_profile.flops = ReadOptional<long long>(model_profile_json, "flops");
+            model_profile.flops_text =
+                model_profile_json.value("flops_text", std::string());
+            model_profile.flops_input_shape =
+                model_profile_json.value("flops_input_shape", std::vector<int>{});
+            model_profile.model_size_mb =
+                ReadOptional<int>(model_profile_json, "model_size_mb");
+            model_profile.precision =
+                model_profile_json.value("precision", std::string());
+            card.model_profile = std::move(model_profile);
         }
 
         if (json_value.contains("safety")) {

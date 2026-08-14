@@ -1,0 +1,28 @@
+{
+  "request_id": "grr-001",
+  "trace_id": "trace-track-threat-001",
+  "algorithm_id": "graph_relation_reasoner",
+  "version": "1.0.0",
+  "backend_type": "python_http_service",
+  "inputs": {
+    "tracks": [
+      {
+        "track_id": "trk-air-001",
+        "object_type": "aircraft",
+        "lat": 31.242,
+        "lon": 121.512,
+        "speed": 230,
+        "heading": 86
+      },
+      {
+        "track_id": "trk-air-002",
+        "object_type": "aircraft",
+        "lat": 31.252,
+        "lon": 121.522,
+        "speed": 232,
+        "heading": 88
+      }
+    ]
+  },
+  "params": {}
+}

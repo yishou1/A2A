@@ -1,0 +1,25 @@
+{
+  "ok": true,
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "trajectory_linear_predictor",
+  "version": "1.0.0",
+  "outputs": {
+    "velocity": {
+      "vx": 4.5,
+      "vy": 5.5
+    },
+    "aim_point": {
+      "x": 38.78,
+      "y": 53.22
+    },
+    "execute_at": 2.4,
+    "future_t": 6.4,
+    "model": "linear_regression",
+    "track_id": "T-001"
+  },
+  "usage": {
+    "latency_ms": 1
+  },
+  "error": null
+}

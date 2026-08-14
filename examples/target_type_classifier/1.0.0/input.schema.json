@@ -1,0 +1,43 @@
+{
+  "title": "Target Type Classifier Input",
+  "type": "object",
+  "properties": {
+    "observations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/observation" }
+    },
+    "detections": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/observation" }
+    },
+    "tracks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/observation" }
+    }
+  },
+  "anyOf": [
+    { "required": ["observations"] },
+    { "required": ["detections"] },
+    { "required": ["tracks"] }
+  ],
+  "$defs": {
+    "observation": {
+      "type": "object",
+      "required": ["lat", "lon", "speed", "heading", "confidence"],
+      "properties": {
+        "detection_id": { "type": "string" },
+        "track_id": { "type": "string" },
+        "object_type": { "type": "string", "enum": ["aircraft", "ship", "uav", "unknown"] },
+        "timestamp": { "type": "number" },
+        "lat": { "type": "number" },
+        "lon": { "type": "number" },
+        "alt": { "type": "number" },
+        "speed": { "type": "number" },
+        "heading": { "type": "number" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

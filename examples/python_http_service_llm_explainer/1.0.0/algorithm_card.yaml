@@ -65,6 +65,26 @@ performance:
     The card records end-to-end service behavior, so the practical latency also
     includes HTTP transport and remote service queueing overhead.
 
+resource_requirements:
+  min_cpu_cores: 2
+  recommended_cpu_cores: 4
+  min_memory_mb: 4096
+  recommended_memory_mb: 8192
+  min_gpu_count: 0
+  gpu_type: optional
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 2048
+
+model_profile:
+  parameter_count: 7000000000
+  parameter_count_text: 7B
+  flops: 14000000000
+  flops_text: 14 GFLOPs/token
+  flops_input_shape: [1, 2048]
+  model_size_mb: 14336
+  precision: fp16
+
 safety:
   risk_level: medium
   requires_human_review: true
