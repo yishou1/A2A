@@ -1,0 +1,29 @@
+{
+  "title": "ODConv Confidence Refiner ONNX Input",
+  "type": "object",
+  "required": [
+    "crops",
+    "base_conf"
+  ],
+  "properties": {
+    "crops": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1
+    },
+    "base_conf": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 1,
+        "items": {
+          "type": "number"
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,23 @@
+{
+  "title": "MARL-PPO Task Scheduler ONNX Input",
+  "type": "object",
+  "required": [
+    "obs"
+  ],
+  "properties": {
+    "obs": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {
+        "type": "array",
+        "minItems": 102,
+        "maxItems": 102,
+        "items": {
+          "type": "number"
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

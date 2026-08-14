@@ -1,0 +1,8 @@
+type: raw_tensor_to_json
+outputs:
+  - tensor_name: probability
+    json_path: $.probability
+  - tensor_name: epistemic
+    json_path: $.epistemic
+  - tensor_name: aleatoric
+    json_path: $.aleatoric

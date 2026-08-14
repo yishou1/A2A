@@ -1,0 +1,10 @@
+type: json_to_tensor_map
+mappings:
+  - json_path: $.crops
+    tensor_name: crops
+    dtype: float32
+    shape: [1, 3, 128, 128]
+  - json_path: $.base_conf
+    tensor_name: base_conf
+    dtype: float32
+    shape: [1, 1]

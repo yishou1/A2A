@@ -1,0 +1,7 @@
+{
+  "model_source": "models/checkpoints/odconv_refiner.pt",
+  "model_type": "odconv_refiner",
+  "format": "onnx",
+  "crop_size": 128,
+  "sibling_python_service": "battlefield_rtdetr_detector"
+}

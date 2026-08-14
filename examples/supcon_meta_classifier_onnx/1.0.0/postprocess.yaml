@@ -1,0 +1,4 @@
+type: raw_tensor_to_json
+outputs:
+  - tensor_name: class_probabilities
+    json_path: $.class_probabilities

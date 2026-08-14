@@ -1,0 +1,11 @@
+inputs:
+  - name: obs
+    dtype: float32
+    shape: [1, 102]
+outputs:
+  - name: action_logits
+    dtype: float32
+    shape: [1, 9]
+  - name: value
+    dtype: float32
+    shape: [1, 1]

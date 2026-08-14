@@ -1,0 +1,39 @@
+{
+  "title": "EDL Evidential Verifier ONNX Output",
+  "type": "object",
+  "required": [
+    "probability",
+    "epistemic",
+    "aleatoric"
+  ],
+  "properties": {
+    "probability": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        }
+      }
+    },
+    "epistemic": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        }
+      }
+    },
+    "aleatoric": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

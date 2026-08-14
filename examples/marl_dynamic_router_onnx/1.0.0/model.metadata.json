@@ -1,0 +1,11 @@
+{
+  "model_source": "models/checkpoints/marl_policy.pt",
+  "model_type": "marl_policy_network",
+  "format": "onnx",
+  "channels": [
+    "semantic_rf",
+    "fhss_backup",
+    "satcom_relay"
+  ],
+  "sibling_python_service": "marl_dynamic_router"
+}

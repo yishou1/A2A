@@ -1,0 +1,4 @@
+type: raw_tensor_to_json
+outputs:
+  - tensor_name: refined_confidence
+    json_path: $.refined_confidence

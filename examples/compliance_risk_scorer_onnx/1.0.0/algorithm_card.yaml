@@ -1,0 +1,89 @@
+algorithm_id: compliance_risk_scorer_onnx
+version: 1.0.0
+display_name: Compliance Risk Scorer ONNX
+backend_type: onnx
+status: draft
+
+task_family: compliance_scoring
+modalities:
+  input:
+    - structured_json
+  output:
+    - structured_json
+
+capabilities:
+  - compliance_risk_scoring
+  - authorization_risk_probability
+
+agent_card:
+  summary: >
+    Score one normalized compliance feature row with the bootstrap compliance
+    logistic-regression model and return a risk probability.
+  when_to_use:
+    - Compliance checks have already been converted to the six documented features.
+    - A lightweight deterministic risk score is required.
+  when_not_to_use:
+    - Rule retrieval, legal interpretation, authorization checks, or explanations are required.
+    - Features are missing, unnormalized, or in a different order.
+  input_description: >
+    One float32 feature row ordered as blocking_violation_count,
+    warning_violation_count, authorization_status_score,
+    authorization_out_of_scope, rag_evidence_count, and law_of_war_rule_hit.
+  output_description: >
+    A risk_probability tensor with shape [1, 1].
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  tensor_contract_ref: tensor_contract.yaml
+  runtime:
+    backend_type: onnx
+    model_uri: model.onnx
+    execution_provider: cpu
+  preprocess:
+    config_uri: preprocess.yaml
+  postprocess:
+    config_uri: postprocess.yaml
+
+constraints:
+  max_input_chars: 4096
+  max_request_bytes: 65536
+  batch_supported: false
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 1
+  latency_ms_p95: 1
+  primary_metric: compliance_risk_probability
+  primary_score: 0.0
+  time_complexity: O(d)
+  space_complexity: O(d)
+  complexity_variable: d = 6 input features
+  performance_notes: >
+    Direct CPU ONNX Runtime inference measured approximately 0.012 ms p50 and
+    0.012 ms p95 over 500 local runs; algorithm-library overhead is excluded.
+    The bootstrap model has not been evaluated on a labeled production dataset.
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 1
+  min_memory_mb: 128
+  recommended_memory_mb: 256
+  min_gpu_count: 0
+  gpu_type: none
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 1
+
+model_profile:
+  parameter_count: 7
+  parameter_count_text: "7"
+  flops: 13
+  flops_text: approximately 13 FLOPs per sample
+  flops_input_shape: [1, 6]
+  model_size_mb: 1
+  precision: fp32
+
+safety:
+  risk_level: high
+  requires_human_review: true

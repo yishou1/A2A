@@ -1,0 +1,19 @@
+{
+  "title": "ODConv Confidence Refiner ONNX Output",
+  "type": "object",
+  "required": [
+    "refined_confidence"
+  ],
+  "properties": {
+    "refined_confidence": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

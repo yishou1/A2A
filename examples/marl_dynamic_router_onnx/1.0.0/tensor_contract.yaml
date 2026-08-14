@@ -1,0 +1,11 @@
+inputs:
+  - name: state
+    dtype: float32
+    shape: [1, 8]
+outputs:
+  - name: channel_logits
+    dtype: float32
+    shape: [1, 3]
+  - name: reliability
+    dtype: float32
+    shape: [1, 1]

@@ -1,0 +1,86 @@
+algorithm_id: edl_evidential_verifier_onnx
+version: 1.0.0
+display_name: EDL Evidential Verifier ONNX
+backend_type: onnx
+status: draft
+
+task_family: verification
+modalities:
+  input:
+    - structured_json
+  output:
+    - structured_json
+
+capabilities:
+  - evidential_verification
+  - uncertainty_estimation
+  - onnx
+
+agent_card:
+  summary: >
+    Native ONNX core of the EDL evidential detection verifier.
+  when_to_use:
+    - Caller already built the six-dim detection feature row.
+    - Need belief probability plus uncertainty tensors without starting Python HTTP.
+  when_not_to_use:
+    - Raw detection JSON still needs bbox feature extraction and verified filtering.
+    - Full pipeline orchestration is required (use edl_evidential_verifier python service).
+  input_description: >
+    One float32 feature row: confidence, w/640, h/640, cx/640, cy/640, damage_score.
+  output_description: >
+    Class probability [1,2], epistemic [1,1], aleatoric entropy proxy [1,1].
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  tensor_contract_ref: tensor_contract.yaml
+  runtime:
+    backend_type: onnx
+    model_uri: model.onnx
+    execution_provider: cpu
+  preprocess:
+    config_uri: preprocess.yaml
+  postprocess:
+    config_uri: postprocess.yaml
+
+constraints:
+  max_input_chars: 2000000
+  max_request_bytes: 33554432
+  batch_supported: false
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 5
+  latency_ms_p95: 30
+  primary_metric: onnx_native_inference
+  primary_score: 1.0
+  time_complexity: O(n)
+  space_complexity: O(n)
+  complexity_variable: [1, 6]
+  performance_notes: >
+    Native CPU ONNX Runtime inference for the model core only. Feature
+    construction / orchestration remains in the python_http_service sibling.
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 2
+  min_memory_mb: 256
+  recommended_memory_mb: 1024
+  min_gpu_count: 0
+  gpu_type: none
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 64
+
+model_profile:
+  parameter_count: 290
+  parameter_count_text: "290"
+  flops: 0
+  flops_text: small MLP
+  flops_input_shape: [1, 6]
+  model_size_mb: 1
+  precision: fp32
+
+safety:
+  risk_level: medium
+  requires_human_review: true

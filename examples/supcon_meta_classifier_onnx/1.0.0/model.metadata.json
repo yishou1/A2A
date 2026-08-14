@@ -1,0 +1,15 @@
+{
+  "model_source": "models/checkpoints/supcon_meta.pt",
+  "model_type": "supcon_meta_fixed_prototypes",
+  "format": "onnx",
+  "in_dim": 1024,
+  "labels": [
+    "friendly",
+    "neutral",
+    "hostile",
+    "unknown"
+  ],
+  "temperature": 0.07,
+  "sibling_python_service": "supcon_meta_classifier",
+  "note": "Support-shot prototype updates are not included in this ONNX core."
+}

@@ -1,0 +1,19 @@
+{
+  "title": "SupCon Meta Classifier ONNX Output",
+  "type": "object",
+  "required": [
+    "class_probabilities"
+  ],
+  "properties": {
+    "class_probabilities": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

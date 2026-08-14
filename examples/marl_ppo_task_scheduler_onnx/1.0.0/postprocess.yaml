@@ -1,0 +1,6 @@
+type: raw_tensor_to_json
+outputs:
+  - tensor_name: action_logits
+    json_path: $.action_logits
+  - tensor_name: value
+    json_path: $.value

@@ -1,0 +1,14 @@
+inputs:
+  - name: features
+    dtype: float32
+    shape: [1, 6]
+outputs:
+  - name: probability
+    dtype: float32
+    shape: [1, 2]
+  - name: epistemic
+    dtype: float32
+    shape: [1, 1]
+  - name: aleatoric
+    dtype: float32
+    shape: [1, 1]

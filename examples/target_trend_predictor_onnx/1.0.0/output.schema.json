@@ -1,0 +1,15 @@
+{
+  "title": "Target Trend Predictor ONNX Output",
+  "type": "object",
+  "required": ["trend_score"],
+  "properties": {
+    "trend_score": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
+      }
+    }
+  },
+  "additionalProperties": false
+}

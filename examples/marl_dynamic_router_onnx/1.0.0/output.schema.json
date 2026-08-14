@@ -1,0 +1,29 @@
+{
+  "title": "MARL Dynamic Router ONNX Output",
+  "type": "object",
+  "required": [
+    "channel_logits",
+    "reliability"
+  ],
+  "properties": {
+    "channel_logits": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        }
+      }
+    },
+    "reliability": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

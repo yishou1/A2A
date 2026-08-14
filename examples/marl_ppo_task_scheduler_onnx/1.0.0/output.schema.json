@@ -1,0 +1,29 @@
+{
+  "title": "MARL-PPO Task Scheduler ONNX Output",
+  "type": "object",
+  "required": [
+    "action_logits",
+    "value"
+  ],
+  "properties": {
+    "action_logits": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        }
+      }
+    },
+    "value": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

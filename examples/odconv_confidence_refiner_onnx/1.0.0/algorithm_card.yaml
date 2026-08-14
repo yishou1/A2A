@@ -1,0 +1,85 @@
+algorithm_id: odconv_confidence_refiner_onnx
+version: 1.0.0
+display_name: ODConv Confidence Refiner ONNX
+backend_type: onnx
+status: draft
+
+task_family: detection_refinement
+modalities:
+  input:
+    - structured_json
+  output:
+    - structured_json
+
+capabilities:
+  - odconv
+  - confidence_refine
+  - onnx
+
+agent_card:
+  summary: >
+    Native ONNX ODConv crop refiner that outputs refined detection confidence.
+  when_to_use:
+    - Caller already cropped a 128x128 RGB patch and has RT-DETR base confidence.
+  when_not_to_use:
+    - Full-frame detection is required (use battlefield_rtdetr_detector).
+    - Crop extraction from bbox is still needed.
+  input_description: >
+    crops [1,3,128,128] in [0,1] and base_conf [1,1].
+  output_description: >
+    refined_confidence [1,1] in [0.05, 0.99].
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  tensor_contract_ref: tensor_contract.yaml
+  runtime:
+    backend_type: onnx
+    model_uri: model.onnx
+    execution_provider: cpu
+  preprocess:
+    config_uri: preprocess.yaml
+  postprocess:
+    config_uri: postprocess.yaml
+
+constraints:
+  max_input_chars: 2000000
+  max_request_bytes: 33554432
+  batch_supported: false
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 5
+  latency_ms_p95: 30
+  primary_metric: onnx_native_inference
+  primary_score: 1.0
+  time_complexity: O(n)
+  space_complexity: O(n)
+  complexity_variable: [1, 3, 128, 128]
+  performance_notes: >
+    Native CPU ONNX Runtime inference for the model core only. Feature
+    construction / orchestration remains in the python_http_service sibling.
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 2
+  min_memory_mb: 256
+  recommended_memory_mb: 1024
+  min_gpu_count: 0
+  gpu_type: none
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 64
+
+model_profile:
+  parameter_count: 24361
+  parameter_count_text: "24361"
+  flops: 0
+  flops_text: ODConv stem + MLP head
+  flops_input_shape: [1, 3, 128, 128]
+  model_size_mb: 1
+  precision: fp32
+
+safety:
+  risk_level: medium
+  requires_human_review: true

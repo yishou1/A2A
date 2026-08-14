@@ -1,0 +1,8 @@
+inputs:
+  - name: features
+    dtype: float32
+    shape: [1, 1024]
+outputs:
+  - name: class_probabilities
+    dtype: float32
+    shape: [1, 4]

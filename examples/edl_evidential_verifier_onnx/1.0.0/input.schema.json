@@ -1,0 +1,23 @@
+{
+  "title": "EDL Evidential Verifier ONNX Input",
+  "type": "object",
+  "required": [
+    "features"
+  ],
+  "properties": {
+    "features": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {
+        "type": "array",
+        "minItems": 6,
+        "maxItems": 6,
+        "items": {
+          "type": "number"
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

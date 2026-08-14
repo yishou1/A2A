@@ -1,0 +1,9 @@
+{
+  "model_source": "models/checkpoints/marl_ppo_scheduler.pt",
+  "model_type": "marl_ppo_actor_critic",
+  "format": "onnx",
+  "obs_dim": 102,
+  "n_actions": 9,
+  "n_agents": 8,
+  "sibling_python_service": "marl_ppo_task_scheduler"
+}

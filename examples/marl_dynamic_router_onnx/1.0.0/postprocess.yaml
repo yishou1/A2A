@@ -1,0 +1,6 @@
+type: raw_tensor_to_json
+outputs:
+  - tensor_name: channel_logits
+    json_path: $.channel_logits
+  - tensor_name: reliability
+    json_path: $.reliability

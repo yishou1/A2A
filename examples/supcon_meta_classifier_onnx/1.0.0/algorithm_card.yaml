@@ -1,0 +1,86 @@
+algorithm_id: supcon_meta_classifier_onnx
+version: 1.0.0
+display_name: SupCon Meta Classifier ONNX
+backend_type: onnx
+status: draft
+
+task_family: classification
+modalities:
+  input:
+    - structured_json
+  output:
+    - structured_json
+
+capabilities:
+  - affiliation_labeling
+  - supcon
+  - onnx
+
+agent_card:
+  summary: >
+    Native ONNX SupCon projector + fixed-prototype softmax classifier.
+  when_to_use:
+    - Caller already has a fixed-dim fused embedding vector.
+    - Need class probabilities without support-shot meta update.
+  when_not_to_use:
+    - Few-shot support shots must update prototypes at request time.
+    - Need target_id bookkeeping (use supcon_meta_classifier python service).
+  input_description: >
+    One float32 embedding row of length 1024.
+  output_description: >
+    class_probabilities [1,4] ordered as ['friendly', 'neutral', 'hostile', 'unknown'].
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  tensor_contract_ref: tensor_contract.yaml
+  runtime:
+    backend_type: onnx
+    model_uri: model.onnx
+    execution_provider: cpu
+  preprocess:
+    config_uri: preprocess.yaml
+  postprocess:
+    config_uri: postprocess.yaml
+
+constraints:
+  max_input_chars: 2000000
+  max_request_bytes: 33554432
+  batch_supported: false
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 5
+  latency_ms_p95: 30
+  primary_metric: onnx_native_inference
+  primary_score: 1.0
+  time_complexity: O(n)
+  space_complexity: O(n)
+  complexity_variable: [1, 1024]
+  performance_notes: >
+    Native CPU ONNX Runtime inference for the model core only. Feature
+    construction / orchestration remains in the python_http_service sibling.
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 2
+  min_memory_mb: 256
+  recommended_memory_mb: 1024
+  min_gpu_count: 0
+  gpu_type: none
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 64
+
+model_profile:
+  parameter_count: 295808
+  parameter_count_text: "295808"
+  flops: 0
+  flops_text: MLP projector + prototype softmax
+  flops_input_shape: [1, 1024]
+  model_size_mb: 1
+  precision: fp32
+
+safety:
+  risk_level: medium
+  requires_human_review: true
