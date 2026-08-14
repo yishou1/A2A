@@ -50,7 +50,7 @@ class RunRequest(BaseModel):
 
 
 def _active_registry() -> list[dict[str, Any]]:
-    """活跃算法目录（与 lzh GET /algorithms 字段对齐）。"""
+    """活跃算法目录。"""
     cards = build_algorithm_catalog(host=HOST)
     out: list[dict[str, Any]] = []
     for card in cards:
