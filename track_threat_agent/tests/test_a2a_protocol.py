@@ -65,8 +65,9 @@ def test_a2a_agent_card_compatibility_endpoint():
         "group_threat_ranking",
         "protected_asset_impact_analysis",
     } <= skill_ids
-    assert card["execution"]["mode"] == "in_process_model_execution"
+    assert card["execution"]["mode"] == "llm_planned_algorithm_library_with_local_fallback"
     assert card["execution"]["internal_workflow_engine"] is False
+    assert card["algorithmExecution"]["loading_mode"] == "gpt_4o_mini_tool_plan_then_validated_algolib_run"
     assert card["modelsEndpoint"] == "/models"
     assert card["downstreamContracts"]["riskAssessments"] == {
         "outputHint": "risk_assessments",
@@ -151,8 +152,9 @@ async def test_send_message_accepts_a2a_task_payload():
     prediction = body["artifact"]["tracks"][0]["predicted_path"][0]
     assert prediction["prediction_provenance"]["algorithm"] == "adaptive_multi_model_physics"
     assert "st_gnn_inspired" not in prediction
-    assert body["artifact"]["summary"]["execution"]["mode"] == "in_process_model_execution"
+    assert body["artifact"]["summary"]["execution"]["mode"] == "llm_planned_algorithm_library_with_local_fallback"
     assert body["artifact"]["summary"]["execution"]["network_algorithm_calls"] is False
+    assert body["artifact"]["trace"]["algorithm_library"]["planner_mode"] == "local_only"
 
 
 @pytest.mark.anyio

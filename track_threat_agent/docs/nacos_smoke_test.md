@@ -29,7 +29,7 @@ curl http://127.0.0.1:8848/nacos/v1/ns/operator/metrics
 
 ## 2. 启动 Track Threat Agent
 
-算法和 TorchScript 模型由 Agent 本进程加载，不需要额外启动算法库 HTTP 服务。
+完整联调模式需要启动 zsl AlgorithmRepo HTTP 服务；Agent 通过 Nacos 被发现，通过 `ALGOLIB_BASE_URL` 访问算法库。若 `ALGORITHM_LIBRARY_ENABLED=false`，或非必需算法库发生故障，则使用 Agent 本地算法和 TorchScript 模型降级运行。
 
 ```bash
 cd /path/to/yishou1-A2A/track_threat_agent

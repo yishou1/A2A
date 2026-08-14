@@ -233,7 +233,7 @@ CognitionResult
 - `selected_algorithms`：本次 Skill 实际选择的稳定算法 ID，例如 `covariance_kalman_cv_filter`、`st_gnn_dynamic_entity_tracking`、`dynamic_bayesian_network`。
 - `algorithm_duration_ms`：跟踪预测、威胁评估/XAI、编组、保护资产影响和统一排序的分阶段耗时。
 
-该追踪只描述 Agent 进程内执行，不表示通过 HTTP 调用远程算法服务。
+该追踪同时描述 GPT-4o-mini 工具规划、zsl 算法库 `/run` 执行和 Agent 本地降级。`trace.algorithm_library` 中的 `planner_mode`、`planned_algorithms`、`executions` 与 `local_fallbacks` 是实际调用证据，不依赖大模型生成算法结果。
 
 ready=false 时返回标准失败信封：
 

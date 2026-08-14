@@ -52,7 +52,7 @@ metadata.status=idle
 - `GET /ready`、`POST /lifecycle/ready`、`GET /metrics`，适配 Commander 宕机恢复/ready=false 切换规范。
 - `GET /schema/input`、`GET /schema/output`、`GET /state/summary`，用于上游/Gateway/Commander 自动读取协议版本和当前 Agent 状态。
 - `GET /models` 返回 Agent 已加载的模型、版本和 ready/unavailable 状态。
-- `GET /algorithms` 返回稳定算法 ID、版本、后端、模型绑定和 ready/partial/unavailable 状态；算法仍由 Agent 进程执行。
+- `GET /algorithms` 返回稳定算法 ID、版本、后端、模型绑定，以及 GPT-4o-mini/算法库的当前运行状态。
 - `GET /resources` 返回主机与 Agent 进程 CPU、内存、磁盘和线程快照，供 Commander 调度观察。
 - `POST /recovery/notify`、`GET /recovery/status` 接收并查询 Commander 重规划/恢复通知。
 - Nacos role/status metadata 和 heartbeat_ts 心跳；心跳会保留 Commander 写入的 busy/unavailable/lease_* 状态。
@@ -60,7 +60,7 @@ metadata.status=idle
 - 本地 JSON 状态快照，支持演示环境重启后恢复航迹、最近 artifact、幂等缓存和 workflow work list。
 - 独立 ST-GNN 模型包发现：默认发现 `models/track_threat` 下的内置模型包，也可通过 `ST_GNN_AIRCRAFT_MODEL_DIR`、`ST_GNN_SHIP_MODEL_DIR` 或旧 `ST_GNN_MODEL_DIR` 覆盖；模型不可用时安全回退。
 
-当前工程不再只是“预留接口”。`PlanAlgorithmProvider` 会在 Agent 进程内直接执行协方差 Kalman 跟踪、自适应 CV/CA/CT 物理预测、TorchScript ST-GNN、版本化 DBN 态势关注校准、保护资产影响分析、编队识别和 XAI 证据链。知识库/RAG/方案规划/合规授权不放在本 Agent 中，交由独立下游 Agent 消费 `risk_assessments` 后继续处理。公共算法库只作为算法源码、模型包和 schema 的交付仓库，不是本 Agent 的运行时 HTTP 依赖。
+当前工程采用与 `lzh` 分支一致的“工具小模型规划 + 算法库执行”模式。Agent 从 zsl 算法库 `/algorithms` 获取已激活目录，Azure GPT-4o-mini 只输出受白名单限制的 JSON `algorithm_calls`，代码再次校验算法 ID、版本和 backend 后调用 `/run`。算法库不可用、LLM 未配置或规划无效时，`PlanAlgorithmProvider` 回退 Agent 本地的 Kalman、CV/CA/CT、TorchScript ST-GNN、DBN、编组和保护资产影响算法。知识库/RAG/方案规划/合规授权仍属于独立下游 Agent。
 
 ## 2.1 独立 ST-GNN 训练工程
 
@@ -185,7 +185,26 @@ Nacos 只发现 Agent、公布 skill/模型/健康状态，不调度算法、不
 - SDK 注册/心跳失败时自动回退 Nacos HTTP API；metadata PUT 遇到 Nacos Raft metadata 更新异常时，以幂等 POST 重新注册同一实例。
 - 当 `/lifecycle/ready` 设置为 `ready=false` 时，`/sendMessage` 返回标准失败信封，`/sendMessageStream` 返回 503，Commander 可切换到同 role 其他 idle Agent。
 
-本次实现参考 `lzh` 分支的分布式 Agent 运行时契约，但没有复制其远程算法库 `/run` 模式。航迹 Agent 是有状态服务，Kalman、ST-GNN、DBN、编组与资产影响算法全部在 Agent 进程内加载执行；Nacos 只发布发现、容量、心跳、资源、Skill 和模型摘要。`/sendMessage` 响应额外返回 `selected_algorithms` 与 `algorithm_duration_ms`，用于定位实际算法链和性能问题。
+本次实现复用了 `lzh` 分支的远程算法库思路，但加入航迹 Agent 所需的状态保护与本地降级。GPT-4o-mini 负责从 Track Threat 白名单中规划算法，zsl AlgorithmRepo 的 `/run` 负责执行 Python Service；本地 TrackStore 仍是航迹状态权威来源，远端轨迹预测会合并进 `predicted_path`，算法库故障时继续使用本地预测。Nacos 发布发现、容量、心跳、资源、Skill、小模型部署名和算法库地址摘要；API Key 永远不进入 Nacos metadata。
+
+### GPT-4o-mini 与 zsl AlgorithmRepo
+
+联调环境变量：
+
+```bash
+export ALGORITHM_LIBRARY_ENABLED=true
+export ALGOLIB_BASE_URL=http://127.0.0.1:8088
+export ENABLE_LLM=true
+export LLM_PROVIDER=azure_openai
+export AZURE_OPENAI_ENDPOINT=https://YOUR-RESOURCE.openai.azure.com
+export AZURE_OPENAI_CHAT_DEPLOYMENT=gpt-4o-mini
+export AZURE_OPENAI_API_VERSION=2024-12-01-preview
+export AZURE_OPENAI_API_KEY='通过密钥管理系统注入'
+```
+
+`text-embedding-3-small` 是向量模型，只适合检索/相似度，不负责算法选择。工具规划必须使用 GPT-4o-mini 的 Chat Completions 部署。模型只看到 Skill、输入摘要和白名单目录，不接触算法 URL，也不能选择其他 Agent 的算法。实际 `/run` 请求由代码生成和校验。
+
+完整的 zsl worktree、算法注册激活、Azure 环境变量和验收字段见 `docs/llm_algorithm_library_integration.md`。
 
 恢复通知示例：
 

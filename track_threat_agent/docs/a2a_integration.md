@@ -137,7 +137,7 @@ Example:
 
 ### A2A Task Envelope
 
-The Agent accepts the Commander task envelope used by the shared A2A repository. `workflow_id` is correlation metadata only; algorithms still execute in-process without an internal workflow engine:
+The Agent accepts the Commander task envelope used by the shared A2A repository. `workflow_id` is correlation metadata only; the Agent has no internal workflow engine. When enabled, GPT-4o-mini plans validated zsl AlgorithmRepo calls and local algorithms provide fault-tolerant fallback:
 
 ```http
 POST /sendMessage
@@ -192,7 +192,7 @@ Successful responses always include `schema_version=1.0` and must contain `outpu
 
 They also report `selected_algorithms` and per-stage `algorithm_duration_ms`. When the single stateful TrackStore slot is occupied, the Agent returns `error_code=AGENT_RESOURCE_EXHAUSTED`; the Commander should retry or dispatch another idle `track_threat` instance.
 
-`GET /algorithms` is a discovery/diagnostic endpoint. Models and Python algorithms are loaded and executed inside this Agent process; the Agent does not call a remote algorithm-library `/run` endpoint.
+`GET /algorithms` is a discovery/diagnostic endpoint. In integration mode the Agent reads the zsl catalog from `ALGOLIB_BASE_URL/algorithms`, asks GPT-4o-mini for a strict JSON plan, validates it against the Track Threat allowlist, and calls `ALGOLIB_BASE_URL/run`. Invalid plans, unavailable cloud access, and optional algorithm-library failures fall back to local algorithms. The artifact records planner mode, planned calls, executions, latency, errors, and local fallbacks in `trace.algorithm_library`.
 
 The Agent stores the latest `work_list` snapshot per workflow:
 

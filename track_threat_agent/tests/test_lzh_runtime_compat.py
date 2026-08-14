@@ -36,11 +36,12 @@ def test_resource_and_algorithm_catalog_are_discoverable():
     assert card["resourcesEndpoint"] == "/resources"
     assert card["algorithmsEndpoint"] == "/algorithms"
     assert card["recoveryEndpoint"] == "/recovery/notify"
-    assert card["algorithmExecution"]["location"] == "agent_process"
+    assert card["algorithmExecution"]["location"] == "zsl_algorithm_library_with_agent_local_fallback"
     assert card["algorithmExecution"]["remote_execution"] is False
 
-    assert algorithms["execution_location"] == "agent_process"
+    assert algorithms["execution_location"] == "zsl_algorithm_library_with_agent_local_fallback"
     assert algorithms["network_algorithm_calls"] is False
+    assert algorithms["algorithm_library_runtime"]["llm_deployment"] == "gpt-4o-mini"
     assert algorithms["contract_version"] == "track_threat_algorithms/v1"
     assert any(item["algorithm_id"] == "covariance_kalman_cv_filter" for item in algorithms["algorithms"])
     assert any(item["backend"] == "torchscript" for item in algorithms["algorithms"])
@@ -143,8 +144,10 @@ def test_nacos_metadata_advertises_runtime_compatibility_endpoints():
     assert metadata["resources_endpoint"].endswith("/resources")
     assert metadata["recovery_endpoint"].endswith("/recovery/notify")
     assert metadata["algorithms_endpoint"].endswith("/algorithms")
-    assert metadata["algorithm_loading_mode"] == "agent_local_model_bundle"
+    assert metadata["algorithm_loading_mode"] == "gpt_4o_mini_tool_plan_then_validated_algolib_run"
     assert metadata["remote_algorithm_execution"] == "false"
+    assert metadata["algorithm_library_transport"] == "HTTP+JSON"
+    assert metadata["tool_llm_role"] == "validated_algorithm_selection_only"
 
 
 def test_nacos_sdk_and_http_paths_use_the_same_default_cluster(monkeypatch):

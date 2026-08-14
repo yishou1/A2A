@@ -16,7 +16,7 @@ def test_nacos_metadata_exposes_ready_and_metrics_endpoints(monkeypatch):
     assert settings.metadata["output_schema_url"] == "http://127.0.0.1:8102/schema/output"
     assert settings.metadata["capability_version"] == "track_threat_agent_v1"
     assert settings.metadata["model_status"] in {"no_model", "model_loaded"}
-    assert settings.metadata["algorithm_profile"] == "kalman_stgnn_dbn_group_asset_xai"
+    assert settings.metadata["algorithm_profile"] == "gpt4o_mini_algolib_track_threat_with_local_fallback"
     assert "kg_transformer" not in settings.metadata["algorithm_family"]
     assert "kg_transformer" not in settings.metadata["runtime_providers"]
     assert settings.metadata["object_types"] == "aircraft,ship,uav,unknown"
@@ -29,8 +29,12 @@ def test_nacos_metadata_exposes_ready_and_metrics_endpoints(monkeypatch):
     assert settings.metadata["dbn_parameter_model"] == "dbn-risk-attention-v1"
     assert settings.metadata["group_lifecycle_states"] == "tentative,confirmed,coasting"
     assert "mission_planning" in settings.metadata["downstream_boundary"]
-    assert settings.metadata["algorithm_execution_location"] == "agent_process"
-    assert settings.metadata["algorithm_library_transport"] == "none"
+    assert settings.metadata["algorithm_execution_location"] == "zsl_algorithm_library_with_agent_local_fallback"
+    assert settings.metadata["algorithm_library_transport"] == "HTTP+JSON"
+    assert settings.metadata["algorithm_library_url"] == "http://127.0.0.1:8088"
+    assert settings.metadata["tool_llm_provider"] == "azure_openai"
+    assert settings.metadata["tool_llm_deployment"] == "gpt-4o-mini"
+    assert "trajectory_predictor" in settings.metadata["algorithm_library_allowed_ids"]
     assert "track_state_kalman_cv" in settings.metadata["models"]
     assert "trajectory_adaptive_multi_model_physics" in settings.metadata["models_ready"]
     assert "trajectory_imm" not in settings.metadata["models"]
