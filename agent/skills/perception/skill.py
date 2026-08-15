@@ -50,6 +50,12 @@ class PerceptionSkill:
             return plan is None or plan.is_enabled(aid)
 
         raw_dets = _as_list(self.detector.run({"frames": visual_frames}), "detections")
+        for frame in frame_dicts:
+            payload = frame.get("payload") if isinstance(frame.get("payload"), dict) else {}
+            raw_dets.extend(
+                item for item in _as_list(payload.get("detections"), "detections")
+                if isinstance(item, dict)
+            )
         trace = {self.detector.name: f"{len(raw_dets)} detections"}
 
         damage_reports: list[dict[str, Any]] = []

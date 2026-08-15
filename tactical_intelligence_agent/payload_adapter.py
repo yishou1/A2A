@@ -66,6 +66,34 @@ def _frame_from_attachment(attachment: dict[str, Any], index: int) -> SensorFram
 
 def _frames_from_input(input_payload: dict[str, Any]) -> list[SensorFrame]:
     frames: list[SensorFrame] = []
+    contacts = input_payload.get("contacts")
+    if isinstance(contacts, list) and contacts:
+        # Preserve mission contacts as detections when no perception frame exists.
+        detections = [
+            {
+                "track_id": item.get("track_id") or item.get("target_id") or item.get("contact_id"),
+                "sensor_id": "CONTACTS-CTX",
+                "class_name": item.get("classification") or item.get("object_type") or "unknown",
+                "confidence": float(item.get("confidence") or 0.0),
+                "bbox": item.get("bbox") or [0.0, 0.0, 0.0, 0.0],
+                "geo": {
+                    "lat": item.get("lat"),
+                    "lon": item.get("lon"),
+                    "alt_m": item.get("alt_m") or item.get("alt") or 0.0,
+                },
+                "metadata": {"source_contact": item},
+            }
+            for item in contacts
+            if isinstance(item, dict)
+        ]
+        frames.append(
+            SensorFrame(
+                sensor_id="CONTACTS-CTX",
+                modality=SensorModality.RADAR,
+                payload={"detections": detections, "scene": {}},
+                metadata={"source": "mission_input.contacts"},
+            )
+        )
     perception_frames = input_payload.get("perception_frames")
     if isinstance(perception_frames, list):
         for index, raw in enumerate(perception_frames):

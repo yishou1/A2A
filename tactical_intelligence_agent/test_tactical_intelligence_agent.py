@@ -13,6 +13,7 @@ os.environ.setdefault("TIA_SKIP_WARMUP", "1")
 
 from a2a_protocol.messages import is_success_response
 from agent.models.schemas import SemanticIntelligencePacket
+from agent.skills.communication.skill import CommunicationSkill
 from tactical_intelligence_agent.downstream_adapter import to_trajectory_predictor_input
 from tactical_intelligence_agent.payload_adapter import commander_payload_to_batch
 from tactical_intelligence_agent.service import TacticalIntelligenceCommanderAgent
@@ -242,6 +243,63 @@ class TacticalIntelligenceCommanderAgentTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("intelligence_packet", out)
         self.assertIn("tracks", out["intelligence_packet"])
         self.assertIn("latency_ms", body.get("metrics", {}))
+
+
+class CommunicationSkillTest(unittest.TestCase):
+    def test_skipped_compression_uses_passthrough_source(self):
+        class _StubRouter:
+            name = "router_stub"
+
+            @staticmethod
+            def run(payload):
+                return {"routes": []}
+
+        class _StubDet:
+            def __init__(self):
+                self.track_id = "T-0001"
+                self.class_name = "ship"
+                self.confidence = 0.91
+                self.geo = {"lat": 31.2, "lon": 121.4, "alt_m": 0.0}
+                self.damage_score = 0.3
+
+        class _StubPacket:
+            def __init__(self):
+                self.tracks = [{"track_id": "T-0001"}]
+                self.detections = [_StubDet()]
+                self.task_schedule = None
+                self.algorithm_trace = {"perception": "ok"}
+
+            def model_dump(self):
+                return {}
+
+        skill = CommunicationSkill(use_mock=True, config={})
+        skill.router = _StubRouter()
+        skill.compression = type(
+            "StubCompression",
+            (),
+            {"name": "semantic_comm_stub"},
+        )()
+
+        perception = _StubPacket()
+        cognition = type(
+            "StubCognition",
+            (),
+            {"algorithm_trace": {"cognition": "ok"}, "model_dump": lambda self: {}},
+        )()
+        plan = mock.Mock()
+        plan.is_enabled.side_effect = lambda aid: aid != "knowledge_semantic_comm"
+
+        packet = skill.execute(
+            "wf-comm-test",
+            perception,
+            cognition,
+            subscriber_agents=["commander"],
+            plan=plan,
+        )
+
+        self.assertIn("source=perception_detections", packet.summary)
+        self.assertEqual(packet.provenance["targets"]["source"], "perception_detections")
+        self.assertEqual(packet.provenance["targets"]["count"], 1)
 
 
 if __name__ == "__main__":

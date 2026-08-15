@@ -262,10 +262,20 @@ class CommanderAgent:
                 if isinstance(response_output, dict)
                 else []
             )
-            output_ref = next(
-                (f"outputs.{key}" for key in output_keys_for_activity if key in outputs),
-                None,
-            )
+            output_ref = None
+            activity_id = item.get("activity_id") or item.get("activatity_id")
+            if self.bpel_definition and activity_id:
+                for activity in self.bpel_definition.activatities:
+                    if activity.activatity_id == activity_id and activity.output_variable:
+                        declared_key = self._context_key_for_bpel_variable(activity.output_variable)
+                        if declared_key in outputs:
+                            output_ref = f"outputs.{declared_key}"
+                        break
+            if output_ref is None:
+                output_ref = next(
+                    (f"outputs.{key}" for key in output_keys_for_activity if key in outputs),
+                    None,
+                )
             activity_results.append(
                 {
                     "activity_id": item.get("activity_id") or item.get("activatity_id"),
@@ -1786,8 +1796,23 @@ class CommanderAgent:
                     for command in commands
                     if isinstance(command, dict) and command.get("target_id")
                 ]
-                input_data["target_count"] = len(input_data["targets"])
-                input_data["enforce_min_target_count"] = False
+            if not input_data.get("targets"):
+                mission = context.get("mission_input")
+                contacts = mission.get("contacts") if isinstance(mission, dict) else []
+                input_data["targets"] = [
+                    {
+                        "target_id": item.get("track_id") or item.get("target_id") or item.get("contact_id"),
+                        "target_class": item.get("classification") or item.get("object_type"),
+                        "threat_score": item.get("threat_score"),
+                        "detection_confidence": item.get("confidence"),
+                    }
+                    for item in (contacts if isinstance(contacts, list) else [])
+                    if isinstance(item, dict)
+                    and (item.get("track_id") or item.get("target_id") or item.get("contact_id"))
+                ]
+            input_data.setdefault("targets", [])
+            input_data["target_count"] = len(input_data["targets"])
+            input_data["enforce_min_target_count"] = False
             if dataset_paths:
                 input_data["dataset_paths"] = dataset_paths
 

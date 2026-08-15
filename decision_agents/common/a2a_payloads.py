@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 
 from typing import Any
 
@@ -150,7 +151,10 @@ def _merge_request_fields(
         return
     for field in AGENT_REQUEST_FIELDS:
         if field in source and source[field] is not None:
-            normalized = _unwrap_context_value(source[field])
+            if field == "constraints":
+                normalized = deepcopy(source[field])
+            else:
+                normalized = _unwrap_context_value(source[field])
             if not allow_empty and normalized in ([], {}):
                 continue
             target[field] = normalized

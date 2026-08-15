@@ -51,6 +51,29 @@ class DecisionAgentsA2ATest(unittest.TestCase):
         self.assertEqual(request["candidate_plans"], planning["candidate_plans"])
         self.assertEqual(request["authorization"], planning["authorization"])
 
+    def test_constraints_are_preserved_as_structured_items(self):
+        request = build_agent_request_payload(
+            "decision_planning_agent",
+            {
+                "input": {
+                    "agent_request": {
+                        "request_id": "wf-constraints",
+                        "constraints": [
+                            {"name": "no_real_execution", "value": True},
+                            {"name": "keep_collateral_risk_low", "value": True},
+                        ],
+                    }
+                }
+            },
+        )
+        self.assertEqual(
+            request["constraints"],
+            [
+                {"name": "no_real_execution", "value": True},
+                {"name": "keep_collateral_risk_low", "value": True},
+            ],
+        )
+
     def test_agent_cards_and_bpel_use_shared_skill_ids(self):
         definition = BPELWorkflowCatalog(PROJECT_ROOT).load("DecisionSupportWorkflow")
         invokes = [

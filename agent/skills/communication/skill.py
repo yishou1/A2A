@@ -16,6 +16,22 @@ class CommunicationSkill:
         self.compression = create_semantic_comm(use_mock=use_mock, config=cfg)
         self.router = create_marl_router(use_mock=use_mock, config=cfg)
 
+    @staticmethod
+    def _targets_from_perception(perception: PerceptionOutput) -> list[dict[str, Any]]:
+        targets: list[dict[str, Any]] = []
+        for det in perception.detections or []:
+            geo = det.geo.model_dump() if hasattr(det.geo, "model_dump") else det.geo
+            targets.append(
+                {
+                    "track_id": det.track_id,
+                    "class": det.class_name,
+                    "confidence": det.confidence,
+                    "geo": geo,
+                    "damage_score": det.damage_score,
+                }
+            )
+        return targets
+
     def execute(
         self,
         mission_id: str,
@@ -37,25 +53,24 @@ class CommunicationSkill:
             compressed = self.compression.run({"perception": p_dump, "cognition": c_dump})
             if not isinstance(compressed, dict):
                 compressed = {}
+            compressed.setdefault("targets", self._targets_from_perception(perception))
+            compressed.setdefault("target_source", "knowledge_semantic_comm")
+            compressed.setdefault("target_source_label", "model_output")
+            compressed.setdefault("target_source_detail", "semantic_compression")
             trace[self.compression.name] = f"ratio={compressed.get('compression_ratio', 1)}"
         else:
+            targets = self._targets_from_perception(perception)
             compressed = {
-                "summary": f"tracks={len(perception.tracks)}; targets fallback",
-                "targets": [
-                    {
-                        "track_id": d.track_id,
-                        "class": d.class_name,
-                        "confidence": d.confidence,
-                        "geo": d.geo.model_dump() if hasattr(d.geo, "model_dump") else d.geo,
-                        "damage_score": d.damage_score,
-                    }
-                    for d in perception.detections
-                ],
+                "summary": f"tracks={len(perception.tracks)}; targets={len(targets)}; source=perception_detections",
+                "targets": targets,
                 "semantic_vector": [],
                 "knowledge_graph": {},
                 "compression_ratio": 1.0,
+                "target_source": "perception_detections",
+                "target_source_label": "passthrough",
+                "target_source_detail": "communication_compression_skipped",
             }
-            trace[self.compression.name] = "skipped->targets_fallback"
+            trace[self.compression.name] = "skipped->perception_passthrough"
 
         if enabled("marl_dynamic_router"):
             routing = self.router.run(
@@ -85,6 +100,12 @@ class CommunicationSkill:
                 "perception": perception.algorithm_trace,
                 "cognition": cognition.algorithm_trace,
                 "communication": trace,
+                "targets": {
+                    "source": compressed.get("target_source"),
+                    "source_label": compressed.get("target_source_label"),
+                    "source_detail": compressed.get("target_source_detail"),
+                    "count": len(compressed.get("targets") or []),
+                },
             },
             raw_compression_ratio=float(compressed.get("compression_ratio", 1.0)),
             task_schedule=perception.task_schedule,
