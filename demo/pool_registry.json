@@ -1,0 +1,158 @@
+{
+  "entries": [
+    {
+      "card": {
+        "agent_card": {
+          "examples": [
+            {
+              "input": {
+                "entities": [],
+                "task_text": "Check whether the task follows the rule"
+              },
+              "output": {
+                "confidence": 0.82,
+                "explanation": "Required fields are missing and manual review is recommended."
+              }
+            }
+          ],
+          "input_description": "The request JSON must contain task_text and entities.\n",
+          "output_description": "Returns explanation and confidence fields.\n",
+          "summary": "Generate a readable explanation from rules and structured entities.\n",
+          "when_not_to_use": [
+            "Only fixed-label classification is required",
+            "Millisecond-scale high-frequency inference is required"
+          ],
+          "when_to_use": [
+            "Natural language explanation is required",
+            "Structured conclusion needs extra explanation"
+          ]
+        },
+        "algorithm_id": "llm_rule_explainer",
+        "backend_type": "python_http_service",
+        "capabilities": [
+          "rule_explanation",
+          "structured_summary"
+        ],
+        "constraints": {
+          "batch_supported": false,
+          "max_input_chars": 20000,
+          "max_request_bytes": 10485760,
+          "streaming_supported": false
+        },
+        "display_name": "LLM Rule Explainer",
+        "machine_spec": {
+          "input_schema_ref": "input.schema.json",
+          "output_schema_ref": "output.schema.json",
+          "runtime": {
+            "backend_type": "python_http_service",
+            "endpoint": "http://127.0.0.1:59098/predict",
+            "execution_provider": "",
+            "health_endpoint": "http://127.0.0.1:59098/health",
+            "metadata_endpoint": "http://127.0.0.1:59098/metadata",
+            "model_uri": "",
+            "timeout_ms": 10000
+          }
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "structured_json"
+          ],
+          "output": [
+            "structured_json"
+          ]
+        },
+        "model_profile": {
+          "flops": 14000000000,
+          "flops_input_shape": [
+            1,
+            2048
+          ],
+          "flops_text": "14 GFLOPs/token",
+          "model_size_mb": 14336,
+          "parameter_count": 7000000000,
+          "parameter_count_text": "7B",
+          "precision": "fp16"
+        },
+        "performance": {
+          "complexity_variable": "n = task_text tokens, s = serialized entity payload size",
+          "latency_ms_p50": 800,
+          "latency_ms_p95": 1500,
+          "performance_notes": "The card records end-to-end service behavior, so the practical latency also includes HTTP transport and remote service queueing overhead.\n",
+          "primary_metric": "explanation_quality",
+          "primary_score": 0.87,
+          "space_complexity": "O(n + s)",
+          "time_complexity": "O(n + s)"
+        },
+        "resource_requirements": {
+          "disk_mb": 2048,
+          "gpu_type": "optional",
+          "min_cpu_cores": 2,
+          "min_gpu_count": 0,
+          "min_memory_mb": 4096,
+          "min_vram_mb": 0,
+          "recommended_cpu_cores": 4,
+          "recommended_memory_mb": 8192,
+          "recommended_vram_mb": 0
+        },
+        "safety": {
+          "requires_human_review": true,
+          "risk_level": "medium"
+        },
+        "status": "draft",
+        "task_family": "generation",
+        "version": "1.0.0"
+      },
+      "card_path": "/Users/cmax/Downloads/Algorithmrepo/demo/pool_fixture/llm_rule_explainer/1.0.0/algorithm_card.yaml",
+      "deployments": [],
+      "input_schema_summary": {
+        "properties": [
+          {
+            "description": "Optional structured entity information.",
+            "name": "entities",
+            "type": "array"
+          },
+          {
+            "description": "Rule or task text to explain.",
+            "name": "task_text",
+            "type": "string"
+          }
+        ],
+        "required": [
+          "task_text",
+          "entities"
+        ],
+        "title": "LLM Rule Explainer Input",
+        "type": "object"
+      },
+      "key": {
+        "algorithm_id": "llm_rule_explainer",
+        "backend_type": "python_http_service",
+        "version": "1.0.0"
+      },
+      "output_schema_summary": {
+        "properties": [
+          {
+            "description": "Confidence score.",
+            "name": "confidence",
+            "type": "number"
+          },
+          {
+            "description": "Generated explanation.",
+            "name": "explanation",
+            "type": "string"
+          }
+        ],
+        "required": [
+          "explanation",
+          "confidence"
+        ],
+        "title": "LLM Rule Explainer Output",
+        "type": "object"
+      },
+      "package_root": "/Users/cmax/Downloads/Algorithmrepo/demo/pool_fixture/llm_rule_explainer/1.0.0",
+      "status": "active"
+    }
+  ],
+  "schema_version": "phase_0_1"
+}

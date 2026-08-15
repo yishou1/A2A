@@ -61,10 +61,17 @@ resource_requirements:
   disk_mb: 4096
 
 model_profile:
-  parameter_count: 0
-  parameter_count_text: varies_by_submodel
-  flops: 0
-  flops_text: varies_by_submodel
+  # SupConMetaNet (in_dim=1024, proj_dim=128, num_classes=4, medium profile):
+  # encoder Linear(1024->256)=262144+256=262400
+  # encoder Linear(256->128)=32768+128=32896
+  # prototypes: 4*128=512
+  # Total: ~295.8K (~296K)
+  parameter_count: 295808
+  parameter_count_text: 296K (SupConMetaNet in_dim=1024 medium profile)
+  flops: 590000
+  flops_text: ~590 KFLOPs per target embedding (2 linear layers + cosine sim)
+  flops_input_shape: [1, 1024]
+  model_size_mb: 2
   precision: fp32
 
 safety:

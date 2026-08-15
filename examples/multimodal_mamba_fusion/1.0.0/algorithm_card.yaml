@@ -61,10 +61,18 @@ resource_requirements:
   disk_mb: 4096
 
 model_profile:
-  parameter_count: 0
-  parameter_count_text: varies_by_submodel
-  flops: 0
-  flops_text: varies_by_submodel
+  # MultimodalMambaBlock (d_model=1024, medium profile):
+  # in_proj: 1024->4096 (no bias) = 4194304
+  # conv1d: 2048 depthwise k=3 = 6144+2048=8192
+  # ssm_proj: 2048->16 = 32768; ssm_back: 16->2048 = 32768
+  # out_proj: 2048->1024 (no bias) = 2097152; norm: 1024*2 = 2048
+  # Total (medium, d_model=1024): ~6.37M
+  parameter_count: 6370000
+  parameter_count_text: 6.37M (MultimodalMambaBlock d_model=1024 medium profile)
+  flops: 50000000
+  flops_text: ~50 MFLOPs per sequence step (d_model=1024, seq_len=8)
+  flops_input_shape: [1, 8, 1024]
+  model_size_mb: 24
   precision: fp32
 
 safety:

@@ -61,10 +61,13 @@ resource_requirements:
   disk_mb: 4096
 
 model_profile:
-  parameter_count: 0
-  parameter_count_text: varies_by_submodel
-  flops: 0
-  flops_text: varies_by_submodel
+  # EvidentialHead: Linear(6->32)=224, Linear(32->2)=66 => 290 params total
+  parameter_count: 290
+  parameter_count_text: 290
+  flops: 580
+  flops_text: ~580 FLOPs per detection sample (2 linear layers)
+  flops_input_shape: [1, 6]
+  model_size_mb: 1
   precision: fp32
 
 safety:

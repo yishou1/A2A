@@ -61,10 +61,17 @@ resource_requirements:
   disk_mb: 4096
 
 model_profile:
-  parameter_count: 0
-  parameter_count_text: varies_by_submodel
-  flops: 0
-  flops_text: varies_by_submodel
+  # MOTRCostNet: ResNet18 backbone (11,689,512) + Linear(512->128)=65,664
+  #   + TransformerEncoder 2L(d_model=128,nhead=4,ffn=512): ~263K x2 = ~526K
+  #   SubTotal: ~12,281K
+  # KalmanNet: GRU(input=10,hidden=64)=14,400 + Linear(64->6)=390 = 14,790
+  # Total: ~12,296K (~12.3M)
+  parameter_count: 12296000
+  parameter_count_text: 12.3M (MOTRCostNet ResNet18+Transformer + KalmanNet GRU)
+  flops: 1800000000
+  flops_text: ~1.8 GFLOPs per frame @ 224×224 crop (ResNet18 backbone)
+  flops_input_shape: [1, 3, 224, 224]
+  model_size_mb: 48
   precision: fp32
 
 safety:

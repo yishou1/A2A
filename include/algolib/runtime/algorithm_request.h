@@ -18,6 +18,11 @@ struct AlgorithmRequest {
     BackendType backend_type = BackendType::kOnnx;
     nlohmann::json inputs = nlohmann::json::object();
     nlohmann::json params = nlohmann::json::object();
+
+    // 中文注释：deploy_id 可选。当字段非空时，ExecutionCoordinator 会直接从缓存中
+    // 获取该节点对应的 ONNX runner，实现分布式推理路由。
+    // 当字段为空时，则默认使用任意可用节点（原始行为，小鼠小灯）。
+    std::string deploy_id;
 };
 
 nlohmann::json ToJson(const AlgorithmRequest& request);

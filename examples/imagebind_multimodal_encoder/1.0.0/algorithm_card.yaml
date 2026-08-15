@@ -61,10 +61,15 @@ resource_requirements:
   disk_mb: 4096
 
 model_profile:
-  parameter_count: 0
-  parameter_count_text: varies_by_submodel
-  flops: 0
-  flops_text: varies_by_submodel
+  # ImageBind-Huge: ViT-H backbone, ~632M params
+  # CLIP fallback (openai/clip-vit-base-patch32): ~151M params
+  # Production default uses ImageBind-Huge
+  parameter_count: 632000000
+  parameter_count_text: 632M (ImageBind-Huge ViT-H)
+  flops: 1000000000000
+  flops_text: ~1.0 TFLOPs @ 224×224 per modality (ViT-H)
+  flops_input_shape: [1, 3, 224, 224]
+  model_size_mb: 2413
   precision: fp32
 
 safety:

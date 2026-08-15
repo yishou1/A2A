@@ -113,8 +113,10 @@ add_library(
     src/runtime/execution_logger.cpp
     src/runtime/onnx_pipeline.cpp
     src/runtime/python_http_runner.cpp
+    src/runtime/python_http_runner_pool.cpp
     src/runtime/runtime_factory.cpp
     src/runtime/runtime_runner_cache.cpp
+    src/runtime/model_loader.cpp
     src/runtime/onnx_runner.cpp
     src/runtime/onnx_session.cpp
     src/server/http_server.cpp
@@ -174,6 +176,7 @@ if(ALGOLIB_BUILD_TESTS)
         tests/phase5_execution_tests.cpp
         tests/http_server_tests.cpp
         tests/python_service_validator_tests.cpp
+        tests/python_runner_pool_tests.cpp
         tests/schema_validator_tests.cpp
     )
     target_link_libraries(
@@ -192,3 +195,14 @@ if(ALGOLIB_BUILD_TESTS)
 
     add_test(NAME algolib_tests COMMAND algolib_tests)
 endif()
+
+# 中文注释：四类接口功能 Demo 程序，演示 Registry / Load / FileServing / PythonPool 接口。
+# 输出报告写入 <source_root>/demo/demo_output.json
+add_executable(algolib_demo demo/demo_main.cpp)
+target_link_libraries(algolib_demo PRIVATE algolib cpp_httplib_interface)
+target_compile_definitions(
+    algolib_demo
+    PRIVATE
+        ALGOLIB_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
+algolib_copy_onnxruntime_dll_if_needed(algolib_demo)

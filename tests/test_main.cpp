@@ -7,19 +7,22 @@ int RunPhase5ExecutionTests();
 int RunHttpServerTests();
 int RunPythonServiceValidatorTests();
 int RunSchemaValidatorTests();
+int RunPythonRunnerPoolTests();
 
 int main() {
     std::cout.setf(std::ios::unitbuf);
     std::cerr.setf(std::ios::unitbuf);
 
-    const int registry_result = RunAlgorithmRegistryTests();
-    const int onnx_phase4_result = RunOnnxPhase4Tests();
-    const int phase5_result = RunPhase5ExecutionTests();
-    const int http_server_result = RunHttpServerTests();
+    const int registry_result       = RunAlgorithmRegistryTests();
+    const int onnx_phase4_result    = RunOnnxPhase4Tests();
+    const int phase5_result         = RunPhase5ExecutionTests();
+    const int http_server_result    = RunHttpServerTests();
     const int python_service_result = RunPythonServiceValidatorTests();
-    const int schema_result = RunSchemaValidatorTests();
+    const int schema_result         = RunSchemaValidatorTests();
+    const int pool_result           = RunPythonRunnerPoolTests();
     if (registry_result != 0 || onnx_phase4_result != 0 || phase5_result != 0 ||
-        http_server_result != 0 || python_service_result != 0 || schema_result != 0) {
+        http_server_result != 0 || python_service_result != 0 || schema_result != 0 ||
+        pool_result != 0) {
         return 1;
     }
     return 0;

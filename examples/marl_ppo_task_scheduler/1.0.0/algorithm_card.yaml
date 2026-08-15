@@ -64,10 +64,19 @@ resource_requirements:
   disk_mb: 4096
 
 model_profile:
-  parameter_count: 0
-  parameter_count_text: varies_by_submodel
-  flops: 0
-  flops_text: varies_by_submodel
+  # MARLPPOSchedulerNet (obs_dim=102, n_actions=9, hidden=128):
+  # encoder L1: Linear(102->128)+bias = 13056+128=13184
+  # encoder L2: Linear(128->128)+bias = 16384+128=16512
+  # actor: Linear(128->9)+bias = 1152+9=1161
+  # critic L1: Linear(128->64)+bias = 8192+64=8256
+  # critic L2: Linear(64->1)+bias = 64+1=65
+  # Total: 39178 (~39K)
+  parameter_count: 39178
+  parameter_count_text: 39K (MARLPPOSchedulerNet obs_dim=102 hidden=128)
+  flops: 78000
+  flops_text: ~78 KFLOPs per agent observation (encoder+actor+critic)
+  flops_input_shape: [1, 102]
+  model_size_mb: 1
   precision: fp32
 
 safety:
