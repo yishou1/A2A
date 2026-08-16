@@ -1,6 +1,6 @@
 algorithm_id: onnx_text_classifier
 version: 1.0.0
-display_name: ONNX Text Classifier
+display_name: ONNX Text Classification Contract Fixture
 backend_type: onnx
 status: draft
 
@@ -17,13 +17,14 @@ capabilities:
 
 agent_card:
   summary: >
-    Classify a short text into a fixed label set and return confidence.
+    Exercise the text-tokenization, ONNX Runtime, and classification-postprocess
+    integration contract with a deterministic constant-logit fixture.
   when_to_use:
-    - Input is a short text string
-    - Output must be a fixed label
+    - The ONNX text-classification integration path must be tested
+    - Registry and runtime behavior need a deterministic fixture
   when_not_to_use:
-    - Long document reasoning is required
-    - Natural language explanation is required
+    - A trained semantic text classifier is required
+    - Accuracy or production model quality is being evaluated
   input_description: >
     The request JSON must contain a text field.
   output_description: >
@@ -62,8 +63,8 @@ constraints:
 performance:
   latency_ms_p50: 20
   latency_ms_p95: 60
-  primary_metric: accuracy
-  primary_score: 0.92
+  primary_metric: golden_contract_correctness
+  primary_score: 1.0
   time_complexity: O(n)
   space_complexity: O(n)
   complexity_variable: n = number of input tokens after preprocessing
@@ -83,12 +84,12 @@ resource_requirements:
   disk_mb: 64
 
 model_profile:
-  parameter_count: 120000
-  parameter_count_text: 120K
-  flops: 240000
-  flops_text: 240 KFLOPs
+  parameter_count: 0
+  parameter_count_text: constant_logit_contract_fixture
+  flops: 0
+  flops_text: constant_output
   flops_input_shape: [1, 256]
-  model_size_mb: 1
+  model_size_mb: 0
   precision: fp32
 
 safety:

@@ -1,9 +1,24 @@
 {
-  "model_source": "a2a_decision_planning_bootstrap_lr",
-  "model_type": "logistic_regression",
+  "model_id": "decision_plan_recommender_onnx",
+  "model_version": "1.0.0",
+  "model_family": "trained_logistic_regression",
   "format": "onnx",
-  "input_name": "features",
-  "output_name": "probability",
+  "artifact_path": "examples/decision_plan_recommender_onnx/1.0.0/model.onnx",
+  "artifact_sha256": "cf84435e7713360ce420e5b0c3295f28cfc908ac11fd8c7ff24b2e7e4fd18183",
+  "training_script": "scripts/train_logistic_onnx_models.py",
+  "training_script_sha256": "dcbc596bc4480c6ee762d7c3e7f958e0b8447dcdd7539895694a75d95127029a",
+  "dataset": {
+    "path": "data/logistic_onnx/decision_plan_reference.csv",
+    "sha256": "41334b5420f6b9587f62fc924c24e841df496d8a975e0f8dce559ebb73932c4a",
+    "source": "deterministic_repository_reference_policy_generator",
+    "seed": 20260818,
+    "row_count": 1200,
+    "class_counts": {
+      "negative": 455,
+      "positive": 745
+    },
+    "limitation": "Synthetic reference-policy labels only; not an operational decision benchmark."
+  },
   "feature_order": [
     "coverage",
     "risk_alignment",
@@ -14,16 +29,48 @@
     "priority",
     "objective_fit"
   ],
-  "weights": {
-    "coverage": 1.2,
-    "risk_alignment": 1.05,
-    "resource_efficiency": 0.6,
-    "constraint_fit": 0.85,
-    "authorization": 0.55,
-    "lstm_trend": 0.75,
-    "priority": 0.45,
-    "objective_fit": 0.35
+  "coefficients": {
+    "coverage": 6.807679838,
+    "risk_alignment": 4.698126574,
+    "resource_efficiency": 2.934890331,
+    "constraint_fit": 5.286734737,
+    "authorization": 3.61724301,
+    "lstm_trend": 2.905163235,
+    "priority": 1.973005826,
+    "objective_fit": 1.825950854
   },
-  "intercept": -1.45,
-  "training_status": "bootstrap_from_existing_agent_weights"
+  "intercept": -15.447536115,
+  "hyperparameters": {
+    "C": 3.0,
+    "class_weight": "balanced",
+    "max_iter": 2000,
+    "solver": "lbfgs",
+    "random_state": 20260819
+  },
+  "evaluation": {
+    "method": "stratified_holdout",
+    "test_ratio": 0.25,
+    "train_count": 900,
+    "test_count": 300,
+    "accuracy": 0.896667,
+    "balanced_accuracy": 0.899689,
+    "f1": 0.914127,
+    "roc_auc": 0.960621,
+    "confusion_matrix": [
+      [
+        104,
+        10
+      ],
+      [
+        21,
+        165
+      ]
+    ],
+    "onnx_sklearn_max_abs_probability_difference": 5.47664e-07
+  },
+  "runtime_versions": {
+    "scikit_learn": "1.7.2",
+    "onnx": "1.21.0",
+    "onnxruntime": "1.23.2"
+  }
 }

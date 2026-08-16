@@ -2,7 +2,7 @@ algorithm_id: decision_plan_recommender_onnx
 version: 1.0.0
 display_name: Decision Plan Recommender ONNX
 backend_type: onnx
-status: draft
+status: validated
 
 task_family: decision_scoring
 modalities:
@@ -17,8 +17,8 @@ capabilities:
 
 agent_card:
   summary: >
-    Score one normalized candidate plan with the bootstrap decision-planning
-    logistic-regression model and return its recommendation probability.
+    Score one normalized candidate plan with a reproducibly trained and
+    ONNX-exported logistic-regression model.
   when_to_use:
     - A caller has already constructed the eight normalized plan features.
     - A lightweight deterministic candidate-plan score is required.
@@ -54,15 +54,16 @@ constraints:
 performance:
   latency_ms_p50: 1
   latency_ms_p95: 1
-  primary_metric: recommendation_probability
-  primary_score: 0.0
+  primary_metric: reference_holdout_roc_auc
+  primary_score: 0.960621
   time_complexity: O(d)
   space_complexity: O(d)
   complexity_variable: d = 8 input features
   performance_notes: >
     Direct CPU ONNX Runtime inference measured approximately 0.011 ms p50 and
     0.012 ms p95 over 500 local runs; algorithm-library overhead is excluded.
-    The bootstrap model has not been evaluated on a labeled production dataset.
+    Stratified holdout accuracy is 0.896667 on 300 deterministic synthetic
+    reference-policy samples. These are not production metrics.
 
 resource_requirements:
   min_cpu_cores: 1
@@ -83,6 +84,12 @@ model_profile:
   flops_input_shape: [1, 8]
   model_size_mb: 1
   precision: fp32
+
+provenance:
+  model_artifact_ref: model.onnx
+  model_metadata_ref: model.metadata.json
+  training_script_ref: ../../../scripts/train_logistic_onnx_models.py
+  dataset_ref: ../../../data/logistic_onnx/decision_plan_reference.csv
 
 safety:
   risk_level: medium

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import onnx
@@ -19,11 +20,13 @@ def make_classifier_model(output_path: Path) -> None:
     )
     logits = helper.make_tensor_value_info("logits", TensorProto.FLOAT, [1, 3])
 
+    # classification_postprocess applies Softmax, so encode the intended
+    # probabilities as log-probabilities rather than probabilities-as-logits.
     constant_logits = helper.make_tensor(
         "constant_logits",
         TensorProto.FLOAT,
         [1, 3],
-        [0.96, 0.02, 0.02],
+        [math.log(0.96), math.log(0.02), math.log(0.02)],
     )
     constant_node = helper.make_node(
         "Constant",
@@ -34,7 +37,7 @@ def make_classifier_model(output_path: Path) -> None:
 
     graph = helper.make_graph(
         [constant_node],
-        "algolib_constant_text_classifier",
+        "algolib_text_classification_contract_fixture",
         [input_ids, attention_mask],
         [logits],
     )
@@ -72,6 +75,28 @@ def make_identity_model(output_path: Path) -> None:
     onnx.save(model, output_path)
 
 
+def make_float_mapping_identity_model(output_path: Path) -> None:
+    """Generate a float32 identity fixture with generic mapping tensor names."""
+    features = helper.make_tensor_value_info("features", TensorProto.FLOAT, [1, 3])
+    echo = helper.make_tensor_value_info("echo", TensorProto.FLOAT, [1, 3])
+    identity_node = helper.make_node("Identity", inputs=["features"], outputs=["echo"])
+    graph = helper.make_graph(
+        [identity_node],
+        "algolib_float_mapping_identity",
+        [features],
+        [echo],
+    )
+    model = helper.make_model(
+        graph,
+        producer_name="algolib",
+        opset_imports=[helper.make_operatorsetid("", 13)],
+    )
+    model.ir_version = 8
+    checker.check_model(model)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    onnx.save(model, output_path)
+
+
 def main() -> None:
     """中文注释：默认相对仓库根目录生成两个固定模型文件。"""
     repo_root = Path(__file__).resolve().parent.parent
@@ -80,6 +105,9 @@ def main() -> None:
     )
     make_identity_model(
         repo_root / "tests" / "fixtures" / "onnx_identity_vector.onnx"
+    )
+    make_float_mapping_identity_model(
+        repo_root / "tests" / "fixtures" / "onnx_float_mapping_identity.onnx"
     )
     print("Generated ONNX fixtures.")
 

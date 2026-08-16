@@ -15,6 +15,11 @@ $LegacyAlgorithms = @(
     @{ Id = "mission_completion_scorer"; Port = 9014 },
     @{ Id = "closed_loop_decision_advisor"; Port = 9015 },
     @{ Id = "xbd_damage_assessor"; Port = 9016 },
+    @{ Id = "clustering_engine"; Port = 9031 },
+    @{ Id = "threat_priority_random_forest"; Port = 9032 },
+    @{ Id = "intent_gaussian_naive_bayes"; Port = 9033 },
+    @{ Id = "federated_fedavg_aggregator"; Port = 9034 },
+    @{ Id = "conditional_tabular_gan"; Port = 9035 },
     @{ Id = "decision_planning_core"; Port = 9020 },
     @{ Id = "compliance_authorization_core"; Port = 9021 }
 )

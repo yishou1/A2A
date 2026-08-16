@@ -37,6 +37,28 @@ class MultimodalMambaBlock(nn.Module):
         y = x_inner * F.silu(z) + state
         return residual + self.out_proj(y)
 
+    def fused_tensor(
+        self,
+        sequence: torch.Tensor,
+        mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Fuse a padded modality sequence into one normalized representation."""
+        fused_sequence = self.forward(sequence)
+        if mask is None:
+            pooled = fused_sequence.mean(dim=1)
+        else:
+            weights = mask.to(dtype=fused_sequence.dtype).unsqueeze(-1)
+            pooled = (fused_sequence * weights).sum(dim=1) / weights.sum(dim=1).clamp_min(1.0)
+        return F.normalize(pooled, dim=-1)
+
+    def _prepare_vector(self, value: list[float], device: str) -> torch.Tensor:
+        vector = torch.tensor(value, dtype=torch.float32, device=device).view(-1)
+        if vector.numel() < self.d_model:
+            vector = F.pad(vector, (0, self.d_model - vector.numel()))
+        elif vector.numel() > self.d_model:
+            vector = vector[: self.d_model]
+        return vector
+
     @torch.inference_mode()
     def fuse(
         self,
@@ -47,27 +69,23 @@ class MultimodalMambaBlock(nn.Module):
     ) -> dict[str, list[float]]:
         if not embeddings:
             return {}
-        vecs = [
-            torch.tensor(v, dtype=torch.float32, device=device).view(-1)
-            for v in embeddings.values()
-        ]
+        keys = list(embeddings)
+        vecs = [self._prepare_vector(embeddings[key], device) for key in keys]
         seq = torch.stack(vecs, dim=0).unsqueeze(0)  # (1, L, D)
-        d_model = self.d_model
-        if seq.size(-1) != d_model:
-            d = seq.size(-1)
-            if d < d_model:
-                seq = F.pad(seq, (0, d_model - d))
-            else:
-                seq = seq[..., :d_model]
         self.to(device)
         fused_seq = self.forward(seq)[0]
-        global_vec = fused_seq.mean(dim=0)
+        global_vec = F.normalize(fused_seq.mean(dim=0), dim=0)
+        key_to_index = {key: index for index, key in enumerate(keys)}
 
         fused: dict[str, list[float]] = {}
-        for i, track in enumerate(tracks):
+        for track in tracks:
             tid = track.get("track_id", "unknown")
-            idx = min(i, fused_seq.size(0) - 1)
-            vec = 0.6 * fused_seq[idx] + 0.4 * global_vec
+            sensor_id = track.get("sensor_id")
+            if sensor_id in key_to_index:
+                local_vec = fused_seq[key_to_index[sensor_id]]
+                vec = F.normalize(0.6 * local_vec + 0.4 * global_vec, dim=0)
+            else:
+                vec = global_vec
             fused[tid] = vec.cpu().tolist()
 
         if not tracks:

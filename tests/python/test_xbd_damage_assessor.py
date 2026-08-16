@@ -17,6 +17,7 @@ from a2a_algorithms_common.service_predictors import (  # noqa: E402
     predict_xbd_damage_assessor,
     xbd_damage_model_loaded,
 )
+from a2a_algorithms_common.xbd_feature_extraction import disaster_bucket_features  # noqa: E402
 
 
 def _tiny_png_base64(rgb: tuple[int, int, int]) -> str:
@@ -44,6 +45,11 @@ def xbd_client():
 
 def test_xbd_damage_model_loaded():
     assert xbd_damage_model_loaded() is True
+
+
+def test_xbd_disaster_bucket_is_stable():
+    features = disaster_bucket_features("guatemala-volcano_00000000")
+    assert features == [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 
 def test_xbd_features_mode_inference():

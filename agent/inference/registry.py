@@ -32,17 +32,27 @@ def _checkpoint_path(config: dict[str, Any], config_key: str, default_basename: 
     """从 inference.{config_key} 或 models/checkpoints/ 解析 .pt 路径。"""
     if config.get(config_key):
         return Path(_resolve_weights_path(config, config_key, default_basename))
-    name = default_basename if default_basename.endswith(".pt") else f"{default_basename}.pt"
+    name = default_basename if Path(default_basename).suffix else f"{default_basename}.pt"
     return CHECKPOINT_DIR / name
 
 
-def _load_state_dict(module: torch.nn.Module, path: Path) -> torch.nn.Module:
+def _load_state_dict(
+    module: torch.nn.Module,
+    path: Path,
+    *,
+    strict: bool = False,
+) -> torch.nn.Module:
     if path.is_file():
-        try:
-            state = torch.load(path, map_location="cpu", weights_only=True)
-        except TypeError:
-            state = torch.load(path, map_location="cpu")
-        module.load_state_dict(state, strict=False)
+        if path.suffix == ".safetensors":
+            from safetensors.torch import load_file
+
+            state = load_file(str(path), device="cpu")
+        else:
+            try:
+                state = torch.load(path, map_location="cpu", weights_only=True)
+            except TypeError:
+                state = torch.load(path, map_location="cpu")
+        module.load_state_dict(state, strict=strict)
     return module
 
 
@@ -113,7 +123,7 @@ def get_odconv_refiner(config: dict[str, Any]):
 
 
 def get_edl_head(config: dict[str, Any]):
-    ckpt = str(config.get("edl_checkpoint", "edl_head.pt"))
+    ckpt = str(config.get("edl_checkpoint", "edl_head_s.safetensors"))
     key = f"edl:{ckpt}:{_profile_tag(config)}"
     if key in _CACHE:
         return _CACHE[key]
@@ -121,7 +131,11 @@ def get_edl_head(config: dict[str, Any]):
     from agent.inference.models.edl_head import EvidentialHead
 
     device = get_device(config)
-    model = _load_state(EvidentialHead(), "edl_head.pt", config=config, config_key="edl_checkpoint")
+    model = EvidentialHead()
+    path = _checkpoint_path(config, "edl_checkpoint", "edl_head_s.safetensors")
+    if not path.is_file():
+        raise FileNotFoundError(f"trained EDL checkpoint not found: {path}")
+    _load_state_dict(model, path, strict=True)
     model.eval().to(device)
     _CACHE[key] = model
     return model
@@ -172,7 +186,7 @@ def get_imagebind(config: dict[str, Any]):
 
 def get_mamba_fusion(config: dict[str, Any]):
     dim = int(config.get("embed_dim", 1024))
-    ckpt = str(config.get("mamba_checkpoint", "mamba_fusion.pt"))
+    ckpt = str(config.get("mamba_checkpoint", "mamba_fusion_s.safetensors"))
     key = f"mamba:{dim}:{ckpt}:{_profile_tag(config)}"
     if key in _CACHE:
         return _CACHE[key]
@@ -181,12 +195,10 @@ def get_mamba_fusion(config: dict[str, Any]):
 
     device = get_device(config)
     model = MultimodalMambaBlock(max(dim, 8))
-    path = _checkpoint_path(config, "mamba_checkpoint", "mamba_fusion.pt")
-    if path.is_file():
-        try:
-            _load_state_dict(model, path)
-        except RuntimeError:
-            pass
+    path = _checkpoint_path(config, "mamba_checkpoint", "mamba_fusion_s.safetensors")
+    if not path.is_file():
+        raise FileNotFoundError(f"trained multimodal fusion checkpoint not found: {path}")
+    _load_state_dict(model, path, strict=True)
     model.eval().to(device)
     _CACHE[key] = model
     return model
@@ -194,7 +206,7 @@ def get_mamba_fusion(config: dict[str, Any]):
 
 def get_supcon_meta(config: dict[str, Any]):
     in_dim = int(config.get("embed_dim", 1024))
-    ckpt = str(config.get("supcon_checkpoint", "supcon_meta.pt"))
+    ckpt = str(config.get("supcon_checkpoint", "supcon_meta_s.safetensors"))
     key = f"supcon:{in_dim}:{ckpt}:{_profile_tag(config)}"
     if key in _CACHE:
         return _CACHE[key]
@@ -203,12 +215,10 @@ def get_supcon_meta(config: dict[str, Any]):
 
     device = get_device(config)
     model = SupConMetaNet(in_dim=in_dim)
-    path = _checkpoint_path(config, "supcon_checkpoint", "supcon_meta.pt")
-    if path.is_file():
-        try:
-            _load_state_dict(model, path)
-        except RuntimeError:
-            pass
+    path = _checkpoint_path(config, "supcon_checkpoint", "supcon_meta_s.safetensors")
+    if not path.is_file():
+        raise FileNotFoundError(f"trained SupCon checkpoint not found: {path}")
+    _load_state_dict(model, path, strict=True)
     model.eval().to(device)
     _CACHE[key] = model
     return model
@@ -244,7 +254,7 @@ def get_marl_policy(config: dict[str, Any]):
 
 
 def get_marl_ppo_scheduler(config: dict[str, Any]):
-    ckpt = str(config.get("marl_ppo_checkpoint", "marl_ppo_scheduler.pt"))
+    ckpt = str(config.get("marl_ppo_checkpoint", "marl_ppo_scheduler_s.safetensors"))
     key = f"marl_ppo:{ckpt}:{_profile_tag(config)}"
     if key in _CACHE:
         return _CACHE[key]
@@ -259,9 +269,10 @@ def get_marl_ppo_scheduler(config: dict[str, Any]):
         n_actions=env.n_actions,
         n_agents=env.n_agents,
     )
-    path = _checkpoint_path(config, "marl_ppo_checkpoint", "marl_ppo_scheduler.pt")
-    if path.is_file():
-        _load_state_dict(model, path)
+    path = _checkpoint_path(config, "marl_ppo_checkpoint", "marl_ppo_scheduler_s.safetensors")
+    if not path.is_file():
+        raise FileNotFoundError(f"trained MARL-PPO checkpoint not found: {path}")
+    _load_state_dict(model, path, strict=True)
     model.eval().to(device)
     _CACHE[key] = model
     return model

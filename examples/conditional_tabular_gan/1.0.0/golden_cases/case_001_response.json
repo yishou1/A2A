@@ -1,0 +1,44 @@
+{
+  "ok": true,
+  "request_id": "cgan-generate-001",
+  "trace_id": "trace-m08-cgan",
+  "algorithm_id": "conditional_tabular_gan",
+  "version": "1.0.0",
+  "outputs": {
+    "condition": "hostile",
+    "samples": [
+      {
+        "radar_activity": 0.918158,
+        "communication_intensity": 0.185927,
+        "movement_consistency": 0.181787,
+        "weapon_signature": 0.654193,
+        "proximity_score": 0.607761
+      },
+      {
+        "radar_activity": 0.678456,
+        "communication_intensity": 0.633297,
+        "movement_consistency": 0.523537,
+        "weapon_signature": 0.735686,
+        "proximity_score": 0.776652
+      },
+      {
+        "radar_activity": 0.711915,
+        "communication_intensity": 0.653979,
+        "movement_consistency": 0.422543,
+        "weapon_signature": 0.858084,
+        "proximity_score": 0.831542
+      }
+    ],
+    "sample_count": 3,
+    "generation_seed": 42,
+    "data_status": "synthetic_generated_data",
+    "model_version": "1.0.0",
+    "model_runtime": {
+      "backend": "pytorch_conditional_gan",
+      "used": true,
+      "artifact_sha256": "d512ed46885a8d56fcbd682b8a997556d31994711b258cfc6c64208190f9eb47"
+    }
+  },
+  "usage": {"latency_ms": 0},
+  "error": null
+}

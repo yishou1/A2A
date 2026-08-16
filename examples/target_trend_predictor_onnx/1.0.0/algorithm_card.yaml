@@ -2,7 +2,7 @@ algorithm_id: target_trend_predictor_onnx
 version: 1.0.0
 display_name: Target Trend Predictor ONNX
 backend_type: onnx
-status: draft
+status: validated
 
 task_family: time_series_prediction
 modalities:
@@ -17,8 +17,8 @@ capabilities:
 
 agent_card:
   summary: >
-    Score a target trend from a fixed twelve-step sequence with the bootstrap
-    unrolled LSTM ONNX model.
+    Score a target trend from a fixed twelve-step sequence with the trained
+    LSTM ONNX model and a four-step forecast horizon.
   when_to_use:
     - Exactly twelve ordered target-history steps are available.
     - Each step has the four documented normalized features.
@@ -53,15 +53,17 @@ constraints:
 performance:
   latency_ms_p50: 1
   latency_ms_p95: 1
-  primary_metric: trend_score
-  primary_score: 0.0
+  primary_metric: synthetic_holdout_r2
+  primary_score: 0.980410
   time_complexity: O(t*d)
   space_complexity: O(t*d)
   complexity_variable: t = 12 steps and d = 4 features
   performance_notes: >
-    Direct CPU ONNX Runtime inference measured approximately 0.111 ms p50 and
-    0.180 ms p95 over 500 local runs; algorithm-library overhead is excluded.
-    The bootstrap model has not been evaluated on a labeled production dataset.
+    On 800 independent deterministic synthetic holdout sequences, the trained
+    model achieved MAE 0.036445, RMSE 0.051080, and R2 0.980410. The
+    last-observation baseline RMSE was 0.095422. Direct CPU ONNX Runtime
+    inference measured approximately 0.018 ms p50 and 0.027 ms p95 over 500
+    local runs; algorithm-library overhead is excluded.
 
 resource_requirements:
   min_cpu_cores: 1
@@ -75,8 +77,8 @@ resource_requirements:
   disk_mb: 1
 
 model_profile:
-  parameter_count: 24
-  parameter_count_text: 24 trainable gate parameters
+  parameter_count: 1425
+  parameter_count_text: 1.4K trained LSTM and regression-head parameters
   flops: 0
   flops_text: not yet profiled
   flops_input_shape: [1, 12, 4]
@@ -86,3 +88,9 @@ model_profile:
 safety:
   risk_level: medium
   requires_human_review: true
+
+provenance:
+  model_metadata_ref: model.metadata.json
+  training_script_ref: ../../../scripts/train_target_trend_predictor.py
+  training_dataset_ref: ../../../data/target_trend/reference_train_inputs.npy
+  holdout_dataset_ref: ../../../data/target_trend/reference_holdout_inputs.npy

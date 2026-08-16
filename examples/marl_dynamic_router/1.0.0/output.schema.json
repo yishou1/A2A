@@ -6,7 +6,7 @@
       "type": "array"
     },
     "anti_jam_mode": {
-      "type": "number"
+      "type": "boolean"
     },
     "broadcast_summary": {
       "type": "string"

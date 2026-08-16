@@ -2,8 +2,8 @@ algorithm_id: graph_relation_reasoner
 version: 1.0.0
 display_name: Graph Relation Reasoner
 backend_type: python_http_service
-status: draft
-algorithm_class: M07
+status: validated
+algorithm_class: M20
 algorithm_class_name: 图神经网络
 owner_scope: track_threat_agent
 
@@ -22,7 +22,8 @@ capabilities:
 
 agent_card:
   summary: >
-    M07 package for the Track Threat Agent. Builds spatiotemporal target relation edges from spatial distance, heading difference, and speed difference, then returns connected groups.
+    M20 package for the Track Threat Agent. Uses a trained dense message-passing
+    graph neural network to infer pairwise formation relations and connected groups.
   when_to_use:
     - Multi-target tracks need graph relations or formation/group candidates.
   when_not_to_use:
@@ -51,8 +52,12 @@ constraints:
 performance:
   latency_ms_p50: 20
   latency_ms_p95: 120
-  primary_metric: graph_edge_quality
-  primary_score: 0.8
+  primary_metric: synthetic_holdout_edge_f1
+  primary_score: 0.962788
+  performance_notes: >
+    On 600 independent deterministic synthetic formation graphs, edge accuracy
+    was 0.992088, F1 0.962788 and ROC AUC 0.999212. The prior distance/motion
+    rule baseline achieved F1 0.912402 and ROC AUC 0.936968.
 
 resource_requirements:
   min_cpu_cores: 1
@@ -66,11 +71,17 @@ resource_requirements:
   disk_mb: 10
 
 model_profile:
-  parameter_count: 0
-  parameter_count_text: graph-rule reasoner; ST-GNN model bundles are stored separately
+  parameter_count: 16673
+  parameter_count_text: 16.7K dense message-passing GNN parameters
   model_size_mb: 2
   precision: fp32
 
 safety:
   risk_level: low
   requires_human_review: true
+
+provenance:
+  model_artifact_ref: ../../../models/checkpoints/graph_relation_gnn_s.safetensors
+  model_metadata_ref: ../../../models/checkpoints/graph_relation_gnn_s.metadata.json
+  training_script_ref: ../../../scripts/train_graph_relation_gnn.py
+  holdout_dataset_ref: ../../../data/graph_relation_gnn/reference_holdout_nodes.npy

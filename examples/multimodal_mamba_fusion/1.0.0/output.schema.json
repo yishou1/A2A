@@ -1,13 +1,49 @@
 {
-  "title": "TIA Algorithm Output",
+  "title": "Multimodal Mamba Fusion Output",
   "type": "object",
+  "required": [
+    "fused_embeddings",
+    "sequence_length",
+    "modality_count",
+    "input_embedding_dimensions"
+  ],
   "properties": {
     "fused_embeddings": {
-      "type": "object"
+      "type": "object",
+      "description": "Map from track id to a unit-normalized 256-dimensional numeric vector.",
+      "additionalProperties": true
     },
     "sequence_length": {
-      "type": "number"
+      "type": "integer",
+      "minimum": 0
+    },
+    "modality_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "input_embedding_dimensions": {
+      "type": "object",
+      "description": "Map from input sensor or modality id to its original positive vector dimension.",
+      "additionalProperties": true
+    },
+    "model": {
+      "type": "object",
+      "required": [
+        "model_id",
+        "model_version",
+        "model_family",
+        "compute_profile",
+        "artifact_sha256"
+      ],
+      "properties": {
+        "model_id": { "const": "multimodal_mamba_fusion" },
+        "model_version": { "type": "string" },
+        "model_family": { "type": "string" },
+        "compute_profile": { "type": "string" },
+        "artifact_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      },
+      "additionalProperties": false
     }
   },
-  "additionalProperties": true
+  "additionalProperties": false
 }

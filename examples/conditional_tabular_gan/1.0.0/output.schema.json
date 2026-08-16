@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Conditional Tabular GAN Output",
+  "type": "object",
+  "required": [
+    "condition",
+    "samples",
+    "sample_count",
+    "generation_seed",
+    "data_status",
+    "model_version",
+    "model_runtime"
+  ],
+  "properties": {
+    "condition": {
+      "type": "string",
+      "enum": ["benign", "surveillance", "hostile"]
+    },
+    "samples": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "radar_activity",
+          "communication_intensity",
+          "movement_consistency",
+          "weapon_signature",
+          "proximity_score"
+        ],
+        "properties": {
+          "radar_activity": {"type": "number", "minimum": 0, "maximum": 1},
+          "communication_intensity": {"type": "number", "minimum": 0, "maximum": 1},
+          "movement_consistency": {"type": "number", "minimum": 0, "maximum": 1},
+          "weapon_signature": {"type": "number", "minimum": 0, "maximum": 1},
+          "proximity_score": {"type": "number", "minimum": 0, "maximum": 1}
+        },
+        "additionalProperties": false
+      }
+    },
+    "sample_count": {"type": "integer", "minimum": 1},
+    "generation_seed": {"type": "integer", "minimum": 0},
+    "data_status": {"type": "string"},
+    "model_version": {"type": "string"},
+    "model_runtime": {
+      "type": "object",
+      "required": ["backend", "used", "artifact_sha256"],
+      "properties": {
+        "backend": {"type": "string"},
+        "used": {"type": "boolean"},
+        "artifact_sha256": {"type": "string"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

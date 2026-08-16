@@ -2,7 +2,7 @@ algorithm_id: execution_rule_matcher
 version: 1.0.0
 display_name: Execution Rule Matcher
 backend_type: python_http_service
-status: draft
+status: validated
 
 task_family: decision
 modalities:
@@ -12,19 +12,26 @@ modalities:
     - structured_json
 
 capabilities:
-  - execution_rule_matcher
+  - apriori_association_rule_mining
+  - execution_rule_matching
+  - reference_policy_action_selection
 
 agent_card:
   summary: >
-    Execution Rule Matcher packaged for the A2A algorithm library.
+    Deterministic Apriori-style association-rule matcher backed by a persisted,
+    hash-verified rule artifact mined from repository reference-policy records.
   when_to_use:
-    - Structured JSON inputs are available for this algorithm family.
+    - Strike or assault situations have already been converted to structured scores.
+    - A traceable rule, support, confidence, and recommended action are required.
   when_not_to_use:
-    - Raw media or unstructured text without preprocessing.
+    - Raw media or unstructured text has not been converted to structured inputs.
+    - Reference-policy evaluation is being treated as operational performance.
   input_description: >
-    See input.schema.json for required structured fields.
+    Phase plus normalized threat, intelligence-confidence, resource-readiness,
+    and optional commander-decision fields.
   output_description: >
-    See output.schema.json for structured outputs.
+    Ranked matching rules, selected primary rule, discretized items, and the
+    verified rule-artifact identity.
 
 machine_spec:
   input_schema_ref: input.schema.json
@@ -45,8 +52,33 @@ constraints:
 performance:
   latency_ms_p50: 20
   latency_ms_p95: 100
-  primary_metric: rule_match_rate
-  primary_score: 0.85
+  primary_metric: reference_holdout_action_accuracy
+  primary_score: 1.0
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 1
+  min_memory_mb: 64
+  recommended_memory_mb: 128
+  min_gpu_count: 0
+  gpu_type: none
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 5
+
+model_profile:
+  parameter_count: 28
+  parameter_count_text: 28_mined_rules
+  flops: 0
+  flops_text: rule_subset_matching
+  precision: deterministic_rules
+
+provenance:
+  model_artifact_ref: ../../../data/execution_control/processed/mined_rules.json
+  model_metadata_ref: ../../../models/execution_rule_matcher.metadata.json
+  training_script_ref: ../../../scripts/train_execution_rule_matcher.py
+  dataset_ref: ../../../data/execution_control/fixtures/rule_training_records.json
+  evaluation_dataset_ref: ../../../data/execution_control/fixtures/rule_evaluation_records.json
 
 safety:
   risk_level: medium

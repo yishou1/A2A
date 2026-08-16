@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Intent Gaussian Naive Bayes Output",
+  "type": "object",
+  "required": [
+    "predictions",
+    "observation_count",
+    "model_version",
+    "assessment_scope",
+    "model_runtime"
+  ],
+  "properties": {
+    "predictions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["observation_id", "intent", "confidence", "posterior_probabilities"],
+        "properties": {
+          "observation_id": {"type": "string"},
+          "intent": {"type": "string", "enum": ["benign", "surveillance", "hostile"]},
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+          "posterior_probabilities": {
+            "type": "object",
+            "required": ["benign", "surveillance", "hostile"],
+            "properties": {
+              "benign": {"type": "number", "minimum": 0, "maximum": 1},
+              "surveillance": {"type": "number", "minimum": 0, "maximum": 1},
+              "hostile": {"type": "number", "minimum": 0, "maximum": 1}
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "observation_count": {"type": "integer", "minimum": 1},
+    "model_version": {"type": "string"},
+    "assessment_scope": {"type": "string"},
+    "model_runtime": {
+      "type": "object",
+      "required": ["backend", "used", "artifact_sha256"],
+      "properties": {
+        "backend": {"type": "string"},
+        "used": {"type": "boolean"},
+        "artifact_sha256": {"type": "string"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
