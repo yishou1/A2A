@@ -1,0 +1,24 @@
+{
+  "request_id": "tsu-001",
+  "trace_id": "trace-track-threat-001",
+  "algorithm_id": "track_state_updater",
+  "version": "1.0.0",
+  "backend_type": "python_http_service",
+  "inputs": {
+    "detections": [
+      {
+        "detection_id": "det-air-001",
+        "object_type": "aircraft",
+        "timestamp": 1718000050,
+        "lat": 31.242,
+        "lon": 121.512,
+        "alt": 8800,
+        "speed": 230,
+        "heading": 86,
+        "confidence": 0.92
+      }
+    ],
+    "existing_tracks": []
+  },
+  "params": {}
+}

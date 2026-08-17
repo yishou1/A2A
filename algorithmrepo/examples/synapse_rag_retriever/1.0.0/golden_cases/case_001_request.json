@@ -1,0 +1,24 @@
+{
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "synapse_rag_retriever",
+  "version": "1.0.0",
+  "backend_type": "python_http_service",
+  "inputs": {
+    "classifications": [
+      {
+        "target_id": "T-1",
+        "label": "hostile",
+        "confidence": 0.88
+      }
+    ],
+    "knowledge_base": [
+      {
+        "title": "装甲威胁规则",
+        "content": "高威胁坦克需优先分配火力"
+      }
+    ],
+    "query": "战场目标实体与威胁关联"
+  },
+  "params": {}
+}

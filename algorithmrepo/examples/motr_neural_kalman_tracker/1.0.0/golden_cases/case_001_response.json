@@ -1,0 +1,51 @@
+{
+  "ok": true,
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "motr_neural_kalman_tracker",
+  "version": "1.0.0",
+  "outputs": {
+    "tracks": [
+      {
+        "track_id": "T-0001",
+        "class_name": "tank",
+        "confidence": 0.9,
+        "state": "active",
+        "bbox": [
+          10,
+          20,
+          80,
+          90
+        ],
+        "last_bbox": [
+          10,
+          20,
+          80,
+          90
+        ],
+        "position_px": [
+          45.0,
+          55.0
+        ],
+        "geo": {
+          "lat": 30.510098,
+          "lon": 114.391839,
+          "alt_m": 122.5,
+          "slant_range_m": 3257.6,
+          "domain": "land",
+          "alt_source": "ground_surface",
+          "alt_confidence": 0.72,
+          "geo_method": "land_surface_intersection",
+          "vertical_offset_m": 2.5,
+          "class_name": "tank"
+        },
+        "kalman_gain": 0.62
+      }
+    ],
+    "associations": 1
+  },
+  "usage": {
+    "latency_ms": 1
+  },
+  "error": null
+}

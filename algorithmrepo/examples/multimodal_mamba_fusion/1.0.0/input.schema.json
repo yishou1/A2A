@@ -1,0 +1,27 @@
+{
+  "title": "Multimodal Mamba Fusion Input",
+  "type": "object",
+  "required": [
+    "embeddings"
+  ],
+  "properties": {
+    "embeddings": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "Map from sensor or modality id to a non-empty numeric embedding vector; vector validation is enforced by the service.",
+      "additionalProperties": true
+    },
+    "tracks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "track_id": { "type": "string" },
+          "sensor_id": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,43 @@
+{
+  "ok": true,
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "execution_rule_matcher",
+  "version": "1.0.0",
+  "outputs": {
+    "matched_rules": [],
+    "primary_rule": {
+      "rule_id": "RULE-028",
+      "support": 0.1667,
+      "confidence": 1.0,
+      "antecedent": [
+        "intel=good",
+        "phase=strike",
+        "resource=ready",
+        "threat=high"
+      ],
+      "consequent": {
+        "action": "precision_strike",
+        "executor_role": "artillery",
+        "priority": 0.91,
+        "coordination_group": "GROUP-A"
+      }
+    },
+    "matched_items": [
+      "intel=good",
+      "phase=strike",
+      "resource=ready",
+      "threat=high"
+    ],
+    "model": {
+      "model_id": "execution_rule_matcher",
+      "model_version": "1.0.0",
+      "model_family": "apriori_association_rule_miner",
+      "artifact_sha256": "848e226d1cb8d232f859151f564453f0d40548675d8143b17f6bc4ab1c56353a"
+    }
+  },
+  "usage": {
+    "latency_ms": 1
+  },
+  "error": null
+}

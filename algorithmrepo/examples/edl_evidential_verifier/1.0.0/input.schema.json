@@ -1,0 +1,16 @@
+{
+  "title": "EDL Evidential Verifier Input",
+  "type": "object",
+  "required": [
+    "detections"
+  ],
+  "properties": {
+    "detections": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  "additionalProperties": true
+}

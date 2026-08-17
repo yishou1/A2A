@@ -1,0 +1,84 @@
+algorithm_id: conditional_tabular_gan
+version: 1.0.0
+display_name: Conditional Tabular GAN
+backend_type: python_http_service
+status: validated
+
+task_family: generation
+modalities:
+  input:
+    - structured_json
+    - generation_condition
+  output:
+    - structured_json
+    - synthetic_numeric_features
+
+capabilities:
+  - conditional_gan_generation
+  - tabular_feature_synthesis
+  - seeded_reproducible_generation
+
+agent_card:
+  summary: >
+    Trained PyTorch conditional GAN that generates bounded five-dimensional
+    synthetic reference observations for three requested conditions.
+  when_to_use:
+    - Synthetic tabular samples are needed for development or augmentation experiments.
+    - Generated values must be reproducible from an explicit seed.
+  when_not_to_use:
+    - Generated values would be represented as genuine sensor observations.
+    - Operational decisions require validated real-world measurements.
+  input_description: >
+    A benign, surveillance, or hostile condition and a sample count. Optional
+    seed and temperature are supplied in the request params object.
+  output_description: >
+    Bounded synthetic feature rows, generation seed, synthetic-data status, and
+    the verified trained-generator artifact identity.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  runtime:
+    backend_type: python_http_service
+    endpoint: http://127.0.0.1:9035/predict
+    health_endpoint: http://127.0.0.1:9035/health
+    metadata_endpoint: http://127.0.0.1:9035/metadata
+    timeout_ms: 10000
+
+constraints:
+  max_input_chars: 10000
+  max_request_bytes: 1048576
+  batch_supported: true
+  streaming_supported: false
+
+performance:
+  primary_metric: class_conditional_feature_mean_absolute_error
+  primary_score: 0.056212
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 2
+  min_memory_mb: 256
+  recommended_memory_mb: 512
+  min_gpu_count: 0
+  gpu_type: optional_for_retraining
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 10
+
+model_profile:
+  parameter_count: 1605
+  parameter_count_text: trained_generator_parameters
+  flops: 0
+  flops_text: batch_and_architecture_dependent
+  precision: fp32
+
+provenance:
+  model_artifact_ref: ../../../models/conditional_tabular_gan_generator.pt
+  model_metadata_ref: ../../../models/conditional_tabular_gan.metadata.json
+  training_script_ref: ../../../scripts/train_conditional_tabular_gan.py
+  dataset_ref: ../../../data/intent_naive_bayes/reference_observations.csv
+
+safety:
+  risk_level: medium
+  requires_human_review: true

@@ -1,0 +1,18 @@
+{
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "closed_loop_decision_advisor",
+  "version": "1.0.0",
+  "backend_type": "python_http_service",
+  "inputs": {
+    "target": {
+      "target_id": "TGT-001",
+      "threat_score": 0.78,
+      "uncertainty": 0.2
+    },
+    "damage_probability": 0.62,
+    "situation": "critical",
+    "mission_completion": 0.72
+  },
+  "params": {}
+}

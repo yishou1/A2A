@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Threat Priority Random Forest Output",
+  "type": "object",
+  "required": [
+    "priorities",
+    "target_count",
+    "model_version",
+    "assessment_scope",
+    "model_runtime"
+  ],
+  "properties": {
+    "priorities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["target_id", "priority", "confidence", "class_probabilities"],
+        "properties": {
+          "target_id": {"type": "string"},
+          "priority": {"type": "string", "enum": ["low", "medium", "high"]},
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+          "class_probabilities": {
+            "type": "object",
+            "required": ["low", "medium", "high"],
+            "properties": {
+              "low": {"type": "number", "minimum": 0, "maximum": 1},
+              "medium": {"type": "number", "minimum": 0, "maximum": 1},
+              "high": {"type": "number", "minimum": 0, "maximum": 1}
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "target_count": {"type": "integer", "minimum": 1},
+    "model_version": {"type": "string"},
+    "assessment_scope": {"type": "string"},
+    "model_runtime": {
+      "type": "object",
+      "required": ["backend", "used", "artifact_sha256"],
+      "properties": {
+        "backend": {"type": "string"},
+        "used": {"type": "boolean"},
+        "artifact_sha256": {"type": "string"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

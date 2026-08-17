@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "marl_ppo_task_scheduler",
+  "version": "1.0.0",
+  "outputs": {
+    "sensor_assignments": [],
+    "reattack_plan": [],
+    "covered_targets": [],
+    "reattack_targets": []
+  },
+  "usage": {
+    "latency_ms": 1
+  },
+  "error": null
+}

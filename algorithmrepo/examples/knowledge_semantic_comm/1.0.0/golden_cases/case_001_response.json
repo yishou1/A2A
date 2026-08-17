@@ -1,0 +1,33 @@
+{
+  "ok": true,
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "knowledge_semantic_comm",
+  "version": "1.0.0",
+  "outputs": {
+    "summary": "目标数=1；高威胁=1",
+    "targets": [
+      {
+        "track_id": "T-1",
+        "class": "tank",
+        "label": "hostile",
+        "affiliation": "red",
+        "threat_level": "high",
+        "geo": null,
+        "damage_score": null,
+        "confidence": 0.9,
+        "knowledge_ref": null
+      }
+    ],
+    "semantic_vector": [],
+    "knowledge_graph": {
+      "nodes": [],
+      "edges": []
+    },
+    "compression_ratio": 0.85
+  },
+  "usage": {
+    "latency_ms": 1
+  },
+  "error": null
+}

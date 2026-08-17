@@ -1,0 +1,24 @@
+{
+  "title": "MARL Dynamic Router Input",
+  "type": "object",
+  "required": [
+    "packet"
+  ],
+  "properties": {
+    "packet": {
+      "type": "object"
+    },
+    "subscriber_agents": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "jamming_level": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    }
+  },
+  "additionalProperties": true
+}

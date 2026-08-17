@@ -1,0 +1,97 @@
+{
+  "model_id": "supcon_meta_classifier",
+  "model_version": "1.0.0",
+  "model_family": "supervised_contrastive_prototypical_mlp",
+  "compute_profile": "small",
+  "artifact_path": "models/checkpoints/supcon_meta_s.safetensors",
+  "artifact_sha256": "49342702fd56372e23a0ef94ca77a2db3ca8ed3a362697bcdd6d056e383daf60",
+  "training_script": "scripts/train_supcon_meta_classifier.py",
+  "training_script_sha256": "3333b905ef9f369e46c7bcf85e7f76ab05d4021cf7ef758d1437df3d25285861",
+  "dataset": {
+    "embeddings_path": "data/supcon_meta/reference_embeddings.npy",
+    "embeddings_sha256": "f3a5ddd8643a1c26799542381acf7d83268c682d3491595c2b65f2bedb7e9a06",
+    "labels_path": "data/supcon_meta/reference_labels.npy",
+    "labels_sha256": "74fd7bc1b4f4712fdd482596ea6ff94edcaafe3ebc4df9092cd02877893ee79f",
+    "source": "deterministic_synthetic_embedding_generator",
+    "seed": 20260820,
+    "row_count": 1600,
+    "class_counts": {
+      "friendly": 400,
+      "neutral": 400,
+      "hostile": 400,
+      "unknown": 400
+    },
+    "limitation": "Synthetic embedding clusters only; not an operational target-identification benchmark."
+  },
+  "architecture": {
+    "input_dim": 256,
+    "hidden_dim": 256,
+    "projection_dim": 128,
+    "class_count": 4,
+    "labels": [
+      "friendly",
+      "neutral",
+      "hostile",
+      "unknown"
+    ],
+    "parameter_count": 99200
+  },
+  "training": {
+    "epochs": 30,
+    "batch_size": 64,
+    "optimizer": "AdamW",
+    "learning_rate": 0.0015,
+    "weight_decay": 0.0001,
+    "temperature": 0.1,
+    "classification_loss_weight": 0.75,
+    "supervised_contrastive_loss_weight": 0.25,
+    "random_state": 20260821,
+    "final_combined_loss": 0.680159
+  },
+  "evaluation": {
+    "method": "stratified_holdout",
+    "test_ratio": 0.25,
+    "train_count": 1200,
+    "test_count": 400,
+    "accuracy": 1.0,
+    "macro_f1": 1.0,
+    "mean_confidence": 0.999954,
+    "confusion_matrix_labels": [
+      "friendly",
+      "neutral",
+      "hostile",
+      "unknown"
+    ],
+    "confusion_matrix": [
+      [
+        100,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        100,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        100,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        100
+      ]
+    ]
+  },
+  "runtime_versions": {
+    "torch": "2.12.0+cpu",
+    "numpy": "2.2.6",
+    "scikit_learn": "1.7.2"
+  }
+}

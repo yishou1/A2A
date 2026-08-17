@@ -1,0 +1,60 @@
+{
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "mission_feature_adapter",
+  "version": "1.0.0",
+  "backend_type": "python_http_service",
+  "inputs": {
+    "source_type": "agent_results",
+    "mode": "fixture",
+    "agent_results": {
+      "damage_confirmation": {
+        "output_data": {
+          "engaged_targets": 40,
+          "confirmed_destroyed": 30
+        }
+      },
+      "resource_allocation": {
+        "output_data": {
+          "readiness": 0.75,
+          "supply_pressure": 0.55
+        }
+      },
+      "execution_control": {
+        "output_data": {
+          "latency_ms": 300
+        }
+      },
+      "perception_detection": {
+        "output_data": {
+          "detections": [
+            {
+              "conf": 0.9
+            },
+            {
+              "conf": 0.8
+            }
+          ]
+        }
+      },
+      "threat_evaluation": {
+        "output_data": {
+          "ranked_targets": [
+            {
+              "score": 0.7
+            },
+            {
+              "score": 0.6
+            }
+          ]
+        }
+      },
+      "communication": {
+        "output_data": {
+          "delivery_rate": 0.92
+        }
+      }
+    }
+  },
+  "params": {}
+}

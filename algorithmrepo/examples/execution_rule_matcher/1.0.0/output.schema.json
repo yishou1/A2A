@@ -1,0 +1,38 @@
+{
+  "title": "Execution Rule Matcher Output",
+  "type": "object",
+  "required": [
+    "matched_rules",
+    "primary_rule",
+    "matched_items",
+    "model"
+  ],
+  "properties": {
+    "matched_rules": {
+      "type": "array"
+    },
+    "primary_rule": {
+      "type": "object"
+    },
+    "matched_items": {
+      "type": "array"
+    },
+    "model": {
+      "type": "object",
+      "required": [
+        "model_id",
+        "model_version",
+        "model_family",
+        "artifact_sha256"
+      ],
+      "properties": {
+        "model_id": {"const": "execution_rule_matcher"},
+        "model_version": {"type": "string"},
+        "model_family": {"const": "apriori_association_rule_miner"},
+        "artifact_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

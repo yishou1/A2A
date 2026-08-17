@@ -1,0 +1,36 @@
+{
+  "request_id": "gnb-intent-001",
+  "trace_id": "trace-m07-gnb",
+  "algorithm_id": "intent_gaussian_naive_bayes",
+  "version": "1.0.0",
+  "backend_type": "python_http_service",
+  "inputs": {
+    "observations": [
+      {
+        "observation_id": "OBS-BENIGN",
+        "radar_activity": 0.12,
+        "communication_intensity": 0.22,
+        "movement_consistency": 0.86,
+        "weapon_signature": 0.05,
+        "proximity_score": 0.15
+      },
+      {
+        "observation_id": "OBS-SURVEILLANCE",
+        "radar_activity": 0.62,
+        "communication_intensity": 0.56,
+        "movement_consistency": 0.68,
+        "weapon_signature": 0.3,
+        "proximity_score": 0.52
+      },
+      {
+        "observation_id": "OBS-HOSTILE",
+        "radar_activity": 0.91,
+        "communication_intensity": 0.8,
+        "movement_consistency": 0.38,
+        "weapon_signature": 0.93,
+        "proximity_score": 0.88
+      }
+    ]
+  },
+  "params": {}
+}
