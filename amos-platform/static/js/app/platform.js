@@ -333,6 +333,20 @@ window.Platform = (function () {
     lightbox.setAttribute("aria-hidden", "true");
   }
 
+  function openKnowledgeGraph() {
+    var dialog = document.getElementById("knowledge-graph-dialog");
+    var frame = document.getElementById("knowledge-graph-frame");
+    if (!frame.getAttribute("src")) frame.setAttribute("src", frame.dataset.src);
+    dialog.classList.add("open");
+    dialog.setAttribute("aria-hidden", "false");
+  }
+
+  function closeKnowledgeGraph() {
+    var dialog = document.getElementById("knowledge-graph-dialog");
+    dialog.classList.remove("open");
+    dialog.setAttribute("aria-hidden", "true");
+  }
+
   function branchOptions() {
     var configured = currentScenario && currentScenario.expected_branches || scenarioSummary(currentScenarioId).expected_branches || [];
     var defaults = [
@@ -977,6 +991,11 @@ window.Platform = (function () {
     });
     document.getElementById("media-lightbox-close").addEventListener("click", closeMedia);
     document.getElementById("media-lightbox").addEventListener("click", function (event) { if (event.target === this) closeMedia(); });
+    document.getElementById("btn-open-knowledge-graph").addEventListener("click", openKnowledgeGraph);
+    document.getElementById("knowledge-graph-close").addEventListener("click", closeKnowledgeGraph);
+    document.getElementById("knowledge-graph-dialog").addEventListener("click", function (event) {
+      if (event.target === this) closeKnowledgeGraph();
+    });
     document.getElementById("story-hero-image").addEventListener("click", function () { if (currentMediaId) showMedia(currentMediaId); });
     document.getElementById("story-media-strip").addEventListener("click", function (event) {
       var button = event.target.closest("[data-story-media-id]");
@@ -990,6 +1009,9 @@ window.Platform = (function () {
       if (event.target === this) closeAuthorizationDialog();
     });
     document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && document.getElementById("knowledge-graph-dialog").classList.contains("open")) {
+        closeKnowledgeGraph();
+      }
       if (event.key === "Escape" && !document.getElementById("authorization-dialog").hidden) {
         closeAuthorizationDialog();
       }
