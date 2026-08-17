@@ -335,7 +335,7 @@ window.PlatformPanels = (function () {
         '<span>模型 <b>' + escapeHtml(profile.model_id || "未上报") + '</b></span>' +
         '<span>版本 <b>' + escapeHtml(item.version || "未上报") + '</b></span>' +
         '<span>后端 <b>' + escapeHtml(item.backend_type || "未上报") + '</b></span>' +
-        '<span>参数量 <b>' + escapeHtml(params) + '</b></span>' +
+        '<span>模型规模 <b>' + escapeHtml(params) + '</b></span>' +
         '<span>预测端点 <b>' + escapeHtml(endpoint) + '</b></span></div></article>';
     }
     function renderGroup(title, rows) {
