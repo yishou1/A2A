@@ -143,6 +143,7 @@ def test_frontend_uses_dynamic_scenarios_without_future_route_renderer() -> None
     assert 'data-workspace-tab="evidence"' in html
     assert 'id="scenario-functional-agents"' in html
     assert 'id="functional-agent-count"' in html
+    assert 'id="backend-active-count"' in html
     assert 'id="backend-runnable-count"' in html
     assert 'id="backend-unavailable-count"' in html
     assert 'id="wf-function-points"' in html

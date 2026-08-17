@@ -297,15 +297,17 @@ window.PlatformPanels = (function () {
     if (!root) return;
     var catalog = runtimeAlgorithmCatalog || {};
     var allRows = Array.isArray(catalog.algorithms) ? catalog.algorithms : [];
-    var rows = allRows.filter(function (item) { return item.runtime_status === "ready"; });
+    var readyRows = allRows.filter(function (item) { return item.runtime_status === "ready"; });
+    var unavailableRows = allRows.filter(function (item) { return item.runtime_status !== "ready"; });
     var families = {};
-    rows.forEach(function (item) { if (item.task_family) families[item.task_family] = true; });
+    allRows.forEach(function (item) { if (item.task_family) families[item.task_family] = true; });
+    var activeCount = catalog.active_count;
+    if (activeCount == null) activeCount = allRows.length;
+    var activeNode = document.getElementById("backend-active-count");
+    if (activeNode) activeNode.textContent = activeCount || 0;
     document.getElementById("backend-runnable-count").textContent = catalog.runnable_count || 0;
     document.getElementById("backend-unavailable-count").textContent = catalog.unavailable_count || 0;
     document.getElementById("backend-family-count").textContent = Object.keys(families).length;
-    document.getElementById("backend-model-count").textContent = rows.filter(function (item) {
-      return item.model_loaded === true;
-    }).length;
     var status = document.getElementById("algorithm-runtime-status");
     if (status) {
       status.textContent = catalog.status === "ready" ? "运行时已验证" :
@@ -313,18 +315,48 @@ window.PlatformPanels = (function () {
       status.className = "status-chip " + (catalog.status === "ready" ? "success" :
         (catalog.status === "degraded" ? "warning" : (catalog.status === "offline" ? "danger" : "neutral")));
     }
-    var html = rows.length ? rows.map(function (item) {
+    var meta = document.getElementById("algorithm-runtime-meta");
+    if (meta) {
+      var checkedAt = catalog.checked_at ? new Date(catalog.checked_at).toLocaleString() : "未上报";
+      meta.innerHTML = '<span>来源 <b>' + escapeHtml(catalog.source || "未上报") + '</b></span>' +
+        '<span>最近检查 <b>' + escapeHtml(checkedAt) + '</b></span>';
+    }
+    function renderAlgorithmCard(item) {
       var profile = item.model_profile || {};
       var params = profile.parameter_count_text || (profile.parameter_count == null ? "未上报" : String(profile.parameter_count));
-      return '<article class="backend-function-card runtime-ready">' +
+      var ready = item.runtime_status === "ready";
+      var stateText = ready ? "运行就绪" : "不可用";
+      var endpoint = item.predict_endpoint || profile.predict_endpoint || "未上报";
+      return '<article class="backend-function-card ' + (ready ? "runtime-ready" : "runtime-unavailable") + '">' +
         '<header><div><b>' + escapeHtml(item.display_name || item.algorithm_id) + '</b><code>' +
-        escapeHtml(item.algorithm_id) + '</code></div><span>运行就绪</span></header>' +
+        escapeHtml(item.algorithm_id) + '</code></div><span>' + escapeHtml(stateText) + '</span></header>' +
         '<p>' + escapeHtml((item.capabilities || []).join(" · ") || "未声明能力标签") + '</p>' +
         '<div class="backend-runtime-meta"><span>任务族 <b>' + escapeHtml(item.task_family || "未上报") + '</b></span>' +
+        '<span>模型 <b>' + escapeHtml(profile.model_id || "未上报") + '</b></span>' +
         '<span>版本 <b>' + escapeHtml(item.version || "未上报") + '</b></span>' +
         '<span>后端 <b>' + escapeHtml(item.backend_type || "未上报") + '</b></span>' +
-        '<span>参数量 <b>' + escapeHtml(params) + '</b></span></div></article>';
-    }).join("") : '<div class="empty-state">后端当前没有通过运行时健康检查的算法</div>';
+        '<span>模型规模 <b>' + escapeHtml(params) + '</b></span>' +
+        '<span>预测端点 <b>' + escapeHtml(endpoint) + '</b></span></div></article>';
+    }
+    function renderGroup(title, rows) {
+      if (!rows.length) return "";
+      var grouped = rows.reduce(function (result, item) {
+        var family = item.task_family || "未分组";
+        if (!result[family]) result[family] = [];
+        result[family].push(item);
+        return result;
+      }, {});
+      return '<section class="backend-family-section"><header><b>' + escapeHtml(title) +
+        '</b><span>' + escapeHtml(rows.length) + '</span></header>' +
+        Object.keys(grouped).sort().map(function (family) {
+          var items = grouped[family];
+          return '<div class="backend-family-group"><div class="backend-family-title"><b>' +
+            escapeHtml(family) + '</b><span>' + escapeHtml(items.length) + '</span></div>' +
+            items.map(renderAlgorithmCard).join("") + '</div>';
+        }).join("") + '</section>';
+    }
+    var html = allRows.length ? renderGroup("可调度算法", readyRows) + renderGroup("运行时异常", unavailableRows) :
+      '<div class="empty-state">' + escapeHtml(catalog.error || "后端当前没有返回算法目录") + '</div>';
     setHtmlIfChanged(root, html);
   }
 

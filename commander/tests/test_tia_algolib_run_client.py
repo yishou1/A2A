@@ -119,6 +119,16 @@ class AlgolibRunClientTest(unittest.TestCase):
             target_type["predict_endpoint"],
             "http://127.0.0.1:9042/target_type_classifier/predict",
         )
+        self.assertEqual(target_type["model_profile"]["parameter_count_text"], "rule-based")
+
+        supcon_meta = next(
+            item for item in catalog if item["algorithm_id"] == "supcon_meta_classifier"
+        )
+        self.assertEqual(
+            supcon_meta["model_profile"]["parameter_count_text"],
+            "296K (SupConMetaNet in_dim=1024 medium profile)",
+        )
+        self.assertEqual(supcon_meta["model_profile"]["parameter_count"], 295808)
 
     def test_run_error_raises(self):
         client = AlgorithmLibraryClient({"call_mode": "run", "base_url": "http://127.0.0.1:8088"})

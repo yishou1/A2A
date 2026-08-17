@@ -79,6 +79,132 @@ ALGORITHM_MODEL_IDS: dict[str, str] = {
     "marl_dynamic_router": "marl-dynamic-router",
 }
 
+ALGORITHM_MODEL_PROFILES: dict[str, dict[str, Any]] = {
+    "marl_ppo_task_scheduler": {
+        "parameter_count": 39178,
+        "parameter_count_text": "39K (MARLPPOSchedulerNet obs_dim=102 hidden=128)",
+        "flops": 78000,
+        "flops_text": "~78 KFLOPs per agent observation (encoder+actor+critic)",
+        "flops_input_shape": [1, 102],
+        "model_size_mb": 1,
+        "precision": "fp32",
+    },
+    "battlefield_rtdetr_detector": {
+        "parameter_count": 32024000,
+        "parameter_count_text": "32.0M (RT-DETR-L 32M + ODConv refiner 24K)",
+        "flops": 91900000000,
+        "flops_text": "91.9 GFLOPs @ 640x640 (RT-DETR-L official); ODConv adds ~5 MFLOPs per crop",
+        "flops_input_shape": [1, 3, 640, 640],
+        "model_size_mb": 122,
+        "precision": "fp32",
+    },
+    "siamese_mask2former_damage": {
+        "parameter_count": 44000000,
+        "parameter_count_text": "44M (Mask2Former-Swin-Tiny Siamese)",
+        "flops": 55000000000,
+        "flops_text": "~55 GFLOPs @ 512x512 per image (single branch, doubled for siamese pair)",
+        "flops_input_shape": [1, 3, 512, 512],
+        "model_size_mb": 168,
+        "precision": "fp32",
+    },
+    "edl_evidential_verifier": {
+        "parameter_count": 290,
+        "parameter_count_text": "290",
+        "flops": 580,
+        "flops_text": "~580 FLOPs per detection sample (2 linear layers)",
+        "flops_input_shape": [1, 6],
+        "model_size_mb": 1,
+        "precision": "fp32",
+    },
+    "motr_neural_kalman_tracker": {
+        "parameter_count": 12296000,
+        "parameter_count_text": "12.3M (MOTRCostNet ResNet18+Transformer + KalmanNet GRU)",
+        "flops": 1800000000,
+        "flops_text": "~1.8 GFLOPs per frame @ 224x224 crop (ResNet18 backbone)",
+        "flops_input_shape": [1, 3, 224, 224],
+        "model_size_mb": 48,
+        "precision": "fp32",
+    },
+    "multimodal_feature_fuser": {
+        "parameter_count": 0,
+        "parameter_count_text": "deterministic feature adapter",
+        "model_size_mb": 0,
+        "precision": "fp32",
+    },
+    "target_type_classifier": {
+        "parameter_count": 0,
+        "parameter_count_text": "rule-based",
+        "model_size_mb": 0,
+        "precision": "fp32",
+    },
+    "track_state_updater": {
+        "parameter_count": 0,
+        "parameter_count_text": "nearest-neighbor plus lightweight filter",
+        "model_size_mb": 0,
+        "precision": "fp32",
+    },
+    "trajectory_predictor": {
+        "parameter_count": 0,
+        "parameter_count_text": "frozen TorchScript bundles, see models/track_threat",
+        "model_size_mb": 2,
+        "precision": "fp32",
+    },
+    "graph_relation_reasoner": {
+        "parameter_count": 0,
+        "parameter_count_text": "graph-rule reasoner; ST-GNN model bundles are stored separately",
+        "model_size_mb": 2,
+        "precision": "fp32",
+    },
+    "imagebind_multimodal_encoder": {
+        "parameter_count": 632000000,
+        "parameter_count_text": "632M (ImageBind-Huge ViT-H)",
+        "flops": 1000000000000,
+        "flops_text": "~1.0 TFLOPs @ 224x224 per modality (ViT-H)",
+        "flops_input_shape": [1, 3, 224, 224],
+        "model_size_mb": 2413,
+        "precision": "fp32",
+    },
+    "multimodal_mamba_fusion": {
+        "parameter_count": 6370000,
+        "parameter_count_text": "6.37M (MultimodalMambaBlock d_model=1024 medium profile)",
+        "flops": 50000000,
+        "flops_text": "~50 MFLOPs per sequence step (d_model=1024, seq_len=8)",
+        "flops_input_shape": [1, 8, 1024],
+        "model_size_mb": 24,
+        "precision": "fp32",
+    },
+    "supcon_meta_classifier": {
+        "parameter_count": 295808,
+        "parameter_count_text": "296K (SupConMetaNet in_dim=1024 medium profile)",
+        "flops": 590000,
+        "flops_text": "~590 KFLOPs per target embedding (2 linear layers + cosine sim)",
+        "flops_input_shape": [1, 1024],
+        "model_size_mb": 2,
+        "precision": "fp32",
+    },
+    "synapse_rag_retriever": {
+        "parameter_count": 0,
+        "parameter_count_text": "varies_by_submodel",
+        "flops": 0,
+        "flops_text": "varies_by_submodel",
+        "precision": "fp32",
+    },
+    "knowledge_semantic_comm": {
+        "parameter_count": 0,
+        "parameter_count_text": "varies_by_submodel",
+        "flops": 0,
+        "flops_text": "varies_by_submodel",
+        "precision": "fp32",
+    },
+    "marl_dynamic_router": {
+        "parameter_count": 0,
+        "parameter_count_text": "varies_by_submodel",
+        "flops": 0,
+        "flops_text": "varies_by_submodel",
+        "precision": "fp32",
+    },
+}
+
 _ALGORITHM_CARDS: dict[str, dict[str, Any]] = {
     "marl_ppo_task_scheduler": {
         "task_family": "task_scheduling",
@@ -217,6 +343,10 @@ def build_algorithm_catalog(
             continue
         card = _ALGORITHM_CARDS.get(algorithm_id, {})
         model_id = str(card.get("model_id") or ALGORITHM_MODEL_IDS.get(algorithm_id) or "")
+        model_profile = dict(ALGORITHM_MODEL_PROFILES.get(algorithm_id, {}))
+        if model_id:
+            model_profile["model_id"] = model_id
+            model_profile["runtime"] = "python_http_service"
         catalog.append(
             {
                 "algorithm_id": algorithm_id,
@@ -224,10 +354,7 @@ def build_algorithm_catalog(
                 "backend_type": "python_http_service",
                 "task_family": card.get("task_family", ""),
                 "model_id": model_id,
-                "model_profile": {
-                    "model_id": model_id,
-                    "runtime": "python_http_service",
-                } if model_id else {},
+                "model_profile": model_profile,
                 "capabilities": card.get("capabilities", []),
                 "required_fields": card.get("required_fields", []),
                 "optional": bool(card.get("optional", True)),
