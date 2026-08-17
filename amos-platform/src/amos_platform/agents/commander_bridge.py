@@ -234,6 +234,8 @@ class CommanderBridge:
                     "backend_type": backend_type,
                     "task_family": item.get("task_family"),
                     "capabilities": list(item.get("capabilities") or []),
+                    "summary": item.get("summary"),
+                    "agent_card": item.get("agent_card") if isinstance(item.get("agent_card"), dict) else {},
                     "model_profile": item.get("model_profile") if isinstance(item.get("model_profile"), dict) else {},
                     "predict_endpoint": item.get("predict_endpoint"),
                     "runtime_status": runtime_status,

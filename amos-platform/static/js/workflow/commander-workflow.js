@@ -110,7 +110,25 @@ window.PlatformWorkflow = (function () {
     if (value == null || value === "") return null;
     var duration = Number(value);
     if (!Number.isFinite(duration)) return null;
+    if (duration <= 0) return "未计时";
+    if (duration < 1) return "<1ms";
     return duration >= 1000 ? (duration / 1000).toFixed(duration >= 10000 ? 0 : 1) + "s" : Math.round(duration) + "ms";
+  }
+
+  function positiveDuration(value) {
+    var duration = Number(value);
+    return Number.isFinite(duration) && duration > 0 ? duration : 0;
+  }
+
+  function activityTimingLabel(item, detail) {
+    var activityDuration = positiveDuration(item && item.duration_ms);
+    if (activityDuration > 0) return "\u6d3b\u52a8\u8017\u65f6 " + formatDuration(activityDuration);
+    var algorithms = detail && Array.isArray(detail.algorithms) ? detail.algorithms : [];
+    var algorithmDuration = algorithms.reduce(function (total, row) {
+      return total + positiveDuration(row.duration_ms);
+    }, 0);
+    if (algorithmDuration > 0) return "\u7b97\u6cd5\u8017\u65f6 " + formatDuration(algorithmDuration);
+    return null;
   }
 
   function renderTaskHistory() {
@@ -391,6 +409,30 @@ window.PlatformWorkflow = (function () {
     }
     var count = document.getElementById("wf-activity-count");
     if (count) count.textContent = rows.length + " 项";
+    function activityDescription(item, sequenceContainer) {
+      if (sequenceContainer) return "流程容器负责按 BPEL 顺序串联子活动，本身不代表业务 Agent 执行。";
+      var key = String(item.role || item.work_item || item.activity_id || "").toLowerCase();
+      if (item.description || item.summary) return item.description || item.summary;
+      if (key.indexOf("tactical_intelligence") >= 0 || key.indexOf("recon") >= 0) {
+        return "汇聚传感器观测与算法输出，完成目标初始发现、识别线索整理和态势信息共享。";
+      }
+      if (key.indexOf("track_threat") >= 0 || key.indexOf("track") >= 0) {
+        return "生成并维护目标航迹，评估威胁等级、目标优先级和后续跟踪需求。";
+      }
+      if (key.indexOf("task_scheduling") >= 0 || key.indexOf("resource") >= 0 || key.indexOf("sched") >= 0) {
+        return "根据当前态势分配侦察、跟踪和打击资源，必要时重排平台与算法任务。";
+      }
+      if (key.indexOf("decision") >= 0 || key.indexOf("planning") >= 0 || key.indexOf("plan") >= 0) {
+        return "形成候选处置方案，比较行动选项、时间窗口和目标优先级。";
+      }
+      if (key.indexOf("compliance") >= 0 || key.indexOf("authorization") >= 0 || key.indexOf("roe") >= 0) {
+        return "检查交战规则、授权条件和附带风险，确认是否允许进入执行环节。";
+      }
+      if (key.indexOf("closed_loop") >= 0 || key.indexOf("execute") >= 0 || key.indexOf("assess") >= 0) {
+        return "下发执行指令、监控武器或平台动作，并根据效果评估决定结束或重规划。";
+      }
+      return "执行当前工作流活动，并把输入、输出、调用和证据回写到本轮任务记录。";
+    }
     root.innerHTML = rows.length ? rows.map(function (item) {
       var state = item.status || "pending";
       var sequenceContainer = item.type === "sequence" || /activatity-\d+-sequence$/i.test(item.activity_id || "");
@@ -399,14 +441,19 @@ window.PlatformWorkflow = (function () {
         ? "Commander 流程控制 · " + (item.activity_id || item.work_item || "内部节点")
         : (item.agent || "Agent 未分配");
       var dependency = (item.depends_on || []).length ? " · 依赖 " + item.depends_on.join(", ") : "";
+      var description = activityDescription(item, sequenceContainer);
+      var detail = view && view.activity_details && view.activity_details[activityKey(item)];
+      var timing = activityTimingLabel(item, detail);
       return '<button type="button" class="workflow-activity ' + escapeHtml(state) + (activityKey(item) === selectedActivityId ? " selected" : "") +
         '" data-activity-id="' + escapeHtml(activityKey(item)) + '" aria-pressed="' + (activityKey(item) === selectedActivityId) + '">' +
         '<span class="workflow-step-index">' + String(item.index || 0).padStart(2, "0") + '</span>' +
         '<span class="workflow-activity-body"><b>' + escapeHtml(title) + '</b>' +
-        '<small>' + escapeHtml(executor) + (item.duration_ms == null ? "" : " · " + escapeHtml(formatDuration(item.duration_ms))) + escapeHtml(dependency) + '</small>' +
-        (item.error ? '<em>' + escapeHtml(item.error) + '</em>' : '') + '</span>' +
-        '<span class="workflow-mode-tag">' + escapeHtml(modeLabel(item.execution_mode)) + '</span>' +
-        '<span class="workflow-state-tag">' + escapeHtml(statusLabel(state)) + '</span>' +
+        '<small class="workflow-activity-agent">' + escapeHtml(executor) + escapeHtml(dependency) + '</small>' +
+        (timing ? '<small class="workflow-activity-timing">' + escapeHtml(timing) + '</small>' : '') +
+        '<small class="workflow-activity-desc">' + escapeHtml(description) + '</small>' +
+        (item.error ? '<em>' + escapeHtml(item.error) + '</em>' : '') +
+        '<span class="workflow-activity-meta"><span class="workflow-mode-tag">' + escapeHtml(modeLabel(item.execution_mode)) + '</span>' +
+        '<span class="workflow-state-tag">' + escapeHtml(statusLabel(state)) + '</span></span></span>' +
       '</button>';
     }).join("") : '<div class="workflow-empty">未返回执行计划</div>';
 
@@ -510,7 +557,7 @@ window.PlatformWorkflow = (function () {
           '<small>实例 ' + escapeHtml(row.instance_id) + ' · ' + escapeHtml(statusLabel(row.status)) + '</small>' +
           '<dl><dt>执行模式</dt><dd>' + escapeHtml(modeLabel(row.execution_mode)) + '</dd>' +
           '<dt>活动 / 调用</dt><dd>' + escapeHtml(row.activity_count || 0) + ' / ' + escapeHtml(row.call_count || 0) + '</dd>' +
-          '<dt>累计耗时</dt><dd>' + escapeHtml(provided(row.duration_ms, function (value) { return Math.round(Number(value)) + " ms"; })) + '</dd>' +
+          '<dt>累计耗时</dt><dd>' + escapeHtml(provided(row.duration_ms, formatDuration)) + '</dd>' +
           '<dt>重试</dt><dd>' + escapeHtml(provided(row.retry_count)) + '</dd>' +
           '<dt>最近心跳</dt><dd>' + escapeHtml(provided(row.last_heartbeat)) + '</dd></dl>' +
         '</article>';
@@ -542,7 +589,7 @@ window.PlatformWorkflow = (function () {
           '<dt>负责 Agent</dt><dd>' + escapeHtml(compactSummary(row.assigned_agents)) + '</dd>' +
           '<dt>版本</dt><dd>' + escapeHtml(provided(row.version)) + '</dd>' +
           '<dt>执行模式</dt><dd>' + escapeHtml(provided(row.execution_mode, modeLabel)) + '</dd>' +
-          '<dt>耗时</dt><dd>' + escapeHtml(provided(row.duration_ms, function (value) { return Math.round(Number(value)) + " ms"; })) + '</dd>' +
+          '<dt>耗时</dt><dd>' + escapeHtml(provided(row.duration_ms, formatDuration)) + '</dd>' +
           '<dt>输入摘要</dt><dd>' + escapeHtml(compactSummary(row.input_summary)) + '</dd>' +
           '<dt>结果摘要</dt><dd>' + escapeHtml(compactSummary(row.result_summary)) + '</dd>' +
           '<dt>Params / FLOPs</dt><dd>' + escapeHtml(provided(row.params)) + ' / ' + escapeHtml(provided(row.flops)) + '</dd></dl>' +
@@ -612,14 +659,14 @@ window.PlatformWorkflow = (function () {
     if (!root) return;
     metrics = metrics || {};
     var rows = [
-      ["工作流耗时", provided(metrics.workflow_duration_ms, function (value) { return Math.round(Number(value)) + " ms"; })],
-      ["活动累计耗时", provided(metrics.activity_duration_total_ms, function (value) { return Math.round(Number(value)) + " ms"; })],
+      ["工作流耗时", provided(metrics.workflow_duration_ms, formatDuration)],
+      ["活动累计耗时", provided(metrics.activity_duration_total_ms, formatDuration)],
       ["调用尝试", provided(metrics.agent_call_attempts)],
       ["成功调用", provided(metrics.agent_call_completed)],
       ["失败调用", provided(metrics.agent_call_failed)],
       ["实际重试", provided(metrics.retry_count)],
       ["吞吐", provided(metrics.throughput)],
-      ["恢复时间", provided(metrics.recovery_time_ms, function (value) { return Math.round(Number(value)) + " ms"; })],
+      ["恢复时间", provided(metrics.recovery_time_ms, formatDuration)],
     ];
     root.innerHTML = '<div class="workflow-metric-grid">' + rows.map(function (row) {
       return '<span><small>' + escapeHtml(row[0]) + '</small><b>' + escapeHtml(row[1]) + '</b></span>';

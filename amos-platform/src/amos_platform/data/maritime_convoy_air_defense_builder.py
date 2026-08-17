@@ -6,9 +6,12 @@ from typing import Any
 
 from amos_platform.data.scenario_builder_support import (
     asset_profiles,
+    agent_deployment,
     bind_media_consumers,
+    compute_node,
     capture_plan,
     media_record,
+    physical_devices,
     required_backend_roles,
     scenario_agents,
     sensor_capability,
@@ -171,6 +174,42 @@ def build_maritime_convoy_air_defense_scenario() -> dict[str, Any]:
         "AEW-01": "loop", "UAV-CONFIRM-01": "hold", "SHORE-RADAR-01": "hold",
     }
     motion_windows = {"UAV-CONFIRM-01": {"start_sec": 2160, "activate_on_follow": True}}
+    extra_devices = [{
+        "device_id": "ASCM-01",
+        "name": "舰载反舰导弹一号",
+        "device_type": "anti_ship_missile",
+        "status": "stowed",
+        "asset_ref": "ESCORT-01",
+    }]
+    compute_nodes = [
+        compute_node("ESCORT-01-COMPUTE", "护航舰舰载任务计算节点", "ESCORT-01",
+                     host_device_type="escort_ship", compute_type="ship_edge",
+                     cpu="32 cores", accelerator="tactical_gpu", memory_gb=128, network="shipboard_fabric"),
+        compute_node("UAV-CONFIRM-01-COMPUTE", "补充侦察无人机边缘计算模块", "UAV-CONFIRM-01",
+                     host_device_type="uav", compute_type="uav_edge",
+                     cpu="8 cores", accelerator="embedded_ai", memory_gb=32, network="line_of_sight_datalink"),
+        compute_node("ASCM-01-COMPUTE", "反舰导弹弹载制导计算单元", "ASCM-01",
+                     host_device_type="anti_ship_missile", compute_type="onboard_guidance",
+                     status="standby", cpu="4 cores", accelerator="signal_processor", memory_gb=8, network="weapon_datalink"),
+        compute_node("AEW-01-COMPUTE", "预警机任务处理节点", "AEW-01",
+                     host_device_type="aircraft", compute_type="airborne_edge",
+                     cpu="24 cores", accelerator="radar_dsp", memory_gb=96, network="tactical_air_link"),
+        compute_node("SHORE-RADAR-01-COMPUTE", "岸基融合处理节点", "SHORE-RADAR-01",
+                     host_device_type="ground_station", compute_type="ground_edge",
+                     cpu="48 cores", accelerator="server_gpu", memory_gb=192, network="fiber_backhaul"),
+    ]
+    agent_deployments = [
+        agent_deployment("A1", "AEW-01-COMPUTE", roles=["early_warning_detection", "multi_source_perception"], runtime_status="planned"),
+        agent_deployment("A1", "SHORE-RADAR-01-COMPUTE", roles=["ais_radar_correlation", "intelligence_ingest"], runtime_status="planned"),
+        agent_deployment("A2", "ESCORT-01-COMPUTE", roles=["track_update", "threat_assessment"], runtime_status="planned"),
+        agent_deployment("A3", "ESCORT-01-COMPUTE", roles=["resource_allocation", "uav_tasking"], runtime_status="planned"),
+        agent_deployment("A4", "ESCORT-01-COMPUTE", roles=["attack_option_selection", "decision_planning"], runtime_status="planned"),
+        agent_deployment("A5", "ESCORT-01-COMPUTE", roles=["roe_review", "civilian_no_strike_check"], runtime_status="planned"),
+        agent_deployment("A6", "ESCORT-01-COMPUTE", roles=["fire_command", "closed_loop_control"], runtime_status="planned"),
+        agent_deployment("A1", "UAV-CONFIRM-01-COMPUTE", roles=["supplemental_reconnaissance", "target_follow"], runtime_status="standby"),
+        agent_deployment("A2", "UAV-CONFIRM-01-COMPUTE", roles=["post_strike_tracking", "damage_observation"], runtime_status="standby"),
+        agent_deployment("A6", "ASCM-01-COMPUTE", roles=["terminal_guidance", "weapon_flight_monitor"], runtime_status="standby"),
+    ]
     asset_capabilities, asset_task_schedule, capture_plans = _capture_contract()
     timeline = _timeline()
     media_cues = bind_media_consumers(_media_cues(), timeline)
@@ -201,6 +240,9 @@ def build_maritime_convoy_air_defense_scenario() -> dict[str, Any]:
             "return_hide_distance_nm": 0.2,
         }],
         "asset_profiles": asset_profiles(assets),
+        "physical_devices": physical_devices(assets, extra_devices),
+        "compute_nodes": compute_nodes,
+        "agent_deployments": agent_deployments,
         "asset_capabilities": asset_capabilities,
         "asset_task_schedule": asset_task_schedule,
         "capture_plans": capture_plans,

@@ -277,6 +277,12 @@ window.PlatformPanels = (function () {
     return escapeHtml(value);
   }
 
+  function valueList(value) {
+    if (Array.isArray(value)) return value;
+    if (value == null || value === "") return [];
+    return String(value).split(/[；, ]+/).filter(Boolean);
+  }
+
   function renderFunctionalAgents(scenario) {
     var root = document.getElementById("scenario-functional-agents");
     var badge = document.getElementById("functional-agent-count");
@@ -290,6 +296,71 @@ window.PlatformPanels = (function () {
         '</p><dl><div><dt>后端角色</dt><dd>' + compactValue(item.backend_roles) +
         '</dd></div></dl></article>';
     }).join("") : '<div class="empty-state">当前场景未声明功能 Agent</div>');
+  }
+
+  function renderAgentDeploymentTopology(scenario) {
+    var root = document.getElementById("agent-deployment-topology");
+    var badge = document.getElementById("agent-deployment-count");
+    if (!root) return;
+    var devices = asList(scenario && scenario.physical_devices);
+    var nodes = asList(scenario && scenario.compute_nodes);
+    var deployments = asList(scenario && scenario.agent_deployments);
+    var agents = asList(scenario && scenario.functional_agents);
+    if (badge) badge.textContent = deployments.length;
+    var agentsById = agents.reduce(function (result, item) {
+      result[item.agent_id || item.id] = item;
+      return result;
+    }, {});
+    var nodesByDevice = nodes.reduce(function (result, item) {
+      var deviceId = item.host_device_id || "未绑定设备";
+      if (!result[deviceId]) result[deviceId] = [];
+      result[deviceId].push(item);
+      return result;
+    }, {});
+    var deploymentsByNode = deployments.reduce(function (result, item) {
+      var nodeId = item.compute_node_id || "未绑定节点";
+      if (!result[nodeId]) result[nodeId] = [];
+      result[nodeId].push(item);
+      return result;
+    }, {});
+    var devicesById = devices.reduce(function (result, item) {
+      result[item.device_id || item.id] = item;
+      return result;
+    }, {});
+    nodes.forEach(function (node) {
+      var deviceId = node.host_device_id || "未绑定设备";
+      if (!devicesById[deviceId]) {
+        devices.push({device_id: deviceId, name: deviceId, device_type: node.host_device_type || "platform", status: "unknown"});
+        devicesById[deviceId] = devices[devices.length - 1];
+      }
+    });
+    var html = devices.length ? devices.map(function (device) {
+      var deviceId = device.device_id || device.id;
+      var deviceNodes = nodesByDevice[deviceId] || [];
+      return '<article class="deployment-device"><header><div><b>' + escapeHtml(device.name || deviceId) +
+        '</b><small>' + escapeHtml(deviceId) + ' · ' + escapeHtml(device.device_type || "platform") +
+        '</small></div><span>' + escapeHtml(device.status || "unknown") + '</span></header>' +
+        (deviceNodes.length ? deviceNodes.map(function (node) {
+          var nodeDeployments = deploymentsByNode[node.node_id] || [];
+          return '<section class="deployment-compute-node"><div class="deployment-node-head"><b>' +
+            escapeHtml(node.name || node.node_id) + '</b><span>' + escapeHtml(node.compute_type || "compute") +
+            '</span></div><dl><div><dt>CPU</dt><dd>' + escapeHtml(node.cpu || "未声明") +
+            '</dd></div><div><dt>加速器</dt><dd>' + escapeHtml(node.accelerator || "未声明") +
+            '</dd></div><div><dt>内存</dt><dd>' + escapeHtml(node.memory_gb == null ? "未声明" : node.memory_gb + " GB") +
+            '</dd></div><div><dt>网络</dt><dd>' + escapeHtml(node.network || "未声明") +
+            '</dd></div></dl><div class="deployment-agent-list">' +
+            (nodeDeployments.length ? nodeDeployments.map(function (deployment) {
+              var agent = agentsById[deployment.agent_id] || {};
+              return '<div class="deployment-agent"><b>' + escapeHtml(deployment.agent_id || "Agent") +
+                ' · ' + escapeHtml(agent.name || "未命名 Agent") + '</b><small>' +
+                escapeHtml(valueList(deployment.roles).join("；") || "未声明部署职责") +
+                '</small><span>' + escapeHtml(deployment.runtime_status || "planned") + '</span></div>';
+            }).join("") : '<div class="deployment-empty">该算力节点暂无 Agent 部署</div>') +
+            '</div></section>';
+        }).join("") : '<div class="deployment-empty">该设备暂无算力节点</div>') +
+        '</article>';
+    }).join("") : '<div class="empty-state">当前场景未声明 Agent—设备算力映射</div>';
+    setHtmlIfChanged(root, html);
   }
 
   function renderBackendCapabilities() {
@@ -327,10 +398,11 @@ window.PlatformPanels = (function () {
       var ready = item.runtime_status === "ready";
       var stateText = ready ? "运行就绪" : "不可用";
       var endpoint = item.predict_endpoint || profile.predict_endpoint || "未上报";
+      var agentCard = item.agent_card || {};
+      var description = item.summary || agentCard.summary || (item.capabilities || []).join(" · ") || "未声明算法作用";
       return '<article class="backend-function-card ' + (ready ? "runtime-ready" : "runtime-unavailable") + '">' +
-        '<header><div><b>' + escapeHtml(item.display_name || item.algorithm_id) + '</b><code>' +
-        escapeHtml(item.algorithm_id) + '</code></div><span>' + escapeHtml(stateText) + '</span></header>' +
-        '<p>' + escapeHtml((item.capabilities || []).join(" · ") || "未声明能力标签") + '</p>' +
+        '<header><div><b>' + escapeHtml(item.display_name || item.algorithm_id) + '</b></div><span>' + escapeHtml(stateText) + '</span></header>' +
+        '<p>' + escapeHtml(description) + '</p>' +
         '<div class="backend-runtime-meta"><span>任务族 <b>' + escapeHtml(item.task_family || "未上报") + '</b></span>' +
         '<span>模型 <b>' + escapeHtml(profile.model_id || "未上报") + '</b></span>' +
         '<span>版本 <b>' + escapeHtml(item.version || "未上报") + '</b></span>' +
@@ -385,6 +457,7 @@ window.PlatformPanels = (function () {
     });
     renderBackendCapabilities();
     renderFunctionalAgents(activeScenario);
+    renderAgentDeploymentTopology(activeScenario);
   }
 
   // ── Full Update ────────────────────────────────────────────

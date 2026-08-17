@@ -19,6 +19,8 @@ def test_algorithm_catalog_only_counts_healthy_active_runtimes(monkeypatch) -> N
                         "backend_type": "python_http_service",
                         "task_family": "tracking",
                         "capabilities": ["tracking"],
+                        "summary": "多目标跟踪与定位",
+                        "agent_card": {"summary": "跟踪算法服务"},
                     },
                     {
                         "algorithm_id": "offline_algorithm",
@@ -56,6 +58,8 @@ def test_algorithm_catalog_only_counts_healthy_active_runtimes(monkeypatch) -> N
         "ready_algorithm"
     ]
     assert catalog["algorithms"][0]["model_loaded"] is True
+    assert catalog["algorithms"][0]["summary"] == "多目标跟踪与定位"
+    assert catalog["algorithms"][0]["agent_card"]["summary"] == "跟踪算法服务"
 
 
 def test_algorithm_catalog_accepts_flat_algolib_gateway_shape(monkeypatch) -> None:

@@ -412,6 +412,32 @@ def test_algorithm_call_duration_and_model_id_are_preserved() -> None:
     assert algorithm["model_id"] == "rt-detr-odconv-detector"
     assert algorithm["duration_ms"] == 18.75
     assert algorithm["result_summary"] == {"detections": 2}
+    assert view["orchestration"]["activities"][0]["duration_ms"] == 18.75
+    assert view["activity_details"]["A-TIA"]["agent_call"]["duration_ms"] == 18.75
+
+
+def test_activity_duration_falls_back_to_start_and_finish_times() -> None:
+    view = build_workflow_view(
+        {
+            "workflow_id": "wf-activity-clock",
+            "status": "completed",
+            "result": {"activity_results": [{
+                "activity_id": "A-SCHED",
+                "status": "completed",
+                "started_at": "2026-08-17T15:32:39.725970+00:00",
+                "finished_at": "2026-08-17T15:32:44.247127+00:00",
+                "metrics": {"duration_ms": 0.0},
+            }]},
+        },
+        work_list={"work_list": [{
+            "activity_id": "A-SCHED",
+            "status": "completed",
+            "metrics": {"duration_ms": 0.0},
+        }]},
+    )
+
+    assert view["orchestration"]["activities"][0]["duration_ms"] == 4521.157
+    assert view["activity_details"]["A-SCHED"]["agent_call"]["duration_ms"] == 4521.157
 
 
 def test_activity_detail_does_not_expose_arbitrary_explicit_summary_objects() -> None:

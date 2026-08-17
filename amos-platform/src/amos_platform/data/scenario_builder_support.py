@@ -41,6 +41,84 @@ def required_backend_roles() -> list[dict[str, Any]]:
     return [dict(item) for item in REQUIRED_BACKEND_ROLES]
 
 
+def _asset_record(raw: Any) -> dict[str, Any]:
+    return raw.to_dict() if hasattr(raw, "to_dict") else dict(raw)
+
+
+def physical_devices(
+    assets: list[Any],
+    extra_devices: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
+) -> list[dict[str, Any]]:
+    """Expose physical carriers that can host compute and Agent deployments."""
+    devices = []
+    for raw in assets:
+        asset = _asset_record(raw)
+        device_id = str(asset.get("asset_id") or asset.get("id") or "")
+        devices.append({
+            "device_id": device_id,
+            "name": str(asset.get("role") or device_id or "未命名设备"),
+            "device_type": str(asset.get("domain") or "platform"),
+            "status": str(asset.get("status") or "unknown"),
+            "is_simulated": True,
+            "asset_ref": device_id,
+        })
+    devices.extend(dict(item, is_simulated=item.get("is_simulated", True)) for item in extra_devices)
+    return devices
+
+
+def compute_node(
+    node_id: str,
+    name: str,
+    host_device_id: str,
+    *,
+    host_device_type: str,
+    compute_type: str,
+    status: str = "online",
+    cpu: str = "",
+    accelerator: str = "",
+    memory_gb: int | None = None,
+    network: str = "",
+) -> dict[str, Any]:
+    node = {
+        "node_id": node_id,
+        "name": name,
+        "host_device_id": host_device_id,
+        "host_device_type": host_device_type,
+        "compute_type": compute_type,
+        "status": status,
+    }
+    if cpu:
+        node["cpu"] = cpu
+    if accelerator:
+        node["accelerator"] = accelerator
+    if memory_gb is not None:
+        node["memory_gb"] = memory_gb
+    if network:
+        node["network"] = network
+    return node
+
+
+def agent_deployment(
+    agent_id: str,
+    compute_node_id: str,
+    *,
+    deployment_id: str | None = None,
+    runtime_status: str = "planned",
+    roles: list[str] | tuple[str, ...] = (),
+    notes: str = "",
+) -> dict[str, Any]:
+    result = {
+        "deployment_id": deployment_id or f"{agent_id}@{compute_node_id}",
+        "agent_id": agent_id,
+        "compute_node_id": compute_node_id,
+        "runtime_status": runtime_status,
+        "roles": list(roles),
+    }
+    if notes:
+        result["notes"] = notes
+    return result
+
+
 def bind_media_consumers(
     media_cues: list[dict[str, Any]],
     timeline: list[dict[str, Any]],

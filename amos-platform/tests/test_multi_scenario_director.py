@@ -51,6 +51,32 @@ def test_midterm_catalog_exposes_maritime_scenario_and_builders_keep_v2_contract
     assert declared_functions == {item["function_id"] for item in FUNCTION_POINT_CATALOG}
 
 
+def test_maritime_scenario_declares_agent_device_compute_mapping() -> None:
+    scenario = get_scenario("maritime-convoy-air-defense")
+    assert scenario is not None
+
+    devices = {row["device_id"]: row for row in scenario["physical_devices"]}
+    nodes = {row["node_id"]: row for row in scenario["compute_nodes"]}
+    deployments = scenario["agent_deployments"]
+
+    assert {"ESCORT-01", "UAV-CONFIRM-01", "ASCM-01"}.issubset(devices)
+    assert devices["ASCM-01"]["device_type"] == "anti_ship_missile"
+    assert nodes["ESCORT-01-COMPUTE"]["host_device_id"] == "ESCORT-01"
+    assert nodes["UAV-CONFIRM-01-COMPUTE"]["host_device_id"] == "UAV-CONFIRM-01"
+    assert nodes["ASCM-01-COMPUTE"]["host_device_id"] == "ASCM-01"
+
+    escort_agents = {
+        row["agent_id"]
+        for row in deployments
+        if row["compute_node_id"] == "ESCORT-01-COMPUTE"
+    }
+    assert {"A2", "A3", "A4", "A5", "A6"}.issubset(escort_agents)
+    assert any(
+        row["agent_id"] == "A6" and row["compute_node_id"] == "ASCM-01-COMPUTE"
+        for row in deployments
+    )
+
+
 def test_document_requirement_ids_and_coverage_tiers_are_not_conflated() -> None:
     scenarios = [get_scenario(scenario_id) for scenario_id in SCENARIO_IDS]
     models = {
