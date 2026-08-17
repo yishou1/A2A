@@ -168,13 +168,14 @@
 
       <section class="workspace-panel" data-workspace-panel="algorithms" role="tabpanel" hidden>
         <div class="metric-strip four" id="backend-capability-summary">
+          <span><small>已发现算法</small><b id="backend-active-count">0</b></span>
           <span><small>可运行算法</small><b id="backend-runnable-count">0</b></span>
           <span><small>运行时不可用</small><b id="backend-unavailable-count">0</b></span>
           <span><small>任务族</small><b id="backend-family-count">0</b></span>
-          <span><small>模型已加载</small><b id="backend-model-count">0</b></span>
         </div>
         <div class="card" id="backend-capability-plan">
           <div class="card-heading"><div><span class="section-eyebrow">AlgoLib 运行时发现</span><h2>后端可运行算法</h2></div><span id="algorithm-runtime-status" class="status-chip neutral">检查中</span></div>
+          <div id="algorithm-runtime-meta" class="algorithm-runtime-meta"></div>
           <div id="backend-capability-map" class="backend-capability-map">
             <div class="empty-state">正在检查算法服务</div>
           </div>
