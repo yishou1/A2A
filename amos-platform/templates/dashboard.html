@@ -6,7 +6,7 @@
 <title>Simulation 场景仿真平台</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
-<link rel="stylesheet" href="/static/css/platform.css?v=20260817f">
+<link rel="stylesheet" href="/static/css/platform.css?v=20260817h">
 <script src="/static/vendor/leaflet/leaflet.js"></script>
 <script src="/static/vendor/protomaps/protomaps-leaflet.js"></script>
 </head>
@@ -261,6 +261,21 @@
           </div>
           <p class="report-note">报告包含本次运行配置、提交快照、工作流记录、覆盖证据、指标和最终状态。</p>
         </div>
+        <div class="card knowledge-graph-entry">
+          <div class="knowledge-graph-copy">
+            <span class="section-eyebrow">规则知识</span>
+            <h2>交战规则知识图谱</h2>
+            <p>查看规则实体、主题分类与关联关系</p>
+          </div>
+          <div class="knowledge-graph-actions">
+            <div class="knowledge-graph-stats" aria-label="图谱规模">
+              <span><b>1386</b> 节点</span>
+              <span><b>18</b> 关系类型</span>
+              <span><b>14</b> 主题</span>
+            </div>
+            <button id="btn-open-knowledge-graph" class="btn btn-sm btn-primary" type="button">打开图谱</button>
+          </div>
+        </div>
         <div class="card">
           <div class="card-heading"><div><span class="section-eyebrow">提交记录</span><h2>输入快照</h2></div></div>
           <div id="wf-input-snapshot"><div class="empty-state">流程尚未产生后端输入快照</div></div>
@@ -311,6 +326,16 @@
       <button id="authorization-cancel" class="btn" type="button">暂不打击</button>
       <button id="authorization-confirm" class="btn btn-danger" type="button">确认打击</button>
     </footer>
+  </section>
+</div>
+
+<div id="knowledge-graph-dialog" class="knowledge-graph-dialog" aria-hidden="true">
+  <section class="knowledge-graph-panel" role="dialog" aria-modal="true" aria-labelledby="knowledge-graph-title">
+    <header class="knowledge-graph-header">
+      <h2 id="knowledge-graph-title">交战规则知识图谱</h2>
+      <button id="knowledge-graph-close" class="btn btn-sm" type="button">关闭</button>
+    </header>
+    <iframe id="knowledge-graph-frame" title="交战规则知识图谱" data-src="/static/knowledge-graph/roe-knowledge-graph.html"></iframe>
   </section>
 </div>
 

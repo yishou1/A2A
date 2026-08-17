@@ -156,6 +156,32 @@ def test_frontend_uses_dynamic_scenarios_without_future_route_renderer() -> None
     assert "btn-story-run-chain" not in html + controller
 
 
+def test_evidence_workspace_embeds_the_knowledge_graph_as_one_static_asset() -> None:
+    html = (ROOT / "templates/dashboard.html").read_text(encoding="utf-8")
+    controller = (ROOT / "static/js/app/platform.js").read_text(encoding="utf-8")
+    styles = (ROOT / "static/css/platform.css").read_text(encoding="utf-8")
+    graph_path = ROOT / "static/knowledge-graph/roe-knowledge-graph.html"
+
+    assert 'id="btn-open-knowledge-graph"' in html
+    assert 'id="knowledge-graph-dialog"' in html
+    assert 'role="dialog"' in html
+    assert 'data-src="/static/knowledge-graph/roe-knowledge-graph.html"' in html
+    assert "openKnowledgeGraph" in controller
+    assert "closeKnowledgeGraph" in controller
+    assert ".knowledge-graph-dialog{position:fixed;inset:0" in styles
+    assert "width:100vw;height:100vh" in styles
+    assert "查看规则实体、主题分类与关联关系" in html
+    assert "关系类型" in html
+    report_position = html.index('class="card report-card"')
+    graph_position = html.index('class="card knowledge-graph-entry"')
+    snapshot_position = html.index('id="wf-input-snapshot"')
+    assert report_position < graph_position < snapshot_position
+    assert graph_path.is_file()
+    graph_html = graph_path.read_text(encoding="utf-8")
+    assert "交战规则知识图谱" in graph_html
+    assert '"visible_nodes": 1386' in graph_html
+
+
 def test_frontend_keeps_director_stream_and_interpolates_live_markers() -> None:
     controller = (ROOT / "static/js/app/platform.js").read_text(encoding="utf-8")
     map_script = (ROOT / "static/js/map/platform-map.js").read_text(encoding="utf-8")
