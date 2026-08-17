@@ -23,15 +23,29 @@ from amos_platform.simulation.exchange_contract import chain_id_for
 DEFAULT_COMMANDER_URL = "http://127.0.0.1:8021"
 DEFAULT_GATEWAY_URL = "http://127.0.0.1:8030"
 DEFAULT_WORKFLOW_FILE = "integrated_system/workflows/integrated_demo_workflow.bpel"
+OBSERVE_WORKFLOW_FILE = "integrated_system/workflows/observe_workflow.bpel"
+ORIENT_WORKFLOW_FILE = "integrated_system/workflows/orient_workflow.bpel"
+DECIDE_WORKFLOW_FILE = "integrated_system/workflows/decide_workflow.bpel"
+ACT_WORKFLOW_FILE = "integrated_system/workflows/act_workflow.bpel"
 PHASE_WORKFLOW_FILES = {
-    "FIND": "integrated_system/workflows/observe_workflow.bpel",
-    "FIX": "integrated_system/workflows/observe_workflow.bpel",
-    "TRACK": "integrated_system/workflows/orient_workflow.bpel",
-    "TARGET": "integrated_system/workflows/decide_workflow.bpel",
-    "ENGAGE": "integrated_system/workflows/act_workflow.bpel",
-    "ASSESS": "integrated_system/workflows/act_workflow.bpel",
+    "FIND": OBSERVE_WORKFLOW_FILE,
+    "FIX": OBSERVE_WORKFLOW_FILE,
+    "TRACK": ORIENT_WORKFLOW_FILE,
+    "TARGET": DECIDE_WORKFLOW_FILE,
+    "ENGAGE": ACT_WORKFLOW_FILE,
+    "ASSESS": ACT_WORKFLOW_FILE,
 }
-ALLOWED_WORKFLOW_FILES = {DEFAULT_WORKFLOW_FILE, *PHASE_WORKFLOW_FILES.values()}
+CHECKPOINT_WORKFLOW_FILES = {
+    "MAR-CP-PERCEPTION": OBSERVE_WORKFLOW_FILE,
+    "MAR-CP-ASSESS": ORIENT_WORKFLOW_FILE,
+    "MAR-CP-PLAN": DECIDE_WORKFLOW_FILE,
+    "MAR-CP-CLOSE": ACT_WORKFLOW_FILE,
+}
+ALLOWED_WORKFLOW_FILES = {
+    DEFAULT_WORKFLOW_FILE,
+    *PHASE_WORKFLOW_FILES.values(),
+    *CHECKPOINT_WORKFLOW_FILES.values(),
+}
 
 
 def _configure_local_proxy_bypass() -> None:
@@ -126,6 +140,39 @@ class CommanderBridge:
         status = str(payload.get("status") or "").lower()
         return payload.get("ok") is not False and status in {"ok", "ready", "healthy"}
 
+    @staticmethod
+    def _health_endpoint_from_predict_endpoint(url: str) -> str:
+        endpoint = str(url or "").strip()
+        if not endpoint:
+            return ""
+        parsed = urllib.parse.urlparse(endpoint)
+        if not parsed.scheme or not parsed.netloc:
+            return ""
+        path = parsed.path.rstrip("/")
+        if path.endswith("/predict"):
+            path = path[: -len("/predict")] + "/health"
+        else:
+            path = path + "/health"
+        return urllib.parse.urlunparse(parsed._replace(path=path, params="", query="", fragment=""))
+
+    @classmethod
+    def _runtime_health_endpoint(cls, item: dict[str, Any], detail: dict[str, Any]) -> str:
+        entry = detail.get("entry") if isinstance(detail.get("entry"), dict) else {}
+        card = entry.get("card") if isinstance(entry.get("card"), dict) else {}
+        machine = card.get("machine_spec") if isinstance(card.get("machine_spec"), dict) else {}
+        runtime = machine.get("runtime") if isinstance(machine.get("runtime"), dict) else {}
+        health_endpoint = str(
+            runtime.get("health_endpoint")
+            or detail.get("health_endpoint")
+            or item.get("health_endpoint")
+            or ""
+        ).strip()
+        if health_endpoint:
+            return health_endpoint
+        return cls._health_endpoint_from_predict_endpoint(
+            str(detail.get("predict_endpoint") or item.get("predict_endpoint") or "")
+        )
+
     def algorithm_catalog(self, *, force: bool = False) -> dict[str, Any]:
         """Return active AlgoLib entries whose configured runtime is healthy."""
         now = time.monotonic()
@@ -173,11 +220,7 @@ class CommanderBridge:
                         urllib.parse.quote(backend_type, safe=""),
                     ])
                     detail = self._fetch_json(detail_url)
-                    entry = detail.get("entry") if isinstance(detail.get("entry"), dict) else {}
-                    card = entry.get("card") if isinstance(entry.get("card"), dict) else {}
-                    machine = card.get("machine_spec") if isinstance(card.get("machine_spec"), dict) else {}
-                    runtime = machine.get("runtime") if isinstance(machine.get("runtime"), dict) else {}
-                    health_endpoint = str(runtime.get("health_endpoint") or "")
+                    health_endpoint = self._runtime_health_endpoint(item, detail)
                     if health_endpoint:
                         health_payload = self._fetch_json(health_endpoint, timeout=1.5)
                         runtime_status = "ready" if self._runtime_is_ready(health_payload) else "unavailable"
@@ -192,6 +235,7 @@ class CommanderBridge:
                     "task_family": item.get("task_family"),
                     "capabilities": list(item.get("capabilities") or []),
                     "model_profile": item.get("model_profile") if isinstance(item.get("model_profile"), dict) else {},
+                    "predict_endpoint": item.get("predict_endpoint"),
                     "runtime_status": runtime_status,
                     "model_loaded": model_loaded,
                     "health_status": health_payload.get("status"),
@@ -249,7 +293,12 @@ class CommanderBridge:
             else {}
         )
         phase = str(stage_transfer.get("phase") or "").upper()
-        payload["workflow_file"] = PHASE_WORKFLOW_FILES.get(phase, DEFAULT_WORKFLOW_FILE)
+        checkpoint_id = str(stage_transfer.get("checkpoint_id") or "").upper()
+        payload["workflow_file"] = (
+            CHECKPOINT_WORKFLOW_FILES.get(checkpoint_id)
+            or PHASE_WORKFLOW_FILES.get(phase)
+            or DEFAULT_WORKFLOW_FILE
+        )
         return payload
 
     def build_backend_submission(
@@ -359,5 +408,10 @@ __all__ = [
     "DEFAULT_COMMANDER_URL",
     "DEFAULT_GATEWAY_URL",
     "DEFAULT_WORKFLOW_FILE",
+    "OBSERVE_WORKFLOW_FILE",
+    "ORIENT_WORKFLOW_FILE",
+    "DECIDE_WORKFLOW_FILE",
+    "ACT_WORKFLOW_FILE",
     "PHASE_WORKFLOW_FILES",
+    "CHECKPOINT_WORKFLOW_FILES",
 ]

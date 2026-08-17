@@ -62,6 +62,8 @@ def _active_registry() -> list[dict[str, Any]]:
                 "backend_type": "python_http_service",
                 "status": "active",
                 "task_family": card.get("task_family", ""),
+                "model_id": card.get("model_id"),
+                "model_profile": card.get("model_profile") or {},
                 "capabilities": card.get("capabilities", []),
                 "input_schema_summary": {"required": card.get("required_fields", [])},
                 "agent_card": card.get("agent_card") or {"summary": card.get("summary", "")},
@@ -69,6 +71,7 @@ def _active_registry() -> list[dict[str, Any]]:
                 "optional": card.get("optional", True),
                 "stage": card.get("stage") or ALGORITHM_STAGE.get(aid, ""),
                 "predict_endpoint": card.get("predict_endpoint"),
+                "health_endpoint": str(card.get("predict_endpoint") or "").replace("/predict", "/health"),
             }
         )
     return out

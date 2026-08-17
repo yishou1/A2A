@@ -57,3 +57,45 @@ def test_algorithm_catalog_only_counts_healthy_active_runtimes(monkeypatch) -> N
     ]
     assert catalog["algorithms"][0]["model_loaded"] is True
 
+
+def test_algorithm_catalog_accepts_flat_algolib_gateway_shape(monkeypatch) -> None:
+    bridge = CommanderBridge()
+
+    def fake_fetch(url: str, timeout: float = 2.0) -> dict:
+        if url.endswith("/health") and ":8088" in url:
+            return {"ok": True, "status": "ready"}
+        if url.endswith("/algorithms?active_only=true"):
+            return {
+                "algorithms": [
+                    {
+                        "algorithm_id": "flat_algorithm",
+                        "display_name": "Flat Algorithm",
+                        "version": "1.0.0",
+                        "backend_type": "python_http_service",
+                        "task_family": "planning",
+                        "capabilities": ["planning"],
+                        "predict_endpoint": "http://runtime/flat/predict",
+                    },
+                ]
+            }
+        if "/algorithms/flat_algorithm/" in url:
+            return {
+                "algorithm_id": "flat_algorithm",
+                "version": "1.0.0",
+                "backend_type": "python_http_service",
+                "predict_endpoint": "http://runtime/flat/predict",
+            }
+        if url == "http://runtime/flat/health":
+            return {"ok": True, "status": "ready", "model_loaded": True}
+        raise AssertionError(f"unexpected URL: {url}")
+
+    monkeypatch.setattr(bridge, "_fetch_json", fake_fetch)
+
+    catalog = bridge.algorithm_catalog(force=True)
+
+    assert catalog["status"] == "ready"
+    assert catalog["active_count"] == 1
+    assert catalog["runnable_count"] == 1
+    assert catalog["algorithms"][0]["runtime_status"] == "ready"
+    assert catalog["algorithms"][0]["predict_endpoint"] == "http://runtime/flat/predict"
+

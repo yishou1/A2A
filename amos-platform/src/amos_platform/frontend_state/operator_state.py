@@ -37,7 +37,11 @@ def build_operator_state(internal_state: dict[str, Any]) -> dict[str, Any]:
     return sanitize_operator_payload({
         "visibility": "operator-visible",
         "clock": clock,
-        "assets": [sanitize_asset(asset) for asset in internal_state.get("assets") or []],
+        "assets": [
+            sanitize_asset(asset)
+            for asset in internal_state.get("assets") or []
+            if not asset.get("operator_hidden")
+        ],
         "weapons": [
             sanitize_weapon(weapon, truth_terms)
             for weapon in internal_state.get("weapons") or []

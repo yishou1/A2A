@@ -43,8 +43,8 @@ GEOMETRY_ANCHORS = {
     },
     "maritime-convoy-air-defense": {
         "MAR-MEDIA-03": ((22.216446, 121.359430, 0), 141.30, 0.00, [7.61], [7.61]),
-        "MAR-MEDIA-04": ((22.101741, 121.318589, 8000), 122.71, 9.40, [7.95], [8.06]),
-        "MAR-MEDIA-07": ((22.280000, 121.620000, 8000), 154.43, 36.02, [1.81], [2.24]),
+        "MAR-MEDIA-04": ((22.245648, 121.403350, 0), 171.33, 0.00, [13.09], [13.09]),
+        "MAR-MEDIA-07": ((22.223216, 121.619392, 8000), 24.67, 33.97, [1.95], [2.36]),
     },
 }
 
@@ -68,12 +68,52 @@ def _due_on_branch(plan: dict[str, Any], branch: str) -> bool:
 
 def _completed_commander_result(engine: SimEngine, *, workflow_id: str) -> dict[str, Any]:
     run_id = str(engine.clock["run_id"])
+    tracking_rows = []
+    threat_rows = []
+    for track in engine.sensor_fusion.tracks.values():
+        truth_id = engine._truth_target_for_track(track)
+        if truth_id == "CONTACT-HOSTILE-01":
+            tracking_rows.append({
+                "track_id": track.id,
+                "object_type": "ship",
+                "metadata": {
+                    "source_class": "fast_attack_craft",
+                    "label": "hostile",
+                    "affiliation": "red",
+                    "threat_level": "high",
+                },
+                "lat": track.lat,
+                "lon": track.lng,
+            })
+            threat_rows.append({"track_id": track.id, "score": 0.91, "level": "high"})
+        elif truth_id == "CONTACT-FISHING-01":
+            tracking_rows.append({
+                "track_id": track.id,
+                "object_type": "ship",
+                "metadata": {
+                    "source_class": "fishing_vessel",
+                    "label": "civilian fishing vessel",
+                    "affiliation": "civilian",
+                    "threat_level": "low",
+                },
+                "lat": track.lat,
+                "lon": track.lng,
+            })
+            threat_rows.append({"track_id": track.id, "score": 0.12, "level": "low"})
     result = apply_commander_assessments(
         engine,
         {
             "workflow_id": workflow_id,
             "status": "completed",
             "result": {
+                "outputs": {
+                    "tracking_result": [{
+                        "value": {"tracks": tracking_rows, "threats": []},
+                    }],
+                    "threat_assessment_result": [{
+                        "value": {"threats": threat_rows},
+                    }],
+                },
                 "summary": {
                     "verification": "completed backend workflow fixture",
                     "simulation_only": True,
@@ -154,6 +194,15 @@ def _replay(scenario_id: str) -> Replay:
                 workflow_id=f"wf-capture-{scenario_id}",
             )
         engine._tick(step)
+        if scenario_id == "maritime-convoy-air-defense":
+            prompt = engine.get_operator_state().get("follow_launch_prompt")
+            if prompt:
+                authorized = engine.authorize_follow_asset(
+                    str(prompt["asset_id"]),
+                    str(prompt["track_id"]),
+                    authorized=True,
+                )
+                assert authorized["status"] == "authorized"
         _record_new_capture_context(engine, known_media_ids, context)
 
     captures = {

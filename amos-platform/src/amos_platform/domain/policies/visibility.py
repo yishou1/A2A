@@ -213,22 +213,32 @@ def sanitize_fused_track(track: dict[str, Any]) -> dict[str, Any]:
         "source": None,
     })
     kill_chain = track.get("kill_chain") if isinstance(track.get("kill_chain"), dict) else {}
+    classification = str(track.get("classification", "UNKNOWN") or "UNKNOWN")
+    protected_class = any(
+        token in classification.upper()
+        for token in ("FISHING", "CIVILIAN", "MERCHANT")
+    )
+    assessment_level = (
+        assessment.get("level") or track.get("threat_level")
+    ) if assessment.get("source") else None
+    if protected_class:
+        assessment["status"] = "cleared"
+        assessment["level"] = "LOW"
+        assessment_level = "LOW"
     safe = {
         "id": track.get("id") or track.get("track_id"),
         "track_id": track.get("track_id") or track.get("id"),
         "lat": track.get("lat"),
         "lng": track.get("lng"),
         "confidence": track.get("confidence"),
-        "classification": track.get("classification", "UNKNOWN"),
+        "classification": classification,
         "domain_hint": track.get("domain_hint"),
         "heading": track.get("heading"),
         "history_path": deepcopy(track.get("history_path") or []),
         "agent_assessment": assessment,
         # These scalar fields are safe operator projections.  The raw
         # ``threat_level`` and ``kill_chain`` structures remain forbidden.
-        "assessment_level": (
-            assessment.get("level") or track.get("threat_level")
-        ) if assessment.get("source") else None,
+        "assessment_level": assessment_level,
         "kill_chain_phase": kill_chain.get("phase"),
         "source_count": track.get("source_count"),
         "sources": list(track.get("sources") or []),

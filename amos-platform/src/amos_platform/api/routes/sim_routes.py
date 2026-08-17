@@ -129,14 +129,32 @@ def register_sim_routes(bp: Any) -> None:
     def sim_command():
         """Apply an explicitly authorized operator command to the simulation."""
         data = request.get_json(silent=True) or {}
-        if data.get("command_type") != "fire":
-            return err(400, "only the fire command is supported by this endpoint"), 400
+        command_type = str(data.get("command_type") or "")
         params = data.get("params") if isinstance(data.get("params"), dict) else {}
         authorization = (
             data.get("authorization")
             if isinstance(data.get("authorization"), dict)
             else {}
         )
+        if command_type == "launch_follow_uav":
+            required = ("track_id", "asset_id")
+            missing = [name for name in required if not params.get(name)]
+            if missing:
+                return err(400, f"missing command parameters: {', '.join(missing)}"), 400
+            result = get_engine().authorize_follow_asset(
+                str(params["asset_id"]),
+                str(params["track_id"]),
+                authorized=authorization.get("approved") is True,
+            )
+            if result.get("error"):
+                return err(409, str(result["error"])), 409
+            return ok({
+                "command_type": "launch_follow_uav",
+                "status": "executed",
+                "result": result,
+            })
+        if command_type != "fire":
+            return err(400, "unsupported simulation command"), 400
         required = ("track_id", "asset_id", "weapon_name")
         missing = [name for name in required if not params.get(name)]
         if missing:

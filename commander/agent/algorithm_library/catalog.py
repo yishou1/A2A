@@ -46,6 +46,20 @@ ALGORITHM_STAGE: dict[str, str] = {
     "marl_dynamic_router": "communication",
 }
 
+ALGORITHM_MODEL_IDS: dict[str, str] = {
+    "marl_ppo_task_scheduler": "marl-ppo-scheduler",
+    "battlefield_rtdetr_detector": "rt-detr-odconv-detector",
+    "siamese_mask2former_damage": "siamese-mask2former-damage",
+    "edl_evidential_verifier": "edl-evidential-verifier",
+    "motr_neural_kalman_tracker": "motr-neural-kalman",
+    "imagebind_multimodal_encoder": "imagebind-multimodal-encoder",
+    "multimodal_mamba_fusion": "multimodal-mamba-fusion",
+    "supcon_meta_classifier": "supcon-meta-classifier",
+    "synapse_rag_retriever": "synapse-rag-retriever",
+    "knowledge_semantic_comm": "knowledge-semantic-comm",
+    "marl_dynamic_router": "marl-dynamic-router",
+}
+
 _ALGORITHM_CARDS: dict[str, dict[str, Any]] = {
     "marl_ppo_task_scheduler": {
         "task_family": "task_scheduling",
@@ -148,12 +162,18 @@ def build_algorithm_catalog(
         if algorithm_id not in TIA_ALGORITHM_PORTS:
             continue
         card = _ALGORITHM_CARDS.get(algorithm_id, {})
+        model_id = str(card.get("model_id") or ALGORITHM_MODEL_IDS.get(algorithm_id) or "")
         catalog.append(
             {
                 "algorithm_id": algorithm_id,
                 "version": TIA_ALGORITHM_VERSIONS.get(algorithm_id, "1.0.0"),
                 "backend_type": "python_http_service",
                 "task_family": card.get("task_family", ""),
+                "model_id": model_id,
+                "model_profile": {
+                    "model_id": model_id,
+                    "runtime": "python_http_service",
+                } if model_id else {},
                 "capabilities": card.get("capabilities", []),
                 "required_fields": card.get("required_fields", []),
                 "optional": bool(card.get("optional", True)),

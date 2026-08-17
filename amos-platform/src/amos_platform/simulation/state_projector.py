@@ -49,6 +49,10 @@ def build_internal_state(engine: Any) -> dict:
             "waypoint_count": len(route),
             "history_path": list(asset.get("_history_path") or []),
             "capability_profile": dict(asset.get("_profile") or {}),
+            "operator_hidden": bool(
+                asset.get("_operator_hidden_until_follow")
+                and not asset.get("_operator_follow_visible")
+            ),
         })
 
     threat_list = []

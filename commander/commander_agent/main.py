@@ -294,6 +294,11 @@ class CommanderAgent:
                     "status": item.get("status"),
                     "error": item.get("error"),
                     "agent": response.get("agent"),
+                    "instance_id": response.get("instance_id") or response.get("agent_instance_id"),
+                    "execution_mode": (
+                        response.get("execution_mode")
+                        or ("local_agent" if response.get("mode") == "local" else response.get("mode"))
+                    ),
                     "output_ref": output_ref,
                     "output_keys": output_keys_for_activity,
                     "metrics": response.get("metrics", {}),

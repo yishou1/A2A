@@ -22,12 +22,12 @@ SCENARIO_ID = "maritime-convoy-air-defense"
 MEDIA_ROOT = f"/static/assets/scenarios/{SCENARIO_ID}"
 CHECKSUMS = {
     "00-convoy-overview.png": "81235f981034c097678c071a5d0b80cbdfa166521b486a8d44edc406e552406f",
-    "01-aew-radar-picture.svg": "55c22cb91e65786bf61a001535f7154e0f99a23f2dbd2c83bf8a6a86e2bdca17",
-    "02-civil-traffic-correlation.svg": "afe0f5e360562e2d3de4578c900ed288fe46fdabf987bcd82aab2e11b6cf72c1",
+    "01-aew-radar-picture.svg": "28aff3ab79787ddbf4c2060f6b524832d899a2fb168a0fec1f932ef85ca4c252",
+    "02-civil-traffic-correlation.svg": "15220aa868895df45229fae5f7da64bb750d3fb63da82827ac9338f68759473e",
     "03-fast-surface-contact.png": "5fcd2ea562e4a8e613fa538d5b53d252b0848f2d7576ec6c10ee887cf843a0c5",
     "04-low-altitude-contact-ir.png": "aadc7052ac1035f5edf2423f548b0df8d2dd8c13582365d7eb8cd304baba2047",
-    "05-elint-interference.svg": "8e4c9eb10ea1a4ef1597a279ea736415e88a542060e3b1187c4728b64457cf72",
-    "06-convoy-maneuver-current.svg": "58eeb714d6ef7727833d51124d59e72bb6487dad82f0e4595b221bd9d048cb8f",
+    "05-elint-interference.svg": "b7024386becab8a47fec284cb0e3fb044901b32ddfcb93a07fe5d4cbdc9c2140",
+    "06-convoy-maneuver-current.svg": "2f9ea4ab5fdc72fb47750e40eb84e25328f79c92cdb4e604d897edbc6ea3e6c9",
     "07-post-maneuver-observation.png": "23248d25593e9fbcf8cd58dde8a6cbbea7e47547e260c1f6f1ac4647a5ecc62f",
 }
 
@@ -49,7 +49,7 @@ def _media_cues() -> list[dict[str, Any]]:
         ("MAR-MEDIA-01", "01-aew-radar-picture.svg", 720, "FIND", "双目标雷达批次", "预警机形成两个海面接触的雷达批次，两者身份、属性和威胁等级均保持未知。", "AEW-01/AEW_RADAR", "radar", "image/svg+xml"),
         ("MAR-MEDIA-02", "02-civil-traffic-correlation.svg", 1440, "FIX", "AIS 与雷达关联记录", "AIS、岸基雷达和舰载雷达提供两个海面接触的跨源记录，后端负责区分敌方资源与渔船。", "SHORE-RADAR-01/AIS-RADAR", "telemetry", "image/svg+xml"),
         ("MAR-MEDIA-03", "03-fast-surface-contact.png", 2160, "TRACK", "高速海面目标光电复核", "舰载光电形成高速接触当前帧，外形、航速和接近行为供后端识别，前端不预设敌我结论。", "ESCORT-01/EO-IR", "eo_ir", "image/png"),
-        ("MAR-MEDIA-04", "04-low-altitude-contact-ir.png", 2880, "TRACK", "渔船目标红外复核", "核验无人机形成慢速海面接触的红外观测，供后端确认渔船身份并建立禁射约束。", "UAV-CONFIRM-01/IR", "ir", "image/png"),
+        ("MAR-MEDIA-04", "04-low-altitude-contact-ir.png", 2880, "TRACK", "渔船目标红外复核", "护航舰光电红外形成慢速海面接触的当前帧，供后端确认渔船身份并建立禁射约束。", "ESCORT-01/IR", "ir", "image/png"),
         ("MAR-MEDIA-05", "05-elint-interference.svg", 3600, "TARGET", "敌方目标辐射源复核", "护航舰电子侦察载荷冻结高速目标的当前频谱观测，供后端完成目标优先级、交战规则和武器方案审查。", "ESCORT-01/ELINT", "telemetry", "image/svg+xml"),
         ("MAR-MEDIA-06", "06-convoy-maneuver-current.svg", 4560, "ENGAGE", "武器攻击命令执行状态", "仅在后端完成敌方识别、渔船排除且操作员明确授权后，展示当前模拟发射和武器飞行状态。", "COMMANDER/EXECUTION", "telemetry", "image/svg+xml"),
         ("MAR-MEDIA-07", "07-post-maneuver-observation.png", 5580, "ASSESS", "攻击后效果评估", "核验无人机记录敌方目标攻击后的当前状态，同时持续确认渔船安全，供毁伤评估和再攻击决策使用。", "UAV-CONFIRM-01/EO", "eo_ir", "image/png"),
@@ -80,9 +80,9 @@ def _capture_contract() -> tuple[list[dict[str, Any]], list[dict[str, Any]], lis
         sensor_capability("MAR-CAP-ESCORT-EO", "ESCORT-01", "EO-IR", sensor_type="electro_optical",
                           modalities=["eo_ir"], configured_sensor="EO/IR",
                           parameters={"effective_range_nm": 12, "horizontal_fov_deg": 35, "resolution_px": [1920, 1080]}),
-        sensor_capability("MAR-CAP-CONFIRM-IR", "UAV-CONFIRM-01", "IR", sensor_type="infrared",
+        sensor_capability("MAR-CAP-ESCORT-IR", "ESCORT-01", "IR", sensor_type="infrared",
                           modalities=["ir"], configured_sensor="EO/IR",
-                          parameters={"effective_range_nm": 10, "horizontal_fov_deg": 24, "spectral_band_um": [8, 12]}),
+                          parameters={"effective_range_nm": 16, "horizontal_fov_deg": 24, "spectral_band_um": [8, 12]}),
         sensor_capability("MAR-CAP-ESCORT-ELINT", "ESCORT-01", "ELINT", sensor_type="elint",
                           modalities=["telemetry"], configured_sensor="ELINT",
                           parameters={"frequency_band_mhz": [500, 8000], "bearing_error_deg": 4, "observation_window_sec": 180}),
@@ -99,7 +99,7 @@ def _capture_contract() -> tuple[list[dict[str, Any]], list[dict[str, Any]], lis
         ("MAR-TASK-01", "MAR-CAP-AEW-RADAR", "derive", 660, 750, ["CONTACT-HOSTILE-01", "CONTACT-FISHING-01"], ["*"]),
         ("MAR-TASK-02", "MAR-CAP-SHORE-CORRELATION", "derive", 1380, 1470, ["CONTACT-HOSTILE-01", "CONTACT-FISHING-01"], ["*"]),
         ("MAR-TASK-03", "MAR-CAP-ESCORT-EO", "capture", 2100, 2190, ["CONTACT-HOSTILE-01"], ["*"]),
-        ("MAR-TASK-04", "MAR-CAP-CONFIRM-IR", "capture", 2820, 2910, ["CONTACT-FISHING-01"], ["*"]),
+        ("MAR-TASK-04", "MAR-CAP-ESCORT-IR", "capture", 2820, 2910, ["CONTACT-FISHING-01"], ["*"]),
         ("MAR-TASK-05", "MAR-CAP-ESCORT-ELINT", "derive", 3540, 3630, ["CONTACT-HOSTILE-01"], ["*"]),
         ("MAR-TASK-06", "MAR-CAP-EXECUTION", "command_product", 4500, 4590, ["CONTACT-HOSTILE-01"], ["*"]),
         ("MAR-TASK-07", "MAR-CAP-CONFIRM-EO", "capture", 5520, 5610, ["CONTACT-HOSTILE-01"], ["*"]),
@@ -114,10 +114,10 @@ def _capture_contract() -> tuple[list[dict[str, Any]], list[dict[str, Any]], lis
         "MAR-MEDIA-01": {"instrumented_range_nm": 120, "azimuth_coverage_deg": 360, "range_resolution_m": 120, "observation_window_sec": 60, "data_source": "sensor_observations", "renderer_type": "radar_ppi"},
         "MAR-MEDIA-02": {"radar_range_nm": 40, "ais_range_nm": 40, "association_gate_nm": 1.2, "source_sensors": ["AESA_RADAR", "AIS"], "data_source": "sensor_observations", "renderer_type": "ais_radar_correlation"},
         "MAR-MEDIA-03": {"effective_range_nm": 12, "horizontal_fov_deg": 35, "look_angle_deg": 0, "point_at_target": True, "registration_group": "MAR-SURFACE-CONTACT-A", "frame_role": "initial_surface_eo", "resolution_px": [1672, 941]},
-        "MAR-MEDIA-04": {"effective_range_nm": 10, "horizontal_fov_deg": 24, "look_angle_deg": 9.4, "spectral_band_um": [8, 12], "point_at_target": True, "resolution_px": [1672, 941]},
+        "MAR-MEDIA-04": {"effective_range_nm": 16, "horizontal_fov_deg": 24, "look_angle_deg": 0, "spectral_band_um": [8, 12], "point_at_target": True, "resolution_px": [1672, 941]},
         "MAR-MEDIA-05": {"frequency_band_mhz": [500, 8000], "observation_window_sec": 180, "bearing_error_deg": 4, "data_source": "sensor_observations", "renderer_type": "elint_spectrum"},
         "MAR-MEDIA-06": {"input_cutoff_sec": 4560, "simulation_execution_only": True, "data_source": "task_state", "renderer_type": "execution_state"},
-        "MAR-MEDIA-07": {"effective_range_nm": 12, "horizontal_fov_deg": 35, "look_angle_deg": 37, "point_at_target": True, "registration_group": "MAR-SURFACE-CONTACT-A", "reference_media_id": "MAR-MEDIA-03", "frame_role": "post_maneuver_eo", "subject_asset_ids": ["MERCHANT-01", "MERCHANT-02", "ESCORT-01"], "resolution_px": [1672, 941]},
+        "MAR-MEDIA-07": {"effective_range_nm": 12, "horizontal_fov_deg": 35, "look_angle_deg": 34, "point_at_target": True, "registration_group": "MAR-SURFACE-CONTACT-A", "reference_media_id": "MAR-MEDIA-03", "frame_role": "post_maneuver_eo", "subject_asset_ids": ["MERCHANT-01", "MERCHANT-02", "ESCORT-01"], "resolution_px": [1672, 941]},
     }
     captures = []
     for index, task in enumerate(tasks):
@@ -151,7 +151,7 @@ def build_maritime_convoy_air_defense_scenario() -> dict[str, Any]:
         AssetSnapshot("MERCHANT-02", "maritime", "运输船二号", "active", 22.06, 121.24, heading=55, speed_kts=14, sensors=["AIS", "NAV-RADAR"], endurance_hr=220, autonomy_tier=1, health={"fuel_pct": 79, "comms_strength": 89}),
         AssetSnapshot("ESCORT-01", "maritime", "编队护航舰", "active", 22.14, 121.22, heading=55, speed_kts=15, sensors=["AESA_RADAR", "EO/IR", "ELINT"], weapons=["舰载反舰导弹"], endurance_hr=300, autonomy_tier=2, health={"fuel_pct": 86, "comms_strength": 95}),
         AssetSnapshot("AEW-01", "air", "预警机", "active", 22.55, 121.48, alt_ft=25000, heading=225, speed_kts=310, sensors=["AEW_RADAR", "EO/IR", "ESM"], endurance_hr=10, autonomy_tier=2, health={"fuel_pct": 74, "comms_strength": 94}),
-        AssetSnapshot("UAV-CONFIRM-01", "air", "补充侦察无人机", "active", 21.98, 121.48, alt_ft=8000, heading=315, speed_kts=92, sensors=["EO/IR", "SAR"], endurance_hr=18, autonomy_tier=4, health={"battery_pct": 88, "comms_strength": 86}),
+        AssetSnapshot("UAV-CONFIRM-01", "air", "补充侦察无人机", "active", 22.14, 121.22, alt_ft=8000, heading=70, speed_kts=92, sensors=["EO/IR", "SAR"], endurance_hr=18, autonomy_tier=4, health={"battery_pct": 88, "comms_strength": 86}),
         AssetSnapshot("SHORE-RADAR-01", "ground", "岸基警戒雷达", "active", 22.42, 120.92, heading=100, sensors=["AESA_RADAR", "AIS", "COMINT"], endurance_hr=9999, autonomy_tier=1, health={"battery_pct": 100, "comms_strength": 97}),
     ]
     threats = [
@@ -163,14 +163,14 @@ def build_maritime_convoy_air_defense_scenario() -> dict[str, Any]:
         "MERCHANT-02": [{"lat": 22.11, "lng": 121.34}, {"lat": 22.18, "lng": 121.46}, {"lat": 22.26, "lng": 121.58}],
         "ESCORT-01": [{"lat": 22.19, "lng": 121.32}, {"lat": 22.27, "lng": 121.44}, {"lat": 22.35, "lng": 121.56}],
         "AEW-01": [{"lat": 22.62, "lng": 121.28}, {"lat": 22.52, "lng": 121.06}, {"lat": 22.30, "lng": 121.14}, {"lat": 22.36, "lng": 121.48}],
-        "UAV-CONFIRM-01": [{"lat": 22.08, "lng": 121.30}, {"lat": 22.20, "lng": 121.55}, {"lat": 22.28, "lng": 121.62}],
+        "UAV-CONFIRM-01": [{"lat": 22.16, "lng": 121.30}, {"lat": 22.22, "lng": 121.48}, {"lat": 22.28, "lng": 121.62}],
         "SHORE-RADAR-01": [],
     }
     route_modes = {
         "MERCHANT-01": "hold", "MERCHANT-02": "hold", "ESCORT-01": "hold",
         "AEW-01": "loop", "UAV-CONFIRM-01": "hold", "SHORE-RADAR-01": "hold",
     }
-    motion_windows = {"UAV-CONFIRM-01": {"start_sec": 2350}}
+    motion_windows = {"UAV-CONFIRM-01": {"start_sec": 2160, "activate_on_follow": True}}
     asset_capabilities, asset_task_schedule, capture_plans = _capture_contract()
     timeline = _timeline()
     media_cues = bind_media_consumers(_media_cues(), timeline)
@@ -185,6 +185,21 @@ def build_maritime_convoy_air_defense_scenario() -> dict[str, Any]:
         "environment": {"weather": "partly_cloudy", "visibility_nm": 20, "wind_speed_kts": 16, "wind_direction_deg": 85, "sea_state": 3, "precipitation": "none", "intermittent_jamming": True, "shipping_channel": "SIM-TAIWAN-SE-A", "restricted_area": "SIM-NO-GO-01"},
         "asset_routes": routes, "asset_route_modes": route_modes,
         "asset_motion_windows": motion_windows,
+        "asset_follow_tasks": [{
+            "task_id": "MAR-FOLLOW-HIGH-THREAT",
+            "asset_id": "UAV-CONFIRM-01",
+            "launch_from_asset": "ESCORT-01",
+            "start_sec": 0,
+            "hide_until_follow": True,
+            "target_selector": "confirmed_highest_threat",
+            "required_assessment_status": ["confirmed"],
+            "required_threat_levels": ["HIGH", "CRITICAL"],
+            "excluded_classifications": ["FISHING_VESSEL", "FISHING BOAT", "FISHING", "CIVILIAN", "MERCHANT"],
+            "requires_operator_authorization": True,
+            "standoff_nm": 1.8,
+            "return_to_launch_after_strike": True,
+            "return_hide_distance_nm": 0.2,
+        }],
         "asset_profiles": asset_profiles(assets),
         "asset_capabilities": asset_capabilities,
         "asset_task_schedule": asset_task_schedule,

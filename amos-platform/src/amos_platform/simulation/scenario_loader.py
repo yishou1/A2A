@@ -22,6 +22,10 @@ def load_scenario_into_engine(engine: Any, scenario: dict[str, Any], now_iso: An
         dict(task) for task in scenario.get("asset_task_schedule") or []
         if isinstance(task, dict)
     ]
+    engine._scenario_asset_follow_tasks = [
+        dict(task) for task in scenario.get("asset_follow_tasks") or []
+        if isinstance(task, dict)
+    ]
     engine._scenario_capture_plans = [
         dict(capture) for capture in scenario.get("capture_plans") or []
         if isinstance(capture, dict)
@@ -62,6 +66,11 @@ def load_scenario_into_engine(engine: Any, scenario: dict[str, Any], now_iso: An
     scenario_routes = scenario.get("asset_routes") or {}
     route_modes = scenario.get("asset_route_modes") or {}
     motion_windows = scenario.get("asset_motion_windows") or {}
+    follow_tasks_by_asset = {
+        str(task.get("asset_id")): task
+        for task in engine._scenario_asset_follow_tasks
+        if task.get("asset_id")
+    }
     observation_windows = scenario.get("threat_observation_windows") or {}
     raw_profiles = scenario.get("asset_profiles") or []
     if isinstance(raw_profiles, dict):
@@ -83,6 +92,7 @@ def load_scenario_into_engine(engine: Any, scenario: dict[str, Any], now_iso: An
         domain = raw.get("domain", "air")
 
         motion_window = motion_windows.get(aid) if isinstance(motion_windows.get(aid), dict) else {}
+        follow_task = follow_tasks_by_asset.get(str(aid), {})
         cruise_speed = float(raw.get("speed_kts", 30) or 0)
         starts_at = float(motion_window.get("start_sec", 0) or 0)
         profile = asset_profiles.get(str(aid), {})
@@ -105,6 +115,7 @@ def load_scenario_into_engine(engine: Any, scenario: dict[str, Any], now_iso: An
             "speed_kts": 0.0 if starts_at > 0 else cruise_speed,
             "_cruise_speed_kts": cruise_speed,
             "_motion_window": dict(motion_window),
+            "_operator_hidden_until_follow": bool(follow_task.get("hide_until_follow")),
             "max_turn_rate_dps": float(motion_profile.get("max_turn_rate_dps", default_turn_rate)),
             "sensors": raw.get("sensors", []),
             "weapons": raw.get("weapons", []),

@@ -8,6 +8,15 @@ from typing import Any
 
 from amos_platform.domain.policies.visibility import remove_truth_fields
 
+PROTECTED_OBJECT_CLASSES = {
+    "fishing_vessel",
+    "fishing boat",
+    "fishing",
+    "civilian",
+    "merchant",
+    "merchant_vessel",
+}
+
 
 def _first_mapping_with(node: Any, keys: set[str]) -> dict[str, Any]:
     if isinstance(node, dict):
@@ -338,7 +347,17 @@ def apply_commander_assessments(
         level = str(assessment.get("level", "unknown")).lower()
         semantic_label = str(metadata.get("label") or "").lower()
         semantic_threat_level = str(metadata.get("threat_level") or "").lower()
-        if semantic_label == "hostile" and str(metadata.get("affiliation") or "").lower() == "red":
+        existing_class = str(getattr(track, "classification", "") or "").lower()
+        protected = (
+            object_type in PROTECTED_OBJECT_CLASSES
+            or any(value in object_type for value in {"fishing", "civilian", "merchant"})
+            or existing_class in {value.upper().lower() for value in PROTECTED_OBJECT_CLASSES}
+            or any(value in existing_class for value in {"fishing", "civilian", "merchant"})
+        )
+        if protected:
+            status = "cleared"
+            level = "low"
+        elif semantic_label == "hostile" and str(metadata.get("affiliation") or "").lower() == "red":
             status = "confirmed"
             level = semantic_threat_level if semantic_threat_level in {"high", "critical"} else "high"
         elif semantic_label in {"neutral", "friendly"}:
