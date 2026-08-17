@@ -7,6 +7,7 @@ import os
 import unittest
 from unittest.mock import patch
 
+from agent.algorithm_library.catalog import build_algorithm_catalog
 from agent.algorithm_library.client import AlgorithmLibraryClient, AlgorithmLibraryError, AlgorithmRunCall
 from agent.algorithm_library.planner_runtime import plan_algorithms
 from agent.models.schemas import SensorBatch, SensorFrame, SensorModality
@@ -96,6 +97,28 @@ class AlgolibRunClientTest(unittest.TestCase):
                 ),
             )
             self.assertTrue(raw["ok"])
+
+    def test_runtime_catalog_exposes_track_threat_mounted_algorithms(self):
+        catalog = build_algorithm_catalog(include_scheduling=True)
+        algorithm_ids = {item["algorithm_id"] for item in catalog}
+
+        self.assertGreaterEqual(len(catalog), 15)
+        self.assertTrue(
+            {
+                "multimodal_feature_fuser",
+                "target_type_classifier",
+                "track_state_updater",
+                "trajectory_predictor",
+                "graph_relation_reasoner",
+            }.issubset(algorithm_ids)
+        )
+        target_type = next(
+            item for item in catalog if item["algorithm_id"] == "target_type_classifier"
+        )
+        self.assertEqual(
+            target_type["predict_endpoint"],
+            "http://127.0.0.1:9042/target_type_classifier/predict",
+        )
 
     def test_run_error_raises(self):
         client = AlgorithmLibraryClient({"call_mode": "run", "base_url": "http://127.0.0.1:8088"})

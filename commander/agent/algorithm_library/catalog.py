@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent.algorithm_library.endpoints import TIA_ALGORITHM_PORTS, TIA_ALGORITHM_VERSIONS
+from agent.algorithm_library.endpoints import (
+    TIA_ALGORITHM_PORTS,
+    TIA_ALGORITHM_VERSIONS,
+    default_predict_endpoint,
+)
 
 TIA_ALLOWED_ALGORITHMS: set[str] = set(TIA_ALGORITHM_PORTS) - {"marl_ppo_task_scheduler"}
 
@@ -16,6 +20,11 @@ TIA_DEFAULT_PIPELINE: list[str] = [
     "siamese_mask2former_damage",
     "edl_evidential_verifier",
     "motr_neural_kalman_tracker",
+    "multimodal_feature_fuser",
+    "target_type_classifier",
+    "track_state_updater",
+    "trajectory_predictor",
+    "graph_relation_reasoner",
     # marl_ppo_task_scheduler 已拆至独立 task_scheduling_agent，不在 TIA 管线内
     "imagebind_multimodal_encoder",
     "multimodal_mamba_fusion",
@@ -37,6 +46,11 @@ ALGORITHM_STAGE: dict[str, str] = {
     "siamese_mask2former_damage": "perception",
     "edl_evidential_verifier": "perception",
     "motr_neural_kalman_tracker": "perception",
+    "multimodal_feature_fuser": "perception",
+    "target_type_classifier": "perception",
+    "track_state_updater": "perception",
+    "trajectory_predictor": "cognition",
+    "graph_relation_reasoner": "cognition",
     "marl_ppo_task_scheduler": "planning",
     "imagebind_multimodal_encoder": "cognition",
     "multimodal_mamba_fusion": "cognition",
@@ -52,6 +66,11 @@ ALGORITHM_MODEL_IDS: dict[str, str] = {
     "siamese_mask2former_damage": "siamese-mask2former-damage",
     "edl_evidential_verifier": "edl-evidential-verifier",
     "motr_neural_kalman_tracker": "motr-neural-kalman",
+    "multimodal_feature_fuser": "multimodal-feature-fuser",
+    "target_type_classifier": "target-type-classifier",
+    "track_state_updater": "track-state-updater",
+    "trajectory_predictor": "trajectory-predictor",
+    "graph_relation_reasoner": "graph-relation-reasoner",
     "imagebind_multimodal_encoder": "imagebind-multimodal-encoder",
     "multimodal_mamba_fusion": "multimodal-mamba-fusion",
     "supcon_meta_classifier": "supcon-meta-classifier",
@@ -95,6 +114,41 @@ _ALGORITHM_CARDS: dict[str, dict[str, Any]] = {
         "summary": "多目标跟踪与定位，产出 tracks",
         "required_fields": ["verified_detections"],
         "optional": False,
+    },
+    "multimodal_feature_fuser": {
+        "task_family": "feature_engineering",
+        "capabilities": ["multimodal_feature_fusion", "track_feature_enrichment"],
+        "summary": "Track Threat Agent 多模态特征融合算法",
+        "required_fields": ["observations"],
+        "optional": True,
+    },
+    "target_type_classifier": {
+        "task_family": "classification",
+        "capabilities": ["structured_track_feature_classification", "object_type_completion"],
+        "summary": "Track Threat Agent 目标类型分类算法",
+        "required_fields": ["observations"],
+        "optional": True,
+    },
+    "track_state_updater": {
+        "task_family": "tracking",
+        "capabilities": ["multi_target_tracking", "track_filtering", "nearest_neighbor_association"],
+        "summary": "Track Threat Agent 航迹状态更新算法",
+        "required_fields": ["detections"],
+        "optional": True,
+    },
+    "trajectory_predictor": {
+        "task_family": "forecasting",
+        "capabilities": ["time_series_prediction", "st_gnn_candidate_prediction", "physics_baseline_fallback"],
+        "summary": "Track Threat Agent 轨迹预测算法",
+        "required_fields": ["tracks"],
+        "optional": True,
+    },
+    "graph_relation_reasoner": {
+        "task_family": "graph_reasoning",
+        "capabilities": ["graph_neural_network", "relation_reasoning"],
+        "summary": "Track Threat Agent 图关系推理算法",
+        "required_fields": ["tracks"],
+        "optional": True,
     },
     "imagebind_multimodal_encoder": {
         "task_family": "embedding",
@@ -179,7 +233,7 @@ def build_algorithm_catalog(
                 "optional": bool(card.get("optional", True)),
                 "summary": card.get("summary", ""),
                 "agent_card": {"summary": card.get("summary", "")},
-                "predict_endpoint": f"http://{host}:{TIA_ALGORITHM_PORTS[algorithm_id]}/predict",
+                "predict_endpoint": default_predict_endpoint(algorithm_id, host=host),
                 "stage": ALGORITHM_STAGE.get(algorithm_id, ""),
             }
         )
