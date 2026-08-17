@@ -1,0 +1,11 @@
+<process name="OrientWorkflow" targetNamespace="http://a2a.project613/workflow">
+  <variables>
+    <variable name="MissionInput" type="JsonObject"/>
+    <variable name="TrackingResult" type="JsonObject"/>
+    <variable name="ThreatAssessmentResult" type="JsonObject"/>
+  </variables>
+  <sequence>
+    <invoke name="Tracking" partnerLink="TrackThreatAgent" operation="updateTracks" requiredSkill="trajectory_tracking" inputVariable="MissionInput" outputVariable="TrackingResult" />
+    <invoke name="ThreatAssessment" partnerLink="TrackThreatAgent" operation="rankThreats" requiredSkill="threat_ranking" inputVariable="TrackingResult" outputVariable="ThreatAssessmentResult" />
+  </sequence>
+</process>

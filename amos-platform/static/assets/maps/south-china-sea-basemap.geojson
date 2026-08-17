@@ -1,0 +1,34 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {"name": "South China Sea Offline Tile Region", "kind": "aoi"},
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[105, 0], [125, 0], [125, 25], [105, 25], [105, 0]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {"name": "South China Sea Platform AOI", "kind": "ops_box"},
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[110, 5], [120, 5], [120, 15], [110, 15], [110, 5]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {"name": "Platform Operations Box", "kind": "ops_box"},
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[114, 9.5], [116, 9.5], [116, 11], [114, 11], [114, 9.5]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {"name": "Nansha Platform Reference", "kind": "reference_point"},
+      "geometry": {"type": "Point", "coordinates": [115.0, 10.5]}
+    }
+  ]
+}

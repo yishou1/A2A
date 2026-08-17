@@ -1,0 +1,36 @@
+{
+  "title": "Mission Completion Scorer Output",
+  "type": "object",
+  "required": [
+    "mission_completion",
+    "mission_result",
+    "threshold",
+    "model_source",
+    "feature_version",
+    "assessment_status",
+    "warnings"
+  ],
+  "properties": {
+    "mission_completion": {
+      "type": "number"
+    },
+    "mission_result": {
+      "type": "string"
+    },
+    "threshold": {
+      "type": "number"
+    },
+    "model_source": {
+      "type": "string"
+    },
+    "feature_version": {
+      "type": "string"
+    },
+    "assessment_status": {
+      "type": "string"
+    },
+    "warnings": {
+      "type": "array"
+    }
+  }
+}

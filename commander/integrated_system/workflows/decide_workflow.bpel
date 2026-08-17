@@ -1,0 +1,13 @@
+<process name="DecideWorkflow" targetNamespace="http://a2a.project613/workflow">
+  <variables>
+    <variable name="MissionInput" type="JsonObject"/>
+    <variable name="TaskSchedulingResult" type="JsonObject"/>
+    <variable name="DecisionPlanningResult" type="JsonObject"/>
+    <variable name="ComplianceAuthorizationResult" type="JsonObject"/>
+  </variables>
+  <sequence>
+    <invoke name="TaskScheduling" partnerLink="TaskSchedulingAgent" operation="allocateTasksAndResources" requiredSkill="task_scheduling_resource_allocation" inputVariable="MissionInput" outputVariable="TaskSchedulingResult" />
+    <invoke name="DecisionPlanning" partnerLink="DecisionPlanningAgent" operation="generateDecisionPlan" requiredSkill="decision_planning_analysis" inputVariable="TaskSchedulingResult" outputVariable="DecisionPlanningResult" />
+    <invoke name="ComplianceAuthorization" partnerLink="ComplianceAuthorizationAgent" operation="checkComplianceAuthorization" requiredSkill="compliance_authorization_analysis" inputVariable="DecisionPlanningResult" outputVariable="ComplianceAuthorizationResult" />
+  </sequence>
+</process>

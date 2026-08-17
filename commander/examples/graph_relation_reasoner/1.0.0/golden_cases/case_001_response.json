@@ -1,0 +1,15 @@
+{
+  "ok": true,
+  "request_id": "grr-001",
+  "trace_id": "trace-track-threat-001",
+  "algorithm_id": "graph_relation_reasoner",
+  "version": "1.0.0",
+  "outputs": {
+    "schema_version": "graph_relation_reasoner/v1",
+    "relations": [],
+    "groups": [],
+    "graph_summary": {}
+  },
+  "usage": { "latency_ms": 1 },
+  "error": null
+}

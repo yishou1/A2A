@@ -1,0 +1,60 @@
+{
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "execution_control_planner",
+  "version": "1.0.0",
+  "backend_type": "python_http_service",
+  "inputs": {
+    "phase": "strike",
+    "results": {
+      "threat_evaluation": {
+        "output_data": {
+          "priority_score": 0.75
+        }
+      },
+      "perception_detection": {
+        "output_data": {
+          "detections": [
+            {
+              "conf": 0.9
+            }
+          ]
+        }
+      },
+      "resource_allocation": {
+        "output_data": {
+          "readiness": 0.85
+        }
+      },
+      "communication": {
+        "output_data": {
+          "delivery_rate": 0.9
+        }
+      },
+      "data_fusion": {
+        "output_data": {
+          "track_history": [
+            {
+              "track_id": "T-001",
+              "history": [
+                {
+                  "t": 0.0,
+                  "x": 10.0,
+                  "y": 18.0
+                },
+                {
+                  "t": 0.4,
+                  "x": 11.8,
+                  "y": 20.2
+                }
+              ],
+              "weapon_prep_sec": 2.0,
+              "flight_time_sec": 4.0
+            }
+          ]
+        }
+      }
+    }
+  },
+  "params": {}
+}

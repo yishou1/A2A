@@ -1,0 +1,47 @@
+{
+  "ok": true,
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "marl_ppo_task_scheduler",
+  "version": "1.0.0",
+  "outputs": {
+    "sensor_assignments": [
+      {
+        "sensor_id": "EO-FWD-1",
+        "target_id": "T-1",
+        "task": "surveillance",
+        "priority": "high",
+        "rationale": "mock: threat=0.82"
+      },
+      {
+        "sensor_id": "SAR-1",
+        "target_id": "T-2",
+        "task": "surveillance",
+        "priority": "high",
+        "rationale": "mock: threat=0.63"
+      }
+    ],
+    "reattack_plan": [
+      {
+        "asset_id": "ARTY-1",
+        "target_id": "T-1",
+        "task": "reattack",
+        "priority": "critical",
+        "expected_damage": 0.6,
+        "rationale": "mock: 毁伤不足(0.30)"
+      }
+    ],
+    "covered_targets": [
+      "T-1",
+      "T-2"
+    ],
+    "reattack_targets": [
+      "T-1"
+    ],
+    "algorithm": "mock-heuristic"
+  },
+  "usage": {
+    "latency_ms": 1
+  },
+  "error": null
+}

@@ -1,0 +1,11 @@
+<process name="ActWorkflow" targetNamespace="http://a2a.project613/workflow">
+  <variables>
+    <variable name="MissionInput" type="JsonObject"/>
+    <variable name="ExecutionSimulationResult" type="JsonObject"/>
+    <variable name="EffectEvaluationResult" type="JsonObject"/>
+  </variables>
+  <sequence>
+    <invoke name="ExecutionSimulation" partnerLink="SimulationExecutionAgent" operation="simulateExecutionControl" requiredSkill="execution_control" inputVariable="MissionInput" outputVariable="ExecutionSimulationResult" />
+    <invoke name="EffectEvaluation" partnerLink="ClosedLoopAgent" operation="evaluateMissionEffect" requiredSkill="closed_loop_optimization" inputVariable="ExecutionSimulationResult" outputVariable="EffectEvaluationResult" />
+  </sequence>
+</process>

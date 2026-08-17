@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "request_id": "ttc-001",
+  "trace_id": "trace-track-threat-001",
+  "algorithm_id": "target_type_classifier",
+  "version": "1.0.0",
+  "outputs": {
+    "schema_version": "target_type_classifier/v1",
+    "classifications": [
+      {
+        "item_id": "det-air-001",
+        "object_type": "aircraft",
+        "confidence": 0.84,
+        "type_scores": {},
+        "evidence": []
+      }
+    ]
+  },
+  "usage": { "latency_ms": 1 },
+  "error": null
+}

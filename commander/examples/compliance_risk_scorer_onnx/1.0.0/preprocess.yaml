@@ -1,0 +1,6 @@
+type: json_to_tensor_map
+mappings:
+  - json_path: $.features
+    tensor_name: features
+    dtype: float32
+    shape: [1, 6]

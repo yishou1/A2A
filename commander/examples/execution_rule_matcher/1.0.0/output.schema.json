@@ -1,0 +1,20 @@
+{
+  "title": "Execution Rule Matcher Output",
+  "type": "object",
+  "required": [
+    "matched_rules",
+    "primary_rule",
+    "matched_items"
+  ],
+  "properties": {
+    "matched_rules": {
+      "type": "array"
+    },
+    "primary_rule": {
+      "type": "object"
+    },
+    "matched_items": {
+      "type": "array"
+    }
+  }
+}

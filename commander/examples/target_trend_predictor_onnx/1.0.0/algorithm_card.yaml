@@ -1,0 +1,88 @@
+algorithm_id: target_trend_predictor_onnx
+version: 1.0.0
+display_name: Target Trend Predictor ONNX
+backend_type: onnx
+status: draft
+
+task_family: time_series_prediction
+modalities:
+  input:
+    - structured_json
+  output:
+    - structured_json
+
+capabilities:
+  - target_trend_scoring
+  - fixed_window_sequence_inference
+
+agent_card:
+  summary: >
+    Score a target trend from a fixed twelve-step sequence with the bootstrap
+    unrolled LSTM ONNX model.
+  when_to_use:
+    - Exactly twelve ordered target-history steps are available.
+    - Each step has the four documented normalized features.
+  when_not_to_use:
+    - The history has fewer or more than twelve steps without prior resampling.
+    - Full trajectory generation or stateful tracking is required.
+  input_description: >
+    One float32 sequence with shape [1, 12, 4]. Each step is ordered as
+    risk_score, probability, inverse_priority, and resource_pressure.
+  output_description: >
+    A trend_score tensor with shape [1, 1].
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  tensor_contract_ref: tensor_contract.yaml
+  runtime:
+    backend_type: onnx
+    model_uri: model.onnx
+    execution_provider: cpu
+  preprocess:
+    config_uri: preprocess.yaml
+  postprocess:
+    config_uri: postprocess.yaml
+
+constraints:
+  max_input_chars: 16384
+  max_request_bytes: 65536
+  batch_supported: false
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 1
+  latency_ms_p95: 1
+  primary_metric: trend_score
+  primary_score: 0.0
+  time_complexity: O(t*d)
+  space_complexity: O(t*d)
+  complexity_variable: t = 12 steps and d = 4 features
+  performance_notes: >
+    Direct CPU ONNX Runtime inference measured approximately 0.111 ms p50 and
+    0.180 ms p95 over 500 local runs; algorithm-library overhead is excluded.
+    The bootstrap model has not been evaluated on a labeled production dataset.
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 1
+  min_memory_mb: 128
+  recommended_memory_mb: 256
+  min_gpu_count: 0
+  gpu_type: none
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 1
+
+model_profile:
+  parameter_count: 24
+  parameter_count_text: 24 trainable gate parameters
+  flops: 0
+  flops_text: not yet profiled
+  flops_input_shape: [1, 12, 4]
+  model_size_mb: 1
+  precision: fp32
+
+safety:
+  risk_level: medium
+  requires_human_review: true

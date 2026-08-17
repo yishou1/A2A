@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img"><style>
+      .bg{fill:#07131c}.panel{fill:#0b1a24;stroke:#294252}.line{stroke:#31505f;fill:none}
+      .grid{stroke:#213946;fill:none}.accent{stroke:#53a9c9;fill:none}.ok{stroke:#55b58d;fill:none}
+      .warn{stroke:#d2a24f;fill:none}.txt{fill:#cbd8df;font:14px 'DejaVu Sans',sans-serif}
+      .small{fill:#80939f;font:12px 'DejaVu Sans',sans-serif}.tiny{fill:#687d89;font:10px 'DejaVu Sans Mono',monospace}
+      .title{fill:#e3edf1;font:600 20px 'DejaVu Sans',sans-serif}.value{fill:#a9d9e9;font:600 14px 'DejaVu Sans Mono',monospace}
+      .unknown{fill:#8999a2;font:13px 'DejaVu Sans',sans-serif}.dot{fill:#58adca;stroke:#b9e3f0;stroke-width:1}
+    </style><rect width="960" height="540" class="bg"/>
+      <text x="32" y="42" class="title">航道交通关联记录</text>
+      <text x="928" y="42" text-anchor="end" class="tiny">PLANNED INPUT · A1 · M06/M07/M19 · TRACE REQUIRED</text>
+      <text x="32" y="66" class="small">来源平台  SHORE-RADAR-01</text>
+      <text x="300" y="66" class="small">传感器  AIS-RADAR</text>
+      <text x="610" y="66" class="small">采集时刻  T+1440.0s</text>
+      <text x="790" y="66" class="small">快照  T+1440.0s</text>
+      <line x1="32" y1="82" x2="928" y2="82" class="line"/>
+    
+      <rect x="32" y="102" width="896" height="406" rx="4" class="panel"/>
+      <rect x="48" y="114" width="270" height="42" rx="3" class="panel"/>
+      <text x="62" y="132" class="small">雷达 + AIS 候选</text><text x="62" y="150" class="value">1</text>
+      <rect x="332" y="114" width="270" height="42" rx="3" class="panel"/>
+      <text x="346" y="132" class="small">单源记录</text><text x="346" y="150" class="value">雷达 1 · AIS 0</text>
+      <rect x="616" y="114" width="296" height="42" rx="3" class="panel"/>
+      <text x="630" y="132" class="small">距离关联门限</text><text x="630" y="150" class="value">1.2 NM</text>
+      <text x="54" y="174" class="small">航迹 ID</text><text x="244" y="174" class="small">雷达测量</text>
+      <text x="450" y="174" class="small">AIS 报告</text><text x="650" y="174" class="small">测量差</text>
+      <text x="842" y="174" text-anchor="middle" class="small">当前关联状态</text>
+      <line x1="48" y1="197" x2="912" y2="197" class="grid"/><text x="54" y="185" class="txt">TRK-2b9473</text><text x="244" y="185" class="tiny">121.5° / 37.51 NM</text><text x="450" y="185" class="tiny">121.5° / 37.51 NM</text><text x="650" y="185" class="tiny">ΔR 0.00 NM · ΔB 0.0°</text><text x="842" y="185" text-anchor="middle" class="value">候选关联</text><line x1="48" y1="239" x2="912" y2="239" class="grid"/><text x="54" y="227" class="txt">TRK-0a4583</text><text x="244" y="227" class="tiny">114.3° / 31.98 NM</text><text x="450" y="227" class="tiny">未提供 / 未提供</text><text x="650" y="227" class="tiny">ΔR 未提供 · ΔB 未提供</text><text x="842" y="227" text-anchor="middle" class="value">仅雷达</text>
+      
+      <line x1="48" y1="468" x2="912" y2="468" class="line"/>
+      <text x="48" y="490" class="small">候选关联仅表示测量满足门限，不等于身份确认；身份区分须由后端结果和执行 trace 证明。</text>
+    <text x="928" y="526" text-anchor="end" class="tiny">AMOS CURRENT-STATE PRODUCT · MAR-CAPTURE-02</text></svg>

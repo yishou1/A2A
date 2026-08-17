@@ -1,0 +1,32 @@
+{
+  "model_source": "xbd_handcrafted_lr",
+  "feature_version": "xbd_damage_v1",
+  "handcrafted_dim": 31,
+  "cnn_dim": 0,
+  "input_dim": 31,
+  "use_cnn": false,
+  "decision_threshold": 0.005,
+  "split_seed": 20260623,
+  "split_counts": {
+    "fit": 10,
+    "val": 2,
+    "test": 3,
+    "total": 15
+  },
+  "metrics": {
+    "damage_accuracy": 0.0,
+    "damage_f1": 0.0,
+    "damage_balanced_accuracy": 0.0,
+    "damage_precision": 0.0,
+    "damage_recall": 0.0,
+    "decision_threshold": 0.005,
+    "confusion_matrix": {
+      "tp": 0,
+      "fp": 2,
+      "tn": 0,
+      "fn": 1
+    }
+  },
+  "feature_csv": "/home/wangyu/a2a/a2a-amos-integrated/commander/data/xbd/processed/xbd_damage_features.csv",
+  "cnn_npz": ""
+}

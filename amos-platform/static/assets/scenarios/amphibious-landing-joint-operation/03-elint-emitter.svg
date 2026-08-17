@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img"><style>
+      .bg{fill:#07131c}.panel{fill:#0b1a24;stroke:#294252}.line{stroke:#31505f;fill:none}
+      .grid{stroke:#213946;fill:none}.accent{stroke:#53a9c9;fill:none}.ok{stroke:#55b58d;fill:none}
+      .warn{stroke:#d2a24f;fill:none}.txt{fill:#cbd8df;font:14px 'DejaVu Sans',sans-serif}
+      .small{fill:#80939f;font:12px 'DejaVu Sans',sans-serif}.tiny{fill:#687d89;font:10px 'DejaVu Sans Mono',monospace}
+      .title{fill:#e3edf1;font:600 20px 'DejaVu Sans',sans-serif}.value{fill:#a9d9e9;font:600 14px 'DejaVu Sans Mono',monospace}
+      .unknown{fill:#8999a2;font:13px 'DejaVu Sans',sans-serif}.dot{fill:#58adca;stroke:#b9e3f0;stroke-width:1}
+    </style><rect width="960" height="540" class="bg"/>
+      <text x="32" y="42" class="title">电子侦察活动记录</text>
+      <text x="928" y="42" text-anchor="end" class="tiny">PLANNED INPUT · A1/A2 · M05/M07/M20 · TRACE REQUIRED</text>
+      <text x="32" y="66" class="small">来源平台  UAV-ISR-01</text>
+      <text x="300" y="66" class="small">传感器  ELINT</text>
+      <text x="610" y="66" class="small">采集时刻  T+1110.0s</text>
+      <text x="790" y="66" class="small">快照  T+1110.0s</text>
+      <line x1="32" y1="82" x2="928" y2="82" class="line"/>
+    
+      <rect x="32" y="102" width="896" height="406" rx="4" class="panel"/>
+      <rect x="80" y="130" width="690" height="218" fill="#081721" stroke="#31505f"/>
+      <line x1="80.0" y1="130" x2="80.0" y2="348" class="grid"/><line x1="252.5" y1="130" x2="252.5" y2="348" class="grid"/><line x1="425.0" y1="130" x2="425.0" y2="348" class="grid"/><line x1="597.5" y1="130" x2="597.5" y2="348" class="grid"/><line x1="770.0" y1="130" x2="770.0" y2="348" class="grid"/><line x1="80" y1="130.0" x2="770" y2="130.0" class="grid"/><line x1="80" y1="184.5" x2="770" y2="184.5" class="grid"/><line x1="80" y1="239.0" x2="770" y2="239.0" class="grid"/><line x1="80" y1="293.5" x2="770" y2="293.5" class="grid"/><line x1="80" y1="348.0" x2="770" y2="348.0" class="grid"/><text x="80.0" y="366" text-anchor="middle" class="tiny">3195</text><text x="252.5" y="366" text-anchor="middle" class="tiny">3197</text><text x="425.0" y="366" text-anchor="middle" class="tiny">3200</text><text x="597.5" y="366" text-anchor="middle" class="tiny">3202</text><text x="770.0" y="366" text-anchor="middle" class="tiny">3205</text><text x="72" y="134.0" text-anchor="end" class="tiny">T+1020</text><text x="72" y="188.5" text-anchor="end" class="tiny">T+1042</text><text x="72" y="243.0" text-anchor="end" class="tiny">T+1065</text><text x="72" y="297.5" text-anchor="end" class="tiny">T+1088</text><text x="72" y="352.0" text-anchor="end" class="tiny">T+1110</text>
+      <rect x="420.5" y="119.0" width="10" height="22.0" rx="1" fill="#49ad9c" stroke="#b9e3f0" stroke-opacity="0.35"><title>3199.98 MHz / -20.8 dBm / T+1020.0s</title></rect><rect x="416.8" y="191.7" width="10" height="22.0" rx="1" fill="#1c3a4d" stroke="#b9e3f0" stroke-opacity="0.35"><title>3199.92 MHz / -21.6 dBm / T+1050.0s</title></rect><rect x="423.2" y="264.3" width="10" height="22.0" rx="1" fill="#e0b04c" stroke="#b9e3f0" stroke-opacity="0.35"><title>3200.02 MHz / -20.4 dBm / T+1080.0s</title></rect><rect x="419.6" y="337.0" width="10" height="22.0" rx="1" fill="#2e8591" stroke="#b9e3f0" stroke-opacity="0.35"><title>3199.97 MHz / -21.0 dBm / T+1110.0s</title></rect>
+      
+      <text x="425" y="374" text-anchor="middle" class="tiny">频率 / MHz · 仅绘制实测频点</text>
+      <text x="80" y="395" class="small">测向随时间变化</text>
+      <rect x="80" y="402" width="690" height="58" fill="#081721" stroke="#31505f"/>
+      <line x1="80" y1="431" x2="770" y2="431" class="grid"/><polyline points="80.0,454.0 310.0,437.6 540.0,421.6 770.0,406.0" class="accent" stroke-width="1.5"/>
+      
+      <text x="88" y="476" class="tiny">方位范围 16.2°–25.6° · 发射源类别需后端判定</text>
+      <text x="790" y="142" class="small">观测窗口</text><text x="790" y="164" class="value">T+1020s–T+1110s</text>
+      <text x="790" y="198" class="small">采样时刻 / 频点</text><text x="790" y="220" class="value">4 / 4</text>
+      <text x="790" y="254" class="small">最强测量</text>
+      <text x="790" y="276" class="value">3200.0 MHz</text>
+      <text x="790" y="298" class="tiny">-20.4 dBm</text>
+      <text x="790" y="320" class="small">接收功率</text>
+      <rect x="790" y="330" width="11" height="12" fill="#1c3a4d"/><rect x="801" y="330" width="11" height="12" fill="#1d4b61"/><rect x="812" y="330" width="11" height="12" fill="#1e5c74"/><rect x="823" y="330" width="11" height="12" fill="#1f6c88"/><rect x="834" y="330" width="11" height="12" fill="#2b8090"/><rect x="845" y="330" width="11" height="12" fill="#389495"/><rect x="856" y="330" width="11" height="12" fill="#46a89a"/><rect x="867" y="330" width="11" height="12" fill="#71af87"/><rect x="878" y="330" width="11" height="12" fill="#a8af6a"/><rect x="889" y="330" width="11" height="12" fill="#e0b04c"/>
+      <text x="790" y="358" class="tiny">低</text><text x="895" y="358" class="tiny">高</text>
+      <text x="790" y="378" class="small">当前测向 / 距离</text><text x="790" y="390" class="tiny">3200.0 MHz · 25.6° · 14.4 NM</text>
+      <text x="56" y="498" class="small">测量频率  3199.9–3200.0 MHz</text>
+      <text x="300" y="498" class="small">配置频段  500.0–6000.0 MHz</text>
+      <text x="550" y="498" class="small">功率范围  -21.6–-20.4 dBm</text>
+      <text x="830" y="498" class="small">记录  4</text>
+    <text x="928" y="526" text-anchor="end" class="tiny">AMOS CURRENT-STATE PRODUCT · AMP-CAPTURE-03</text></svg>

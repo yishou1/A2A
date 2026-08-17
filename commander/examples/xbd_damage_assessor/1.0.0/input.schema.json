@@ -1,0 +1,63 @@
+{
+  "title": "xBD Damage Assessor Input",
+  "type": "object",
+  "required": [
+    "input_mode"
+  ],
+  "properties": {
+    "input_mode": {
+      "type": "string",
+      "enum": [
+        "features",
+        "images"
+      ]
+    },
+    "sample_id": {
+      "type": "string"
+    },
+    "handcrafted_features": {
+      "type": "object",
+      "properties": {
+        "pre_area": { "type": "number" },
+        "spectral_delta": { "type": "number" },
+        "texture_delta": { "type": "number" },
+        "heat_signature": { "type": "number" },
+        "crater_density": { "type": "number" },
+        "std_spectral": { "type": "number" },
+        "max_spectral": { "type": "number" },
+        "high_change_ratio": { "type": "number" },
+        "severe_damage_ratio": { "type": "number" },
+        "collapse_ratio": { "type": "number" },
+        "post_brightness": { "type": "number" },
+        "brightness_drop": { "type": "number" },
+        "normalized_distance": { "type": "number" },
+        "detection_confidence": { "type": "number" },
+        "threat_score": { "type": "number" }
+      }
+    },
+    "cnn_embedding": {
+      "type": "array",
+      "items": { "type": "number" }
+    },
+    "pre_image": {
+      "type": "string",
+      "description": "Base64-encoded RGB image for images mode"
+    },
+    "post_image": {
+      "type": "string",
+      "description": "Base64-encoded RGB image for images mode"
+    },
+    "polygon": {
+      "type": "array",
+      "description": "Required ROI polygon as [[x,y], ...] in images mode",
+      "items": {
+        "type": "array",
+        "items": { "type": "number" },
+        "minItems": 2,
+        "maxItems": 2
+      },
+      "minItems": 3
+    }
+  },
+  "additionalProperties": true
+}

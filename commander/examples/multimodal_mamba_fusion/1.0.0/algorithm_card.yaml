@@ -1,0 +1,80 @@
+algorithm_id: multimodal_mamba_fusion
+version: 1.0.0
+display_name: Multimodal Mamba Fusion
+backend_type: python_http_service
+status: draft
+
+task_family: fusion
+modalities:
+  input:
+    - structured_json
+  output:
+    - structured_json
+
+capabilities:
+  - temporal_fusion
+  - multimodal_mamba
+
+agent_card:
+  summary: >
+    Multimodal Mamba Fusion from the TIA tactical intelligence agent pipeline.
+  when_to_use:
+    - Embeddings and track history need temporal fusion.
+  when_not_to_use:
+    - No embeddings or tracks are available.
+  input_description: >
+    See input.schema.json for required structured fields.
+  output_description: >
+    See output.schema.json for structured outputs.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  runtime:
+    backend_type: python_http_service
+    endpoint: http://127.0.0.1:9026/predict
+    health_endpoint: http://127.0.0.1:9026/health
+    metadata_endpoint: http://127.0.0.1:9026/metadata
+    timeout_ms: 5000
+
+constraints:
+  max_input_chars: 20000000
+  max_request_bytes: 33554432
+  batch_supported: false
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 50
+  latency_ms_p95: 500
+  primary_metric: fusion_coherence
+  primary_score: 0.84
+
+resource_requirements:
+  min_cpu_cores: 2
+  recommended_cpu_cores: 4
+  min_memory_mb: 4096
+  recommended_memory_mb: 8192
+  min_gpu_count: 0
+  gpu_type: optional
+  min_vram_mb: 0
+  recommended_vram_mb: 8192
+  disk_mb: 4096
+
+model_profile:
+  # MultimodalMambaBlock (d_model=1024, medium profile):
+  # in_proj: 1024->4096 (no bias) = 4194304
+  # conv1d: 2048 depthwise k=3 = 6144+2048=8192
+  # ssm_proj: 2048->16 = 32768; ssm_back: 16->2048 = 32768
+  # out_proj: 2048->1024 (no bias) = 2097152; norm: 1024*2 = 2048
+  # Total (medium, d_model=1024): ~6.37M
+  parameter_count: 6370000
+  parameter_count_text: 6.37M (MultimodalMambaBlock d_model=1024 medium profile)
+  flops: 50000000
+  flops_text: ~50 MFLOPs per sequence step (d_model=1024, seq_len=8)
+  flops_input_shape: [1, 8, 1024]
+  model_size_mb: 24
+  precision: fp32
+
+safety:
+  risk_level: low
+  requires_human_review: true

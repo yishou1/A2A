@@ -1,0 +1,2610 @@
+{
+  "file_serving_api": [
+    {
+      "explanation": "[下载 ONNX 模型] GET /algorithms/{id}/{ver}/{backend}/files/{rel_path}： 下载算法包内的指定文件。 服务器首先解析算法包目录，再拼接 rel_path，最终流式返回文件内容。 返回 Content-Type: application/octet-stream，远程节点可用此接口实现 http_pull 模式下载。 验证要点：file_size_bytes=expected_size_bytes 确保文件内容完整无损。",
+      "http_status": 200,
+      "method": "GET",
+      "passed": true,
+      "path": "/algorithms/onnx_text_classifier/1.0.0/onnx/files/model.onnx",
+      "request": null,
+      "response": {
+        "content_type": "application/octet-stream",
+        "expected_size_bytes": 244,
+        "file_size_bytes": 244,
+        "http_status": 200
+      },
+      "step": "3.1_download_onnx",
+      "timestamp": "2026-08-15T10:43:29Z"
+    },
+    {
+      "explanation": "[下载配置文件] GET .../files/preprocess.yaml：下载算法包内的预处理配置文件。 文件服务接口不限于二进制模型，YAML/JSON/文本等所有文件均可流式返回。 返回 HTTP 200 和正确的文件内容，验证文件服务对不同文件类型的通用支持。",
+      "http_status": 200,
+      "method": "GET",
+      "passed": true,
+      "path": "/algorithms/onnx_text_classifier/1.0.0/onnx/files/preprocess.yaml",
+      "request": null,
+      "response": {
+        "file_size_bytes": 126,
+        "http_status": 200
+      },
+      "step": "3.2_download_yaml",
+      "timestamp": "2026-08-15T10:43:29Z"
+    },
+    {
+      "explanation": "[路径穿越防护] GET .../files/../../../etc/passwd：尝试通过 ../ 跳出算法包目录并读取系统文件。 服务器计算 canonical 路径，如果解析后路径越出算法包目录就拒绝并返回 HTTP 400。 返回 400 正是预期行为，证明路径安全校验机制有效。 如果返回 200 则表示存在路径穿越漏洞，是严重安全隐患。",
+      "http_status": 400,
+      "method": "GET",
+      "passed": true,
+      "path": "/algorithms/onnx_text_classifier/1.0.0/onnx/files/../../../etc/passwd",
+      "request": null,
+      "response": {
+        "expect": 400,
+        "http_status": 400
+      },
+      "step": "3.3_path_traversal_rejected",
+      "timestamp": "2026-08-15T10:43:29Z"
+    },
+    {
+      "explanation": "[文件不存在 404] GET .../files/nonexistent.bin：请求一个不存在的文件。 服务器在安全校验通过后，发现文件不存在则返回 HTTP 404。 返回 404 正是预期行为，验证错误处理逻辑正确，不会将 404 误判为 500 或其他语义。",
+      "http_status": 404,
+      "method": "GET",
+      "passed": true,
+      "path": "/algorithms/onnx_text_classifier/1.0.0/onnx/files/nonexistent.bin",
+      "request": null,
+      "response": {
+        "expect": 404,
+        "http_status": 404
+      },
+      "step": "3.4_file_not_found",
+      "timestamp": "2026-08-15T10:43:29Z"
+    }
+  ],
+  "meta": {
+    "demo": "AlgoLib Four API Demo",
+    "finished_at": "2026-08-15T10:43:29Z",
+    "output_path": "/Users/cmax/Downloads/Algorithmrepo/demo/demo_output.json",
+    "overall_failures": 0,
+    "overall_passed": true,
+    "source_root": "/Users/cmax/Downloads/Algorithmrepo",
+    "started_at": "2026-08-15T10:43:29Z"
+  },
+  "model_load_api": [
+    {
+      "explanation": "[首次加载] POST /load：预加载指定算法的 ONNX Session 到内存缓存。 成功后 load_status=loaded，health.ok=true 表示 Session 已就绪。 同时自动回写注册表中 deploy_id=local/d1 的 deploy_status 为 ready。 transfer_mode=none 表示模型文件已在本地，无需远程下载。",
+      "http_status": 200,
+      "method": "POST",
+      "passed": true,
+      "path": "/load",
+      "request": {
+        "algorithm_id": "onnx_text_classifier",
+        "backend_type": "onnx",
+        "deploy_id": "local/d1",
+        "version": "1.0.0"
+      },
+      "response": {
+        "algorithm_id": "onnx_text_classifier",
+        "backend_type": "onnx",
+        "deploy_id": "local/d1",
+        "health": {
+          "message": "ONNX runner is loaded.",
+          "ok": true,
+          "status": "ready"
+        },
+        "load_status": "loaded",
+        "message": "Model loaded successfully.",
+        "ok": true,
+        "version": "1.0.0"
+      },
+      "step": "2.1_load_first",
+      "timestamp": "2026-08-15T10:43:29Z"
+    },
+    {
+      "explanation": "[验证自动回写] GET /algorithms/.../onnx：/load 成功后会自动回写 deploy_status=ready 到注册表。 通过该接口查看 entry.deployments[]，可确认 deploy_id=local/d1 的状态已更新。 agent_view.ready_endpoints 也会同步包含该节点，agent 可直接读取此列表获得可用的就绪端点。",
+      "http_status": 200,
+      "method": "GET",
+      "passed": true,
+      "path": "/algorithms/onnx_text_classifier/1.0.0/onnx",
+      "request": null,
+      "response": {
+        "agent_view": {
+          "agent_card": {
+            "examples": [
+              {
+                "input": {
+                  "text": "Classify this task description"
+                },
+                "output": {
+                  "confidence": 0.96,
+                  "label": "task"
+                }
+              }
+            ],
+            "input_description": "The request JSON must contain a text field.\n",
+            "output_description": "Returns label and confidence fields.\n",
+            "summary": "Classify a short text into a fixed label set and return confidence.\n",
+            "when_not_to_use": [
+              "Long document reasoning is required",
+              "Natural language explanation is required"
+            ],
+            "when_to_use": [
+              "Input is a short text string",
+              "Output must be a fixed label"
+            ]
+          },
+          "algorithm_id": "onnx_text_classifier",
+          "backend_type": "onnx",
+          "capabilities": [
+            "text_classification",
+            "confidence_score"
+          ],
+          "constraints": {
+            "batch_supported": false,
+            "max_input_chars": 4096,
+            "max_request_bytes": 1048576,
+            "streaming_supported": false
+          },
+          "deployments": [
+            {
+              "deploy_id": "local/d1",
+              "deploy_status": "ready",
+              "endpoint": "",
+              "node_id": "local",
+              "status_message": "Model loaded and ready.",
+              "zone": ""
+            }
+          ],
+          "display_name": "ONNX Text Classifier",
+          "input_schema_summary": {
+            "properties": [
+              {
+                "description": "Input text to classify.",
+                "name": "text",
+                "type": "string"
+              }
+            ],
+            "required": [
+              "text"
+            ],
+            "title": "ONNX Text Classifier Input",
+            "type": "object"
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "structured_json"
+            ]
+          },
+          "model_profile": {
+            "flops": 240000,
+            "flops_input_shape": [
+              1,
+              256
+            ],
+            "flops_text": "240 KFLOPs",
+            "model_size_mb": 1,
+            "parameter_count": 120000,
+            "parameter_count_text": "120K",
+            "precision": "fp32"
+          },
+          "output_schema_summary": {
+            "properties": [
+              {
+                "description": "Prediction confidence.",
+                "name": "confidence",
+                "type": "number"
+              },
+              {
+                "description": "Predicted label.",
+                "name": "label",
+                "type": "string"
+              }
+            ],
+            "required": [
+              "label",
+              "confidence"
+            ],
+            "title": "ONNX Text Classifier Output",
+            "type": "object"
+          },
+          "performance": {
+            "complexity_variable": "n = number of input tokens after preprocessing",
+            "latency_ms_p50": 20,
+            "latency_ms_p95": 60,
+            "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
+            "primary_metric": "accuracy",
+            "primary_score": 0.92,
+            "space_complexity": "O(n)",
+            "time_complexity": "O(n)"
+          },
+          "ready_endpoints": [],
+          "resource_requirements": {
+            "disk_mb": 64,
+            "gpu_type": "none",
+            "min_cpu_cores": 1,
+            "min_gpu_count": 0,
+            "min_memory_mb": 512,
+            "min_vram_mb": 0,
+            "recommended_cpu_cores": 2,
+            "recommended_memory_mb": 1024,
+            "recommended_vram_mb": 0
+          },
+          "safety": {
+            "requires_human_review": false,
+            "risk_level": "low"
+          },
+          "task_family": "text_classification",
+          "version": "1.0.0"
+        },
+        "entry": {
+          "card": {
+            "agent_card": {
+              "examples": [
+                {
+                  "input": {
+                    "text": "Classify this task description"
+                  },
+                  "output": {
+                    "confidence": 0.96,
+                    "label": "task"
+                  }
+                }
+              ],
+              "input_description": "The request JSON must contain a text field.\n",
+              "output_description": "Returns label and confidence fields.\n",
+              "summary": "Classify a short text into a fixed label set and return confidence.\n",
+              "when_not_to_use": [
+                "Long document reasoning is required",
+                "Natural language explanation is required"
+              ],
+              "when_to_use": [
+                "Input is a short text string",
+                "Output must be a fixed label"
+              ]
+            },
+            "algorithm_id": "onnx_text_classifier",
+            "backend_type": "onnx",
+            "capabilities": [
+              "text_classification",
+              "confidence_score"
+            ],
+            "constraints": {
+              "batch_supported": false,
+              "max_input_chars": 4096,
+              "max_request_bytes": 1048576,
+              "streaming_supported": false
+            },
+            "display_name": "ONNX Text Classifier",
+            "machine_spec": {
+              "input_schema_ref": "input.schema.json",
+              "output_schema_ref": "output.schema.json",
+              "postprocess": {
+                "config_uri": "postprocess.yaml",
+                "label_map_uri": "label_map.json"
+              },
+              "preprocess": {
+                "config_uri": "preprocess.yaml",
+                "label_map_uri": ""
+              },
+              "runtime": {
+                "backend_type": "onnx",
+                "endpoint": "",
+                "execution_provider": "cpu",
+                "health_endpoint": "",
+                "metadata_endpoint": "",
+                "model_uri": "model.onnx",
+                "timeout_ms": 0
+              },
+              "tensor_contract_ref": "tensor_contract.yaml",
+              "tokenizer": {
+                "max_length": 256,
+                "tokenizer_uri": "tokenizer.json",
+                "type": "wordpiece"
+              }
+            },
+            "modalities": {
+              "input": [
+                "text"
+              ],
+              "output": [
+                "structured_json"
+              ]
+            },
+            "model_profile": {
+              "flops": 240000,
+              "flops_input_shape": [
+                1,
+                256
+              ],
+              "flops_text": "240 KFLOPs",
+              "model_size_mb": 1,
+              "parameter_count": 120000,
+              "parameter_count_text": "120K",
+              "precision": "fp32"
+            },
+            "performance": {
+              "complexity_variable": "n = number of input tokens after preprocessing",
+              "latency_ms_p50": 20,
+              "latency_ms_p95": 60,
+              "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
+              "primary_metric": "accuracy",
+              "primary_score": 0.92,
+              "space_complexity": "O(n)",
+              "time_complexity": "O(n)"
+            },
+            "resource_requirements": {
+              "disk_mb": 64,
+              "gpu_type": "none",
+              "min_cpu_cores": 1,
+              "min_gpu_count": 0,
+              "min_memory_mb": 512,
+              "min_vram_mb": 0,
+              "recommended_cpu_cores": 2,
+              "recommended_memory_mb": 1024,
+              "recommended_vram_mb": 0
+            },
+            "safety": {
+              "requires_human_review": false,
+              "risk_level": "low"
+            },
+            "status": "draft",
+            "task_family": "text_classification",
+            "version": "1.0.0"
+          },
+          "card_path": "/Users/cmax/Downloads/Algorithmrepo/examples/onnx_text_classifier/1.0.0/algorithm_card.yaml",
+          "deployments": [
+            {
+              "deploy_id": "local/d1",
+              "deploy_status": "ready",
+              "deployed_at": "2026-08-15T10:43:29Z",
+              "endpoint": "",
+              "health_endpoint": "",
+              "local_model_path": "",
+              "node_id": "local",
+              "status_message": "Model loaded and ready.",
+              "updated_at": "2026-08-15T10:43:29Z",
+              "zone": ""
+            }
+          ],
+          "input_schema_summary": {
+            "properties": [
+              {
+                "description": "Input text to classify.",
+                "name": "text",
+                "type": "string"
+              }
+            ],
+            "required": [
+              "text"
+            ],
+            "title": "ONNX Text Classifier Input",
+            "type": "object"
+          },
+          "key": {
+            "algorithm_id": "onnx_text_classifier",
+            "backend_type": "onnx",
+            "version": "1.0.0"
+          },
+          "output_schema_summary": {
+            "properties": [
+              {
+                "description": "Prediction confidence.",
+                "name": "confidence",
+                "type": "number"
+              },
+              {
+                "description": "Predicted label.",
+                "name": "label",
+                "type": "string"
+              }
+            ],
+            "required": [
+              "label",
+              "confidence"
+            ],
+            "title": "ONNX Text Classifier Output",
+            "type": "object"
+          },
+          "package_root": "/Users/cmax/Downloads/Algorithmrepo/examples/onnx_text_classifier/1.0.0",
+          "status": "active"
+        },
+        "ok": true
+      },
+      "step": "2.2_check_deploy_status",
+      "timestamp": "2026-08-15T10:43:29Z"
+    },
+    {
+      "explanation": "[执行推理] POST /run：向已加载的 Session 提交输入并返回推理结果。 请求必须指定 request_id+trace_id 以支持追踪和审计。 outputs.label=task 表示文本被分类为任务类型，置信度 confidence=0.96。 usage 字段返回执行提供器、延迟等性能指标，可用于性能监控。",
+      "http_status": 200,
+      "method": "POST",
+      "passed": true,
+      "path": "/run",
+      "request": {
+        "algorithm_id": "onnx_text_classifier",
+        "backend_type": "onnx",
+        "deploy_id": "local/d1",
+        "inputs": {
+          "text": "Classify this task text."
+        },
+        "request_id": "demo_req_001",
+        "trace_id": "demo_trace_001",
+        "version": "1.0.0"
+      },
+      "response": {
+        "algorithm_id": "onnx_text_classifier",
+        "backend_type": "onnx",
+        "error": null,
+        "ok": true,
+        "outputs": {
+          "confidence": 0.96,
+          "label": "task"
+        },
+        "request_id": "demo_req_001",
+        "trace_id": "demo_trace_001",
+        "usage": {
+          "execution_provider": "cpu",
+          "latency_ms": 0,
+          "session_backend": "stub"
+        },
+        "version": "1.0.0"
+      },
+      "step": "2.3_run_inference",
+      "timestamp": "2026-08-15T10:43:29Z"
+    },
+    {
+      "explanation": "[缓存命中] POST /load（再次）：Runner 已在内存中，第二次调用返回 load_status=already_loaded。 并不重建 ONNX Session，避免重复加载开销，接口实现了幂等性设计。 这意味着多个调用方可以无顾虑是否已加载而安全重复调用 /load。",
+      "http_status": 200,
+      "method": "POST",
+      "passed": true,
+      "path": "/load",
+      "request": {
+        "algorithm_id": "onnx_text_classifier",
+        "backend_type": "onnx",
+        "deploy_id": "local/d1",
+        "version": "1.0.0"
+      },
+      "response": {
+        "algorithm_id": "onnx_text_classifier",
+        "backend_type": "onnx",
+        "deploy_id": "local/d1",
+        "health": {
+          "message": "ONNX runner is loaded.",
+          "ok": true,
+          "status": "ready"
+        },
+        "load_status": "already_loaded",
+        "message": "Runner is already loaded in cache.",
+        "ok": true,
+        "version": "1.0.0"
+      },
+      "step": "2.4_load_cached",
+      "timestamp": "2026-08-15T10:43:29Z"
+    },
+    {
+      "explanation": "[健康检查+缓存大小] GET /health：返回服务器状态摘要。 runner_cache_size=1 表示当前缓存中有 1 个已加载的 Runner（ONNX Session）。 缓存采用 LIFO 策略，当超出容量时驱逐最久未使用的条目，防止内存溢出。 该接口可用于运维监控，实时了解内存占用情况。",
+      "http_status": 200,
+      "method": "GET",
+      "passed": true,
+      "path": "/health",
+      "request": null,
+      "response": {
+        "execution_log_path": "/Users/cmax/Downloads/Algorithmrepo/demo/shared_audit.jsonl",
+        "ok": true,
+        "registry_path": "/Users/cmax/Downloads/Algorithmrepo/demo/shared_registry.json",
+        "runner_cache_size": 1,
+        "status": "ready"
+      },
+      "step": "2.5_health_cache_size",
+      "timestamp": "2026-08-15T10:43:29Z"
+    },
+    {
+      "explanation": "[卸载模型] POST /unload：从缓存中移除指定 Runner，释放内存。 load_status=unloaded 确认 Session 已销毁并从缓存中移除。 同时自动回写注册表中 deploy_id=local/d1 的 deploy_status 为 unloaded。 卸载后可重新 /load 进行热更新，或切换到新版本模型。",
+      "http_status": 200,
+      "method": "POST",
+      "passed": true,
+      "path": "/unload",
+      "request": {
+        "algorithm_id": "onnx_text_classifier",
+        "backend_type": "onnx",
+        "deploy_id": "local/d1",
+        "version": "1.0.0"
+      },
+      "response": {
+        "algorithm_id": "onnx_text_classifier",
+        "backend_type": "onnx",
+        "deploy_id": "local/d1",
+        "load_status": "unloaded",
+        "message": "Runner unloaded from cache.",
+        "ok": true,
+        "version": "1.0.0"
+      },
+      "step": "2.6_unload",
+      "timestamp": "2026-08-15T10:43:29Z"
+    },
+    {
+      "explanation": "[卸载后重新加载] POST /load（卸载后）：验证卸载后可顷利重新加载。 load_status=loaded 表示 Session 重建成功，服务恢复就绪。 此流程常用于模型热更新（unload 旧版本 → 注册新版本 → load 新版本），实现无中断升级。",
+      "http_status": 200,
+      "method": "POST",
+      "passed": true,
+      "path": "/load",
+      "request": {
+        "algorithm_id": "onnx_text_classifier",
+        "backend_type": "onnx",
+        "deploy_id": "local/d1",
+        "version": "1.0.0"
+      },
+      "response": {
+        "algorithm_id": "onnx_text_classifier",
+        "backend_type": "onnx",
+        "deploy_id": "local/d1",
+        "health": {
+          "message": "ONNX runner is loaded.",
+          "ok": true,
+          "status": "ready"
+        },
+        "load_status": "loaded",
+        "message": "Model loaded successfully.",
+        "ok": true,
+        "version": "1.0.0"
+      },
+      "step": "2.7_reload_after_unload",
+      "timestamp": "2026-08-15T10:43:29Z"
+    }
+  ],
+  "python_pool_api": [
+    {
+      "explanation": "[并发池加载] POST /load pool_size=3：创建一个大小为 3 的连接池指向 Python HTTP 服务。 pool_size=3 表示最多允许 3 个并发请求同时占用连接，第 4 个请求必须排队等待。 pool_checkout_timeout_ms=5000 表示排队超过 5 秒未获得连接就返回超时错误。 底层基于 std::condition_variable 实现锁的连接池，限制并发以防止压币 Python 服务。",
+      "http_status": 200,
+      "method": "POST",
+      "passed": true,
+      "path": "/load",
+      "request": {
+        "algorithm_id": "llm_rule_explainer",
+        "backend_type": "python_http_service",
+        "pool_checkout_timeout_ms": 5000,
+        "pool_size": 3,
+        "version": "1.0.0"
+      },
+      "response": {
+        "algorithm_id": "llm_rule_explainer",
+        "backend_type": "python_http_service",
+        "health": {
+          "message": "",
+          "ok": true,
+          "status": "ready"
+        },
+        "load_status": "loaded",
+        "message": "Model loaded successfully.",
+        "ok": true,
+        "version": "1.0.0"
+      },
+      "step": "4.1_pool_load",
+      "timestamp": "2026-08-15T10:43:29Z"
+    },
+    {
+      "explanation": "[并发池健康检查] GET /health：确认并发池 Runner 已进入缓存。 runner_cache_size>=1 表示 Pool Runner 已被注册并激活。 registry_path / execution_log_path 展示此独立 Server 使用的池専用注册表和审计日志路径。",
+      "http_status": 200,
+      "method": "GET",
+      "passed": true,
+      "path": "/health",
+      "request": null,
+      "response": {
+        "execution_log_path": "/Users/cmax/Downloads/Algorithmrepo/demo/pool_audit.jsonl",
+        "ok": true,
+        "registry_path": "/Users/cmax/Downloads/Algorithmrepo/demo/pool_registry.json",
+        "runner_cache_size": 1,
+        "status": "ready"
+      },
+      "step": "4.2_pool_health",
+      "timestamp": "2026-08-15T10:43:29Z"
+    },
+    {
+      "explanation": "[串行 6 次推理] 6 次串行 POST /run 验证排队调度。 pool_size=3 但请求总数 6 超过容量，后 3 个请求会排队等待前 3 个释放连接。 所有 6 个请求均返回 success=true，证明排队机制正常工作。 details[] 字段指向每个单次请求的具体响应，可逐项查看推理输出。",
+      "http_status": 200,
+      "method": "POST",
+      "passed": true,
+      "path": "/run (x6)",
+      "request": {
+        "details": [
+          {
+            "http_status": 200,
+            "index": 0,
+            "ok": true,
+            "response": {
+              "algorithm_id": "llm_rule_explainer",
+              "backend_type": "python_http_service",
+              "error": null,
+              "ok": true,
+              "outputs": {
+                "confidence": 0.85,
+                "explanation": "Mock: required fields are present."
+              },
+              "request_id": "demo_pool_req_0",
+              "trace_id": "demo_pool_trace_0",
+              "usage": {
+                "latency_ms": 16
+              },
+              "version": "1.0.0"
+            }
+          },
+          {
+            "http_status": 200,
+            "index": 1,
+            "ok": true,
+            "response": {
+              "algorithm_id": "llm_rule_explainer",
+              "backend_type": "python_http_service",
+              "error": null,
+              "ok": true,
+              "outputs": {
+                "confidence": 0.85,
+                "explanation": "Mock: required fields are present."
+              },
+              "request_id": "demo_pool_req_1",
+              "trace_id": "demo_pool_trace_1",
+              "usage": {
+                "latency_ms": 19
+              },
+              "version": "1.0.0"
+            }
+          },
+          {
+            "http_status": 200,
+            "index": 2,
+            "ok": true,
+            "response": {
+              "algorithm_id": "llm_rule_explainer",
+              "backend_type": "python_http_service",
+              "error": null,
+              "ok": true,
+              "outputs": {
+                "confidence": 0.85,
+                "explanation": "Mock: required fields are present."
+              },
+              "request_id": "demo_pool_req_2",
+              "trace_id": "demo_pool_trace_2",
+              "usage": {
+                "latency_ms": 19
+              },
+              "version": "1.0.0"
+            }
+          },
+          {
+            "http_status": 200,
+            "index": 3,
+            "ok": true,
+            "response": {
+              "algorithm_id": "llm_rule_explainer",
+              "backend_type": "python_http_service",
+              "error": null,
+              "ok": true,
+              "outputs": {
+                "confidence": 0.85,
+                "explanation": "Mock: required fields are present."
+              },
+              "request_id": "demo_pool_req_3",
+              "trace_id": "demo_pool_trace_3",
+              "usage": {
+                "latency_ms": 16
+              },
+              "version": "1.0.0"
+            }
+          },
+          {
+            "http_status": 200,
+            "index": 4,
+            "ok": true,
+            "response": {
+              "algorithm_id": "llm_rule_explainer",
+              "backend_type": "python_http_service",
+              "error": null,
+              "ok": true,
+              "outputs": {
+                "confidence": 0.85,
+                "explanation": "Mock: required fields are present."
+              },
+              "request_id": "demo_pool_req_4",
+              "trace_id": "demo_pool_trace_4",
+              "usage": {
+                "latency_ms": 20
+              },
+              "version": "1.0.0"
+            }
+          },
+          {
+            "http_status": 200,
+            "index": 5,
+            "ok": true,
+            "response": {
+              "algorithm_id": "llm_rule_explainer",
+              "backend_type": "python_http_service",
+              "error": null,
+              "ok": true,
+              "outputs": {
+                "confidence": 0.85,
+                "explanation": "Mock: required fields are present."
+              },
+              "request_id": "demo_pool_req_5",
+              "trace_id": "demo_pool_trace_5",
+              "usage": {
+                "latency_ms": 20
+              },
+              "version": "1.0.0"
+            }
+          }
+        ],
+        "error_count": 0,
+        "success_count": 6
+      },
+      "response": {
+        "error_count": 0,
+        "success_count": 6
+      },
+      "step": "4.3_pool_run_sequential",
+      "timestamp": "2026-08-15T10:43:29Z"
+    },
+    {
+      "explanation": "[6 线程并发推理] 6 个 std::thread 同时发起 POST /run，验证并发安全性。 6 线程 > pool_size=3，势必需要排队；所有请求均能在超时内完成，证明并发池无死锁。 success=6/6 证明并发路径线程安全，condition_variable+mutex 正确保护了连接池的状态。",
+      "http_status": 200,
+      "method": "POST",
+      "passed": true,
+      "path": "/run (concurrent x6)",
+      "request": {
+        "threads": 6
+      },
+      "response": {
+        "error_count": 0,
+        "success_count": 6
+      },
+      "step": "4.4_pool_run_concurrent",
+      "timestamp": "2026-08-15T10:43:29Z"
+    },
+    {
+      "explanation": "[并发池卸载] POST /unload：销毁并发池并释放所有连接。 load_status=unloaded 确认并发池已完全清除，runner_cache_size 将恢复为 0。 卸载后 Mock Python 服务将不会再接收到任何新请求，证明池的生命周期管理正确。",
+      "http_status": 200,
+      "method": "POST",
+      "passed": true,
+      "path": "/unload",
+      "request": {
+        "algorithm_id": "llm_rule_explainer",
+        "backend_type": "python_http_service",
+        "version": "1.0.0"
+      },
+      "response": {
+        "algorithm_id": "llm_rule_explainer",
+        "backend_type": "python_http_service",
+        "load_status": "unloaded",
+        "message": "Runner unloaded from cache.",
+        "ok": true,
+        "version": "1.0.0"
+      },
+      "step": "4.5_pool_unload",
+      "timestamp": "2026-08-15T10:43:29Z"
+    }
+  ],
+  "registry_api": [
+    {
+      "explanation": "[注册] POST /algorithms/register：传入算法包目录路径，服务器解析 algorithm_card.yaml 并校验文件完整性（schema / model 文件均需存在）。 注册成功返回 HTTP 201，status=validated（已校验但尚未激活）。 validated 状态下算法不对外提供推理服务，需手动 /activate 才能上线。",
+      "http_status": 201,
+      "method": "POST",
+      "passed": true,
+      "path": "/algorithms/register",
+      "request": {
+        "package_or_card_path": "/Users/cmax/Downloads/Algorithmrepo/examples/onnx_text_classifier/1.0.0"
+      },
+      "response": {
+        "agent_view": {
+          "agent_card": {
+            "examples": [
+              {
+                "input": {
+                  "text": "Classify this task description"
+                },
+                "output": {
+                  "confidence": 0.96,
+                  "label": "task"
+                }
+              }
+            ],
+            "input_description": "The request JSON must contain a text field.\n",
+            "output_description": "Returns label and confidence fields.\n",
+            "summary": "Classify a short text into a fixed label set and return confidence.\n",
+            "when_not_to_use": [
+              "Long document reasoning is required",
+              "Natural language explanation is required"
+            ],
+            "when_to_use": [
+              "Input is a short text string",
+              "Output must be a fixed label"
+            ]
+          },
+          "algorithm_id": "onnx_text_classifier",
+          "backend_type": "onnx",
+          "capabilities": [
+            "text_classification",
+            "confidence_score"
+          ],
+          "constraints": {
+            "batch_supported": false,
+            "max_input_chars": 4096,
+            "max_request_bytes": 1048576,
+            "streaming_supported": false
+          },
+          "deployments": [],
+          "display_name": "ONNX Text Classifier",
+          "input_schema_summary": {
+            "properties": [
+              {
+                "description": "Input text to classify.",
+                "name": "text",
+                "type": "string"
+              }
+            ],
+            "required": [
+              "text"
+            ],
+            "title": "ONNX Text Classifier Input",
+            "type": "object"
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "structured_json"
+            ]
+          },
+          "model_profile": {
+            "flops": 240000,
+            "flops_input_shape": [
+              1,
+              256
+            ],
+            "flops_text": "240 KFLOPs",
+            "model_size_mb": 1,
+            "parameter_count": 120000,
+            "parameter_count_text": "120K",
+            "precision": "fp32"
+          },
+          "output_schema_summary": {
+            "properties": [
+              {
+                "description": "Prediction confidence.",
+                "name": "confidence",
+                "type": "number"
+              },
+              {
+                "description": "Predicted label.",
+                "name": "label",
+                "type": "string"
+              }
+            ],
+            "required": [
+              "label",
+              "confidence"
+            ],
+            "title": "ONNX Text Classifier Output",
+            "type": "object"
+          },
+          "performance": {
+            "complexity_variable": "n = number of input tokens after preprocessing",
+            "latency_ms_p50": 20,
+            "latency_ms_p95": 60,
+            "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
+            "primary_metric": "accuracy",
+            "primary_score": 0.92,
+            "space_complexity": "O(n)",
+            "time_complexity": "O(n)"
+          },
+          "ready_endpoints": [],
+          "resource_requirements": {
+            "disk_mb": 64,
+            "gpu_type": "none",
+            "min_cpu_cores": 1,
+            "min_gpu_count": 0,
+            "min_memory_mb": 512,
+            "min_vram_mb": 0,
+            "recommended_cpu_cores": 2,
+            "recommended_memory_mb": 1024,
+            "recommended_vram_mb": 0
+          },
+          "safety": {
+            "requires_human_review": false,
+            "risk_level": "low"
+          },
+          "task_family": "text_classification",
+          "version": "1.0.0"
+        },
+        "algorithm_id": "onnx_text_classifier",
+        "backend_type": "onnx",
+        "ok": true,
+        "status": "validated",
+        "version": "1.0.0"
+      },
+      "step": "1.1_register",
+      "timestamp": "2026-08-15T10:43:29Z"
+    },
+    {
+      "explanation": "[激活] POST .../activate：将算法状态从 validated 推进到 active。 只有 active 状态的算法才能被 /run 接口调用执行推理。 激活是人工把关环节，防止未经审核的算法自动上线。 响应中 status=active 表示激活已生效，可立即接受推理请求。",
+      "http_status": 200,
+      "method": "POST",
+      "passed": true,
+      "path": "/algorithms/onnx_text_classifier/1.0.0/onnx/activate",
+      "request": null,
+      "response": {
+        "agent_view": {
+          "agent_card": {
+            "examples": [
+              {
+                "input": {
+                  "text": "Classify this task description"
+                },
+                "output": {
+                  "confidence": 0.96,
+                  "label": "task"
+                }
+              }
+            ],
+            "input_description": "The request JSON must contain a text field.\n",
+            "output_description": "Returns label and confidence fields.\n",
+            "summary": "Classify a short text into a fixed label set and return confidence.\n",
+            "when_not_to_use": [
+              "Long document reasoning is required",
+              "Natural language explanation is required"
+            ],
+            "when_to_use": [
+              "Input is a short text string",
+              "Output must be a fixed label"
+            ]
+          },
+          "algorithm_id": "onnx_text_classifier",
+          "backend_type": "onnx",
+          "capabilities": [
+            "text_classification",
+            "confidence_score"
+          ],
+          "constraints": {
+            "batch_supported": false,
+            "max_input_chars": 4096,
+            "max_request_bytes": 1048576,
+            "streaming_supported": false
+          },
+          "deployments": [],
+          "display_name": "ONNX Text Classifier",
+          "input_schema_summary": {
+            "properties": [
+              {
+                "description": "Input text to classify.",
+                "name": "text",
+                "type": "string"
+              }
+            ],
+            "required": [
+              "text"
+            ],
+            "title": "ONNX Text Classifier Input",
+            "type": "object"
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "structured_json"
+            ]
+          },
+          "model_profile": {
+            "flops": 240000,
+            "flops_input_shape": [
+              1,
+              256
+            ],
+            "flops_text": "240 KFLOPs",
+            "model_size_mb": 1,
+            "parameter_count": 120000,
+            "parameter_count_text": "120K",
+            "precision": "fp32"
+          },
+          "output_schema_summary": {
+            "properties": [
+              {
+                "description": "Prediction confidence.",
+                "name": "confidence",
+                "type": "number"
+              },
+              {
+                "description": "Predicted label.",
+                "name": "label",
+                "type": "string"
+              }
+            ],
+            "required": [
+              "label",
+              "confidence"
+            ],
+            "title": "ONNX Text Classifier Output",
+            "type": "object"
+          },
+          "performance": {
+            "complexity_variable": "n = number of input tokens after preprocessing",
+            "latency_ms_p50": 20,
+            "latency_ms_p95": 60,
+            "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
+            "primary_metric": "accuracy",
+            "primary_score": 0.92,
+            "space_complexity": "O(n)",
+            "time_complexity": "O(n)"
+          },
+          "ready_endpoints": [],
+          "resource_requirements": {
+            "disk_mb": 64,
+            "gpu_type": "none",
+            "min_cpu_cores": 1,
+            "min_gpu_count": 0,
+            "min_memory_mb": 512,
+            "min_vram_mb": 0,
+            "recommended_cpu_cores": 2,
+            "recommended_memory_mb": 1024,
+            "recommended_vram_mb": 0
+          },
+          "safety": {
+            "requires_human_review": false,
+            "risk_level": "low"
+          },
+          "task_family": "text_classification",
+          "version": "1.0.0"
+        },
+        "algorithm_id": "onnx_text_classifier",
+        "backend_type": "onnx",
+        "ok": true,
+        "status": "active",
+        "version": "1.0.0"
+      },
+      "step": "1.2_activate",
+      "timestamp": "2026-08-15T10:43:29Z"
+    },
+    {
+      "explanation": "[按任务族过滤] GET /algorithms?task_family=text_classification： 返回所有任务族为 text_classification 的 active 算法列表。 响应字段 filter 回显所有生效的过滤条件，algorithms[] 包含算法摘要。 count=1 说明当前注册表里只有 onnx_text_classifier 满足条件。",
+      "http_status": 200,
+      "method": "GET",
+      "passed": true,
+      "path": "/algorithms?task_family=text_classification",
+      "request": null,
+      "response": {
+        "algorithms": [
+          {
+            "agent_card": {
+              "examples": [
+                {
+                  "input": {
+                    "text": "Classify this task description"
+                  },
+                  "output": {
+                    "confidence": 0.96,
+                    "label": "task"
+                  }
+                }
+              ],
+              "input_description": "The request JSON must contain a text field.\n",
+              "output_description": "Returns label and confidence fields.\n",
+              "summary": "Classify a short text into a fixed label set and return confidence.\n",
+              "when_not_to_use": [
+                "Long document reasoning is required",
+                "Natural language explanation is required"
+              ],
+              "when_to_use": [
+                "Input is a short text string",
+                "Output must be a fixed label"
+              ]
+            },
+            "algorithm_id": "onnx_text_classifier",
+            "backend_type": "onnx",
+            "capabilities": [
+              "text_classification",
+              "confidence_score"
+            ],
+            "constraints": {
+              "batch_supported": false,
+              "max_input_chars": 4096,
+              "max_request_bytes": 1048576,
+              "streaming_supported": false
+            },
+            "deployments": [],
+            "display_name": "ONNX Text Classifier",
+            "input_schema_summary": {
+              "properties": [
+                {
+                  "description": "Input text to classify.",
+                  "name": "text",
+                  "type": "string"
+                }
+              ],
+              "required": [
+                "text"
+              ],
+              "title": "ONNX Text Classifier Input",
+              "type": "object"
+            },
+            "modalities": {
+              "input": [
+                "text"
+              ],
+              "output": [
+                "structured_json"
+              ]
+            },
+            "model_profile": {
+              "flops": 240000,
+              "flops_input_shape": [
+                1,
+                256
+              ],
+              "flops_text": "240 KFLOPs",
+              "model_size_mb": 1,
+              "parameter_count": 120000,
+              "parameter_count_text": "120K",
+              "precision": "fp32"
+            },
+            "output_schema_summary": {
+              "properties": [
+                {
+                  "description": "Prediction confidence.",
+                  "name": "confidence",
+                  "type": "number"
+                },
+                {
+                  "description": "Predicted label.",
+                  "name": "label",
+                  "type": "string"
+                }
+              ],
+              "required": [
+                "label",
+                "confidence"
+              ],
+              "title": "ONNX Text Classifier Output",
+              "type": "object"
+            },
+            "performance": {
+              "complexity_variable": "n = number of input tokens after preprocessing",
+              "latency_ms_p50": 20,
+              "latency_ms_p95": 60,
+              "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
+              "primary_metric": "accuracy",
+              "primary_score": 0.92,
+              "space_complexity": "O(n)",
+              "time_complexity": "O(n)"
+            },
+            "ready_endpoints": [],
+            "resource_requirements": {
+              "disk_mb": 64,
+              "gpu_type": "none",
+              "min_cpu_cores": 1,
+              "min_gpu_count": 0,
+              "min_memory_mb": 512,
+              "min_vram_mb": 0,
+              "recommended_cpu_cores": 2,
+              "recommended_memory_mb": 1024,
+              "recommended_vram_mb": 0
+            },
+            "safety": {
+              "requires_human_review": false,
+              "risk_level": "low"
+            },
+            "task_family": "text_classification",
+            "version": "1.0.0"
+          }
+        ],
+        "count": 1,
+        "filter": {
+          "active_only": true,
+          "task_family": "text_classification"
+        },
+        "ok": true
+      },
+      "step": "1.3_query_task_family",
+      "timestamp": "2026-08-15T10:43:29Z"
+    },
+    {
+      "explanation": "[多维 AND 过滤] GET /algorithms?backend=onnx&capability=confidence_score： 同时指定后端类型 onnx 和能力标签 confidence_score。 多个过滤条件之间是 AND 逻辑，只有同时满足所有条件的算法才会出现在结果中。 此步验证 onnx_text_classifier 同时具备这两个属性。",
+      "http_status": 200,
+      "method": "GET",
+      "passed": true,
+      "path": "/algorithms?backend=onnx&capability=confidence_score",
+      "request": null,
+      "response": {
+        "algorithms": [
+          {
+            "agent_card": {
+              "examples": [
+                {
+                  "input": {
+                    "text": "Classify this task description"
+                  },
+                  "output": {
+                    "confidence": 0.96,
+                    "label": "task"
+                  }
+                }
+              ],
+              "input_description": "The request JSON must contain a text field.\n",
+              "output_description": "Returns label and confidence fields.\n",
+              "summary": "Classify a short text into a fixed label set and return confidence.\n",
+              "when_not_to_use": [
+                "Long document reasoning is required",
+                "Natural language explanation is required"
+              ],
+              "when_to_use": [
+                "Input is a short text string",
+                "Output must be a fixed label"
+              ]
+            },
+            "algorithm_id": "onnx_text_classifier",
+            "backend_type": "onnx",
+            "capabilities": [
+              "text_classification",
+              "confidence_score"
+            ],
+            "constraints": {
+              "batch_supported": false,
+              "max_input_chars": 4096,
+              "max_request_bytes": 1048576,
+              "streaming_supported": false
+            },
+            "deployments": [],
+            "display_name": "ONNX Text Classifier",
+            "input_schema_summary": {
+              "properties": [
+                {
+                  "description": "Input text to classify.",
+                  "name": "text",
+                  "type": "string"
+                }
+              ],
+              "required": [
+                "text"
+              ],
+              "title": "ONNX Text Classifier Input",
+              "type": "object"
+            },
+            "modalities": {
+              "input": [
+                "text"
+              ],
+              "output": [
+                "structured_json"
+              ]
+            },
+            "model_profile": {
+              "flops": 240000,
+              "flops_input_shape": [
+                1,
+                256
+              ],
+              "flops_text": "240 KFLOPs",
+              "model_size_mb": 1,
+              "parameter_count": 120000,
+              "parameter_count_text": "120K",
+              "precision": "fp32"
+            },
+            "output_schema_summary": {
+              "properties": [
+                {
+                  "description": "Prediction confidence.",
+                  "name": "confidence",
+                  "type": "number"
+                },
+                {
+                  "description": "Predicted label.",
+                  "name": "label",
+                  "type": "string"
+                }
+              ],
+              "required": [
+                "label",
+                "confidence"
+              ],
+              "title": "ONNX Text Classifier Output",
+              "type": "object"
+            },
+            "performance": {
+              "complexity_variable": "n = number of input tokens after preprocessing",
+              "latency_ms_p50": 20,
+              "latency_ms_p95": 60,
+              "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
+              "primary_metric": "accuracy",
+              "primary_score": 0.92,
+              "space_complexity": "O(n)",
+              "time_complexity": "O(n)"
+            },
+            "ready_endpoints": [],
+            "resource_requirements": {
+              "disk_mb": 64,
+              "gpu_type": "none",
+              "min_cpu_cores": 1,
+              "min_gpu_count": 0,
+              "min_memory_mb": 512,
+              "min_vram_mb": 0,
+              "recommended_cpu_cores": 2,
+              "recommended_memory_mb": 1024,
+              "recommended_vram_mb": 0
+            },
+            "safety": {
+              "requires_human_review": false,
+              "risk_level": "low"
+            },
+            "task_family": "text_classification",
+            "version": "1.0.0"
+          }
+        ],
+        "count": 1,
+        "filter": {
+          "active_only": true,
+          "backend": "onnx",
+          "capability": "confidence_score"
+        },
+        "ok": true
+      },
+      "step": "1.4_query_multi_filter",
+      "timestamp": "2026-08-15T10:43:29Z"
+    },
+    {
+      "explanation": "[资源约束过滤] GET /algorithms?max_memory=2048： 只返回最低内存需求 <= 2048 MB 的算法，帮助 agent 在资源受限节点上选择可部署的算法。 onnx_text_classifier 的 min_memory_mb=512，远低于 2048，因此出现在结果中。 类似参数还有 max_vram_mb / max_cpu_cores，可组合使用。",
+      "http_status": 200,
+      "method": "GET",
+      "passed": true,
+      "path": "/algorithms?max_memory=2048",
+      "request": null,
+      "response": {
+        "algorithms": [
+          {
+            "agent_card": {
+              "examples": [
+                {
+                  "input": {
+                    "text": "Classify this task description"
+                  },
+                  "output": {
+                    "confidence": 0.96,
+                    "label": "task"
+                  }
+                }
+              ],
+              "input_description": "The request JSON must contain a text field.\n",
+              "output_description": "Returns label and confidence fields.\n",
+              "summary": "Classify a short text into a fixed label set and return confidence.\n",
+              "when_not_to_use": [
+                "Long document reasoning is required",
+                "Natural language explanation is required"
+              ],
+              "when_to_use": [
+                "Input is a short text string",
+                "Output must be a fixed label"
+              ]
+            },
+            "algorithm_id": "onnx_text_classifier",
+            "backend_type": "onnx",
+            "capabilities": [
+              "text_classification",
+              "confidence_score"
+            ],
+            "constraints": {
+              "batch_supported": false,
+              "max_input_chars": 4096,
+              "max_request_bytes": 1048576,
+              "streaming_supported": false
+            },
+            "deployments": [],
+            "display_name": "ONNX Text Classifier",
+            "input_schema_summary": {
+              "properties": [
+                {
+                  "description": "Input text to classify.",
+                  "name": "text",
+                  "type": "string"
+                }
+              ],
+              "required": [
+                "text"
+              ],
+              "title": "ONNX Text Classifier Input",
+              "type": "object"
+            },
+            "modalities": {
+              "input": [
+                "text"
+              ],
+              "output": [
+                "structured_json"
+              ]
+            },
+            "model_profile": {
+              "flops": 240000,
+              "flops_input_shape": [
+                1,
+                256
+              ],
+              "flops_text": "240 KFLOPs",
+              "model_size_mb": 1,
+              "parameter_count": 120000,
+              "parameter_count_text": "120K",
+              "precision": "fp32"
+            },
+            "output_schema_summary": {
+              "properties": [
+                {
+                  "description": "Prediction confidence.",
+                  "name": "confidence",
+                  "type": "number"
+                },
+                {
+                  "description": "Predicted label.",
+                  "name": "label",
+                  "type": "string"
+                }
+              ],
+              "required": [
+                "label",
+                "confidence"
+              ],
+              "title": "ONNX Text Classifier Output",
+              "type": "object"
+            },
+            "performance": {
+              "complexity_variable": "n = number of input tokens after preprocessing",
+              "latency_ms_p50": 20,
+              "latency_ms_p95": 60,
+              "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
+              "primary_metric": "accuracy",
+              "primary_score": 0.92,
+              "space_complexity": "O(n)",
+              "time_complexity": "O(n)"
+            },
+            "ready_endpoints": [],
+            "resource_requirements": {
+              "disk_mb": 64,
+              "gpu_type": "none",
+              "min_cpu_cores": 1,
+              "min_gpu_count": 0,
+              "min_memory_mb": 512,
+              "min_vram_mb": 0,
+              "recommended_cpu_cores": 2,
+              "recommended_memory_mb": 1024,
+              "recommended_vram_mb": 0
+            },
+            "safety": {
+              "requires_human_review": false,
+              "risk_level": "low"
+            },
+            "task_family": "text_classification",
+            "version": "1.0.0"
+          }
+        ],
+        "count": 1,
+        "filter": {
+          "active_only": true,
+          "max_memory": 2048
+        },
+        "ok": true
+      },
+      "step": "1.5_query_resource_filter",
+      "timestamp": "2026-08-15T10:43:29Z"
+    },
+    {
+      "explanation": "[算法详情] GET /algorithms/{id}/{ver}/{backend}：返回两个并列视图。 entry = 原始注册条目（完整 card + deployments 列表）； agent_view = agent 专用精简视图，包含 performance（latency_p50/p95/accuracy）、 capabilities、constraints（max_input_chars/batch_supported）、 input_schema_summary / output_schema_summary、ready_endpoints。 agent 可直接读取 agent_view 决策是否选用该算法及如何构造请求。",
+      "http_status": 200,
+      "method": "GET",
+      "passed": true,
+      "path": "/algorithms/onnx_text_classifier/1.0.0/onnx",
+      "request": null,
+      "response": {
+        "agent_view": {
+          "agent_card": {
+            "examples": [
+              {
+                "input": {
+                  "text": "Classify this task description"
+                },
+                "output": {
+                  "confidence": 0.96,
+                  "label": "task"
+                }
+              }
+            ],
+            "input_description": "The request JSON must contain a text field.\n",
+            "output_description": "Returns label and confidence fields.\n",
+            "summary": "Classify a short text into a fixed label set and return confidence.\n",
+            "when_not_to_use": [
+              "Long document reasoning is required",
+              "Natural language explanation is required"
+            ],
+            "when_to_use": [
+              "Input is a short text string",
+              "Output must be a fixed label"
+            ]
+          },
+          "algorithm_id": "onnx_text_classifier",
+          "backend_type": "onnx",
+          "capabilities": [
+            "text_classification",
+            "confidence_score"
+          ],
+          "constraints": {
+            "batch_supported": false,
+            "max_input_chars": 4096,
+            "max_request_bytes": 1048576,
+            "streaming_supported": false
+          },
+          "deployments": [],
+          "display_name": "ONNX Text Classifier",
+          "input_schema_summary": {
+            "properties": [
+              {
+                "description": "Input text to classify.",
+                "name": "text",
+                "type": "string"
+              }
+            ],
+            "required": [
+              "text"
+            ],
+            "title": "ONNX Text Classifier Input",
+            "type": "object"
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "structured_json"
+            ]
+          },
+          "model_profile": {
+            "flops": 240000,
+            "flops_input_shape": [
+              1,
+              256
+            ],
+            "flops_text": "240 KFLOPs",
+            "model_size_mb": 1,
+            "parameter_count": 120000,
+            "parameter_count_text": "120K",
+            "precision": "fp32"
+          },
+          "output_schema_summary": {
+            "properties": [
+              {
+                "description": "Prediction confidence.",
+                "name": "confidence",
+                "type": "number"
+              },
+              {
+                "description": "Predicted label.",
+                "name": "label",
+                "type": "string"
+              }
+            ],
+            "required": [
+              "label",
+              "confidence"
+            ],
+            "title": "ONNX Text Classifier Output",
+            "type": "object"
+          },
+          "performance": {
+            "complexity_variable": "n = number of input tokens after preprocessing",
+            "latency_ms_p50": 20,
+            "latency_ms_p95": 60,
+            "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
+            "primary_metric": "accuracy",
+            "primary_score": 0.92,
+            "space_complexity": "O(n)",
+            "time_complexity": "O(n)"
+          },
+          "ready_endpoints": [],
+          "resource_requirements": {
+            "disk_mb": 64,
+            "gpu_type": "none",
+            "min_cpu_cores": 1,
+            "min_gpu_count": 0,
+            "min_memory_mb": 512,
+            "min_vram_mb": 0,
+            "recommended_cpu_cores": 2,
+            "recommended_memory_mb": 1024,
+            "recommended_vram_mb": 0
+          },
+          "safety": {
+            "requires_human_review": false,
+            "risk_level": "low"
+          },
+          "task_family": "text_classification",
+          "version": "1.0.0"
+        },
+        "entry": {
+          "card": {
+            "agent_card": {
+              "examples": [
+                {
+                  "input": {
+                    "text": "Classify this task description"
+                  },
+                  "output": {
+                    "confidence": 0.96,
+                    "label": "task"
+                  }
+                }
+              ],
+              "input_description": "The request JSON must contain a text field.\n",
+              "output_description": "Returns label and confidence fields.\n",
+              "summary": "Classify a short text into a fixed label set and return confidence.\n",
+              "when_not_to_use": [
+                "Long document reasoning is required",
+                "Natural language explanation is required"
+              ],
+              "when_to_use": [
+                "Input is a short text string",
+                "Output must be a fixed label"
+              ]
+            },
+            "algorithm_id": "onnx_text_classifier",
+            "backend_type": "onnx",
+            "capabilities": [
+              "text_classification",
+              "confidence_score"
+            ],
+            "constraints": {
+              "batch_supported": false,
+              "max_input_chars": 4096,
+              "max_request_bytes": 1048576,
+              "streaming_supported": false
+            },
+            "display_name": "ONNX Text Classifier",
+            "machine_spec": {
+              "input_schema_ref": "input.schema.json",
+              "output_schema_ref": "output.schema.json",
+              "postprocess": {
+                "config_uri": "postprocess.yaml",
+                "label_map_uri": "label_map.json"
+              },
+              "preprocess": {
+                "config_uri": "preprocess.yaml",
+                "label_map_uri": ""
+              },
+              "runtime": {
+                "backend_type": "onnx",
+                "endpoint": "",
+                "execution_provider": "cpu",
+                "health_endpoint": "",
+                "metadata_endpoint": "",
+                "model_uri": "model.onnx",
+                "timeout_ms": 0
+              },
+              "tensor_contract_ref": "tensor_contract.yaml",
+              "tokenizer": {
+                "max_length": 256,
+                "tokenizer_uri": "tokenizer.json",
+                "type": "wordpiece"
+              }
+            },
+            "modalities": {
+              "input": [
+                "text"
+              ],
+              "output": [
+                "structured_json"
+              ]
+            },
+            "model_profile": {
+              "flops": 240000,
+              "flops_input_shape": [
+                1,
+                256
+              ],
+              "flops_text": "240 KFLOPs",
+              "model_size_mb": 1,
+              "parameter_count": 120000,
+              "parameter_count_text": "120K",
+              "precision": "fp32"
+            },
+            "performance": {
+              "complexity_variable": "n = number of input tokens after preprocessing",
+              "latency_ms_p50": 20,
+              "latency_ms_p95": 60,
+              "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
+              "primary_metric": "accuracy",
+              "primary_score": 0.92,
+              "space_complexity": "O(n)",
+              "time_complexity": "O(n)"
+            },
+            "resource_requirements": {
+              "disk_mb": 64,
+              "gpu_type": "none",
+              "min_cpu_cores": 1,
+              "min_gpu_count": 0,
+              "min_memory_mb": 512,
+              "min_vram_mb": 0,
+              "recommended_cpu_cores": 2,
+              "recommended_memory_mb": 1024,
+              "recommended_vram_mb": 0
+            },
+            "safety": {
+              "requires_human_review": false,
+              "risk_level": "low"
+            },
+            "status": "draft",
+            "task_family": "text_classification",
+            "version": "1.0.0"
+          },
+          "card_path": "/Users/cmax/Downloads/Algorithmrepo/examples/onnx_text_classifier/1.0.0/algorithm_card.yaml",
+          "deployments": [],
+          "input_schema_summary": {
+            "properties": [
+              {
+                "description": "Input text to classify.",
+                "name": "text",
+                "type": "string"
+              }
+            ],
+            "required": [
+              "text"
+            ],
+            "title": "ONNX Text Classifier Input",
+            "type": "object"
+          },
+          "key": {
+            "algorithm_id": "onnx_text_classifier",
+            "backend_type": "onnx",
+            "version": "1.0.0"
+          },
+          "output_schema_summary": {
+            "properties": [
+              {
+                "description": "Prediction confidence.",
+                "name": "confidence",
+                "type": "number"
+              },
+              {
+                "description": "Predicted label.",
+                "name": "label",
+                "type": "string"
+              }
+            ],
+            "required": [
+              "label",
+              "confidence"
+            ],
+            "title": "ONNX Text Classifier Output",
+            "type": "object"
+          },
+          "package_root": "/Users/cmax/Downloads/Algorithmrepo/examples/onnx_text_classifier/1.0.0",
+          "status": "active"
+        },
+        "ok": true
+      },
+      "step": "1.6_show_card",
+      "timestamp": "2026-08-15T10:43:29Z"
+    },
+    {
+      "explanation": "[添加部署记录] POST .../deployments：向注册表写入一条 DeploymentSpec。 字段含义：deploy_id=唯一实例标识；node_id=宿主节点；endpoint=对外服务地址； deploy_status 初始为 unloaded，模型加载完成后自动变为 ready。 服务器自动填充 deployed_at（UTC ISO 8601 时间戳），调用方无需传入。 返回 HTTP 201 表示部署记录首次创建成功。",
+      "http_status": 201,
+      "method": "POST",
+      "passed": true,
+      "path": "/algorithms/onnx_text_classifier/1.0.0/onnx/deployments",
+      "request": {
+        "deploy_id": "demo-node-1",
+        "deploy_status": "unloaded",
+        "endpoint": "http://demo-node-1:8088",
+        "node_id": "demo-node-1"
+      },
+      "response": {
+        "agent_view": {
+          "agent_card": {
+            "examples": [
+              {
+                "input": {
+                  "text": "Classify this task description"
+                },
+                "output": {
+                  "confidence": 0.96,
+                  "label": "task"
+                }
+              }
+            ],
+            "input_description": "The request JSON must contain a text field.\n",
+            "output_description": "Returns label and confidence fields.\n",
+            "summary": "Classify a short text into a fixed label set and return confidence.\n",
+            "when_not_to_use": [
+              "Long document reasoning is required",
+              "Natural language explanation is required"
+            ],
+            "when_to_use": [
+              "Input is a short text string",
+              "Output must be a fixed label"
+            ]
+          },
+          "algorithm_id": "onnx_text_classifier",
+          "backend_type": "onnx",
+          "capabilities": [
+            "text_classification",
+            "confidence_score"
+          ],
+          "constraints": {
+            "batch_supported": false,
+            "max_input_chars": 4096,
+            "max_request_bytes": 1048576,
+            "streaming_supported": false
+          },
+          "deployments": [
+            {
+              "deploy_id": "demo-node-1",
+              "deploy_status": "unloaded",
+              "endpoint": "http://demo-node-1:8088",
+              "node_id": "demo-node-1",
+              "status_message": "",
+              "zone": ""
+            }
+          ],
+          "display_name": "ONNX Text Classifier",
+          "input_schema_summary": {
+            "properties": [
+              {
+                "description": "Input text to classify.",
+                "name": "text",
+                "type": "string"
+              }
+            ],
+            "required": [
+              "text"
+            ],
+            "title": "ONNX Text Classifier Input",
+            "type": "object"
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "structured_json"
+            ]
+          },
+          "model_profile": {
+            "flops": 240000,
+            "flops_input_shape": [
+              1,
+              256
+            ],
+            "flops_text": "240 KFLOPs",
+            "model_size_mb": 1,
+            "parameter_count": 120000,
+            "parameter_count_text": "120K",
+            "precision": "fp32"
+          },
+          "output_schema_summary": {
+            "properties": [
+              {
+                "description": "Prediction confidence.",
+                "name": "confidence",
+                "type": "number"
+              },
+              {
+                "description": "Predicted label.",
+                "name": "label",
+                "type": "string"
+              }
+            ],
+            "required": [
+              "label",
+              "confidence"
+            ],
+            "title": "ONNX Text Classifier Output",
+            "type": "object"
+          },
+          "performance": {
+            "complexity_variable": "n = number of input tokens after preprocessing",
+            "latency_ms_p50": 20,
+            "latency_ms_p95": 60,
+            "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
+            "primary_metric": "accuracy",
+            "primary_score": 0.92,
+            "space_complexity": "O(n)",
+            "time_complexity": "O(n)"
+          },
+          "ready_endpoints": [],
+          "resource_requirements": {
+            "disk_mb": 64,
+            "gpu_type": "none",
+            "min_cpu_cores": 1,
+            "min_gpu_count": 0,
+            "min_memory_mb": 512,
+            "min_vram_mb": 0,
+            "recommended_cpu_cores": 2,
+            "recommended_memory_mb": 1024,
+            "recommended_vram_mb": 0
+          },
+          "safety": {
+            "requires_human_review": false,
+            "risk_level": "low"
+          },
+          "task_family": "text_classification",
+          "version": "1.0.0"
+        },
+        "entry": {
+          "card": {
+            "agent_card": {
+              "examples": [
+                {
+                  "input": {
+                    "text": "Classify this task description"
+                  },
+                  "output": {
+                    "confidence": 0.96,
+                    "label": "task"
+                  }
+                }
+              ],
+              "input_description": "The request JSON must contain a text field.\n",
+              "output_description": "Returns label and confidence fields.\n",
+              "summary": "Classify a short text into a fixed label set and return confidence.\n",
+              "when_not_to_use": [
+                "Long document reasoning is required",
+                "Natural language explanation is required"
+              ],
+              "when_to_use": [
+                "Input is a short text string",
+                "Output must be a fixed label"
+              ]
+            },
+            "algorithm_id": "onnx_text_classifier",
+            "backend_type": "onnx",
+            "capabilities": [
+              "text_classification",
+              "confidence_score"
+            ],
+            "constraints": {
+              "batch_supported": false,
+              "max_input_chars": 4096,
+              "max_request_bytes": 1048576,
+              "streaming_supported": false
+            },
+            "display_name": "ONNX Text Classifier",
+            "machine_spec": {
+              "input_schema_ref": "input.schema.json",
+              "output_schema_ref": "output.schema.json",
+              "postprocess": {
+                "config_uri": "postprocess.yaml",
+                "label_map_uri": "label_map.json"
+              },
+              "preprocess": {
+                "config_uri": "preprocess.yaml",
+                "label_map_uri": ""
+              },
+              "runtime": {
+                "backend_type": "onnx",
+                "endpoint": "",
+                "execution_provider": "cpu",
+                "health_endpoint": "",
+                "metadata_endpoint": "",
+                "model_uri": "model.onnx",
+                "timeout_ms": 0
+              },
+              "tensor_contract_ref": "tensor_contract.yaml",
+              "tokenizer": {
+                "max_length": 256,
+                "tokenizer_uri": "tokenizer.json",
+                "type": "wordpiece"
+              }
+            },
+            "modalities": {
+              "input": [
+                "text"
+              ],
+              "output": [
+                "structured_json"
+              ]
+            },
+            "model_profile": {
+              "flops": 240000,
+              "flops_input_shape": [
+                1,
+                256
+              ],
+              "flops_text": "240 KFLOPs",
+              "model_size_mb": 1,
+              "parameter_count": 120000,
+              "parameter_count_text": "120K",
+              "precision": "fp32"
+            },
+            "performance": {
+              "complexity_variable": "n = number of input tokens after preprocessing",
+              "latency_ms_p50": 20,
+              "latency_ms_p95": 60,
+              "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
+              "primary_metric": "accuracy",
+              "primary_score": 0.92,
+              "space_complexity": "O(n)",
+              "time_complexity": "O(n)"
+            },
+            "resource_requirements": {
+              "disk_mb": 64,
+              "gpu_type": "none",
+              "min_cpu_cores": 1,
+              "min_gpu_count": 0,
+              "min_memory_mb": 512,
+              "min_vram_mb": 0,
+              "recommended_cpu_cores": 2,
+              "recommended_memory_mb": 1024,
+              "recommended_vram_mb": 0
+            },
+            "safety": {
+              "requires_human_review": false,
+              "risk_level": "low"
+            },
+            "status": "draft",
+            "task_family": "text_classification",
+            "version": "1.0.0"
+          },
+          "card_path": "/Users/cmax/Downloads/Algorithmrepo/examples/onnx_text_classifier/1.0.0/algorithm_card.yaml",
+          "deployments": [
+            {
+              "deploy_id": "demo-node-1",
+              "deploy_status": "unloaded",
+              "deployed_at": "2026-08-15T10:43:29Z",
+              "endpoint": "http://demo-node-1:8088",
+              "health_endpoint": "",
+              "local_model_path": "",
+              "node_id": "demo-node-1",
+              "status_message": "",
+              "updated_at": "",
+              "zone": ""
+            }
+          ],
+          "input_schema_summary": {
+            "properties": [
+              {
+                "description": "Input text to classify.",
+                "name": "text",
+                "type": "string"
+              }
+            ],
+            "required": [
+              "text"
+            ],
+            "title": "ONNX Text Classifier Input",
+            "type": "object"
+          },
+          "key": {
+            "algorithm_id": "onnx_text_classifier",
+            "backend_type": "onnx",
+            "version": "1.0.0"
+          },
+          "output_schema_summary": {
+            "properties": [
+              {
+                "description": "Prediction confidence.",
+                "name": "confidence",
+                "type": "number"
+              },
+              {
+                "description": "Predicted label.",
+                "name": "label",
+                "type": "string"
+              }
+            ],
+            "required": [
+              "label",
+              "confidence"
+            ],
+            "title": "ONNX Text Classifier Output",
+            "type": "object"
+          },
+          "package_root": "/Users/cmax/Downloads/Algorithmrepo/examples/onnx_text_classifier/1.0.0",
+          "status": "active"
+        },
+        "ok": true
+      },
+      "step": "1.7_add_deployment",
+      "timestamp": "2026-08-15T10:43:29Z"
+    },
+    {
+      "explanation": "[更新部署状态] PATCH .../deployments/{deploy_id}/status： 修改指定节点的部署状态，可选值：unloaded / loading / ready / error。 /load 接口在模型加载成功后会自动调用此接口将状态设为 ready； 此处手动演示 PATCH，同时附带 status_message 文字说明。 状态变为 ready 后，该节点的 endpoint 会出现在 agent_view.ready_endpoints 中。 服务器自动更新 updated_at 时间戳。",
+      "http_status": 200,
+      "method": "PATCH",
+      "passed": true,
+      "path": "/algorithms/onnx_text_classifier/1.0.0/onnx/deployments/demo-node-1/status",
+      "request": {
+        "deploy_status": "ready",
+        "status_message": "demo loaded"
+      },
+      "response": {
+        "agent_view": {
+          "agent_card": {
+            "examples": [
+              {
+                "input": {
+                  "text": "Classify this task description"
+                },
+                "output": {
+                  "confidence": 0.96,
+                  "label": "task"
+                }
+              }
+            ],
+            "input_description": "The request JSON must contain a text field.\n",
+            "output_description": "Returns label and confidence fields.\n",
+            "summary": "Classify a short text into a fixed label set and return confidence.\n",
+            "when_not_to_use": [
+              "Long document reasoning is required",
+              "Natural language explanation is required"
+            ],
+            "when_to_use": [
+              "Input is a short text string",
+              "Output must be a fixed label"
+            ]
+          },
+          "algorithm_id": "onnx_text_classifier",
+          "backend_type": "onnx",
+          "capabilities": [
+            "text_classification",
+            "confidence_score"
+          ],
+          "constraints": {
+            "batch_supported": false,
+            "max_input_chars": 4096,
+            "max_request_bytes": 1048576,
+            "streaming_supported": false
+          },
+          "deployments": [
+            {
+              "deploy_id": "demo-node-1",
+              "deploy_status": "ready",
+              "endpoint": "http://demo-node-1:8088",
+              "node_id": "demo-node-1",
+              "status_message": "demo loaded",
+              "zone": ""
+            }
+          ],
+          "display_name": "ONNX Text Classifier",
+          "input_schema_summary": {
+            "properties": [
+              {
+                "description": "Input text to classify.",
+                "name": "text",
+                "type": "string"
+              }
+            ],
+            "required": [
+              "text"
+            ],
+            "title": "ONNX Text Classifier Input",
+            "type": "object"
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "structured_json"
+            ]
+          },
+          "model_profile": {
+            "flops": 240000,
+            "flops_input_shape": [
+              1,
+              256
+            ],
+            "flops_text": "240 KFLOPs",
+            "model_size_mb": 1,
+            "parameter_count": 120000,
+            "parameter_count_text": "120K",
+            "precision": "fp32"
+          },
+          "output_schema_summary": {
+            "properties": [
+              {
+                "description": "Prediction confidence.",
+                "name": "confidence",
+                "type": "number"
+              },
+              {
+                "description": "Predicted label.",
+                "name": "label",
+                "type": "string"
+              }
+            ],
+            "required": [
+              "label",
+              "confidence"
+            ],
+            "title": "ONNX Text Classifier Output",
+            "type": "object"
+          },
+          "performance": {
+            "complexity_variable": "n = number of input tokens after preprocessing",
+            "latency_ms_p50": 20,
+            "latency_ms_p95": 60,
+            "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
+            "primary_metric": "accuracy",
+            "primary_score": 0.92,
+            "space_complexity": "O(n)",
+            "time_complexity": "O(n)"
+          },
+          "ready_endpoints": [
+            {
+              "deploy_id": "demo-node-1",
+              "endpoint": "http://demo-node-1:8088",
+              "node_id": "demo-node-1",
+              "zone": ""
+            }
+          ],
+          "resource_requirements": {
+            "disk_mb": 64,
+            "gpu_type": "none",
+            "min_cpu_cores": 1,
+            "min_gpu_count": 0,
+            "min_memory_mb": 512,
+            "min_vram_mb": 0,
+            "recommended_cpu_cores": 2,
+            "recommended_memory_mb": 1024,
+            "recommended_vram_mb": 0
+          },
+          "safety": {
+            "requires_human_review": false,
+            "risk_level": "low"
+          },
+          "task_family": "text_classification",
+          "version": "1.0.0"
+        },
+        "entry": {
+          "card": {
+            "agent_card": {
+              "examples": [
+                {
+                  "input": {
+                    "text": "Classify this task description"
+                  },
+                  "output": {
+                    "confidence": 0.96,
+                    "label": "task"
+                  }
+                }
+              ],
+              "input_description": "The request JSON must contain a text field.\n",
+              "output_description": "Returns label and confidence fields.\n",
+              "summary": "Classify a short text into a fixed label set and return confidence.\n",
+              "when_not_to_use": [
+                "Long document reasoning is required",
+                "Natural language explanation is required"
+              ],
+              "when_to_use": [
+                "Input is a short text string",
+                "Output must be a fixed label"
+              ]
+            },
+            "algorithm_id": "onnx_text_classifier",
+            "backend_type": "onnx",
+            "capabilities": [
+              "text_classification",
+              "confidence_score"
+            ],
+            "constraints": {
+              "batch_supported": false,
+              "max_input_chars": 4096,
+              "max_request_bytes": 1048576,
+              "streaming_supported": false
+            },
+            "display_name": "ONNX Text Classifier",
+            "machine_spec": {
+              "input_schema_ref": "input.schema.json",
+              "output_schema_ref": "output.schema.json",
+              "postprocess": {
+                "config_uri": "postprocess.yaml",
+                "label_map_uri": "label_map.json"
+              },
+              "preprocess": {
+                "config_uri": "preprocess.yaml",
+                "label_map_uri": ""
+              },
+              "runtime": {
+                "backend_type": "onnx",
+                "endpoint": "",
+                "execution_provider": "cpu",
+                "health_endpoint": "",
+                "metadata_endpoint": "",
+                "model_uri": "model.onnx",
+                "timeout_ms": 0
+              },
+              "tensor_contract_ref": "tensor_contract.yaml",
+              "tokenizer": {
+                "max_length": 256,
+                "tokenizer_uri": "tokenizer.json",
+                "type": "wordpiece"
+              }
+            },
+            "modalities": {
+              "input": [
+                "text"
+              ],
+              "output": [
+                "structured_json"
+              ]
+            },
+            "model_profile": {
+              "flops": 240000,
+              "flops_input_shape": [
+                1,
+                256
+              ],
+              "flops_text": "240 KFLOPs",
+              "model_size_mb": 1,
+              "parameter_count": 120000,
+              "parameter_count_text": "120K",
+              "precision": "fp32"
+            },
+            "performance": {
+              "complexity_variable": "n = number of input tokens after preprocessing",
+              "latency_ms_p50": 20,
+              "latency_ms_p95": 60,
+              "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
+              "primary_metric": "accuracy",
+              "primary_score": 0.92,
+              "space_complexity": "O(n)",
+              "time_complexity": "O(n)"
+            },
+            "resource_requirements": {
+              "disk_mb": 64,
+              "gpu_type": "none",
+              "min_cpu_cores": 1,
+              "min_gpu_count": 0,
+              "min_memory_mb": 512,
+              "min_vram_mb": 0,
+              "recommended_cpu_cores": 2,
+              "recommended_memory_mb": 1024,
+              "recommended_vram_mb": 0
+            },
+            "safety": {
+              "requires_human_review": false,
+              "risk_level": "low"
+            },
+            "status": "draft",
+            "task_family": "text_classification",
+            "version": "1.0.0"
+          },
+          "card_path": "/Users/cmax/Downloads/Algorithmrepo/examples/onnx_text_classifier/1.0.0/algorithm_card.yaml",
+          "deployments": [
+            {
+              "deploy_id": "demo-node-1",
+              "deploy_status": "ready",
+              "deployed_at": "2026-08-15T10:43:29Z",
+              "endpoint": "http://demo-node-1:8088",
+              "health_endpoint": "",
+              "local_model_path": "",
+              "node_id": "demo-node-1",
+              "status_message": "demo loaded",
+              "updated_at": "2026-08-15T10:43:29Z",
+              "zone": ""
+            }
+          ],
+          "input_schema_summary": {
+            "properties": [
+              {
+                "description": "Input text to classify.",
+                "name": "text",
+                "type": "string"
+              }
+            ],
+            "required": [
+              "text"
+            ],
+            "title": "ONNX Text Classifier Input",
+            "type": "object"
+          },
+          "key": {
+            "algorithm_id": "onnx_text_classifier",
+            "backend_type": "onnx",
+            "version": "1.0.0"
+          },
+          "output_schema_summary": {
+            "properties": [
+              {
+                "description": "Prediction confidence.",
+                "name": "confidence",
+                "type": "number"
+              },
+              {
+                "description": "Predicted label.",
+                "name": "label",
+                "type": "string"
+              }
+            ],
+            "required": [
+              "label",
+              "confidence"
+            ],
+            "title": "ONNX Text Classifier Output",
+            "type": "object"
+          },
+          "package_root": "/Users/cmax/Downloads/Algorithmrepo/examples/onnx_text_classifier/1.0.0",
+          "status": "active"
+        },
+        "ok": true
+      },
+      "step": "1.8_update_deploy_status",
+      "timestamp": "2026-08-15T10:43:29Z"
+    },
+    {
+      "explanation": "[禁用并删除] POST /disable + DELETE：演示算法完整下线流程。 /disable 将状态从 active 改为 disabled，停止接受新的推理请求； DELETE 将状态标记为 deleted，从所有查询结果中永久隐藏（含 active_only=false）。 物理上条目仍保留在注册表文件中以支持审计追踪，不会真正删除磁盘数据。 验证：GET /algorithms?active_only=false 返回 count=0，删除完全生效。",
+      "http_status": 200,
+      "method": "DELETE",
+      "passed": true,
+      "path": "/algorithms/onnx_text_classifier/1.0.0/onnx",
+      "request": null,
+      "response": {
+        "agent_view": {
+          "agent_card": {
+            "examples": [
+              {
+                "input": {
+                  "text": "Classify this task description"
+                },
+                "output": {
+                  "confidence": 0.96,
+                  "label": "task"
+                }
+              }
+            ],
+            "input_description": "The request JSON must contain a text field.\n",
+            "output_description": "Returns label and confidence fields.\n",
+            "summary": "Classify a short text into a fixed label set and return confidence.\n",
+            "when_not_to_use": [
+              "Long document reasoning is required",
+              "Natural language explanation is required"
+            ],
+            "when_to_use": [
+              "Input is a short text string",
+              "Output must be a fixed label"
+            ]
+          },
+          "algorithm_id": "onnx_text_classifier",
+          "backend_type": "onnx",
+          "capabilities": [
+            "text_classification",
+            "confidence_score"
+          ],
+          "constraints": {
+            "batch_supported": false,
+            "max_input_chars": 4096,
+            "max_request_bytes": 1048576,
+            "streaming_supported": false
+          },
+          "deployments": [
+            {
+              "deploy_id": "demo-node-1",
+              "deploy_status": "ready",
+              "endpoint": "http://demo-node-1:8088",
+              "node_id": "demo-node-1",
+              "status_message": "demo loaded",
+              "zone": ""
+            }
+          ],
+          "display_name": "ONNX Text Classifier",
+          "input_schema_summary": {
+            "properties": [
+              {
+                "description": "Input text to classify.",
+                "name": "text",
+                "type": "string"
+              }
+            ],
+            "required": [
+              "text"
+            ],
+            "title": "ONNX Text Classifier Input",
+            "type": "object"
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "structured_json"
+            ]
+          },
+          "model_profile": {
+            "flops": 240000,
+            "flops_input_shape": [
+              1,
+              256
+            ],
+            "flops_text": "240 KFLOPs",
+            "model_size_mb": 1,
+            "parameter_count": 120000,
+            "parameter_count_text": "120K",
+            "precision": "fp32"
+          },
+          "output_schema_summary": {
+            "properties": [
+              {
+                "description": "Prediction confidence.",
+                "name": "confidence",
+                "type": "number"
+              },
+              {
+                "description": "Predicted label.",
+                "name": "label",
+                "type": "string"
+              }
+            ],
+            "required": [
+              "label",
+              "confidence"
+            ],
+            "title": "ONNX Text Classifier Output",
+            "type": "object"
+          },
+          "performance": {
+            "complexity_variable": "n = number of input tokens after preprocessing",
+            "latency_ms_p50": 20,
+            "latency_ms_p95": 60,
+            "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
+            "primary_metric": "accuracy",
+            "primary_score": 0.92,
+            "space_complexity": "O(n)",
+            "time_complexity": "O(n)"
+          },
+          "ready_endpoints": [
+            {
+              "deploy_id": "demo-node-1",
+              "endpoint": "http://demo-node-1:8088",
+              "node_id": "demo-node-1",
+              "zone": ""
+            }
+          ],
+          "resource_requirements": {
+            "disk_mb": 64,
+            "gpu_type": "none",
+            "min_cpu_cores": 1,
+            "min_gpu_count": 0,
+            "min_memory_mb": 512,
+            "min_vram_mb": 0,
+            "recommended_cpu_cores": 2,
+            "recommended_memory_mb": 1024,
+            "recommended_vram_mb": 0
+          },
+          "safety": {
+            "requires_human_review": false,
+            "risk_level": "low"
+          },
+          "task_family": "text_classification",
+          "version": "1.0.0"
+        },
+        "algorithm_id": "onnx_text_classifier",
+        "backend_type": "onnx",
+        "ok": true,
+        "status": "deleted",
+        "version": "1.0.0"
+      },
+      "step": "1.9_disable_delete",
+      "timestamp": "2026-08-15T10:43:29Z"
+    }
+  ],
+  "summary": {
+    "all_passed": true,
+    "file_serving_api": {
+      "passed": 4,
+      "total": 4
+    },
+    "model_load_api": {
+      "passed": 7,
+      "total": 7
+    },
+    "python_pool_api": {
+      "passed": 5,
+      "total": 5
+    },
+    "registry_api": {
+      "passed": 9,
+      "total": 9
+    }
+  }
+}

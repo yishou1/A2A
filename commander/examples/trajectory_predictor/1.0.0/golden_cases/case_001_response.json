@@ -1,0 +1,14 @@
+{
+  "ok": true,
+  "request_id": "tp-001",
+  "trace_id": "trace-track-threat-001",
+  "algorithm_id": "trajectory_predictor",
+  "version": "1.0.0",
+  "outputs": {
+    "schema_version": "trajectory_predictor/v1",
+    "predictions": [],
+    "model_summary": {}
+  },
+  "usage": { "latency_ms": 1 },
+  "error": null
+}

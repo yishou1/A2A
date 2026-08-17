@@ -1,0 +1,15 @@
+{
+  "ok": true,
+  "outputs": {
+    "damage_probability": 0.300581,
+    "damage_label": 0,
+    "damage_result": "no_damage",
+    "decision_threshold": 0.645,
+    "model_source": "xbd_handcrafted_plus_resnet18_lr",
+    "feature_version": "xbd_damage_v1",
+    "assessment_status": "model_estimate",
+    "input_mode": "images",
+    "use_cnn": true,
+    "feature_dim": 1567
+  }
+}

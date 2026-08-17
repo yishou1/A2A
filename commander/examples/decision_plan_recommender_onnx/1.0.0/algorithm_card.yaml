@@ -1,0 +1,89 @@
+algorithm_id: decision_plan_recommender_onnx
+version: 1.0.0
+display_name: Decision Plan Recommender ONNX
+backend_type: onnx
+status: draft
+
+task_family: decision_scoring
+modalities:
+  input:
+    - structured_json
+  output:
+    - structured_json
+
+capabilities:
+  - candidate_plan_scoring
+  - recommendation_probability
+
+agent_card:
+  summary: >
+    Score one normalized candidate plan with the bootstrap decision-planning
+    logistic-regression model and return its recommendation probability.
+  when_to_use:
+    - A caller has already constructed the eight normalized plan features.
+    - A lightweight deterministic candidate-plan score is required.
+  when_not_to_use:
+    - Candidate generation, rule evaluation, ranking, or fallback orchestration is required.
+    - Features are missing, unnormalized, or in a different order.
+  input_description: >
+    One float32 feature row ordered as coverage, risk_alignment,
+    resource_efficiency, constraint_fit, authorization, lstm_trend, priority,
+    and objective_fit.
+  output_description: >
+    A recommendation_probability tensor with shape [1, 1].
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  tensor_contract_ref: tensor_contract.yaml
+  runtime:
+    backend_type: onnx
+    model_uri: model.onnx
+    execution_provider: cpu
+  preprocess:
+    config_uri: preprocess.yaml
+  postprocess:
+    config_uri: postprocess.yaml
+
+constraints:
+  max_input_chars: 4096
+  max_request_bytes: 65536
+  batch_supported: false
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 1
+  latency_ms_p95: 1
+  primary_metric: recommendation_probability
+  primary_score: 0.0
+  time_complexity: O(d)
+  space_complexity: O(d)
+  complexity_variable: d = 8 input features
+  performance_notes: >
+    Direct CPU ONNX Runtime inference measured approximately 0.011 ms p50 and
+    0.012 ms p95 over 500 local runs; algorithm-library overhead is excluded.
+    The bootstrap model has not been evaluated on a labeled production dataset.
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 1
+  min_memory_mb: 128
+  recommended_memory_mb: 256
+  min_gpu_count: 0
+  gpu_type: none
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 1
+
+model_profile:
+  parameter_count: 9
+  parameter_count_text: "9"
+  flops: 17
+  flops_text: approximately 17 FLOPs per sample
+  flops_input_shape: [1, 8]
+  model_size_mb: 1
+  precision: fp32
+
+safety:
+  risk_level: medium
+  requires_human_review: true

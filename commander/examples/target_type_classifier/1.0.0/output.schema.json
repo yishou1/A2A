@@ -1,0 +1,24 @@
+{
+  "title": "Target Type Classifier Output",
+  "type": "object",
+  "required": ["schema_version", "classifications"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "classifications": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["item_id", "object_type", "confidence", "type_scores", "evidence"],
+        "properties": {
+          "item_id": { "type": "string" },
+          "object_type": { "type": "string" },
+          "confidence": { "type": "number" },
+          "type_scores": { "type": "object" },
+          "evidence": { "type": "array" }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}
