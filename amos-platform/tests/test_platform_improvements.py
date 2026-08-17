@@ -132,7 +132,11 @@ def test_frontend_uses_dynamic_scenarios_without_future_route_renderer() -> None
     assert "任务执行检查器" in html
     assert "/api/v1/a2a/backend/health" in api_script
     assert "最新观测资料" in html
-    assert 'id="btn-director-configure"' in html
+    assert 'id="btn-director-configure"' not in html
+    assert 'id="director-mode-select"' not in html
+    assert 'id="director-branch-select"' not in html
+    assert 'id="director-seed"' not in html
+    assert "btn-director-configure" not in controller
     assert 'data-workspace-tab="agents"' in html
     assert 'data-workspace-tab="algorithms"' in html
     assert 'data-workspace-tab="execution"' in html

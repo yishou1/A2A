@@ -357,36 +357,6 @@ window.Platform = (function () {
     dialog.setAttribute("aria-hidden", "true");
   }
 
-  function branchOptions() {
-    var configured = currentScenario && currentScenario.expected_branches || scenarioSummary(currentScenarioId).expected_branches || [];
-    var defaults = [
-      {id: "standard", name: "标准运行"},
-      {id: "low_compute", name: "低算力"},
-      {id: "communication_interference", name: "通信干扰"},
-      {id: "agent_failure", name: "Agent 故障"},
-      {id: "low_score_replan", name: "低评分重规划"},
-    ];
-    if (!Array.isArray(configured) || !configured.length) return defaults;
-    return configured.map(function (item) {
-      return typeof item === "string" ? {id: item, name: item} : {
-        id: item.id || item.branch_id || item.mode,
-        name: item.name || item.title || item.id || item.branch_id,
-      };
-    }).filter(function (item) { return item.id; });
-  }
-
-  function updateDirectorOptions() {
-    var branch = document.getElementById("director-branch-select");
-    var selected = branch.value;
-    branch.innerHTML = branchOptions().map(function (item) {
-      return '<option value="' + escapeHtml(item.id) + '">' + escapeHtml(item.name) + '</option>';
-    }).join("");
-    if (Array.from(branch.options).some(function (option) { return option.value === selected; })) branch.value = selected;
-    var seed = currentScenario && (currentScenario.default_seed != null
-      ? currentScenario.default_seed : currentScenario.demo_controls && currentScenario.demo_controls.default_seed);
-    if (seed != null) document.getElementById("director-seed").value = seed;
-  }
-
   async function switchScenario(scenarioId, options) {
     options = options || {};
     if (!scenarioId || switchingScenario) return;
@@ -413,7 +383,6 @@ window.Platform = (function () {
       localStorage.setItem("amos.scenario.selected", scenarioId);
       select.value = scenarioId;
       setScenarioHeader();
-      updateDirectorOptions();
       Map.loadScenario({
         assets: currentScenario.assets || [],
         theater: currentScenario.theater,
@@ -509,7 +478,7 @@ window.Platform = (function () {
 
   async function resetSim() {
     if (!currentScenarioId) return;
-    if (!(await configureDirector(false))) throw new Error("导演未能重置当前场景");
+    if (!(await configureDirector())) throw new Error("导演未能重置当前场景");
     running = false;
     paused = false;
     disconnectSSE();
@@ -911,31 +880,6 @@ window.Platform = (function () {
 
   function renderDirectorState(state) {
     currentDirectorState = state && Object.keys(state).length ? state : null;
-    var available = state && Object.keys(state).length;
-    var status = state && (state.director_status || state.status);
-    var statusLabels = {
-      unconfigured: "未配置", configured: "已配置", running: "运行中", paused: "已暂停",
-      auto_running: "自动演示", checkpoint_reached: "检查点已到达",
-      awaiting_analysis: "等待后端分析", awaiting_authorization: "等待人工授权",
-      completed: "已完成", error: "异常",
-    };
-    var statusText = statusLabels[status] || status;
-    var badge = document.getElementById("director-status-badge");
-    badge.textContent = available ? (statusText || "状态未上报") : "导演接口不可用";
-    badge.className = "status-chip " +
-      (["running", "auto_running"].indexOf(status) >= 0 ? "info" :
-        (status === "completed" ? "success" : (status === "error" ? "danger" :
-          (status === "awaiting_analysis" ? "warning" : "neutral"))));
-    var checkpoint = state && (state.current_checkpoint || state.checkpoint_id);
-    var checkpointLabel = checkpoint && typeof checkpoint === "object"
-      ? (checkpoint.title || checkpoint.checkpoint_id || "检查点已到达")
-      : checkpoint;
-    document.getElementById("director-checkpoint").textContent = checkpointLabel || (available ? "尚未到达" : "接口不可用");
-    document.getElementById("director-state").textContent = statusText || "未上报";
-    var branchId = state && (state.branch || state.run_branch);
-    var branch = branchOptions().find(function (item) { return String(item.id) === String(branchId); });
-    document.getElementById("director-branch").textContent = branch && branch.name || branchId || "未上报";
-    document.getElementById("director-active-seed").textContent = state && state.seed != null ? state.seed : "未上报";
     updateButtons();
   }
 
@@ -944,7 +888,6 @@ window.Platform = (function () {
     var submission = checkpoint && typeof checkpoint === "object" && checkpoint.submission || null;
     var workflowId = submission && submission.workflow_id;
     var analysisStatus = checkpoint && typeof checkpoint === "object" && checkpoint.analysis_status;
-    var message = document.getElementById("director-message");
     var checkpointKey = checkpoint && typeof checkpoint === "object"
       ? [checkpoint.checkpoint_id, analysisStatus, workflowId].join(":") : null;
     if (!checkpointKey || checkpointKey === handledDirectorCheckpoint) return;
@@ -954,24 +897,6 @@ window.Platform = (function () {
         directorWorkflowId = String(workflowId);
         if (Workflow.track) Workflow.track(directorWorkflowId, state.run_id);
       }
-      message.hidden = false;
-      message.textContent = analysisStatus === "completed"
-        ? "检查点分析已由后端完成并通过验证。"
-        : (analysisStatus === "failed"
-            ? "检查点分析失败：" + errorMessage(checkpoint.analysis_error)
-            : (analysisStatus === "backend_unreachable"
-                ? "分析服务暂时不可达，导演保持暂停并继续重试。"
-                : "检查点分析正在后端执行。"));
-      return;
-    }
-    if (["submission_failed", "submission_unverified"].indexOf(analysisStatus) >= 0) {
-      message.hidden = false;
-      message.textContent = analysisStatus === "submission_failed"
-        ? "检查点分析任务提交失败，未生成工作流结果。"
-        : "检查点未返回 workflow_id，分析状态尚未验证。";
-    } else if (analysisStatus === "submission_unavailable") {
-      message.hidden = false;
-      message.textContent = "检查点已到达，但自动分析服务未配置。";
     }
   }
 
@@ -997,17 +922,20 @@ window.Platform = (function () {
   }
 
   function directorConfiguration() {
-    var seed = Number(document.getElementById("director-seed").value);
+    var sameScenario = currentDirectorState &&
+      String(currentDirectorState.scenario_id) === String(currentScenarioId);
+    var branches = currentScenario && currentScenario.expected_branches || [];
+    var firstBranch = branches.length && (branches[0].branch_id || branches[0].id);
     return {
       scenario_id: currentScenarioId,
-      mode: document.getElementById("director-mode-select").value,
-      branch: document.getElementById("director-branch-select").value,
-      seed: Number.isFinite(seed) ? seed : null,
+      mode: sameScenario && currentDirectorState.mode || "integration",
+      branch: sameScenario && currentDirectorState.branch || currentScenario && currentScenario.default_branch || firstBranch || "standard",
+      seed: sameScenario && currentDirectorState.seed != null
+        ? currentDirectorState.seed : currentScenario && currentScenario.default_seed,
     };
   }
 
-  async function configureDirector(showMessage) {
-    var message = document.getElementById("director-message");
+  async function configureDirector() {
     try {
       var response = await API.configureDirector(directorConfiguration());
       var state = response.data || response;
@@ -1018,14 +946,8 @@ window.Platform = (function () {
       closeAuthorizationDialog();
       renderDirectorState(state);
       onState(await API.loadSimState());
-      if (showMessage) {
-        message.hidden = false;
-        message.textContent = "导演配置已应用；执行状态以服务端事件记录为准。";
-      }
       return true;
     } catch (error) {
-      message.hidden = false;
-      message.textContent = error.status === 404 ? "导演接口不存在" : "导演配置失败：" + errorMessage(error);
       renderDirectorState(null);
       return false;
     }
@@ -1033,7 +955,6 @@ window.Platform = (function () {
 
   async function runDirectorAction(action, button) {
     if (!currentScenarioId) return;
-    var message = document.getElementById("director-message");
     button.disabled = true;
     try {
       var desired = directorConfiguration();
@@ -1042,18 +963,15 @@ window.Platform = (function () {
         String(currentDirectorState.mode) === String(desired.mode) &&
         String(currentDirectorState.branch) === String(desired.branch) &&
         Number(currentDirectorState.seed) === Number(desired.seed);
-      if (!configuredForSelection && !(await configureDirector(false))) return;
+      if (!configuredForSelection && !(await configureDirector())) return;
       var response = await API.runDirectorAction(action, {scenario_id: currentScenarioId});
       var state = response.data || response;
       renderDirectorState(state);
       handleDirectorSubmission(state);
-      if (!(state.current_checkpoint && state.current_checkpoint.analysis_status)) message.hidden = true;
       onState(await API.loadSimState());
       if (action === "start_auto") connectSSE();
       return state;
     } catch (error) {
-      message.hidden = false;
-      message.textContent = error.status === 404 ? "导演接口不存在" : "导演操作失败：" + errorMessage(error);
       return null;
     } finally {
       button.disabled = false;
@@ -1110,7 +1028,6 @@ window.Platform = (function () {
     document.querySelectorAll("[data-workspace-tab]").forEach(function (button) {
       button.addEventListener("click", function () { selectWorkspace(this.dataset.workspaceTab); });
     });
-    document.getElementById("btn-director-configure").addEventListener("click", function () { configureDirector(true); });
     document.querySelectorAll("[data-report-format]").forEach(function (button) {
       button.addEventListener("click", function () { downloadRunReport(this.dataset.reportFormat); });
     });
