@@ -1,0 +1,44 @@
+{
+  "title": "Trajectory Predictor Input",
+  "type": "object",
+  "required": ["tracks"],
+  "properties": {
+    "tracks": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/track" }
+    },
+    "horizons_s": {
+      "type": "array",
+      "items": { "type": "integer", "minimum": 1 }
+    }
+  },
+  "$defs": {
+    "track": {
+      "type": "object",
+      "required": ["track_id", "object_type", "timestamp", "lat", "lon", "speed", "heading", "confidence", "history_path"],
+      "properties": {
+        "track_id": { "type": "string" },
+        "object_type": { "type": "string", "enum": ["aircraft", "ship", "uav", "unknown"] },
+        "timestamp": { "type": "number" },
+        "lat": { "type": "number" },
+        "lon": { "type": "number" },
+        "alt": { "type": "number" },
+        "speed": { "type": "number" },
+        "heading": { "type": "number" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "history_path": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "required": ["timestamp", "lat", "lon"],
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

@@ -50,6 +50,7 @@ export ALGOLIB_REGISTRY_PATH="$ALGOLIB_DIR/registry.json"
 export ALGOLIB_EXECUTION_LOG_PATH="$ALGOLIB_DIR/executions.jsonl"
 export ALGORITHM_LIBRARY_ENABLED=true
 export ALGORITHM_LIBRARY_REQUIRED=true
+export A2A_FORCE_ALGOLIB_FIRST="${A2A_FORCE_ALGOLIB_FIRST:-1}"
 export TASK_SCHEDULING_USE_ALGOLIB=true
 export TIA_ALGOLIB_CALL_MODE=run
 export TIA_ALGORITHM_PLANNER="$([[ "${ENABLE_LLM:-false}" == "true" ]] && echo llm || echo fixed)"

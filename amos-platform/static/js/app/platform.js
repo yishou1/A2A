@@ -19,6 +19,9 @@ window.Platform = (function () {
   var currentDirectorState = null;
   var directorWorkflowId = null;
   var handledDirectorCheckpoint = null;
+  var SIM_POLL_INTERVAL_MS = 3000;
+  var DIRECTOR_REFRESH_INTERVAL_MS = 5000;
+  var ALGORITHM_REFRESH_INTERVAL_MS = 60000;
   var running = false;
   var paused = false;
   var switchingScenario = false;
@@ -28,8 +31,11 @@ window.Platform = (function () {
   var pollTimer = null;
   var directorTimer = null;
   var algorithmTimer = null;
+  var algorithmRefreshInFlight = null;
   var authorizationPromptKey = null;
   var authorizationTrackId = null;
+  var authorizationMode = "fire";
+  var authorizationAssetId = null;
   var authorizationSubmitting = false;
   var authorizationPreviousFocus = null;
 
@@ -61,13 +67,17 @@ window.Platform = (function () {
   }
 
   function refreshRuntimeAlgorithms() {
-    return API.loadRuntimeAlgorithms().then(function (catalog) {
+    if (algorithmRefreshInFlight) return algorithmRefreshInFlight;
+    algorithmRefreshInFlight = API.loadRuntimeAlgorithms().then(function (catalog) {
       Panels.updateRuntimeAlgorithms(catalog);
       return catalog;
     }).catch(function () {
       Panels.updateRuntimeAlgorithms({status: "offline", algorithms: []});
       return null;
+    }).finally(function () {
+      algorithmRefreshInFlight = null;
     });
+    return algorithmRefreshInFlight;
   }
 
   function formatSimTime(value) {
@@ -194,7 +204,7 @@ window.Platform = (function () {
       heading.textContent = name;
       heading.title = name;
     }
-    document.title = name === "未选择场景" ? "AMOS 场景仿真平台" : name + " · AMOS";
+    document.title = name === "未选择场景" ? "Simulation 场景仿真平台" : name + " · Simulation";
   }
 
   function renderStoryAnalysis(analysis) {
@@ -288,8 +298,8 @@ window.Platform = (function () {
     var source = sourceMetadata(item);
     var sourceLabels = {
       asset: "平台载荷", external_source: "外部预采集资料",
-      simulation_processor: "AMOS 当前状态派生", command_system: "Commander 工作流",
-      sensor_observation: "平台载荷", derived_current_state: "AMOS 当前状态派生",
+      simulation_processor: "Simulation 当前状态派生", command_system: "Commander 工作流",
+      sensor_observation: "平台载荷", derived_current_state: "Simulation 当前状态派生",
       external_precollected: "外部预采集资料", commander_workflow: "Commander 工作流"
     };
     var pose = source.platformPose || {};
@@ -541,29 +551,48 @@ window.Platform = (function () {
     dialog.classList.remove("open");
     dialog.setAttribute("aria-hidden", "true");
     authorizationTrackId = null;
+    authorizationAssetId = null;
+    authorizationMode = "fire";
     if (authorizationPreviousFocus && document.contains(authorizationPreviousFocus)) {
       authorizationPreviousFocus.focus();
     }
     authorizationPreviousFocus = null;
   }
 
-  function showAuthorizationDialog(trackId) {
+  function showAuthorizationDialog(trackId, options) {
+    options = options || {};
     var track = trackById(trackId);
     if (!track) return false;
     var dialog = document.getElementById("authorization-dialog");
     var confirmButton = document.getElementById("authorization-confirm");
     if (!dialog || !confirmButton) return false;
+    authorizationMode = options.mode || "fire";
     authorizationTrackId = String(track.id || track.track_id);
+    authorizationAssetId = options.assetId || null;
     authorizationPreviousFocus = document.activeElement;
+    document.getElementById("authorization-title").textContent =
+      options.title || "武器攻击授权";
+    document.getElementById("authorization-phase").textContent =
+      options.phase || "ENGAGE";
     document.getElementById("authorization-target-name").textContent = Panels.contactLabel
       ? Panels.contactLabel(track) : authorizationTrackId;
     document.getElementById("authorization-track-id").textContent = authorizationTrackId;
     document.getElementById("authorization-assessment").textContent =
       (track.agent_assessment && track.agent_assessment.label) || "后端已确认";
-    document.getElementById("authorization-message").textContent = "是否授权对该目标实施打击？";
+    document.getElementById("authorization-message").textContent =
+      options.message || "是否授权对该目标实施打击？";
+    document.getElementById("authorization-action-label").textContent =
+      options.actionLabel || "拟用武器";
+    document.getElementById("authorization-action-value").textContent =
+      options.actionValue || "舰载反舰导弹";
     document.getElementById("authorization-error").hidden = true;
     confirmButton.disabled = false;
-    confirmButton.textContent = "确认打击";
+    confirmButton.textContent = options.confirmText || "确认打击";
+    var cancelButton = document.getElementById("authorization-cancel");
+    if (cancelButton) {
+      cancelButton.disabled = false;
+      cancelButton.textContent = options.cancelText || "暂不打击";
+    }
     dialog.hidden = false;
     dialog.classList.add("open");
     dialog.setAttribute("aria-hidden", "false");
@@ -576,7 +605,10 @@ window.Platform = (function () {
     var awaiting = status === "awaiting_authorization" || Boolean(directorState && directorState.awaiting_authorization);
     if (!awaiting) {
       var dialog = document.getElementById("authorization-dialog");
-      if (dialog && !dialog.hidden && !authorizationSubmitting) closeAuthorizationDialog();
+      if (
+        dialog && !dialog.hidden && !authorizationSubmitting &&
+        authorizationMode === "fire"
+      ) closeAuthorizationDialog();
       return;
     }
     var target = authorizationTarget();
@@ -588,6 +620,41 @@ window.Platform = (function () {
     if (key === authorizationPromptKey) return;
     authorizationPromptKey = key;
     showAuthorizationDialog(target.id || target.track_id);
+  }
+
+  function followLaunchPrompt() {
+    if (!latestState) return null;
+    if (latestState.follow_launch_prompt) return latestState.follow_launch_prompt;
+    var prompts = latestState.follow_launch_prompts || [];
+    return prompts.length ? prompts[0] : null;
+  }
+
+  function syncFollowLaunchDialog() {
+    var prompt = followLaunchPrompt();
+    var dialog = document.getElementById("authorization-dialog");
+    if (!prompt) {
+      if (
+        dialog && !dialog.hidden && !authorizationSubmitting &&
+        authorizationMode === "launch_follow_uav"
+      ) closeAuthorizationDialog();
+      return;
+    }
+    if (dialog && !dialog.hidden && authorizationMode === "fire") return;
+    var runId = latestState && latestState.clock && latestState.clock.run_id || "run";
+    var key = [runId, prompt.task_id || "follow", prompt.asset_id, prompt.track_id].join(":");
+    if (key === authorizationPromptKey) return;
+    authorizationPromptKey = key;
+    showAuthorizationDialog(prompt.track_id, {
+      mode: "launch_follow_uav",
+      assetId: prompt.asset_id || "UAV-CONFIRM-01",
+      title: "补充侦察无人机派出确认",
+      phase: "TRACK",
+      message: prompt.message || "是否派出补充侦察无人机跟踪该目标？",
+      actionLabel: "拟派平台",
+      actionValue: prompt.asset_label || "补充侦察无人机",
+      confirmText: "派出无人机",
+      cancelText: "暂不派出"
+    });
   }
 
   async function issueWeaponAttack(trackId) {
@@ -647,6 +714,22 @@ window.Platform = (function () {
       String(incomingClock.run_id) === String(currentClock.run_id) &&
       Number(incomingClock.elapsed_sec || 0) + 0.001 < Number(currentClock.elapsed_sec || 0)
     ) return;
+    var sameRun = incomingClock.run_id && currentClock.run_id &&
+      String(incomingClock.run_id) === String(currentClock.run_id);
+    var finalLifecycle = String(incomingClock.lifecycle || "").toLowerCase() === "completed" ||
+      String(currentDirectorState && currentDirectorState.director_status || "").toLowerCase() === "completed";
+    if (sameRun && finalLifecycle && latestState) {
+      state = Object.assign({}, state);
+      if (!state.assets.length && Array.isArray(latestState.assets) && latestState.assets.length) {
+        state.assets = latestState.assets;
+      }
+      if (!state.weapons.length && Array.isArray(latestState.weapons) && latestState.weapons.length) {
+        state.weapons = latestState.weapons;
+      }
+      if (!state.fused_tracks.length && Array.isArray(latestState.fused_tracks) && latestState.fused_tracks.length) {
+        state.fused_tracks = latestState.fused_tracks;
+      }
+    }
     latestState = state;
     Panels.updateAll(state);
     Panels.updateWorkspace(state, currentScenario);
@@ -682,6 +765,7 @@ window.Platform = (function () {
     Workflow.syncRun(clock.run_id);
     updateButtons();
     syncAuthorizationDialog(currentDirectorState);
+    syncFollowLaunchDialog();
     if (!running && !directorOwnsLiveUpdates(currentDirectorState)) disconnectSSE();
   }
 
@@ -714,7 +798,7 @@ window.Platform = (function () {
   function connectSSE() {
     if (pollTimer || sseAbortController) return;
     sseAbortController = new AbortController();
-    pollTimer = setInterval(function () { API.loadSimState().then(onState).catch(function () {}); }, 1000);
+    pollTimer = setInterval(function () { API.loadSimState().then(onState).catch(function () {}); }, SIM_POLL_INTERVAL_MS);
     fetch("/api/v1/sim/stream", {
       signal: sseAbortController.signal,
       headers: {Accept: "text/event-stream"},
@@ -1003,7 +1087,11 @@ window.Platform = (function () {
     });
     document.getElementById("authorization-cancel").addEventListener("click", closeAuthorizationDialog);
     document.getElementById("authorization-confirm").addEventListener("click", function () {
-      issueWeaponAttack(authorizationTrackId);
+      if (authorizationMode === "launch_follow_uav") {
+        issueFollowUavLaunch(authorizationTrackId, authorizationAssetId);
+      } else {
+        issueWeaponAttack(authorizationTrackId);
+      }
     });
     document.getElementById("authorization-dialog").addEventListener("click", function (event) {
       if (event.target === this) closeAuthorizationDialog();
@@ -1071,8 +1159,50 @@ window.Platform = (function () {
     updateButtons();
     if (running) connectSSE();
     refreshDirectorState();
-    directorTimer = setInterval(refreshDirectorState, 3000);
-    algorithmTimer = setInterval(refreshRuntimeAlgorithms, 10000);
+    directorTimer = setInterval(refreshDirectorState, DIRECTOR_REFRESH_INTERVAL_MS);
+    algorithmTimer = setInterval(refreshRuntimeAlgorithms, ALGORITHM_REFRESH_INTERVAL_MS);
+  }
+
+  async function issueFollowUavLaunch(trackId, assetId) {
+    if (!trackId || authorizationSubmitting) return;
+    authorizationSubmitting = true;
+    var confirmButton = document.getElementById("authorization-confirm");
+    var cancelButton = document.getElementById("authorization-cancel");
+    if (confirmButton) {
+      confirmButton.disabled = true;
+      confirmButton.textContent = "命令下达中";
+    }
+    if (cancelButton) cancelButton.disabled = true;
+    try {
+      var response = await API.issueSimCommand({
+        command_type: "launch_follow_uav",
+        params: {
+          track_id: trackId,
+          asset_id: assetId || "UAV-CONFIRM-01",
+        },
+        authorization: {approved: true, authority: "operator"},
+      });
+      document.getElementById("status-text").textContent = "补充侦察无人机已派出：" +
+        (response.data && response.data.result && response.data.result.asset_id || assetId || "UAV-CONFIRM-01");
+      authorizationSubmitting = false;
+      if (cancelButton) cancelButton.disabled = false;
+      closeAuthorizationDialog();
+      onState(await API.loadSimState());
+    } catch (error) {
+      document.getElementById("status-text").textContent = "无人机派出命令被拒绝：" + errorMessage(error);
+      var errorElement = document.getElementById("authorization-error");
+      if (errorElement) {
+        errorElement.textContent = "后端拒绝命令：" + errorMessage(error);
+        errorElement.hidden = false;
+      }
+    } finally {
+      authorizationSubmitting = false;
+      if (confirmButton) {
+        confirmButton.disabled = false;
+        confirmButton.textContent = "派出无人机";
+      }
+      if (cancelButton) cancelButton.disabled = false;
+    }
   }
 
   document.addEventListener("DOMContentLoaded", function () {

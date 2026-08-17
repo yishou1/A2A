@@ -106,6 +106,28 @@ def test_workflow_view_uses_real_work_list_progress_and_structured_results() -> 
     assert view["result"]["cards"][0]["execution_mode"] == "unspecified"
 
 
+def test_workflow_view_hides_bpel_sequence_container_from_agent_activities() -> None:
+    status = {
+        "workflow_id": "wf-sequence",
+        "status": "completed",
+        "result": {"activity_results": [
+            {"activity_id": "activatity-1-sequence", "type": "sequence", "status": "completed"},
+            {"activity_id": "A-1", "role": "tracking", "agent": "TrackThreatAgent", "status": "completed"},
+        ]},
+    }
+    work = {"work_list": [
+        {"activity_id": "activatity-1-sequence", "type": "sequence", "status": "completed"},
+        {"activity_id": "A-1", "role": "tracking", "agent": "TrackThreatAgent", "status": "completed"},
+    ]}
+
+    view = build_workflow_view(status, work_list=work)
+
+    assert view["orchestration"]["counts"] == {"total": 1, "completed": 1, "running": 0, "failed": 0}
+    assert [row["activity_id"] for row in view["orchestration"]["activities"]] == ["A-1"]
+    assert view["orchestration"]["activities"][0]["index"] == 1
+    assert view["agents"]["counts"]["workflow_activity_count"] == 1
+
+
 def test_paused_workflow_with_failed_activity_is_terminal_for_director() -> None:
     view = build_workflow_view(
         {"workflow_id": "wf-paused-failed", "status": "paused"},
@@ -162,16 +184,16 @@ def test_workflow_view_v2_separates_agent_roles_instances_and_stubs() -> None:
         "workflow_activity_count": 4,
         "role_count": 3,
         "planned_role_count": 0,
-        "instance_count": 2,
-            "real_instance_count": 1,
-            "functional_agent_count": 0,
-        }
+        "instance_count": 3,
+        "real_instance_count": 2,
+        "functional_agent_count": 0,
+    }
     instances = {row["instance_id"]: row for row in view["agents"]["instances"]}
     assert instances["track-01"]["activity_count"] == 2
     assert instances["track-01"]["real_service"] is True
     assert instances["sim-stub-01"]["is_stub"] is True
     assert instances["sim-stub-01"]["real_service"] is False
-    assert "AssessmentAgent" not in {row["agent"] for row in view["agents"]["instances"]}
+    assert instances["runtime:assessmentagent"]["agent"] == "AssessmentAgent"
     assert view["agents"]["heartbeat_available"] is False
 
 
@@ -264,6 +286,8 @@ def test_workflow_view_joins_safe_activity_input_output_calls_algorithms_and_tra
 
     assert detail["input_summary"] == [{"key": "risk_score", "value": 0.72}]
     assert detail["output_summary"] == [{"key": "track_count", "value": 2}]
+    assert detail["input_detail"]["risk_score"]["value"] == 0.72
+    assert detail["output_detail"]["track_count"]["value"] == 2
     assert detail["agent_call"]["agent"] == "TrackThreatAgent"
     assert detail["agent_call"]["instances"][0]["instance_id"] == "track-01"
     assert detail["algorithms"][0]["algorithm_id"] == "motr-neural-kalman"
@@ -273,6 +297,121 @@ def test_workflow_view_joins_safe_activity_input_output_calls_algorithms_and_tra
     assert view["activity_details"]["A-2"]["input_summary"] is None
     assert view["activity_details"]["A-2"]["output_summary"] is None
     assert view["activity_details"]["A-2"]["algorithms"] == []
+
+
+def test_activity_detail_does_not_show_planned_algorithms_as_runtime_calls() -> None:
+    submission = {"algorithm_coverage": [{
+        "algorithm_id": "declared-tracker",
+        "name": "Declared Tracker",
+        "assigned_agents": ["A2"],
+    }], "functional_agents": [{
+        "agent_id": "A2",
+        "backend_roles": ["track_threat"],
+    }]}
+    work = {"work_list": [{
+        "activity_id": "A-2",
+        "work_item": "review",
+        "role": "track_threat",
+        "status": "running",
+    }]}
+
+    view = build_workflow_view(
+        {"workflow_id": "wf-planned-algorithm", "status": "running"},
+        work_list=work,
+        submission=submission,
+    )
+    assert view["activity_details"]["A-2"]["algorithms"] == []
+
+
+def test_workflow_view_infers_local_mode_instances_and_dereferences_outputs() -> None:
+    status = {
+        "workflow_id": "wf-local-output",
+        "mode": "local",
+        "status": "completed",
+        "result": {
+            "outputs": {
+                "task_scheduling_result": {
+                    "selected_algorithms": ["marl_ppo_task_scheduler"],
+                    "algorithm_calls": [{
+                        "algorithm_id": "marl_ppo_task_scheduler",
+                        "version": "1.0.0",
+                        "execution_mode": "algolib_runtime",
+                    }],
+                    "scheduled_tasks": [{"id": "TASK-001"}],
+                    "resources": [{"id": "ESCORT-01"}],
+                }
+            },
+            "activity_results": [{
+                "activity_id": "A-SCHED",
+                "work_item": "schedule",
+                "role": "task_scheduling",
+                "status": "completed",
+                "agent": "Local_Task_Scheduling_Agent",
+                "output_ref": "outputs.task_scheduling_result",
+            }],
+        },
+    }
+    work = {"work_list": [{
+        "activity_id": "A-SCHED",
+        "work_item": "schedule",
+        "role": "task_scheduling",
+        "status": "completed",
+    }]}
+
+    view = build_workflow_view(status, work_list=work)
+
+    activity = view["orchestration"]["activities"][0]
+    assert activity["execution_mode"] == "local_agent"
+    instances = {row["instance_id"]: row for row in view["agents"]["instances"]}
+    assert instances["local:local_task_scheduling_agent"]["execution_mode"] == "local_agent"
+    assert view["activity_details"]["A-SCHED"]["output_summary"] == [
+        {"key": "scheduled_tasks_count", "value": 1},
+        {"key": "resources_count", "value": 1},
+    ]
+    algorithms = {row["algorithm_id"]: row for row in view["algorithms"]["items"]}
+    assert algorithms["marl_ppo_task_scheduler"]["status"] == "verified"
+    assert algorithms["marl_ppo_task_scheduler"]["execution_mode"] == "algolib_runtime"
+
+
+def test_algorithm_call_duration_and_model_id_are_preserved() -> None:
+    status = {
+        "workflow_id": "wf-algorithm-fields",
+        "status": "completed",
+        "result": {"activity_results": [{
+            "activity_id": "A-TIA",
+            "role": "tactical_intelligence",
+            "status": "completed",
+            "agent": "Local_Tactical_Intelligence_Agent",
+            "output": {
+                "algorithm_calls": [{
+                    "algorithm_id": "battlefield_rtdetr_detector",
+                    "algorithm_name": "battlefield_rtdetr_detector",
+                    "model_id": "rt-detr-odconv-detector",
+                    "version": "1.0.0",
+                    "execution_mode": "algolib_runtime",
+                    "duration_ms": 18.75,
+                    "result_summary": {"detections": 2},
+                }],
+            },
+        }]},
+    }
+    work = {"work_list": [{
+        "activity_id": "A-TIA",
+        "role": "tactical_intelligence",
+        "status": "completed",
+        "agent": "Local_Tactical_Intelligence_Agent",
+        "metrics": {"duration_ms": 0.0},
+    }]}
+
+    view = build_workflow_view(status, work_list=work)
+    algorithm = {
+        row["algorithm_id"]: row
+        for row in view["activity_details"]["A-TIA"]["algorithms"]
+    }["battlefield_rtdetr_detector"]
+
+    assert algorithm["model_id"] == "rt-detr-odconv-detector"
+    assert algorithm["duration_ms"] == 18.75
+    assert algorithm["result_summary"] == {"detections": 2}
 
 
 def test_activity_detail_does_not_expose_arbitrary_explicit_summary_objects() -> None:
@@ -743,6 +882,54 @@ def test_fix_tracking_semantics_are_applied_without_threat_ranking() -> None:
     assert fishing.agent_assessment["status"] == "cleared"
     assert hostile.classification == "FAST_ATTACK_CRAFT"
     assert hostile.agent_assessment["status"] == "confirmed"
+
+
+def test_protected_fishing_track_stays_low_risk_even_if_ranking_overstates_it() -> None:
+    from amos_platform.agents.a2a.commander_projection import apply_commander_assessments
+    from amos_platform.fusion.track_fusion import FusedTrack
+
+    fishing = FusedTrack(
+        "TRK-FISHING", 22.1, 121.4, "RADAR", domain_hint="maritime", sim_time=0
+    )
+    engine = SimpleNamespace(
+        sensor_fusion=SimpleNamespace(tracks={fishing.id: fishing}),
+        events=[],
+        scenario_story={},
+    )
+    workflow = {
+        "workflow_id": "wf-fishing-protected",
+        "status": "completed",
+        "result": {
+            "outputs": {
+                "tracking_result": {
+                    "tracks": [{
+                        "track_id": "TRK-FISHING",
+                        "object_type": "ship",
+                        "metadata": {
+                            "source_class": "fishing_vessel",
+                            "label": "neutral",
+                            "threat_level": "low",
+                        },
+                    }]
+                },
+                "threat_assessment_result": {
+                    "threats": [{
+                        "track_id": "TRK-FISHING",
+                        "score": 0.95,
+                        "level": "high",
+                    }]
+                },
+            }
+        },
+    }
+
+    projection = apply_commander_assessments(engine, workflow)
+
+    assert projection["applied_count"] == 1
+    assert fishing.classification == "FISHING_VESSEL"
+    assert fishing.threat_level == "LOW"
+    assert fishing.agent_assessment["status"] == "cleared"
+    assert fishing.agent_assessment["level"] == "LOW"
 
 
 def test_previous_run_result_is_not_applied_to_current_tracks() -> None:

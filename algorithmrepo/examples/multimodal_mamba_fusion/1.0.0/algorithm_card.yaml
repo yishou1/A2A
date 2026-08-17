@@ -1,0 +1,81 @@
+algorithm_id: multimodal_mamba_fusion
+version: 1.0.0
+display_name: Multimodal Mamba Fusion
+backend_type: python_http_service
+status: validated
+
+task_family: fusion
+modalities:
+  input:
+    - structured_json
+  output:
+    - structured_json
+
+capabilities:
+  - temporal_fusion
+  - multimodal_mamba
+
+agent_card:
+  summary: >
+    Trained small-profile Mamba-style selective state-space block for denoising
+    and fusing ordered multimodal embedding sequences.
+  when_to_use:
+    - Embeddings and track history need temporal fusion.
+  when_not_to_use:
+    - No embeddings or tracks are available.
+  input_description: >
+    Named sensor or modality embedding vectors plus optional tracks. Vectors are
+    padded or truncated to the selected compute-profile dimension.
+  output_description: >
+    Unit-normalized fused embeddings, sequence metadata, input dimensions, and
+    verified checkpoint identity in real mode.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  runtime:
+    backend_type: python_http_service
+    endpoint: http://127.0.0.1:9026/predict
+    health_endpoint: http://127.0.0.1:9026/health
+    metadata_endpoint: http://127.0.0.1:9026/metadata
+    timeout_ms: 5000
+
+constraints:
+  max_input_chars: 20000000
+  max_request_bytes: 33554432
+  batch_supported: false
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 50
+  latency_ms_p95: 500
+  primary_metric: synthetic_holdout_mean_cosine_similarity
+  primary_score: 0.771683
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 2
+  min_memory_mb: 512
+  recommended_memory_mb: 1024
+  min_gpu_count: 0
+  gpu_type: optional
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 10
+
+model_profile:
+  parameter_count: 412688
+  parameter_count_text: 412.7K_small_profile
+  flops: 0
+  flops_text: varies_by_submodel
+  precision: fp32
+
+provenance:
+  model_artifact_ref: ../../../models/checkpoints/mamba_fusion_s.safetensors
+  model_metadata_ref: ../../../models/checkpoints/mamba_fusion_s.metadata.json
+  training_script_ref: ../../../scripts/train_multimodal_mamba_fusion.py
+  dataset_ref: ../../../data/multimodal_mamba/reference_holdout_inputs.npy
+
+safety:
+  risk_level: medium
+  requires_human_review: true

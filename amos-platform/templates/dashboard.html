@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>AMOS 场景仿真平台</title>
+<title>Simulation 场景仿真平台</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
 <link rel="stylesheet" href="/static/css/platform.css?v=20260817h">
@@ -14,7 +14,7 @@
 
 <header class="topbar">
   <div class="topbar-brand-group">
-    <span class="brand">AMOS</span>
+    <span class="brand">Simulation</span>
     <span class="product-name">场景仿真平台</span>
     <span class="mode-tag" id="mode-tag">就绪</span>
   </div>
@@ -200,16 +200,16 @@
 
         <div class="card agent-card workflow-console workflow-inspector" id="a2a-workflow-card">
           <div class="workflow-heading">
-            <div><span class="section-eyebrow">本轮真实接口记录</span><h2>工作流执行检查器</h2></div>
+            <div><h2>任务执行检查器</h2></div>
             <span id="backend-transport-badge" class="status-chip neutral">Gateway</span>
             <span id="backend-health-badge" class="status-chip danger">离线</span>
             <span id="wf-status-badge" class="status-chip neutral">尚未开始</span>
           </div>
-          <nav id="wf-task-history" class="workflow-task-history" aria-label="本轮后端工作流">
-            <button type="button" disabled><small>Observe · Find/Fix</small><b>观察与识别</b><span>未生成任务</span></button>
-            <button type="button" disabled><small>Orient · Track</small><b>航迹评估</b><span>未生成任务</span></button>
-            <button type="button" disabled><small>Decide · Target</small><b>方案决策</b><span>未生成任务</span></button>
-            <button type="button" disabled><small>Act · Engage/Assess</small><b>执行与复核</b><span>未生成任务</span></button>
+          <nav id="wf-task-history" class="workflow-task-history" aria-label="本轮阶段检查点">
+            <button type="button" disabled><small>Observe · Find/Fix</small><b>观察与识别</b><span>未生成阶段分析</span></button>
+            <button type="button" disabled><small>Orient · Track</small><b>航迹评估</b><span>未生成阶段分析</span></button>
+            <button type="button" disabled><small>Decide · Target</small><b>方案决策</b><span>未生成阶段分析</span></button>
+            <button type="button" disabled><small>Act · Engage/Assess</small><b>执行与复核</b><span>未生成阶段分析</span></button>
           </nav>
           <div class="agent-progress"><div class="agent-progress-bar" id="wf-progress-bar"></div></div>
           <div class="agent-meta">
@@ -228,7 +228,7 @@
               <div id="wf-execution-graph" data-contract="amos.workflow-view.v2.execution_graph">
                 <div class="empty-state">尚无结构化执行图</div>
               </div>
-              <details class="workflow-trace"><summary>全部执行事件</summary><div id="wf-trace-list"></div></details>
+              <div id="wf-trace-list" hidden></div>
             </section>
             <section class="workflow-detail-pane" aria-labelledby="wf-detail-title">
               <header><div><span class="section-eyebrow">活动真实记录</span><h3 id="wf-detail-title">请选择活动</h3></div><span id="wf-detail-status" class="status-chip neutral">未选择</span></header>
@@ -311,14 +311,14 @@
   <section class="authorization-panel" role="dialog" aria-modal="true" aria-labelledby="authorization-title" aria-describedby="authorization-message">
     <header class="authorization-header">
       <div><span class="section-eyebrow">人工授权检查点</span><h2 id="authorization-title">武器攻击授权</h2></div>
-      <span class="status-chip warning">ENGAGE</span>
+      <span id="authorization-phase" class="status-chip warning">ENGAGE</span>
     </header>
     <p id="authorization-message" class="authorization-question">是否授权对该目标实施打击？</p>
     <dl class="authorization-details">
       <div><dt>目标</dt><dd id="authorization-target-name">—</dd></div>
       <div><dt>航迹编号</dt><dd id="authorization-track-id">—</dd></div>
       <div><dt>后端评估</dt><dd id="authorization-assessment">—</dd></div>
-      <div><dt>拟用武器</dt><dd>舰载反舰导弹</dd></div>
+      <div><dt id="authorization-action-label">拟用武器</dt><dd id="authorization-action-value">舰载反舰导弹</dd></div>
     </dl>
     <p id="authorization-error" class="authorization-error" role="alert" hidden></p>
     <footer class="authorization-actions">
@@ -359,7 +359,7 @@
 <script src="/static/js/api/platform-api.js?v=20260817d"></script>
 <script src="/static/js/map/platform-map.js?v=20260817c"></script>
 <script src="/static/js/panels/platform-panels.js?v=20260817e"></script>
-<script src="/static/js/workflow/commander-workflow.js?v=20260817g"></script>
+<script src="/static/js/workflow/commander-workflow.js?v=20260817h"></script>
 <script src="/static/js/app/platform.js?v=20260817h"></script>
 </body>
 </html>

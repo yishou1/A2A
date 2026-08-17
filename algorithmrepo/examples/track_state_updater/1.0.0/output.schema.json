@@ -1,0 +1,12 @@
+{
+  "title": "Track State Updater Output",
+  "type": "object",
+  "required": ["schema_version", "tracks", "updates", "summary"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "tracks": { "type": "array" },
+    "updates": { "type": "array" },
+    "summary": { "type": "object" }
+  },
+  "additionalProperties": true
+}

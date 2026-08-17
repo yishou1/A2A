@@ -274,7 +274,7 @@ def test_director_reports_unavailable_submission_without_a_backend_callback() ->
     assert reached["simulation_lifecycle"] == "paused"
 
 
-def test_each_scenario_can_reach_all_declared_checkpoints() -> None:
+def test_each_scenario_can_reach_all_unconditional_declared_checkpoints() -> None:
     for scenario_id in SCENARIO_IDS:
         runtime = PlatformRuntime()
         director = DirectorService(runtime)
@@ -288,8 +288,11 @@ def test_each_scenario_can_reach_all_declared_checkpoints() -> None:
         )
         expected = [
             item for item in scenario["demo_checkpoints"]
-            if "*" in set(item.get("branch_ids") or ["*"])
-            or "standard" in set(item.get("branch_ids") or [])
+            if not item.get("requires_operator_action")
+            and (
+                "*" in set(item.get("branch_ids") or ["*"])
+                or "standard" in set(item.get("branch_ids") or [])
+            )
         ]
         reached = [
             director.action("advance_checkpoint")["current_checkpoint"]["checkpoint_id"]

@@ -1,0 +1,55 @@
+{
+  "title": "Trajectory Linear Predictor Output",
+  "type": "object",
+  "required": [
+    "velocity",
+    "aim_point",
+    "execute_at",
+    "future_t",
+    "model",
+    "fit",
+    "history_points",
+    "model_identity",
+    "track_id"
+  ],
+  "properties": {
+    "velocity": {
+      "type": "object"
+    },
+    "aim_point": {
+      "type": "object"
+    },
+    "execute_at": {
+      "type": "number"
+    },
+    "future_t": {
+      "type": "number"
+    },
+    "model": {
+      "type": "string"
+    },
+    "fit": {
+      "type": "object",
+      "required": ["x", "y"]
+    },
+    "history_points": {
+      "type": "integer",
+      "minimum": 2
+    },
+    "model_identity": {
+      "type": "object",
+      "required": ["model_id", "model_version", "model_family", "implementation_sha256"],
+      "properties": {
+        "model_id": {"const": "trajectory_linear_predictor"},
+        "model_version": {"type": "string"},
+        "model_family": {"const": "per_request_ordinary_least_squares_2d"},
+        "implementation_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "track_id": {
+      "type": ["string", "null"]
+    }
+  },
+  "additionalProperties": false
+}

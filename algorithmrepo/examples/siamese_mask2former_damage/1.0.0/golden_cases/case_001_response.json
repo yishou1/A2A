@@ -1,0 +1,22 @@
+{
+  "ok": true,
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "siamese_mask2former_damage",
+  "version": "1.0.0",
+  "outputs": {
+    "damage_reports": [
+      {
+        "sensor_id": "EO-FWD-1",
+        "damage_score": 0.74,
+        "change_ratio": 0.19,
+        "damage_mask_ref": "siamese_mask2former_mock"
+      }
+    ],
+    "count": 1
+  },
+  "usage": {
+    "latency_ms": 1
+  },
+  "error": null
+}

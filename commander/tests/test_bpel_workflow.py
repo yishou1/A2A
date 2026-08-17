@@ -1,3 +1,4 @@
+import os
 import tempfile
 import time
 import unittest
@@ -19,6 +20,20 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class BPELWorkflowTest(unittest.TestCase):
+    def setUp(self):
+        self._local_backend = patch.dict(os.environ, {
+            "A2A_FORCE_ALGOLIB_FIRST": "0",
+            "A2A_ALGORITHM_BACKEND": "local",
+            "TASK_SCHEDULING_BACKEND": "local",
+            "TASK_SCHEDULING_USE_ALGOLIB": "false",
+            "EXECUTION_CONTROL_BACKEND": "local",
+            "CLOSED_LOOP_BACKEND": "local",
+            "ENABLE_LLM": "false",
+            "ALGOLIB_ENABLE_LLM": "false",
+        })
+        self._local_backend.start()
+        self.addCleanup(self._local_backend.stop)
+
     def test_catalog_loads_named_workflow_and_builds_work_list(self):
         definition = BPELWorkflowCatalog(PROJECT_ROOT).load("beachhead_workflow")
         work_list = definition.initial_work_list("wf-bpel")

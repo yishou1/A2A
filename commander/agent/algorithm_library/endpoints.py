@@ -14,14 +14,28 @@ TIA_ALGORITHM_PORTS: dict[str, int] = {
     "synapse_rag_retriever": 9028,
     "knowledge_semantic_comm": 9029,
     "marl_dynamic_router": 9030,
+    "multimodal_feature_fuser": 9042,
+    "target_type_classifier": 9042,
+    "track_state_updater": 9042,
+    "trajectory_predictor": 9042,
+    "graph_relation_reasoner": 9042,
 }
 
 TIA_ALGORITHM_VERSIONS: dict[str, str] = {aid: "1.0.0" for aid in TIA_ALGORITHM_PORTS}
 
+TIA_ALGORITHM_PATHS: dict[str, str] = {
+    "multimodal_feature_fuser": "/multimodal_feature_fuser",
+    "target_type_classifier": "/target_type_classifier",
+    "track_state_updater": "/track_state_updater",
+    "trajectory_predictor": "/trajectory_predictor",
+    "graph_relation_reasoner": "/graph_relation_reasoner",
+}
+
 
 def default_predict_endpoint(algorithm_id: str, host: str = "127.0.0.1") -> str:
     port = TIA_ALGORITHM_PORTS[algorithm_id]
-    return f"http://{host}:{port}/predict"
+    path = TIA_ALGORITHM_PATHS.get(algorithm_id, "")
+    return f"http://{host}:{port}{path}/predict"
 
 
 def resolve_endpoint(algorithm_id: str, library_cfg: dict) -> str:

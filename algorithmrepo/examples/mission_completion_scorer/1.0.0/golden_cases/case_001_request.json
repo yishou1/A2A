@@ -1,0 +1,19 @@
+{
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "mission_completion_scorer",
+  "version": "1.0.0",
+  "backend_type": "python_http_service",
+  "inputs": {
+    "features": {
+      "damage_rate": 0.7,
+      "asset_readiness": 0.8,
+      "control_timeliness": 0.85,
+      "intel_confidence": 0.9,
+      "threat_pressure": 0.6,
+      "ammo_pressure": 0.4,
+      "comm_quality": 0.92
+    }
+  },
+  "params": {}
+}

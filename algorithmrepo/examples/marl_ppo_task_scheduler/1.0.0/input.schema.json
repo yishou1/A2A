@@ -1,0 +1,33 @@
+{
+  "title": "MARL-PPO Task Scheduler Input",
+  "type": "object",
+  "required": [
+    "tracks",
+    "detections",
+    "frames"
+  ],
+  "properties": {
+    "tracks": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "detections": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "batch_context": {
+      "type": "object"
+    },
+    "frames": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  "additionalProperties": true
+}

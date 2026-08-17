@@ -129,7 +129,7 @@ def test_frontend_uses_dynamic_scenarios_without_future_route_renderer() -> None
     assert "asset_routes" not in map_script
     assert "history_path" in map_script
     assert "历史航迹" in map_script
-    assert "工作流执行检查器" in html
+    assert "任务执行检查器" in html
     assert "/api/v1/a2a/backend/health" in api_script
     assert "最新观测资料" in html
     assert 'id="btn-director-configure"' in html

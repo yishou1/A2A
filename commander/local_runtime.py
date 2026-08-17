@@ -1,8 +1,10 @@
 import json
+import os
 import time
 from copy import deepcopy
 from typing import Dict, Iterable, Tuple
 
+from agent.algorithm_library.client import AlgorithmLibraryClient, AlgorithmLibraryError
 from a2a_protocol.messages import build_task_response
 from decision_agents.common.a2a_payloads import agent_response_to_a2a_response, run_agent_payload
 from decision_agents.compliance_authorization.agent import ComplianceAuthorizationAgent
@@ -92,6 +94,18 @@ class LocalAgentRuntime:
         },
     }
 
+    ALGOLIB_ROLE_PIPELINE = {
+        "tactical_intelligence": [
+            "battlefield_rtdetr_detector",
+            "edl_evidential_verifier",
+            "motr_neural_kalman_tracker",
+            "multimodal_mamba_fusion",
+            "supcon_meta_classifier",
+        ],
+        "trajectory_tracking": ["motr_neural_kalman_tracker"],
+        "threat_ranking": ["supcon_meta_classifier"],
+    }
+
     def discover(self, role: str) -> Dict[str, str]:
         if role not in self.AGENTS:
             raise ValueError(f"Unsupported local role: {role}")
@@ -133,6 +147,8 @@ class LocalAgentRuntime:
                 work_list_size=len(self.get_work_list(payload.get("workflow_id"))),
             )
             response["mode"] = "local"
+            response["execution_mode"] = "local_agent"
+            self._attach_decision_algorithm_calls(response, agent.agent_name, algorithm_response)
             self._task_response_cache[work_item] = response
             return response
 
@@ -148,7 +164,7 @@ class LocalAgentRuntime:
             metrics={"latency_ms": 0.0, "duration_ms": 0.0},
             message=message,
             work_list_size=len(self.get_work_list(payload.get("workflow_id"))),
-            extra={"mode": "local"},
+            extra={"mode": "local", "execution_mode": "local_agent"},
         )
         validate_task_response(payload, response, {"id": skill_id, **skill_contract(skill_id)})
         self._task_response_cache[work_item] = response
@@ -207,7 +223,7 @@ class LocalAgentRuntime:
                 metrics={"stream_events": len(events), "duration_ms": 0.0},
                 message=message,
                 work_list_size=len(self.get_work_list(payload.get("workflow_id"))),
-                extra={"mode": "local", "token": token},
+                extra={"mode": "local", "execution_mode": "local_agent", "token": token},
             )
         else:
             response = self.send_message(role, payload)
@@ -254,11 +270,49 @@ class LocalAgentRuntime:
     def _build_tactical_intelligence_result(cls, payload: dict) -> dict:
         mission_input = payload.get("input", {}).get("mission_input") or {}
         mission_id = payload.get("workflow_id") or "mission-demo"
+        scenario_id = str(mission_input.get("scenario_id") or "")
         scene = mission_input.get("scene") or {
             "sector": "Sector-A",
             "protected_assets": [{"asset_id": "ASSET-001", "asset_name": "Command Post"}],
         }
-        targets = mission_input.get("targets") or [
+        contacts = [
+            item for item in mission_input.get("contacts") or []
+            if isinstance(item, dict) and (item.get("contact_id") or item.get("track_id"))
+        ]
+        targets = mission_input.get("targets")
+        if not targets and contacts:
+            targets = []
+            for index, contact in enumerate(contacts, start=1):
+                metadata = contact.get("metadata") if isinstance(contact.get("metadata"), dict) else {}
+                geo = contact.get("geo") if isinstance(contact.get("geo"), dict) else metadata.get("geo") or {}
+                track_id = str(contact.get("contact_id") or contact.get("track_id"))
+                if scenario_id == "maritime-convoy-air-defense":
+                    hostile = index == len(contacts)
+                    object_class = "fast_attack_craft" if hostile else "fishing_vessel"
+                    label = "hostile" if hostile else "neutral"
+                    score = 0.86 if hostile else 0.18
+                    intent = "approach" if hostile else "civilian_transit"
+                else:
+                    object_class = str(contact.get("classification") or metadata.get("classification") or "unknown")
+                    label = str(contact.get("affiliation") or metadata.get("affiliation") or "unknown")
+                    score = float(metadata.get("confidence") or contact.get("confidence") or 0.6)
+                    intent = contact.get("intent")
+                targets.append({
+                    "track_id": track_id,
+                    "class": object_class,
+                    "geo": geo,
+                    "confidence": float(metadata.get("confidence") or contact.get("confidence") or 0.8),
+                    "intent": intent,
+                    "threat_score": score,
+                    "metadata": {
+                        "amos_track_id": track_id,
+                        "source_class": object_class,
+                        "label": label,
+                        "affiliation": "red" if label == "hostile" else ("neutral" if label == "neutral" else "unknown"),
+                        "threat_level": "high" if score >= 0.75 else ("medium" if score >= 0.45 else "low"),
+                    },
+                })
+        targets = targets or [
             {
                 "track_id": "T-001",
                 "class": "hostile_uav",
@@ -276,6 +330,14 @@ class LocalAgentRuntime:
                 "threat_score": 0.72,
             },
         ]
+        high_count = sum(
+            1 for target in targets
+            if str((target.get("metadata") or {}).get("threat_level") or "").lower() in {"high", "critical"}
+        )
+        low_count = sum(
+            1 for target in targets
+            if str((target.get("metadata") or {}).get("threat_level") or "").lower() in {"none", "low"}
+        )
         return {
             "packet_id": f"{mission_id}-tia",
             "schema_version": "intelligence_packet/v1",
@@ -283,8 +345,279 @@ class LocalAgentRuntime:
             "scene": scene,
             "targets": targets,
             "tracks": targets,
-            "summary": "Detected 2 hostile targets and published shared tactical intelligence.",
+            "summary": (
+                f"Published tactical intelligence for {len(targets)} contacts: "
+                f"{high_count} high-threat and {low_count} cleared/low-risk."
+            ),
         }
+
+    @staticmethod
+    def _algolib_first_enabled() -> bool:
+        return os.environ.get("A2A_FORCE_ALGOLIB_FIRST", "0").strip().lower() not in {
+            "0", "false", "no", "off",
+        }
+
+    @staticmethod
+    def _activity_skill(payload: dict) -> str:
+        return str(payload.get("required_skill") or payload.get("command") or "")
+
+    @classmethod
+    def _algolib_pipeline_for(cls, role: str, payload: dict) -> list[str]:
+        if role == "track_threat":
+            return list(cls.ALGOLIB_ROLE_PIPELINE.get(cls._activity_skill(payload), []))
+        return list(cls.ALGOLIB_ROLE_PIPELINE.get(role, []))
+
+    @classmethod
+    def _mission_input(cls, payload: dict) -> dict:
+        input_payload = payload.get("input") if isinstance(payload.get("input"), dict) else {}
+        mission = input_payload.get("mission_input")
+        return mission if isinstance(mission, dict) else {}
+
+    @classmethod
+    def _media_refs(cls, payload: dict) -> list[dict]:
+        mission = cls._mission_input(payload)
+        refs = []
+        for item in mission.get("attachments") or []:
+            if not isinstance(item, dict):
+                continue
+            refs.append({
+                "id": item.get("id") or item.get("media_id"),
+                "uri": item.get("uri"),
+                "mime_type": item.get("mime_type"),
+                "name": item.get("name"),
+            })
+        for item in mission.get("evidence") or []:
+            if not isinstance(item, dict):
+                continue
+            refs.append({
+                "id": item.get("id") or item.get("media_id"),
+                "uri": item.get("uri"),
+                "mime_type": item.get("mime_type"),
+                "name": item.get("source_name") or item.get("name"),
+            })
+        return [item for item in refs if item.get("uri") or item.get("id")]
+
+    @classmethod
+    def _frames(cls, payload: dict) -> list[dict]:
+        mission = cls._mission_input(payload)
+        frames = mission.get("perception_frames")
+        if isinstance(frames, list) and frames:
+            return deepcopy(frames)
+        media_refs = cls._media_refs(payload)
+        return [{"sensor_id": "mission_media", "modality": "mission_evidence", "payload": {"media_refs": media_refs}}] if media_refs else []
+
+    @classmethod
+    def _detections_from_value(cls, value: dict) -> list[dict]:
+        detections = value.get("detections")
+        if isinstance(detections, list):
+            return deepcopy(detections)
+        targets = value.get("targets") or value.get("tracks") or []
+        rows = []
+        for index, target in enumerate(targets if isinstance(targets, list) else [], start=1):
+            if not isinstance(target, dict):
+                continue
+            rows.append({
+                "detection_id": f"local-target-{index}",
+                "track_id": target.get("track_id"),
+                "class": target.get("class") or target.get("object_type"),
+                "confidence": target.get("confidence", 0.8),
+                "geo": target.get("geo") or target.get("current_point") or {},
+                "metadata": target.get("metadata") or {},
+            })
+        return rows
+
+    @classmethod
+    def _tracks_from_value(cls, value: dict) -> list[dict]:
+        tracks = value.get("tracks")
+        if isinstance(tracks, list):
+            return deepcopy(tracks)
+        targets = value.get("targets")
+        return deepcopy(targets) if isinstance(targets, list) else []
+
+    @classmethod
+    def _algolib_inputs(
+        cls,
+        algorithm_id: str,
+        *,
+        role: str,
+        payload: dict,
+        value: dict,
+        outputs: dict[str, dict],
+    ) -> dict:
+        mission = cls._mission_input(payload)
+        tracks = cls._tracks_from_value(value)
+        detections = (
+            outputs.get("battlefield_rtdetr_detector", {}).get("detections")
+            or cls._detections_from_value(value)
+        )
+        verified = (
+            outputs.get("edl_evidential_verifier", {}).get("verified_detections")
+            or detections
+        )
+        batch_context = {
+            "workflow_id": payload.get("workflow_id"),
+            "role": role,
+            "required_skill": cls._activity_skill(payload),
+            "scenario_id": mission.get("scenario_id"),
+            "phase": ((mission.get("stage_transfer") or {}).get("phase") if isinstance(mission.get("stage_transfer"), dict) else None),
+            "contacts": len(mission.get("contacts") or []),
+        }
+        if algorithm_id == "battlefield_rtdetr_detector":
+            return {"frames": cls._frames(payload), "media_refs": cls._media_refs(payload), "batch_context": batch_context}
+        if algorithm_id == "edl_evidential_verifier":
+            return {"detections": detections, "batch_context": batch_context}
+        if algorithm_id == "motr_neural_kalman_tracker":
+            return {
+                "verified_detections": verified,
+                "prior_tracks": tracks,
+                "frames": cls._frames(payload),
+                "batch_context": batch_context,
+            }
+        if algorithm_id == "multimodal_mamba_fusion":
+            return {
+                "embeddings": outputs.get("imagebind_multimodal_encoder", {}).get("embeddings") or {},
+                "tracks": outputs.get("motr_neural_kalman_tracker", {}).get("tracks") or tracks,
+                "batch_context": batch_context,
+            }
+        if algorithm_id == "supcon_meta_classifier":
+            return {
+                "fused_embeddings": outputs.get("multimodal_mamba_fusion", {}).get("fused_embeddings") or {},
+                "support_shots": mission.get("support_shots") or [],
+                "tracks": tracks,
+                "batch_context": batch_context,
+            }
+        return {"tracks": tracks, "detections": detections, "batch_context": batch_context}
+
+    @staticmethod
+    def _result_summary(outputs: dict) -> dict:
+        summary = {}
+        for key in (
+            "count", "track_count", "ranking_count", "scheduled_task_count",
+            "detections", "verified_detections", "tracks", "classifications",
+            "fused_embeddings", "damage_reports",
+        ):
+            value = outputs.get(key)
+            if isinstance(value, list):
+                summary[key] = len(value)
+            elif isinstance(value, dict):
+                summary[key] = len(value)
+            elif value not in (None, "", []):
+                summary[key] = value
+        return summary
+
+    @classmethod
+    def _run_algolib_pipeline(cls, role: str, payload: dict, value: dict) -> tuple[list[dict], dict[str, dict], list[str]]:
+        if not cls._algolib_first_enabled():
+            return [], {}, []
+        planned_ids = cls._algolib_pipeline_for(role, payload)
+        if not planned_ids:
+            return [], {}, []
+        client = AlgorithmLibraryClient()
+        try:
+            active_rows = client.list_algorithms(active_only=True)
+        except AlgorithmLibraryError as exc:
+            return [], {}, [f"algolib_unavailable:{exc}"]
+        active = {
+            str(item.get("algorithm_id")): item
+            for item in active_rows
+            if isinstance(item, dict) and item.get("algorithm_id")
+        }
+        calls = []
+        outputs_by_algorithm: dict[str, dict] = {}
+        warnings = []
+        for algorithm_id in planned_ids:
+            meta = active.get(algorithm_id)
+            if not meta:
+                warnings.append(f"algolib_algorithm_not_active:{algorithm_id}")
+                continue
+            inputs = cls._algolib_inputs(
+                algorithm_id,
+                role=role,
+                payload=payload,
+                value=value,
+                outputs=outputs_by_algorithm,
+            )
+            start = time.perf_counter()
+            try:
+                outputs = client.predict(
+                    algorithm_id,
+                    inputs,
+                    request_id=str(payload.get("work_item") or payload.get("workflow_id") or ""),
+                    trace_id=str(payload.get("workflow_id") or ""),
+                    version=str(meta.get("version") or "1.0.0"),
+                    backend_type=str(meta.get("backend_type") or "python_http_service"),
+                )
+            except AlgorithmLibraryError as exc:
+                warnings.append(f"algolib_call_failed:{algorithm_id}:{exc}")
+                continue
+            duration_ms = round((time.perf_counter() - start) * 1000.0, 3)
+            outputs_by_algorithm[algorithm_id] = outputs
+            model_profile = meta.get("model_profile") if isinstance(meta.get("model_profile"), dict) else {}
+            calls.append({
+                "algorithm_id": algorithm_id,
+                "algorithm_name": algorithm_id,
+                "model_id": meta.get("model_id") or model_profile.get("model_id"),
+                "version": meta.get("version"),
+                "backend_type": meta.get("backend_type"),
+                "status": "completed",
+                "execution_mode": "algolib_runtime",
+                "duration_ms": duration_ms,
+                "input_summary": {
+                    "frames": len(inputs.get("frames") or []),
+                    "detections": len(inputs.get("detections") or inputs.get("verified_detections") or []),
+                    "tracks": len(inputs.get("tracks") or inputs.get("prior_tracks") or []),
+                },
+                "result_summary": cls._result_summary(outputs),
+            })
+        return calls, outputs_by_algorithm, warnings
+
+    @classmethod
+    def _attach_algolib_evidence(cls, role: str, payload: dict, value: dict) -> dict:
+        if not isinstance(value, dict):
+            return value
+        calls, outputs, warnings = cls._run_algolib_pipeline(role, payload, value)
+        if calls:
+            selected = list(value.get("selected_algorithms") or [])
+            for call in calls:
+                algorithm_id = call["algorithm_id"]
+                if algorithm_id not in selected:
+                    selected.append(algorithm_id)
+            value["selected_algorithms"] = selected
+            value["algorithm_calls"] = list(value.get("algorithm_calls") or []) + calls
+            value["algolib_outputs"] = outputs
+            value["execution_mode"] = "local_agent_with_algolib_runtime"
+        else:
+            value.setdefault("execution_mode", "local_agent")
+        if warnings:
+            value.setdefault("warnings", []).extend(warnings)
+        return value
+
+    @staticmethod
+    def _attach_decision_algorithm_calls(response: dict, agent_name: str, agent_response) -> None:
+        output = response.get("output") if isinstance(response.get("output"), dict) else {}
+        selected = list(getattr(agent_response, "selected_algorithms", []) or [])
+        if not selected:
+            return
+        key = "decision_planning_result" if agent_name == "decision_planning_agent" else "compliance_authorization_result"
+        result = output.get(key)
+        if not isinstance(result, dict):
+            result = {}
+            output[key] = result
+        existing = list(result.get("algorithm_calls") or [])
+        for algorithm_id in selected:
+            if any(row.get("algorithm_id") == algorithm_id for row in existing if isinstance(row, dict)):
+                continue
+            existing.append({
+                "algorithm_id": algorithm_id,
+                "algorithm_name": algorithm_id,
+                "status": "completed" if response.get("status") == "completed" else response.get("status"),
+                "execution_mode": "local_algorithm",
+            })
+        result["algorithm_calls"] = existing
+        result["selected_algorithms"] = selected
+        if selected:
+            result.setdefault("execution_mode", "local_algorithm")
+        response["output"] = output
 
     @classmethod
     def _build_tracking_result(cls, payload: dict) -> dict:
@@ -308,6 +641,7 @@ class LocalAgentRuntime:
                     "track_id": track_id,
                     "object_type": target.get("class", "unknown"),
                     "current_point": target.get("geo", {}),
+                    "metadata": target.get("metadata", {}),
                     "history_points": 5,
                     "threat_score": score,
                     "confidence": float(target.get("confidence") or 0.8),
@@ -344,7 +678,7 @@ class LocalAgentRuntime:
         for index, track in enumerate(tracks or [], start=1):
             target_id = str(track.get("track_id") or f"T-{index:03d}")
             probability = round(float(track.get("threat_score") or 0.6), 4)
-            risk = "high" if probability >= 0.75 else "medium"
+            risk = "high" if probability >= 0.75 else ("medium" if probability >= 0.45 else "low")
             risk_assessments.append(
                 {
                     "target_id": target_id,
@@ -425,6 +759,44 @@ class LocalAgentRuntime:
             },
         }
 
+    @classmethod
+    def _build_algolib_task_scheduling_result(cls, payload: dict) -> dict:
+        from task_scheduling_agent.agent import TaskSchedulingAgent
+        from task_scheduling_agent.main import (
+            _runtime_config,
+            build_scheduler_input,
+            normalize_task_scheduling_result,
+        )
+
+        scheduler_input = build_scheduler_input(payload)
+        scheduler = TaskSchedulingAgent(use_mock=True, config=_runtime_config())
+        raw_result = scheduler.run(scheduler_input)
+        value = normalize_task_scheduling_result(payload, raw_result)
+        algorithm_calls = []
+        algolib_result = value.get("algolib_result") if isinstance(value.get("algolib_result"), dict) else {}
+        for algorithm_id in value.get("selected_algorithms") or []:
+            algorithm_calls.append({
+                "algorithm_id": algorithm_id,
+                "algorithm_name": algorithm_id,
+                "version": algolib_result.get("version"),
+                "backend_type": algolib_result.get("backend_type"),
+                "status": "completed",
+                "execution_mode": "algolib_runtime",
+                "input_summary": {
+                    "tasks": len(scheduler_input.get("tasks") or []),
+                    "platforms": len(scheduler_input.get("platforms") or []),
+                    "phase": scheduler_input.get("phase"),
+                },
+                "result_summary": {
+                    "scheduled_tasks": len(value.get("scheduled_tasks") or []),
+                    "resources": len(value.get("resources") or []),
+                    "sensor_assignments": len(value.get("sensor_assignments") or []),
+                },
+            })
+        value["algorithm_calls"] = algorithm_calls
+        value["execution_mode"] = "local_agent_with_algolib_runtime" if algorithm_calls else "local_agent"
+        return value
+
     def _output_for(self, role: str, payload: dict) -> tuple[dict, str]:
         output_hint = payload.get("output_hint") or "result"
         message = self._message_for(role, payload)
@@ -433,14 +805,22 @@ class LocalAgentRuntime:
             value = "Sector_A is heavily fortified with overlapping machine gun nests."
         elif role == "tactical_intelligence":
             value = self._build_tactical_intelligence_result(payload)
+            value = self._attach_algolib_evidence(role, payload, value)
         elif role == "track_threat":
             skill_id = payload.get("required_skill") or payload.get("command")
             if skill_id == "trajectory_tracking":
                 value = self._build_tracking_result(payload)
             else:
                 value = self._build_threat_assessment_result(payload)
+            value = self._attach_algolib_evidence(role, payload, value)
         elif role == "task_scheduling":
-            value = self._build_task_scheduling_result(payload)
+            try:
+                value = self._build_algolib_task_scheduling_result(payload)
+            except Exception as exc:
+                value = self._build_task_scheduling_result(payload)
+                value["execution_mode"] = "local_agent"
+                value["algorithm_calls"] = []
+                value.setdefault("warnings", []).append(f"algolib_task_scheduling_fallback:{exc}")
         elif role == "execution_control":
             from execution_control_agent.algolib_runtime import run_execution_control_with_backend
             from execution_control_agent.main import build_execution_control_arguments

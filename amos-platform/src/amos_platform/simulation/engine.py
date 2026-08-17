@@ -83,6 +83,7 @@ class SimEngine:
         self.tasks: list[dict] = []
         self._scenario_task_schedule: list[dict] = []
         self._scenario_capture_plans: list[dict] = []
+        self._scenario_asset_follow_tasks: list[dict] = []
         self._engagement_policy: dict = {}
         self._operator_contact_labels: dict[str, str] = {}
         self.scenario_story: dict = {}
@@ -366,7 +367,12 @@ class SimEngine:
             active_now = current_sim_time >= start_sec and (
                 end_raw is None or current_sim_time < float(end_raw)
             )
+            if window.get("activate_on_follow"):
+                active_now = bool(asset.get("_operator_follow_visible")) and (
+                    end_raw is None or current_sim_time < float(end_raw)
+                )
             if active_now and asset.get("status") == "staged":
+                self._apply_follow_launch_origin(asset)
                 asset["status"] = asset.get("_configured_status", "active")
             if (
                 not active_now
@@ -379,6 +385,8 @@ class SimEngine:
                 asset["speed_kts"] = float(asset.get("_cruise_speed_kts", 0) or 0)
             else:
                 asset["speed_kts"] = 0.0
+
+        self._update_asset_follow_tasks()
 
         # 1. Move assets along waypoint routes
         wp_events = self.waypoint_nav.tick(self.assets, dt)
@@ -621,10 +629,9 @@ class SimEngine:
             # Hit detection
             if dist_nm < 0.3 or reaches_target:  # within this simulation step -> impact
                 # This operator demonstration models a guided weapon that has
-                # already reached its authorized target.  Impact is guaranteed;
-                # p_kill now controls destroyed versus damaged, not hit versus miss.
-                p_kill = max(0.0, min(1.0, float(w.get("p_kill", 0.7))))
-                damage = "destroyed" if self._rng.random() < p_kill else "damaged"
+                # already reached its authorized target.  Authorized impacts
+                # are deterministic in this demo and always destroy the target.
+                damage = "destroyed"
                 w["status"] = "hit"
                 w["damage_state"] = damage
                 self._apply_damage(target, damage)
@@ -634,6 +641,7 @@ class SimEngine:
                 if target_track is not None:
                     target_track.kill_chain_phase = "ASSESS"
                     target_track.kill_chain_times["ASSESS"] = time.time()
+                self._return_follow_assets_after_strike(target_track_id)
 
         # Clean up finished weapons (keep last 10 for history)
         for wid in finished_weapons:
@@ -665,6 +673,8 @@ class SimEngine:
         )
         for ev in fusion_events:
             self.events.append(ev)
+
+        self._update_asset_follow_tasks()
 
         # 4.5. Ordinary coverage gaps no longer carry truth IDs. Handover
         # policies that need truth associations must use explicit admin/debug
@@ -755,6 +765,206 @@ class SimEngine:
             })
         return records
 
+    def _update_asset_follow_tasks(self) -> None:
+        """Retask scenario assets from public fused-track attributes only."""
+        elapsed = float(self.clock.get("elapsed_sec", 0) or 0)
+        for task in self._scenario_asset_follow_tasks:
+            asset_id = str(task.get("asset_id") or "")
+            if not asset_id or asset_id not in self.assets:
+                continue
+            asset = self.assets[asset_id]
+            if asset.get("status") not in {"active", "operational", "holding", "staged"}:
+                continue
+            start_sec = float(task.get("start_sec", 0) or 0)
+            end_raw = task.get("end_sec")
+            if elapsed < start_sec or (end_raw is not None and elapsed >= float(end_raw)):
+                continue
+            if asset.get("_follow_returning_home"):
+                self._update_follow_return_home(asset, task)
+                continue
+            candidates = self._follow_task_candidates(task, asset)
+            if not candidates:
+                asset["_follow_pending_prompt"] = None
+                continue
+            target = candidates[0]
+            target_id = str(target.get("id") or target.get("track_id") or "")
+            requires_authorization = bool(task.get("requires_operator_authorization"))
+            already_following = (
+                str(asset.get("_follow_track_id") or "") == target_id
+                and bool(asset.get("_operator_follow_visible"))
+            )
+            authorized_track_id = str(asset.get("_follow_launch_authorized_track_id") or "")
+            if requires_authorization and not already_following and authorized_track_id != target_id:
+                asset["_follow_pending_prompt"] = {
+                    "prompt_type": "launch_follow_uav",
+                    "task_id": task.get("task_id"),
+                    "asset_id": asset_id,
+                    "track_id": target_id,
+                    "launch_from_asset": task.get("launch_from_asset"),
+                    "message": "是否派出补充侦察无人机跟踪该目标？",
+                }
+                continue
+            asset["_follow_pending_prompt"] = None
+            if asset.get("status") in {"staged", "holding"}:
+                self._apply_follow_launch_origin(asset)
+                asset["status"] = asset.get("_configured_status", "active")
+                asset["speed_kts"] = float(asset.get("_cruise_speed_kts", 0) or 0)
+                asset["_operator_follow_visible"] = True
+            target_lat = float(target["lat"])
+            target_lng = float(target["lng"])
+            standoff_nm = float(task.get("standoff_nm", 1.5) or 0)
+            waypoint = {"lat": target_lat, "lng": target_lng, "label": "FOLLOW"}
+            if standoff_nm > 0:
+                apos = asset.get("position", asset)
+                bearing = _bearing_deg(
+                    target_lat,
+                    target_lng,
+                    float(apos.get("lat", 0)),
+                    float(apos.get("lng", 0)),
+                )
+                lat, lng = _advance_position(target_lat, target_lng, bearing, standoff_nm)
+                waypoint = {"lat": lat, "lng": lng, "label": "FOLLOW"}
+            self.waypoint_nav.set_route(asset_id, [waypoint], mode="hold")
+            asset["_follow_track_id"] = target_id
+            asset["_follow_task_id"] = task.get("task_id")
+            asset["_follow_target"] = {"track_id": target_id, "lat": target_lat, "lng": target_lng}
+            previous = asset.get("_follow_last_event_track_id")
+            if previous != target_id:
+                asset["_follow_last_event_track_id"] = target_id
+                self.events.append({
+                    "type": "asset_follow_track",
+                    "asset_id": asset_id,
+                    "track_id": target_id,
+                    "sim_time": round(elapsed, 2),
+                    "timestamp": time.time(),
+                })
+
+    def _follow_task_candidates(self, task: dict, asset: dict) -> list[dict]:
+        required_levels = {
+            str(level).upper()
+            for level in task.get("required_threat_levels") or ["HIGH", "CRITICAL"]
+        }
+        required_status = {
+            str(value).lower()
+            for value in task.get("required_assessment_status") or ["confirmed"]
+        }
+        excluded_classes = {
+            str(value).upper()
+            for value in task.get("excluded_classifications") or []
+        }
+        retired_track_ids = {
+            str(value)
+            for value in asset.get("_follow_retired_track_ids") or []
+            if value
+        }
+        candidates = []
+        for track in self.sensor_fusion.get_tracks().values():
+            track_id = str(track.get("id") or track.get("track_id") or "")
+            if track_id in retired_track_ids:
+                continue
+            assessment = track.get("agent_assessment") if isinstance(track.get("agent_assessment"), dict) else {}
+            status = str(assessment.get("status") or "").lower()
+            level = str(track.get("threat_level") or "").upper()
+            classification = str(track.get("classification") or "").upper()
+            if required_status and status not in required_status:
+                continue
+            if level not in required_levels:
+                continue
+            if classification in excluded_classes:
+                continue
+            if track.get("lat") is None or track.get("lng") is None:
+                continue
+            candidates.append(track)
+        rank = {"CRITICAL": 3, "HIGH": 2, "MEDIUM": 1, "LOW": 0, "UNKNOWN": -1}
+        candidates.sort(
+            key=lambda row: (
+                rank.get(str(row.get("threat_level") or "").upper(), -1),
+                float(row.get("confidence", 0) or 0),
+            ),
+            reverse=True,
+        )
+        return candidates
+
+    def _return_follow_assets_after_strike(self, target_track_id: str) -> None:
+        if not target_track_id:
+            return
+        for task in self._scenario_asset_follow_tasks:
+            asset_id = str(task.get("asset_id") or "")
+            asset = self.assets.get(asset_id)
+            if not asset or str(asset.get("_follow_track_id") or "") != target_track_id:
+                continue
+            if not task.get("return_to_launch_after_strike", True):
+                continue
+            retired = asset.setdefault("_follow_retired_track_ids", [])
+            if target_track_id not in retired:
+                retired.append(target_track_id)
+            asset["_follow_returning_home"] = True
+            asset["_follow_track_id"] = None
+            asset["_follow_target"] = None
+            asset["_operator_follow_visible"] = True
+            if asset.get("status") in {"staged", "holding"}:
+                asset["status"] = asset.get("_configured_status", "active")
+            asset["speed_kts"] = float(asset.get("_cruise_speed_kts", 0) or 0)
+            self._update_follow_return_home(asset, task)
+
+    def _update_follow_return_home(self, asset: dict, task: dict) -> None:
+        host = self.assets.get(str(task.get("launch_from_asset") or ""))
+        if not host:
+            return
+        host_pos = host.get("position") or host
+        pos = asset.get("position") or asset
+        distance_nm = self.waypoint_nav._haversine(
+            float(pos.get("lat", 0)),
+            float(pos.get("lng", 0)),
+            float(host_pos.get("lat", 0)),
+            float(host_pos.get("lng", 0)),
+        )
+        if distance_nm <= float(task.get("return_hide_distance_nm", 0.2) or 0.2):
+            pos["lat"] = round(float(host_pos.get("lat", pos.get("lat", 0))), 6)
+            pos["lng"] = round(float(host_pos.get("lng", pos.get("lng", 0))), 6)
+            asset["status"] = "staged"
+            asset["speed_kts"] = 0.0
+            asset["_operator_follow_visible"] = False
+            asset["_follow_returning_home"] = False
+            asset["_follow_launch_origin_applied"] = False
+            asset["_follow_launch_authorized_track_id"] = None
+            asset["_follow_pending_prompt"] = None
+            self.waypoint_nav.clear(str(asset.get("id") or ""))
+            return
+        asset["status"] = asset.get("_configured_status", "active")
+        asset["speed_kts"] = float(asset.get("_cruise_speed_kts", 0) or 0)
+        self.waypoint_nav.set_route(str(asset.get("id") or ""), [{
+            "lat": float(host_pos.get("lat", 0)),
+            "lng": float(host_pos.get("lng", 0)),
+            "label": "RETURN",
+        }], mode="hold")
+
+    def _apply_follow_launch_origin(self, asset: dict) -> None:
+        asset_id = str(asset.get("id") or "")
+        if not asset_id or asset.get("_follow_launch_origin_applied"):
+            return
+        task = next((
+            row for row in self._scenario_asset_follow_tasks
+            if str(row.get("asset_id") or "") == asset_id and row.get("launch_from_asset")
+        ), None)
+        if not task:
+            return
+        host = self.assets.get(str(task.get("launch_from_asset")))
+        if not host:
+            return
+        host_pos = host.get("position") or host
+        pos = asset.setdefault("position", {})
+        pos["lat"] = round(float(host_pos.get("lat", pos.get("lat", 0))), 6)
+        pos["lng"] = round(float(host_pos.get("lng", pos.get("lng", 0))), 6)
+        if pos.get("alt_ft") is None:
+            pos["alt_ft"] = 0
+        asset["_history_path"] = [{
+            "lat": pos.get("lat", 0),
+            "lng": pos.get("lng", 0),
+            "sim_time": round(float(self.clock.get("elapsed_sec", 0) or 0), 2),
+        }]
+        asset["_follow_launch_origin_applied"] = True
+
     def _update_scenario_tasks(self) -> None:
         """Project only current/past scripted work; future schedule stays private."""
         elapsed = float(self.clock.get("elapsed_sec", 0) or 0)
@@ -836,6 +1046,9 @@ class SimEngine:
             track["engagement_eligible"] = eligibility.get("eligible") is True
             if eligibility.get("reason"):
                 track["engagement_block_reason"] = str(eligibility["reason"])
+        prompts = self._operator_follow_launch_prompts(state.get("fused_tracks") or [])
+        state["follow_launch_prompts"] = prompts
+        state["follow_launch_prompt"] = prompts[0] if prompts else None
         return state
 
     def get_agent_visible_state(self) -> dict:
@@ -844,6 +1057,36 @@ class SimEngine:
         return build_agent_visible_state(self.get_state())
 
     # ── Asset re-tasking (F3 Re-Task Detection support) ──────────
+
+    def _operator_follow_launch_prompts(self, public_tracks: list[dict]) -> list[dict]:
+        tracks_by_id = {
+            str(track.get("id") or track.get("track_id") or ""): track
+            for track in public_tracks
+        }
+        prompts = []
+        for task in self._scenario_asset_follow_tasks:
+            asset_id = str(task.get("asset_id") or "")
+            asset = self.assets.get(asset_id)
+            if not asset:
+                continue
+            pending = asset.get("_follow_pending_prompt")
+            if not isinstance(pending, dict):
+                continue
+            track_id = str(pending.get("track_id") or "")
+            if track_id not in tracks_by_id:
+                continue
+            track = tracks_by_id[track_id]
+            prompts.append({
+                "prompt_type": "launch_follow_uav",
+                "task_id": str(pending.get("task_id") or task.get("task_id") or ""),
+                "asset_id": asset_id,
+                "asset_label": str(asset.get("role") or asset_id),
+                "track_id": track_id,
+                "target_label": str(track.get("display_label") or track_id),
+                "launch_from_asset": str(pending.get("launch_from_asset") or task.get("launch_from_asset") or ""),
+                "message": str(pending.get("message") or "是否派出补充侦察无人机跟踪该目标？"),
+            })
+        return prompts
 
     def retask_asset(self, asset_id: str, waypoints: list[dict]) -> dict:
         """Replace an asset's patrol route with a new set of waypoints.
@@ -906,6 +1149,45 @@ class SimEngine:
                 "asset_id": asset_id,
                 "target": {"lat": target_lat, "lng": target_lng},
                 "status": "intercepting",
+            }
+
+    def authorize_follow_asset(self, asset_id: str, track_id: str, *, authorized: bool) -> dict:
+        """Authorize a scenario follow asset to launch against an eligible public track."""
+        if not authorized:
+            return {"error": "operator authorization is required"}
+        asset_id = str(asset_id or "")
+        track_id = str(track_id or "")
+        with self._lock:
+            asset = self.assets.get(asset_id)
+            if not asset:
+                return {"error": f"asset not found: {asset_id}"}
+            task = next((
+                row for row in self._scenario_asset_follow_tasks
+                if str(row.get("asset_id") or "") == asset_id
+            ), None)
+            if not task:
+                return {"error": f"follow task not found for asset: {asset_id}"}
+            candidates = self._follow_task_candidates(task, asset)
+            if track_id not in {
+                str(track.get("id") or track.get("track_id") or "")
+                for track in candidates
+            }:
+                return {"error": "target track is not eligible for follow launch"}
+            asset["_follow_launch_authorized_track_id"] = track_id
+            asset["_follow_pending_prompt"] = None
+            self.events.append({
+                "type": "operator_follow_launch_authorized",
+                "asset_id": asset_id,
+                "target_track_id": track_id,
+                "timestamp": time.time(),
+                "sim_time": round(float(self.clock.get("elapsed_sec", 0) or 0), 2),
+            })
+            self._update_asset_follow_tasks()
+            return {
+                "asset_id": asset_id,
+                "track_id": track_id,
+                "authorization": "operator_confirmed",
+                "status": "authorized",
             }
 
     # ── Weapon engagement (F23 Attack Target) ──────────────────

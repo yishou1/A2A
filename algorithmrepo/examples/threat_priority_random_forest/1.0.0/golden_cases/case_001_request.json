@@ -1,0 +1,38 @@
+{
+  "request_id": "rf-priority-001",
+  "trace_id": "trace-m05-rf",
+  "algorithm_id": "threat_priority_random_forest",
+  "version": "1.0.0",
+  "backend_type": "python_http_service",
+  "inputs": {
+    "targets": [
+      {
+        "target_id": "TGT-HIGH",
+        "threat_score": 0.95,
+        "distance_km": 5.0,
+        "speed_mps": 420.0,
+        "asset_value": 0.9,
+        "intel_confidence": 0.95
+      },
+      {
+        "target_id": "TGT-LOW",
+        "threat_score": 0.12,
+        "distance_km": 140.0,
+        "speed_mps": 20.0,
+        "asset_value": 0.1,
+        "intel_confidence": 0.7
+      },
+      {
+        "target_id": "TGT-MEDIUM",
+        "threat_score": 0.55,
+        "distance_km": 65.0,
+        "speed_mps": 180.0,
+        "asset_value": 0.5,
+        "intel_confidence": 0.8
+      }
+    ]
+  },
+  "params": {
+    "sort_descending": true
+  }
+}

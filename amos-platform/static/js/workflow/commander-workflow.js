@@ -19,6 +19,7 @@ window.PlatformWorkflow = (function () {
   var viewCache = {};
   var selectedActivityId = null;
   var activityTab = "input";
+  var activityDetailSelection = {input: "__all__", output: "__all__"};
   var followCurrentActivity = true;
   var activeAnalysisSignature = null;
   var submitting = false;
@@ -57,6 +58,9 @@ window.PlatformWorkflow = (function () {
     return ({
       remote_agent: "远程 Agent",
       remote: "远程服务",
+      local_agent: "本地 Agent",
+      algolib_runtime: "算法库运行",
+      local_agent_with_algolib_runtime: "本地 Agent + 算法库",
       builtin: "内置执行",
       demo_adapter: "演示适配器",
       simulated_adapter: "模拟适配器",
@@ -257,7 +261,19 @@ window.PlatformWorkflow = (function () {
       }).join("") : '<div class="workflow-empty">无可提交媒体</div>') + '</div>';
   }
 
-  function factList(value) {
+  function detailJsonBlock(details, scope) {
+    if (!details || typeof details !== "object") return "";
+    var key = activityDetailSelection[scope] || "__all__";
+    var row = details[key] || details.__all__;
+    if (!row) return "";
+    var title = key === "__all__" ? "完整明细" : ("字段明细 · " + key);
+    var payload = row.value !== undefined ? row.value : row;
+    return '<div class="workflow-detail-json"><header><b>' + escapeHtml(title) + '</b><span>' +
+      escapeHtml(row.variable || row.source || "") + '</span></header><pre>' +
+      escapeHtml(JSON.stringify(payload, null, 2)) + '</pre></div>';
+  }
+
+  function factList(value, details, scope) {
     if (value == null || value === "" || Array.isArray(value) && !value.length) {
       return '<div class="workflow-detail-empty">后端未上报</div>';
     }
@@ -266,7 +282,13 @@ window.PlatformWorkflow = (function () {
     }
     return '<dl class="workflow-detail-facts">' + value.map(function (item) {
       if (!item || typeof item !== "object") return '<div><dt>值</dt><dd>' + escapeHtml(item) + '</dd></div>';
-      return '<div><dt>' + escapeHtml(item.key || "指标") + '</dt><dd>' + escapeHtml(item.value == null ? "后端未上报" : item.value) + '</dd></div>';
+      var key = String(item.key || "指标");
+      var clickable = details && (details[key] || details.__all__) && scope;
+      var selected = clickable && (activityDetailSelection[scope] || "__all__") === key;
+      var inner = '<dt>' + escapeHtml(key) + '</dt><dd>' + escapeHtml(item.value == null ? "后端未上报" : item.value) + '</dd>';
+      return clickable
+        ? '<button type="button" class="workflow-detail-fact ' + (selected ? "selected" : "") + '" data-detail-scope="' + escapeHtml(scope) + '" data-detail-key="' + escapeHtml(key) + '">' + inner + '</button>'
+        : '<div>' + inner + '</div>';
     }).join("") + '</dl>';
   }
 
@@ -306,11 +328,15 @@ window.PlatformWorkflow = (function () {
       return;
     }
     if (activityTab === "input") {
-      root.innerHTML = '<div class="workflow-detail-section"><h4>活动输入摘要</h4>' + factList(detail.input_summary) + '</div>';
+      root.innerHTML = '<div class="workflow-detail-section"><h4>活动输入摘要</h4>' +
+        factList(detail.input_summary, detail.input_detail, "input") +
+        detailJsonBlock(detail.input_detail, "input") + '</div>';
       return;
     }
     if (activityTab === "output") {
-      root.innerHTML = '<div class="workflow-detail-section"><h4>活动输出摘要</h4>' + factList(detail.output_summary) + '</div>';
+      root.innerHTML = '<div class="workflow-detail-section"><h4>活动输出摘要</h4>' +
+        factList(detail.output_summary, detail.output_detail, "output") +
+        detailJsonBlock(detail.output_detail, "output") + '</div>';
       return;
     }
     if (activityTab === "call") {
@@ -326,11 +352,12 @@ window.PlatformWorkflow = (function () {
     if (activityTab === "algorithm") {
       var algorithms = detail.algorithms || [];
       root.innerHTML = algorithms.length ? '<div class="workflow-detail-algorithms">' + algorithms.map(function (row) {
-        return '<article><header><b>' + escapeHtml(row.name || row.algorithm_id) + '</b><span>' + escapeHtml(statusLabel(row.status)) + '</span></header>' +
+        var runtimeObserved = !!row.runtime_observed;
+        return '<article class="' + (runtimeObserved ? "verified" : "declared") + '"><header><b>' + escapeHtml(row.name || row.algorithm_id) + '</b><span>' + escapeHtml(statusLabel(row.status)) + '</span></header>' +
           detailDefinitionList([["算法 ID", row.algorithm_id], ["模型", row.model_id], ["版本", row.version],
             ["执行 Agent", row.agent], ["执行模式", row.execution_mode ? modeLabel(row.execution_mode) : null],
-            ["耗时", formatDuration(row.duration_ms)]]) + '</article>';
-      }).join("") + '</div>' : '<div class="workflow-detail-empty">后端未上报该活动的算法调用</div>';
+            ["耗时", formatDuration(row.duration_ms)], ["运行证据", "后端已上报"]]) + '</article>';
+      }).join("") + '</div>' : '<div class="workflow-detail-empty">后端未上报该活动的算法调用；活动完成只表示流程节点完成</div>';
       return;
     }
     var traceEvents = detail.trace_events || [];
@@ -468,8 +495,8 @@ window.PlatformWorkflow = (function () {
         '<span><small>工作流活动</small><b>' + escapeHtml(provided(counts.workflow_activity_count)) + '</b></span>' +
         '<span><small>计划角色</small><b>' + escapeHtml(provided(counts.planned_role_count)) + '</b></span>' +
         '<span><small>Agent 类型</small><b>' + escapeHtml(provided(counts.role_count)) + '</b></span>' +
-        '<span><small>已标识实例</small><b>' + escapeHtml(provided(counts.instance_count)) + '</b></span>' +
-        '<span><small>真实实例</small><b>' + escapeHtml(provided(counts.real_instance_count)) + '</b></span>' +
+        '<span><small>运行时实例</small><b>' + escapeHtml(provided(counts.instance_count)) + '</b></span>' +
+        '<span><small>非模拟实例</small><b>' + escapeHtml(provided(counts.real_instance_count)) + '</b></span>' +
       '</div>' +
       '<div class="workflow-agent-role-list">' + (roles.length ? roles.map(function (row) {
         return '<div class="workflow-agent-role ' + escapeHtml(row.status || "unknown") + '">' +
@@ -477,7 +504,7 @@ window.PlatformWorkflow = (function () {
           ' · 活动 ' + escapeHtml(row.activity_count || 0) + ' · 调用事件 ' + escapeHtml(row.call_count || 0) + '</small></div>';
       }).join("") : '<div class="workflow-empty">后端未返回 Agent 角色</div>') + '</div>' +
       '<div class="workflow-agent-instance-list">' + (instances.length ? instances.map(function (row) {
-        var nature = row.is_stub ? "Stub" : (row.is_mock ? "Mock" : "真实服务");
+        var nature = row.is_stub ? "Stub" : (row.is_mock ? "Mock" : (row.execution_mode === "local_agent" ? "本地 Agent" : "真实服务"));
         return '<article class="workflow-agent-instance ' + (row.real_service ? "real" : "non-real") + '">' +
           '<header><b>' + escapeHtml(row.agent || row.role || row.instance_id) + '</b><span>' + escapeHtml(nature) + '</span></header>' +
           '<small>实例 ' + escapeHtml(row.instance_id) + ' · ' + escapeHtml(statusLabel(row.status)) + '</small>' +
@@ -499,8 +526,10 @@ window.PlatformWorkflow = (function () {
     });
     var executingCount = rows.filter(function (row) { return row.status === "executing"; }).length;
     var verifiedCount = rows.filter(function (row) { return row.status === "verified"; }).length;
+    var counts = algorithms.counts || {};
     root.innerHTML =
       '<div class="workflow-v2-summary">' +
+        '<span><small>场景声明</small><b>' + escapeHtml(provided(counts.planned || counts.total)) + '</b></span>' +
         '<span><small>后端已调用</small><b>' + escapeHtml(rows.length) + '</b></span>' +
         '<span><small>执行中</small><b>' + escapeHtml(executingCount) + '</b></span>' +
         '<span><small>执行成功</small><b>' + escapeHtml(verifiedCount) + '</b></span>' +
@@ -519,7 +548,7 @@ window.PlatformWorkflow = (function () {
           '<dt>Params / FLOPs</dt><dd>' + escapeHtml(provided(row.params)) + ' / ' + escapeHtml(provided(row.flops)) + '</dd></dl>' +
           (row.evidence_refs && row.evidence_refs.length ? '<footer>证据 ' + escapeHtml(row.evidence_refs.join(", ")) + '</footer>' : '') +
         '</article>';
-      }).join("") : '<div class="workflow-empty">本次后端工作流尚未调用算法</div>') + '</div>';
+      }).join("") : '<div class="workflow-empty">本次后端工作流未上报实际算法调用；场景声明不会被当作已执行算法显示</div>') + '</div>';
   }
 
   function renderFunctionPoints(functionPoints) {
@@ -547,10 +576,10 @@ window.PlatformWorkflow = (function () {
     if (!root) return;
     graph = graph || {};
     var edges = graph.edges || [];
-    root.innerHTML = '<div class="workflow-graph-note">依赖来源：' + escapeHtml(graph.dependency_source === "backend" ? "后端显式依赖" : "后端未上报") + '</div>' +
-      '<div class="workflow-graph-edges">' + (edges.length ? edges.map(function (edge) {
+    root.hidden = !edges.length;
+    root.innerHTML = edges.length ? '<div class="workflow-graph-edges">' + edges.map(function (edge) {
         return '<span>' + escapeHtml(edge.source) + ' → ' + escapeHtml(edge.target) + '</span>';
-      }).join("") : '<span>无显式依赖边</span>') + '</div>';
+      }).join("") + '</div>' : "";
   }
 
   function renderProvenance(provenance) {
@@ -853,6 +882,7 @@ window.PlatformWorkflow = (function () {
       var button = event.target.closest("[data-activity-id]");
       if (!button || !lastView) return;
       selectedActivityId = button.dataset.activityId;
+      activityDetailSelection = {input: "__all__", output: "__all__"};
       followCurrentActivity = false;
       var follow = document.getElementById("wf-follow-current");
       if (follow) follow.checked = false;
@@ -861,8 +891,20 @@ window.PlatformWorkflow = (function () {
     document.querySelectorAll("[data-activity-tab]").forEach(function (button) {
       button.addEventListener("click", function () {
         activityTab = this.dataset.activityTab;
+        if (activityTab === "input" || activityTab === "output") {
+          activityDetailSelection[activityTab] = activityDetailSelection[activityTab] || "__all__";
+        }
         renderActivityDetail(lastView);
       });
+    });
+    var activityDetail = document.getElementById("wf-activity-detail");
+    if (activityDetail) activityDetail.addEventListener("click", function (event) {
+      var button = event.target.closest("[data-detail-key]");
+      if (!button) return;
+      var scope = button.dataset.detailScope;
+      if (scope !== "input" && scope !== "output") return;
+      activityDetailSelection[scope] = button.dataset.detailKey || "__all__";
+      renderActivityDetail(lastView);
     });
     var follow = document.getElementById("wf-follow-current");
     if (follow) follow.addEventListener("change", function () {

@@ -1,0 +1,56 @@
+{
+  "architecture": {
+    "action_count": 9,
+    "hidden_dimension": 128,
+    "maximum_agent_count": 8,
+    "observation_dimension": 104,
+    "parameter_count": 39434
+  },
+  "artifact_path": "models/checkpoints/marl_ppo_scheduler_s.safetensors",
+  "artifact_sha256": "e827dd1abf59e35e146f84afb13a6296c5f7f4e18c51584025afa0082baedfc8",
+  "compute_profile": "small",
+  "dataset": {
+    "holdout_count": 256,
+    "holdout_seed": 20260823,
+    "limitation": "Synthetic reference scenarios only; not an operational scheduling benchmark.",
+    "path": "data/marl_ppo/reference_holdout.json",
+    "sha256": "f94b5e971a15d105899a648e57df695d4bcb7fcf6b25ff900bc5188f0adadc92",
+    "source": "deterministic_synthetic_battlefield_scenario_generator"
+  },
+  "evaluation": {
+    "method": "independent_deterministic_synthetic_holdout",
+    "random_policy_baseline": {
+      "high_threat_coverage": 0.510352,
+      "reattack_coverage": 0.340495,
+      "total_reward": 2.066525
+    },
+    "reward_improvement": 1.434468,
+    "trained_policy": {
+      "high_threat_coverage": 0.70651,
+      "reattack_coverage": 0.627474,
+      "total_reward": 3.500993
+    }
+  },
+  "model_family": "parameter_shared_marl_ppo_actor_critic",
+  "model_id": "marl_ppo_task_scheduler",
+  "model_version": "1.0.0",
+  "runtime_versions": {
+    "numpy": "2.2.6",
+    "scikit_learn": "1.7.2",
+    "torch": "2.12.0+cpu"
+  },
+  "training": {
+    "algorithm": "PPO",
+    "clip_epsilon": 0.2,
+    "entropy_weight": 0.01,
+    "epochs": 240,
+    "learning_rate": 0.0003,
+    "optimizer": "Adam",
+    "random_state": 20260822,
+    "rollouts_per_epoch": 24,
+    "update_epochs": 4,
+    "value_loss_weight": 0.5
+  },
+  "training_script": "scripts/train_marl_ppo_scheduler.py",
+  "training_script_sha256": "b3367aa2eced2d782a5654080a901d83c9f3dc54e286e27d92cdc74c2f5f1faa"
+}

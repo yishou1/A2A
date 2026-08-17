@@ -1,0 +1,29 @@
+{
+  "title": "Closed Loop Decision Advisor Input",
+  "type": "object",
+  "required": [
+    "target",
+    "damage_probability",
+    "situation",
+    "mission_completion"
+  ],
+  "properties": {
+    "target": {
+      "type": "object"
+    },
+    "damage_probability": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "situation": {
+      "type": "string"
+    },
+    "mission_completion": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    }
+  },
+  "additionalProperties": false
+}
