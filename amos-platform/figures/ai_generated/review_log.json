@@ -1,0 +1,11 @@
+{
+  "ok": true,
+  "finalizedAt": "2026-08-17T15:43:35Z",
+  "workspace": "/home/dministrator/work/jzz-integrated/amos-platform",
+  "bestImage": "/home/dministrator/work/jzz-integrated/amos-platform/figures/ai_generated/figure_v2.png",
+  "finalImage": "/home/dministrator/work/jzz-integrated/amos-platform/figures/ai_generated/figure_final.png",
+  "score": 9.0,
+  "reviewSummary": "Accepted after strict review: native Image2 output is photorealistic, contains exactly one destroyed fast attack craft, has no horizon or out-of-frame resources, and matches the frozen T+5580 EO geometry.",
+  "caption": "[Replace with a paper-ready caption].",
+  "label": "fig:replace-me"
+}

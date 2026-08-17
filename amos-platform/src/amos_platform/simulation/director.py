@@ -281,6 +281,16 @@ class DirectorService:
         if analysis_status is not None:
             engine.clock["director_analysis_status"] = analysis_status
 
+    def _enter_authorization_wait(self) -> None:
+        """Lock playback to real time while an operator decision is pending."""
+        self.runtime.get_engine().lock_speed_for_confirmation("awaiting_authorization")
+
+    def _leave_authorization_wait(self, *, restore: bool = True) -> None:
+        """Release the decision lock and restore the last operator speed."""
+        self.runtime.get_engine().unlock_speed_for_confirmation(
+            "awaiting_authorization", restore=restore
+        )
+
     def _analysis_progress_enabled(self, checkpoint: dict[str, Any]) -> bool:
         controls = (self._scenario or {}).get("demo_controls") or {}
         return bool(
@@ -494,10 +504,15 @@ class DirectorService:
 
                 if self._authorization_gate_required():
                     if not self._state.get("awaiting_authorization"):
-                        engine.pause()
                         with self._lock:
                             self._state["awaiting_authorization"] = True
                             self._set_status("awaiting_authorization")
+                            self._enter_authorization_wait()
+                            if (
+                                not engine.clock.get("running")
+                                and engine.clock.get("lifecycle") != "completed"
+                            ):
+                                engine.resume()
                             self._record("authorization_required", phase="ENGAGE")
                             self.runtime.record_director_state(self.state())
                     continue
@@ -505,6 +520,7 @@ class DirectorService:
                     with self._lock:
                         self._state["awaiting_authorization"] = False
                         self._set_status("auto_running")
+                        self._leave_authorization_wait()
                         self._record("authorization_completed", phase="ENGAGE")
                         engine.resume()
                         self.runtime.record_director_state(self.state())
@@ -545,6 +561,7 @@ class DirectorService:
         self._auto_thread = None
         if pause:
             self.runtime.get_engine().pause()
+        self._leave_authorization_wait()
 
     def action(self, action: str, *, step_sec: Any = 1.0) -> dict[str, Any]:
         """Apply a director action and return the operator-safe director state."""

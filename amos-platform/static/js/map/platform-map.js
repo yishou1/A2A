@@ -151,7 +151,15 @@ window.PlatformMap = (function () {
     if (marker._amosMotionFrame) window.cancelAnimationFrame(marker._amosMotionFrame);
     marker._amosMotionTarget = targetSignature;
     var startedAt = window.performance.now();
+    var updateCadence = marker._amosMotionUpdatedAt == null
+      ? 450 : startedAt - marker._amosMotionUpdatedAt;
+    marker._amosMotionUpdatedAt = startedAt;
+    // Follow the actual stream cadence so a marker neither arrives early and
+    // pauses nor spends several updates chasing an obsolete position.
     var durationMs = 450;
+    if (updateCadence > 0 && updateCadence < 5000) {
+      durationMs = Math.max(260, Math.min(900, updateCadence * 1.04));
+    }
     function animate(now) {
       var progress = Math.min(1, Math.max(0, (now - startedAt) / durationMs));
       marker.setLatLng([
@@ -161,6 +169,7 @@ window.PlatformMap = (function () {
       if (progress < 1 && map && map.hasLayer(marker)) {
         marker._amosMotionFrame = window.requestAnimationFrame(animate);
       } else {
+        marker.setLatLng(target);
         marker._amosMotionFrame = null;
         marker._amosMotionTarget = null;
       }
@@ -378,12 +387,38 @@ window.PlatformMap = (function () {
     focusScenarioView();
   }
 
-  function renderTrail(store, id, rawPoints, color, maxPoints) {
+  function smoothTrailPoints(points, passes) {
+    var result = points.slice();
+    for (var pass = 0; pass < (passes || 0) && result.length > 2; pass += 1) {
+      var next = [result[0]];
+      for (var index = 0; index < result.length - 1; index += 1) {
+        var current = result[index];
+        var following = result[index + 1];
+        next.push([
+          current[0] * 0.75 + following[0] * 0.25,
+          current[1] * 0.75 + following[1] * 0.25,
+        ]);
+        next.push([
+          current[0] * 0.25 + following[0] * 0.75,
+          current[1] * 0.25 + following[1] * 0.75,
+        ]);
+      }
+      next.push(result[result.length - 1]);
+      result = next;
+    }
+    return result;
+  }
+
+  function renderTrail(store, id, rawPoints, color, maxPoints, smooth) {
     var points = (rawPoints || []).filter(function (item) {
       return item && item.lat != null && (item.lng != null || item.lon != null);
     }).slice(-(maxPoints || 120)).map(function (item) {
       return [Number(item.lat), Number(item.lng == null ? item.lon : item.lng)];
+    }).filter(function (item, index, rows) {
+      if (!Number.isFinite(item[0]) || !Number.isFinite(item[1])) return false;
+      return index === 0 || Math.abs(item[0] - rows[index - 1][0]) + Math.abs(item[1] - rows[index - 1][1]) > 1e-8;
     });
+    if (smooth) points = smoothTrailPoints(points, 2);
     var geometrySignature = color + ":" + JSON.stringify(points);
     if (points.length > 1) {
       if (store[id]) {
@@ -437,7 +472,11 @@ window.PlatformMap = (function () {
         "<br>航向 " + escapeHtml(Math.round(Number(asset.heading || 0))) + "° · " +
         escapeHtml(Math.round(Number(asset.speed_kts || 0))) + " kt" +
         (asset.domain === "air" ? "<br>高度 " + escapeHtml(Math.round(Number((asset.position || {}).alt_ft || 0))) + " ft" : ""));
-      renderTrail(ownTrails, id, asset.history_path, "#42d7ff", asset.domain === "air" ? 90 : 180);
+      renderTrail(
+        ownTrails, id, asset.history_path, "#42d7ff",
+        asset.domain === "air" ? 90 : 180,
+        asset.domain === "air"
+      );
       updateSensorFootprints(asset);
     });
     Object.keys(ownMarkers).forEach(function (id) {

@@ -25,13 +25,13 @@ SCENARIO_ID = "maritime-convoy-air-defense"
 MEDIA_ROOT = f"/static/assets/scenarios/{SCENARIO_ID}"
 CHECKSUMS = {
     "00-convoy-overview.png": "81235f981034c097678c071a5d0b80cbdfa166521b486a8d44edc406e552406f",
-    "01-aew-radar-picture.svg": "28aff3ab79787ddbf4c2060f6b524832d899a2fb168a0fec1f932ef85ca4c252",
-    "02-civil-traffic-correlation.svg": "15220aa868895df45229fae5f7da64bb750d3fb63da82827ac9338f68759473e",
+    "01-aew-radar-picture.svg": "c66106d37a6004688c64eaad188eb895775efa401c454c3b5c961f95116e125c",
+    "02-civil-traffic-correlation.svg": "afe0f5e360562e2d3de4578c900ed288fe46fdabf987bcd82aab2e11b6cf72c1",
     "03-fast-surface-contact.png": "5fcd2ea562e4a8e613fa538d5b53d252b0848f2d7576ec6c10ee887cf843a0c5",
     "04-low-altitude-contact-ir.png": "aadc7052ac1035f5edf2423f548b0df8d2dd8c13582365d7eb8cd304baba2047",
-    "05-elint-interference.svg": "b7024386becab8a47fec284cb0e3fb044901b32ddfcb93a07fe5d4cbdc9c2140",
-    "06-convoy-maneuver-current.svg": "2f9ea4ab5fdc72fb47750e40eb84e25328f79c92cdb4e604d897edbc6ea3e6c9",
-    "07-post-maneuver-observation.png": "23248d25593e9fbcf8cd58dde8a6cbbea7e47547e260c1f6f1ac4647a5ecc62f",
+    "05-elint-interference.svg": "8e4c9eb10ea1a4ef1597a279ea736415e88a542060e3b1187c4728b64457cf72",
+    "06-convoy-maneuver-current.svg": "58eeb714d6ef7727833d51124d59e72bb6487dad82f0e4595b221bd9d048cb8f",
+    "07-post-maneuver-observation.png": "64b1aca4782d7d466803406edbcfd3513958318b285f86041822747728d72a04",
 }
 
 PRODUCT_TYPES = {
@@ -49,13 +49,13 @@ PRODUCT_TYPES = {
 def _media_cues() -> list[dict[str, Any]]:
     rows = (
         ("MAR-MEDIA-00", "00-convoy-overview.png", 0, "FIND", "海上编队初始态势", "外部预采集光电资料记录编队、护航舰与周边民船的初始相对位置，所有外部接触均保持待识别。", "EXTERNAL-IMAGERY-01/EO", "eo_ir", "image/png"),
-        ("MAR-MEDIA-01", "01-aew-radar-picture.svg", 720, "FIND", "双目标雷达批次", "预警机形成两个海面接触的雷达批次，两者身份、属性和威胁等级均保持未知。", "AEW-01/AEW_RADAR", "radar", "image/svg+xml"),
+        ("MAR-MEDIA-01", "01-aew-radar-picture.svg", 720, "FIND", "双目标雷达批次", "侦察无人机形成两个海面接触的雷达批次，两者身份、属性和威胁等级均保持未知。", "AEW-01/AEW_RADAR", "radar", "image/svg+xml"),
         ("MAR-MEDIA-02", "02-civil-traffic-correlation.svg", 1440, "FIX", "AIS 与雷达关联记录", "AIS、岸基雷达和舰载雷达提供两个海面接触的跨源记录，后端负责区分敌方资源与渔船。", "SHORE-RADAR-01/AIS-RADAR", "telemetry", "image/svg+xml"),
         ("MAR-MEDIA-03", "03-fast-surface-contact.png", 2160, "TRACK", "高速海面目标光电复核", "舰载光电形成高速接触当前帧，外形、航速和接近行为供后端识别，前端不预设敌我结论。", "ESCORT-01/EO-IR", "eo_ir", "image/png"),
         ("MAR-MEDIA-04", "04-low-altitude-contact-ir.png", 2880, "TRACK", "渔船目标红外复核", "护航舰光电红外形成慢速海面接触的当前帧，供后端确认渔船身份并建立禁射约束。", "ESCORT-01/IR", "ir", "image/png"),
         ("MAR-MEDIA-05", "05-elint-interference.svg", 3600, "TARGET", "敌方目标辐射源复核", "护航舰电子侦察载荷冻结高速目标的当前频谱观测，供后端完成目标优先级、交战规则和武器方案审查。", "ESCORT-01/ELINT", "telemetry", "image/svg+xml"),
         ("MAR-MEDIA-06", "06-convoy-maneuver-current.svg", 4560, "ENGAGE", "武器攻击命令执行状态", "仅在后端完成敌方识别、渔船排除且操作员明确授权后，展示当前模拟发射和武器飞行状态。", "COMMANDER/EXECUTION", "telemetry", "image/svg+xml"),
-        ("MAR-MEDIA-07", "07-post-maneuver-observation.png", 5580, "ASSESS", "攻击后效果评估", "核验无人机记录敌方目标攻击后的当前状态，同时持续确认渔船安全，供毁伤评估和再攻击决策使用。", "UAV-CONFIRM-01/EO", "eo_ir", "image/png"),
+        ("MAR-MEDIA-07", "07-post-maneuver-observation.png", 5580, "ASSESS", "攻击后效果评估", "补充侦察无人机在目标西南约 1.96 海里处冻结光电画面，记录高速攻击艇已毁、停航并局部燃烧的状态；渔船位于镜头视场外且保持安全。", "UAV-CONFIRM-01/EO", "eo_ir", "image/png"),
     )
     return [
         media_record(
@@ -120,7 +120,7 @@ def _capture_contract() -> tuple[list[dict[str, Any]], list[dict[str, Any]], lis
         "MAR-MEDIA-04": {"effective_range_nm": 16, "horizontal_fov_deg": 24, "look_angle_deg": 0, "spectral_band_um": [8, 12], "point_at_target": True, "resolution_px": [1672, 941]},
         "MAR-MEDIA-05": {"frequency_band_mhz": [500, 8000], "observation_window_sec": 180, "bearing_error_deg": 4, "data_source": "sensor_observations", "renderer_type": "elint_spectrum"},
         "MAR-MEDIA-06": {"input_cutoff_sec": 4560, "simulation_execution_only": True, "data_source": "task_state", "renderer_type": "execution_state"},
-        "MAR-MEDIA-07": {"effective_range_nm": 12, "horizontal_fov_deg": 35, "look_angle_deg": 34, "point_at_target": True, "registration_group": "MAR-SURFACE-CONTACT-A", "reference_media_id": "MAR-MEDIA-03", "frame_role": "post_maneuver_eo", "subject_asset_ids": ["MERCHANT-01", "MERCHANT-02", "ESCORT-01"], "resolution_px": [1672, 941]},
+        "MAR-MEDIA-07": {"effective_range_nm": 12, "horizontal_fov_deg": 35, "look_angle_deg": 34, "point_at_target": True, "required_damage_state": "destroyed", "registration_group": "MAR-SURFACE-CONTACT-A", "reference_media_id": "MAR-MEDIA-03", "frame_role": "post_maneuver_eo", "subject_asset_ids": ["MERCHANT-01", "MERCHANT-02", "ESCORT-01"], "resolution_px": [1672, 941]},
     }
     captures = []
     for index, task in enumerate(tasks):
@@ -138,7 +138,7 @@ def _capture_contract() -> tuple[list[dict[str, Any]], list[dict[str, Any]], lis
 def _timeline() -> list[dict[str, Any]]:
     return [
         {"cue_id": "MAR-CUE-01", "at_sec": 0, "phase": "FIND", "level": "INFO", "title": "海上编队进入责任区", "description": "编队、护航舰和民用航道交通进入当前态势。", "media_ids": ["MAR-MEDIA-00"], "functional_agent_ids": ["A1"], "model_requirement_ids": ["M17"]},
-        {"cue_id": "MAR-CUE-02", "at_sec": 720, "phase": "FIND", "level": "INFO", "title": "发现两个待识别海面目标", "description": "预警机、岸基和舰载雷达形成两个相互独立的未知海面航迹。", "media_ids": ["MAR-MEDIA-01"], "functional_agent_ids": ["A1"], "model_requirement_ids": ["M01", "M15", "M17"]},
+        {"cue_id": "MAR-CUE-02", "at_sec": 720, "phase": "FIND", "level": "INFO", "title": "发现两个待识别海面目标", "description": "侦察无人机、岸基和舰载雷达形成两个相互独立的未知海面航迹。", "media_ids": ["MAR-MEDIA-01"], "functional_agent_ids": ["A1"], "model_requirement_ids": ["M01", "M15", "M17"]},
         {"cue_id": "MAR-CUE-03", "at_sec": 1440, "phase": "FIX", "level": "INFO", "title": "双目标跨源关联完成", "description": "AIS 与多部雷达记录已到达，可由后端分别固定目标位置并保持身份未知。", "media_ids": ["MAR-MEDIA-02"], "functional_agent_ids": ["A1"], "model_requirement_ids": ["M06", "M07", "M19"]},
         {"cue_id": "MAR-CUE-04", "at_sec": 2160, "phase": "TRACK", "level": "WARNING", "title": "高速目标持续接近编队", "description": "高速海面目标形成连续航迹与光电证据，但前端不预设其敌我属性。", "media_ids": ["MAR-MEDIA-03"], "functional_agent_ids": ["A2"], "model_requirement_ids": ["M05", "M16", "M19", "M20"]},
         {"cue_id": "MAR-CUE-05", "at_sec": 2880, "phase": "TRACK", "level": "INFO", "title": "慢速目标渔船特征形成", "description": "第二目标形成渔船外形、低速航行和 AIS 关联证据，等待后端给出民用识别结论。", "media_ids": ["MAR-MEDIA-04"], "functional_agent_ids": ["A2"], "model_requirement_ids": ["M03", "M05", "M16"]},
@@ -153,7 +153,7 @@ def build_maritime_convoy_air_defense_scenario() -> dict[str, Any]:
         AssetSnapshot("MERCHANT-01", "maritime", "运输船一号", "active", 22.10, 121.28, heading=55, speed_kts=14, sensors=["AIS", "NAV-RADAR"], endurance_hr=240, autonomy_tier=1, health={"fuel_pct": 82, "comms_strength": 91}),
         AssetSnapshot("MERCHANT-02", "maritime", "运输船二号", "active", 22.06, 121.24, heading=55, speed_kts=14, sensors=["AIS", "NAV-RADAR"], endurance_hr=220, autonomy_tier=1, health={"fuel_pct": 79, "comms_strength": 89}),
         AssetSnapshot("ESCORT-01", "maritime", "编队护航舰", "active", 22.14, 121.22, heading=55, speed_kts=15, sensors=["AESA_RADAR", "EO/IR", "ELINT"], weapons=["舰载反舰导弹"], endurance_hr=300, autonomy_tier=2, health={"fuel_pct": 86, "comms_strength": 95}),
-        AssetSnapshot("AEW-01", "air", "预警机", "active", 22.55, 121.48, alt_ft=25000, heading=225, speed_kts=310, sensors=["AEW_RADAR", "EO/IR", "ESM"], endurance_hr=10, autonomy_tier=2, health={"fuel_pct": 74, "comms_strength": 94}),
+        AssetSnapshot("AEW-01", "air", "侦察无人机", "active", 22.42, 121.52, alt_ft=18000, heading=204, speed_kts=110, sensors=["AEW_RADAR", "EO/IR", "ESM"], endurance_hr=24, autonomy_tier=4, health={"battery_pct": 84, "comms_strength": 94}),
         AssetSnapshot("UAV-CONFIRM-01", "air", "补充侦察无人机", "active", 22.14, 121.22, alt_ft=8000, heading=70, speed_kts=92, sensors=["EO/IR", "SAR"], endurance_hr=18, autonomy_tier=4, health={"battery_pct": 88, "comms_strength": 86}),
         AssetSnapshot("SHORE-RADAR-01", "ground", "岸基警戒雷达", "active", 22.42, 120.92, heading=100, sensors=["AESA_RADAR", "AIS", "COMINT"], endurance_hr=9999, autonomy_tier=1, health={"battery_pct": 100, "comms_strength": 97}),
     ]
@@ -165,7 +165,16 @@ def build_maritime_convoy_air_defense_scenario() -> dict[str, Any]:
         "MERCHANT-01": [{"lat": 22.15, "lng": 121.38}, {"lat": 22.22, "lng": 121.50}, {"lat": 22.30, "lng": 121.62}],
         "MERCHANT-02": [{"lat": 22.11, "lng": 121.34}, {"lat": 22.18, "lng": 121.46}, {"lat": 22.26, "lng": 121.58}],
         "ESCORT-01": [{"lat": 22.19, "lng": 121.32}, {"lat": 22.27, "lng": 121.44}, {"lat": 22.35, "lng": 121.56}],
-        "AEW-01": [{"lat": 22.62, "lng": 121.28}, {"lat": 22.52, "lng": 121.06}, {"lat": 22.30, "lng": 121.14}, {"lat": 22.36, "lng": 121.48}],
+        "AEW-01": [
+            {"lat": 22.32, "lng": 121.47, "label": "ORBIT-SE"},
+            {"lat": 22.26, "lng": 121.32, "label": "ORBIT-S"},
+            {"lat": 22.31, "lng": 121.15, "label": "ORBIT-SW"},
+            {"lat": 22.43, "lng": 121.08, "label": "ORBIT-W"},
+            {"lat": 22.55, "lng": 121.15, "label": "ORBIT-NW"},
+            {"lat": 22.61, "lng": 121.32, "label": "ORBIT-N"},
+            {"lat": 22.55, "lng": 121.47, "label": "ORBIT-NE"},
+            {"lat": 22.42, "lng": 121.52, "label": "ORBIT-E"},
+        ],
         "UAV-CONFIRM-01": [{"lat": 22.16, "lng": 121.30}, {"lat": 22.22, "lng": 121.48}, {"lat": 22.28, "lng": 121.62}],
         "SHORE-RADAR-01": [],
     }
@@ -191,8 +200,8 @@ def build_maritime_convoy_air_defense_scenario() -> dict[str, Any]:
         compute_node("ASCM-01-COMPUTE", "反舰导弹弹载制导计算单元", "ASCM-01",
                      host_device_type="anti_ship_missile", compute_type="onboard_guidance",
                      status="standby", cpu="4 cores", accelerator="signal_processor", memory_gb=8, network="weapon_datalink"),
-        compute_node("AEW-01-COMPUTE", "预警机任务处理节点", "AEW-01",
-                     host_device_type="aircraft", compute_type="airborne_edge",
+        compute_node("AEW-01-COMPUTE", "侦察无人机任务处理节点", "AEW-01",
+                     host_device_type="uav", compute_type="uav_edge",
                      cpu="24 cores", accelerator="radar_dsp", memory_gb=96, network="tactical_air_link"),
         compute_node("SHORE-RADAR-01-COMPUTE", "岸基融合处理节点", "SHORE-RADAR-01",
                      host_device_type="ground_station", compute_type="ground_edge",
@@ -236,7 +245,11 @@ def build_maritime_convoy_air_defense_scenario() -> dict[str, Any]:
             "excluded_classifications": ["FISHING_VESSEL", "FISHING BOAT", "FISHING", "CIVILIAN", "MERCHANT"],
             "requires_operator_authorization": True,
             "standoff_nm": 1.8,
+            "station_bearing_slew_dps": 0.35,
+            "fallback_target_speed_kts": 31,
+            "closure_gain_kts_per_nm": 12,
             "return_to_launch_after_strike": True,
+            "return_after_sec": 5610,
             "return_hide_distance_nm": 0.2,
         }],
         "asset_profiles": asset_profiles(assets),
@@ -271,7 +284,7 @@ def build_maritime_convoy_air_defense_scenario() -> dict[str, Any]:
         "expected_branches": [
             {"branch_id": "standard", "name": "标准杀伤链", "description": "完成敌方识别、渔船排除、授权攻击和毁伤评估。"},
             {"branch_id": "communication_degraded", "name": "通信降级", "description": "注入链路质量下降，检验后端是否重评估。"},
-            {"branch_id": "resource_unavailable", "name": "资源不可用", "description": "请求后端处理预警资源不可用条件。"},
+            {"branch_id": "resource_unavailable", "name": "资源不可用", "description": "请求后端处理侦察无人机资源不可用条件。"},
             {"branch_id": "behavior_changed", "name": "目标行为变化", "description": "以当前新航迹状态触发重新评估和规划。"},
             {"branch_id": "civilian_misidentification", "name": "民用目标误识别", "description": "检验渔船身份置信不足时是否禁止攻击并请求补充侦察。"},
         ],

@@ -309,7 +309,11 @@ def test_maritime_scenario_has_two_unknown_surface_targets_and_engagement_policy
         if row["threat_id"] == "CONTACT-FISHING-01"
     )["ais_match"] is True
     escort = next(row for row in scenario["assets"] if row["asset_id"] == "ESCORT-01")
+    reconnaissance_uav = next(row for row in scenario["assets"] if row["asset_id"] == "AEW-01")
     assert escort["weapons"] == ["舰载反舰导弹"]
+    assert reconnaissance_uav["role"] == "侦察无人机"
+    assert len(scenario["asset_routes"]["AEW-01"]) == 8
+    assert scenario["asset_route_modes"]["AEW-01"] == "loop"
     assert scenario["engagement_policy"]["protected_truth_ids"] == ["CONTACT-FISHING-01"]
     assert scenario["acceptance_profile"]["requires_explicit_fire_authorization"] is True
     assert {row["branch_id"] for row in scenario["expected_branches"]} >= {

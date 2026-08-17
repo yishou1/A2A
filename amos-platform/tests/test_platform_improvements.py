@@ -60,6 +60,86 @@ def test_speed_switch_keeps_simulation_clock_advancing() -> None:
     assert after > before
 
 
+def test_authorization_wait_locks_speed_and_restores_previous_multiplier() -> None:
+    runtime = PlatformRuntime()
+    director = runtime.get_director()
+    engine = runtime.get_engine()
+    engine.set_speed(8)
+    engine.start()
+
+    director._enter_authorization_wait()
+
+    assert engine.clock["speed"] == 1
+    assert engine.clock["running"] is True
+    assert engine.clock["lifecycle"] == "running"
+    assert engine.clock["speed_locked_reason"] == "awaiting_authorization"
+    assert engine.clock["speed_resume_value"] == 8
+    operator_clock = engine.get_operator_state()["clock"]
+    assert operator_clock["speed"] == 1
+    assert operator_clock["speed_resume_value"] == 8
+    engine.set_speed(32)
+    director._enter_authorization_wait()
+    assert engine.clock["speed"] == 1
+    assert engine.clock["speed_resume_value"] == 8
+    engine.lock_speed_for_confirmation("awaiting_follow_confirmation")
+
+    director._leave_authorization_wait()
+
+    assert engine.clock["speed"] == 1
+    assert engine.clock["speed_locked_reason"] == "awaiting_follow_confirmation"
+    engine.unlock_speed_for_confirmation("awaiting_follow_confirmation")
+    assert engine.clock["speed"] == 8
+    assert "speed_locked_reason" not in engine.clock
+    assert "speed_resume_value" not in engine.clock
+    engine.stop()
+
+
+def test_speed_endpoint_cannot_override_authorization_lock() -> None:
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+    engine = get_engine()
+    engine.set_speed(16)
+    engine.lock_speed_for_confirmation("awaiting_authorization")
+    try:
+        result = client.post("/api/v1/sim/speed", json={"speed": 32}).get_json()["data"]
+        assert result["speed"] == 1
+        assert result["speed_locked"] is True
+        assert result["speed_resume_value"] == 16
+    finally:
+        engine.unlock_speed_for_confirmation("awaiting_authorization")
+
+
+def test_weapon_confirmation_keeps_clock_running_at_one_x(monkeypatch) -> None:
+    runtime = PlatformRuntime()
+    director = runtime.get_director()
+    director.configure(
+        scenario_id="maritime-convoy-air-defense",
+        mode="demonstration",
+        branch="standard",
+        seed=33031,
+    )
+    engine = runtime.get_engine()
+    engine.set_speed(8)
+    engine.pause()
+    monkeypatch.setattr(director, "_authorization_gate_required", lambda: True)
+    monkeypatch.setattr(
+        runtime,
+        "record_director_state",
+        lambda _state: director._auto_stop.set(),
+    )
+
+    director._auto_stop.clear()
+    director._auto_monitor()
+
+    assert director.state()["awaiting_authorization"] is True
+    assert engine.clock["speed"] == 1
+    assert engine.clock["running"] is True
+    assert engine.clock["lifecycle"] == "running"
+    director._leave_authorization_wait()
+    engine.stop()
+
+
 def test_completed_simulation_cannot_be_started_or_resumed() -> None:
     runtime = PlatformRuntime()
     engine = runtime.get_engine()
@@ -128,6 +208,7 @@ def test_frontend_uses_dynamic_scenarios_without_future_route_renderer() -> None
     assert "scenario-1" not in html + controller + api_script
     assert "asset_routes" not in map_script
     assert "history_path" in map_script
+    assert "smoothTrailPoints" in map_script
     assert "历史航迹" in map_script
     assert "任务执行检查器" in html
     assert "/api/v1/a2a/backend/health" in api_script
@@ -194,6 +275,8 @@ def test_frontend_keeps_director_stream_and_interpolates_live_markers() -> None:
 
     assert "moveMarker" in map_script
     assert "durationMs = 450" in map_script
+    assert "_amosMotionUpdatedAt" in map_script
+    assert "updateCadence * 1.04" in map_script
     assert "directorOwnsLiveUpdates" in controller
     assert "!running && !directorOwnsLiveUpdates(currentDirectorState)" in controller
     assert "if (pollTimer || sseAbortController) return" in controller
@@ -244,6 +327,22 @@ def test_live_renderers_do_not_rebuild_unchanged_panels_or_map_layers() -> None:
     assert "preferCanvas: false" in map_script
     assert "_amosMotionTarget" in map_script
     assert "顺序流程容器" in workflow
+
+
+def test_story_animation_is_incremental_and_speed_ui_tracks_backend_state() -> None:
+    controller = (ROOT / "static/js/app/platform.js").read_text(encoding="utf-8")
+    styles = (ROOT / "static/css/platform.css").read_text(encoding="utf-8")
+
+    assert "syncStoryMedia" in controller
+    assert "syncStoryTimeline" in controller
+    assert "updateStoryHero" in controller
+    assert "scrollIntoView" in controller
+    assert "prefers-reduced-motion" in controller + styles
+    assert "speedRequestQueue" in controller
+    assert "syncSpeedFromClock" in controller
+    assert "Boolean(clock.speed_locked_reason)" in controller
+    assert "speed_resume_value" in controller
+    assert ".speed-group.speed-locked" in styles
 
 
 def test_execution_workspace_inspects_current_run_workflows_and_real_activity_details() -> None:

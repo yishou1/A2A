@@ -317,10 +317,39 @@ def test_each_scenario_can_reach_all_declared_checkpoints() -> None:
             if "*" in set(item.get("branch_ids") or ["*"])
             or "standard" in set(item.get("branch_ids") or [])
         ]
-        reached = [
-            director.action("advance_checkpoint")["current_checkpoint"]["checkpoint_id"]
-            for _ in expected
-        ]
+        reached = []
+        for _ in expected:
+            checkpoint_id = director.action("advance_checkpoint")["current_checkpoint"]["checkpoint_id"]
+            reached.append(checkpoint_id)
+            if scenario_id == "maritime-convoy-air-defense" and checkpoint_id == "MAR-CP-PLAN":
+                engine = runtime.get_engine()
+                hostile = next(
+                    track for track in engine.sensor_fusion.tracks.values()
+                    if engine._truth_target_for_track(track) == "CONTACT-HOSTILE-01"
+                )
+                hostile.classification = "FAST_ATTACK_CRAFT"
+                hostile.threat_level = "HIGH"
+                hostile.kill_chain_phase = "TARGET"
+                hostile.agent_assessment = {
+                    "status": "confirmed",
+                    "label": "高风险",
+                    "source": "test checkpoint workflow",
+                }
+                engine._tick(1.0)
+                prompt = engine.get_operator_state()["follow_launch_prompt"]
+                authorized = engine.authorize_follow_asset(
+                    str(prompt["asset_id"]),
+                    str(prompt["track_id"]),
+                    authorized=True,
+                )
+                assert authorized["status"] == "authorized"
+                launched = engine.fire_weapon_at_track(
+                    hostile.id,
+                    asset_id="ESCORT-01",
+                    weapon_name="舰载反舰导弹",
+                    authorized=True,
+                )
+                assert launched["status"] == "launched"
         assert reached == [item["checkpoint_id"] for item in expected]
 
 

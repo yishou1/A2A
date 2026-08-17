@@ -122,9 +122,12 @@ def test_post_strike_capture_observes_destroyed_target_without_recreating_track(
         authorized=True,
     )
     assert authorized["status"] == "authorized"
+    engine._tick(5580.0 - float(engine.clock["elapsed_sec"]))
+    assert "MAR-MEDIA-07" not in engine.media_capture.captured_media_ids
+
     engine._apply_damage(engine.threats[truth_id], "destroyed")
     engine.sensor_fusion.tracks.pop(hostile.id, None)
-    engine._tick(5610.0 - float(engine.clock["elapsed_sec"]))
+    engine._tick(1.0)
 
     assert "MAR-MEDIA-07" in engine.media_capture.captured_media_ids
     assert hostile.id not in engine.sensor_fusion.tracks
@@ -224,6 +227,7 @@ def test_confirm_uav_launches_from_escort_and_follows_confirmed_high_threat() ->
     hostile.classification = "FAST_ATTACK_CRAFT"
     hostile.threat_level = "HIGH"
     hostile.agent_assessment = {"status": "confirmed", "source": "test"}
+    engine.set_speed(8)
 
     engine._tick(1)
 
@@ -232,6 +236,11 @@ def test_confirm_uav_launches_from_escort_and_follows_confirmed_high_threat() ->
     assert prompt["prompt_type"] == "launch_follow_uav"
     assert prompt["asset_id"] == "UAV-CONFIRM-01"
     assert prompt["track_id"] == hostile.id
+    assert prompt_state["clock"]["speed"] == 1
+    assert prompt_state["clock"]["speed_locked_reason"] == "awaiting_follow_confirmation"
+    assert prompt_state["clock"]["speed_resume_value"] == 8
+    engine.set_speed(32)
+    assert engine.clock["speed"] == 1
     assert engine.assets["UAV-CONFIRM-01"]["status"] == "staged"
     assert not any(
         asset["id"] == "UAV-CONFIRM-01"
@@ -245,6 +254,8 @@ def test_confirm_uav_launches_from_escort_and_follows_confirmed_high_threat() ->
         authorized=True,
     )
     assert authorized["status"] == "authorized"
+    assert engine.clock["speed"] == 8
+    assert "speed_locked_reason" not in engine.clock
 
     uav = engine.assets["UAV-CONFIRM-01"]
     launch_distance_nm = engine.waypoint_nav._haversine(
@@ -258,6 +269,11 @@ def test_confirm_uav_launches_from_escort_and_follows_confirmed_high_threat() ->
     assert launch_distance_nm < 0.1
     assert uav["_follow_track_id"] == hostile.id
     assert route and route[0]["label"] == "FOLLOW"
+    station_bearing = engine.waypoint_nav._bearing(
+        hostile.lat, hostile.lng, route[0]["lat"], route[0]["lng"],
+    )
+    expected_bearing = ((hostile.heading_deg or station_bearing) + 180.0) % 360.0
+    assert abs((station_bearing - expected_bearing + 180.0) % 360.0 - 180.0) < 1.0
     assert any(
         asset["id"] == "UAV-CONFIRM-01"
         for asset in engine.get_operator_state()["assets"]
@@ -267,6 +283,38 @@ def test_confirm_uav_launches_from_escort_and_follows_confirmed_high_threat() ->
     engine._tick(1)
     assert uav["status"] == "active"
     assert engine.waypoint_nav.get_route("UAV-CONFIRM-01")[0]["label"] == "FOLLOW"
+
+
+def test_follow_uav_keeps_a_stable_trailing_station_and_slows_near_it() -> None:
+    scenario = get_scenario(SCENARIO_ID)
+    assert scenario is not None
+    engine = SimEngine(seed=int(scenario["default_seed"]))
+    engine.load_scenario(scenario)
+    engine._tick(2160)
+    hostile = {
+        engine._truth_target_for_track(track): track
+        for track in engine.sensor_fusion.tracks.values()
+    }["CONTACT-HOSTILE-01"]
+    hostile.classification = "FAST_ATTACK_CRAFT"
+    hostile.threat_level = "HIGH"
+    hostile.heading_deg = 90.0
+    hostile.agent_assessment = {"status": "confirmed", "source": "test"}
+    engine._tick(1)
+    engine.authorize_follow_asset("UAV-CONFIRM-01", hostile.id, authorized=True)
+
+    first_station = engine.waypoint_nav.get_route("UAV-CONFIRM-01")[0]
+    uav = engine.assets["UAV-CONFIRM-01"]
+    uav["position"].update({"lat": hostile.lat, "lng": hostile.lng + 0.02})
+    engine._update_asset_follow_tasks()
+    second_station = engine.waypoint_nav.get_route("UAV-CONFIRM-01")[0]
+
+    assert engine.waypoint_nav._haversine(
+        first_station["lat"], first_station["lng"],
+        second_station["lat"], second_station["lng"],
+    ) < 0.05
+    uav["position"].update({"lat": second_station["lat"], "lng": second_station["lng"]})
+    engine._update_asset_follow_tasks()
+    assert 1.0 <= uav["speed_kts"] < uav["_cruise_speed_kts"]
 
 
 def test_confirm_uav_returns_to_escort_and_hides_after_authorized_strike() -> None:
@@ -313,6 +361,12 @@ def test_confirm_uav_returns_to_escort_and_hides_after_authorized_strike() -> No
             break
 
     assert engine.weapons[launched["weapon_id"]]["damage_state"] == "destroyed"
+    assert uav.get("_follow_return_pending_track_id") == hostile.id
+    assert not uav.get("_follow_returning_home")
+    assert engine.waypoint_nav.get_route("UAV-CONFIRM-01")[0]["label"] == "FOLLOW"
+
+    engine.clock["elapsed_sec"] = 5609.0
+    engine._tick(1.0)
     assert uav.get("_follow_returning_home") is True
     assert engine.waypoint_nav.get_route("UAV-CONFIRM-01")[0]["label"] == "RETURN"
 
