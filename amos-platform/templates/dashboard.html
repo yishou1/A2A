@@ -6,7 +6,7 @@
 <title>AMOS 场景仿真平台</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
-<link rel="stylesheet" href="/static/css/platform.css?v=20260817h">
+<link rel="stylesheet" href="/static/css/platform.css?v=20260817i">
 <script src="/static/vendor/leaflet/leaflet.js"></script>
 <script src="/static/vendor/protomaps/protomaps-leaflet.js"></script>
 </head>
@@ -70,35 +70,6 @@
 
     <div class="workspace-body">
       <section class="workspace-panel active" data-workspace-panel="situation" role="tabpanel">
-        <div class="card director-card">
-          <div class="card-heading">
-            <div><span class="section-eyebrow">演示控制</span><h2>导演台</h2></div>
-            <span id="director-status-badge" class="status-chip neutral">未配置</span>
-          </div>
-          <div class="director-config-grid">
-            <label>运行方式
-              <select id="director-mode-select">
-                <option value="integration">联调模式</option>
-                <option value="demonstration">演示模式</option>
-              </select>
-            </label>
-            <label>运行分支
-              <select id="director-branch-select"><option value="standard">标准运行</option></select>
-            </label>
-            <label>随机种子
-              <input id="director-seed" type="number" min="0" step="1" value="20260811">
-            </label>
-            <button id="btn-director-configure" class="btn btn-primary" type="button">应用配置</button>
-          </div>
-          <div class="director-state-grid">
-            <span><small>当前检查点</small><b id="director-checkpoint">状态加载中</b></span>
-            <span><small>导演状态</small><b id="director-state">状态加载中</b></span>
-            <span><small>运行分支</small><b id="director-branch">状态加载中</b></span>
-            <span><small>实际种子</small><b id="director-active-seed">状态加载中</b></span>
-          </div>
-          <div id="director-message" class="inline-message" hidden></div>
-        </div>
-
         <div id="scenario-story-card" class="card scenario-story-card" hidden>
           <div class="card-heading story-heading">
             <div><span class="section-eyebrow">当前态势</span><h2 id="story-title">场景态势</h2></div>
@@ -360,6 +331,6 @@
 <script src="/static/js/map/platform-map.js?v=20260817c"></script>
 <script src="/static/js/panels/platform-panels.js?v=20260817e"></script>
 <script src="/static/js/workflow/commander-workflow.js?v=20260817g"></script>
-<script src="/static/js/app/platform.js?v=20260817h"></script>
+<script src="/static/js/app/platform.js?v=20260817i"></script>
 </body>
 </html>
