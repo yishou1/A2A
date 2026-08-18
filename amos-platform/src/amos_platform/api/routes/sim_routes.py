@@ -116,14 +116,23 @@ def register_sim_routes(bp: Any) -> None:
         data = request.get_json(silent=True) or {}
         multiplier = float(data.get("speed", 1.0))
         engine = get_engine()
-        engine.set_speed(multiplier)
-        return ok({
-            "speed": engine.clock["speed"],
-            "running": bool(engine.clock.get("running")),
-            "elapsed_sec": round(float(engine.clock.get("elapsed_sec", 0)), 3),
-            "tick_thread_alive": bool(engine._thread and engine._thread.is_alive()),
-            "last_tick_error": engine.clock.get("last_tick_error"),
-        })
+        with engine._lock:
+            speed_locked = bool(engine.clock.get("speed_locked_reason"))
+            # The backend owns this safety-critical invariant as well as the UI:
+            # direct or delayed requests must not override 1x during confirmation.
+            target = 1 if speed_locked else multiplier
+            if float(engine.clock.get("speed", 1) or 1) != target:
+                engine.set_speed(target)
+            return ok({
+                "speed": engine.clock["speed"],
+                "speed_locked": speed_locked,
+                "speed_locked_reason": engine.clock.get("speed_locked_reason"),
+                "speed_resume_value": engine.clock.get("speed_resume_value"),
+                "running": bool(engine.clock.get("running")),
+                "elapsed_sec": round(float(engine.clock.get("elapsed_sec", 0)), 3),
+                "tick_thread_alive": bool(engine._thread and engine._thread.is_alive()),
+                "last_tick_error": engine.clock.get("last_tick_error"),
+            })
 
     @bp.route("/api/v1/sim/commands", methods=["POST"])
     def sim_command():
@@ -136,6 +145,20 @@ def register_sim_routes(bp: Any) -> None:
             if isinstance(data.get("authorization"), dict)
             else {}
         )
+        if command_type == "warn":
+            if not params.get("track_id"):
+                return err(400, "missing command parameters: track_id"), 400
+            result = get_engine().issue_warning_at_track(
+                str(params["track_id"]),
+                authorized=authorization.get("approved") is True,
+            )
+            if result.get("error"):
+                return err(409, str(result["error"])), 409
+            return ok({
+                "command_type": "warn",
+                "status": "executed",
+                "result": result,
+            })
         if command_type == "launch_follow_uav":
             required = ("track_id", "asset_id")
             missing = [name for name in required if not params.get(name)]

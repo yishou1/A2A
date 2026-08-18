@@ -60,6 +60,116 @@ def test_speed_switch_keeps_simulation_clock_advancing() -> None:
     assert after > before
 
 
+def test_authorization_wait_locks_speed_and_restores_previous_multiplier() -> None:
+    runtime = PlatformRuntime()
+    director = runtime.get_director()
+    engine = runtime.get_engine()
+    engine.set_speed(8)
+    engine.start()
+
+    director._enter_authorization_wait()
+
+    assert engine.clock["speed"] == 1
+    assert engine.clock["running"] is True
+    assert engine.clock["lifecycle"] == "running"
+    assert engine.clock["speed_locked_reason"] == "awaiting_authorization"
+    assert engine.clock["speed_resume_value"] == 8
+    operator_clock = engine.get_operator_state()["clock"]
+    assert operator_clock["speed"] == 1
+    assert operator_clock["speed_resume_value"] == 8
+    engine.set_speed(32)
+    director._enter_authorization_wait()
+    assert engine.clock["speed"] == 1
+    assert engine.clock["speed_resume_value"] == 8
+    engine.lock_speed_for_confirmation("awaiting_follow_confirmation")
+
+    director._leave_authorization_wait()
+
+    assert engine.clock["speed"] == 1
+    assert engine.clock["speed_locked_reason"] == "awaiting_follow_confirmation"
+    engine.unlock_speed_for_confirmation("awaiting_follow_confirmation")
+    assert engine.clock["speed"] == 8
+    assert "speed_locked_reason" not in engine.clock
+    assert "speed_resume_value" not in engine.clock
+    engine.stop()
+
+
+def test_speed_endpoint_cannot_override_authorization_lock() -> None:
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+    engine = get_engine()
+    engine.set_speed(16)
+    engine.lock_speed_for_confirmation("awaiting_authorization")
+    try:
+        result = client.post("/api/v1/sim/speed", json={"speed": 32}).get_json()["data"]
+        assert result["speed"] == 1
+        assert result["speed_locked"] is True
+        assert result["speed_resume_value"] == 16
+    finally:
+        engine.unlock_speed_for_confirmation("awaiting_authorization")
+
+
+def test_weapon_confirmation_keeps_clock_running_at_one_x(monkeypatch) -> None:
+    runtime = PlatformRuntime()
+    director = runtime.get_director()
+    director.configure(
+        scenario_id="maritime-convoy-air-defense",
+        mode="demonstration",
+        branch="standard",
+        seed=33031,
+    )
+    engine = runtime.get_engine()
+    engine.set_speed(8)
+    engine.pause()
+    monkeypatch.setattr(director, "_authorization_stage", lambda: "fire")
+    monkeypatch.setattr(
+        runtime,
+        "record_director_state",
+        lambda _state: director._auto_stop.set(),
+    )
+
+    director._auto_stop.clear()
+    director._auto_monitor()
+
+    assert director.state()["awaiting_authorization"] is True
+    assert engine.clock["speed"] == 1
+    assert engine.clock["running"] is True
+    assert engine.clock["lifecycle"] == "running"
+    assert engine.clock["authorization_stage"] == "fire"
+    director._leave_authorization_wait()
+    engine.stop()
+
+
+def test_maritime_warning_stage_opens_fire_gate_after_three_hundred_sim_seconds() -> None:
+    runtime = PlatformRuntime()
+    director = runtime.get_director()
+    director.configure(
+        scenario_id="maritime-convoy-air-defense",
+        mode="demonstration",
+        branch="standard",
+        seed=33031,
+    )
+    engine = runtime.get_engine()
+    engine.clock["elapsed_sec"] = 4560.0
+
+    assert director._authorization_stage() == "warning"
+
+    engine._engagement_warnings["TRK-TEST"] = {
+        "track_id": "TRK-TEST",
+        "status": "issued",
+        "issued_at_sec": 4560.0,
+        "fire_not_before_sec": 4860.0,
+        "delay_sec": 300.0,
+    }
+    assert director._authorization_stage() == "warning_wait"
+
+    engine.clock["elapsed_sec"] = 4859.999
+    assert director._authorization_stage() == "warning_wait"
+    engine.clock["elapsed_sec"] = 4860.0
+    assert director._authorization_stage() == "fire"
+
+
 def test_completed_simulation_cannot_be_started_or_resumed() -> None:
     runtime = PlatformRuntime()
     engine = runtime.get_engine()
@@ -128,6 +238,7 @@ def test_frontend_uses_dynamic_scenarios_without_future_route_renderer() -> None
     assert "scenario-1" not in html + controller + api_script
     assert "asset_routes" not in map_script
     assert "history_path" in map_script
+    assert "smoothTrailPoints" in map_script
     assert "历史航迹" in map_script
     assert "任务执行检查器" in html
     assert "/api/v1/a2a/backend/health" in api_script
@@ -143,6 +254,8 @@ def test_frontend_uses_dynamic_scenarios_without_future_route_renderer() -> None
     assert 'data-workspace-tab="evidence"' in html
     assert 'id="scenario-functional-agents"' in html
     assert 'id="functional-agent-count"' in html
+    assert 'id="agent-deployment-topology"' in html
+    assert 'id="agent-deployment-count"' in html
     assert 'id="backend-active-count"' in html
     assert 'id="backend-runnable-count"' in html
     assert 'id="backend-unavailable-count"' in html
@@ -192,6 +305,8 @@ def test_frontend_keeps_director_stream_and_interpolates_live_markers() -> None:
 
     assert "moveMarker" in map_script
     assert "durationMs = 450" in map_script
+    assert "_amosMotionUpdatedAt" in map_script
+    assert "updateCadence * 1.04" in map_script
     assert "directorOwnsLiveUpdates" in controller
     assert "!running && !directorOwnsLiveUpdates(currentDirectorState)" in controller
     assert "if (pollTimer || sseAbortController) return" in controller
@@ -201,6 +316,7 @@ def test_frontend_authorization_is_non_blocking_and_backend_driven() -> None:
     html = (ROOT / "templates/dashboard.html").read_text(encoding="utf-8")
     controller = (ROOT / "static/js/app/platform.js").read_text(encoding="utf-8")
     panels = (ROOT / "static/js/panels/platform-panels.js").read_text(encoding="utf-8")
+    map_script = (ROOT / "static/js/map/platform-map.js").read_text(encoding="utf-8")
     styles = (ROOT / "static/css/platform.css").read_text(encoding="utf-8")
 
     assert 'id="authorization-dialog"' in html
@@ -210,6 +326,16 @@ def test_frontend_authorization_is_non_blocking_and_backend_driven() -> None:
     assert "syncAuthorizationDialog" in controller
     assert 'status === "awaiting_authorization"' in controller
     assert "authorizationPromptKey" in controller
+    assert 'command_type: "warn"' in controller
+    assert 'mode: "warn"' in controller
+    assert "authorization_stage" in controller
+    assert 'if (stage !== "warning" && stage !== "fire") return;' in controller
+    assert "无线电警告确认" in controller
+    assert "目标未回应警告，是否授权实施武器打击？" in controller
+    assert "警告发出已满" not in controller
+    assert "warningDelaySeconds" in controller
+    assert "interactive: false" in map_script
+    assert "sensorCapabilityHtml" in map_script
     assert "amos:fire-track" not in controller + panels
     assert "data-fire-track-id" not in panels
     assert 'selectWorkspace("execution");' not in controller
@@ -242,6 +368,23 @@ def test_live_renderers_do_not_rebuild_unchanged_panels_or_map_layers() -> None:
     assert "preferCanvas: false" in map_script
     assert "_amosMotionTarget" in map_script
     assert "顺序流程容器" in workflow
+
+
+def test_story_animation_is_incremental_and_speed_ui_tracks_backend_state() -> None:
+    controller = (ROOT / "static/js/app/platform.js").read_text(encoding="utf-8")
+    styles = (ROOT / "static/css/platform.css").read_text(encoding="utf-8")
+
+    assert "syncStoryMedia" in controller
+    assert "syncStoryTimeline" in controller
+    assert "updateStoryHero" in controller
+    assert "scrollIntoView" in controller
+    assert "prefers-reduced-motion" in controller + styles
+    assert "speedRequestQueue" in controller
+    assert "syncSpeedFromClock" in controller
+    assert "Boolean(clock.speed_locked_reason)" in controller
+    assert "speed_resume_value" in controller
+    assert ".speed-group.speed-locked" in styles
+    assert ".leaflet-overlay-pane path.leaflet-interactive:focus{outline:none}" in styles
 
 
 def test_execution_workspace_inspects_current_run_workflows_and_real_activity_details() -> None:

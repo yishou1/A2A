@@ -12,11 +12,16 @@ from amos_platform.frontend_state.temporal_story import build_internal_story
 
 def load_scenario_into_engine(engine: Any, scenario: dict[str, Any], now_iso: Any) -> None:
     """Initialize engine state from an existing scenario dict."""
+    if engine._speed_before_lock is not None:
+        engine.clock["speed"] = engine._speed_before_lock
+    engine._speed_before_lock = None
+    engine._speed_lock_reasons.clear()
     engine.assets.clear()
     engine.threats.clear()
     engine.weapons.clear()
     engine.alerts.clear()
     engine.events.clear()
+    engine._engagement_warnings.clear()
     engine.tasks.clear()
     engine._scenario_task_schedule = [
         dict(task) for task in scenario.get("asset_task_schedule") or []
@@ -50,6 +55,11 @@ def load_scenario_into_engine(engine: Any, scenario: dict[str, Any], now_iso: An
         "director_mode",
         "scenario_branch",
         "director_checkpoint_id",
+        "director_status",
+        "director_analysis_status",
+        "speed_locked_reason",
+        "speed_locked_reasons",
+        "speed_resume_value",
         "roe_context",
     ):
         engine.clock.pop(run_scoped_key, None)

@@ -28,6 +28,27 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _parse_datetime(value: Any) -> datetime | None:
+    if not value:
+        return None
+    text = str(value)
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _duration_between_ms(started_at: Any, finished_at: Any) -> float | None:
+    started = _parse_datetime(started_at)
+    finished = _parse_datetime(finished_at)
+    if not started or not finished:
+        return None
+    duration = (finished - started).total_seconds() * 1000
+    return round(duration, 3) if duration > 0 else None
+
+
 def build_submission_snapshot(
     payload: dict[str, Any],
     *,
@@ -312,6 +333,11 @@ def _normalize_activities(status: dict[str, Any], work_payload: Any) -> list[dic
             merged["execution_mode"] = "local_agent"
         metrics = merged.get("metrics") if isinstance(merged.get("metrics"), dict) else {}
         instance_id = merged.get("instance_id") or merged.get("agent_instance_id")
+        started_at = merged.get("started_at") or metrics.get("started_at")
+        finished_at = merged.get("finished_at") or metrics.get("finished_at")
+        duration_ms = metrics.get("duration_ms")
+        if _positive_duration_ms(duration_ms) is None:
+            duration_ms = _duration_between_ms(started_at, finished_at)
         normalized.append({
             "index": len(normalized) + 1,
             "activity_id": merged.get("activity_id") or merged.get("activatity_id"),
@@ -323,7 +349,9 @@ def _normalize_activities(status: dict[str, Any], work_payload: Any) -> list[dic
             "status": str(merged.get("status") or "pending").lower(),
             "required_skills": list(merged.get("required_skills") or []),
             "error": merged.get("error"),
-            "duration_ms": metrics.get("duration_ms"),
+            "duration_ms": duration_ms,
+            "started_at": started_at,
+            "finished_at": finished_at,
             "execution_mode": _execution_mode(merged),
             "depends_on": [str(item) for item in merged.get("depends_on") or [] if item],
             "retry_count": metrics.get("retry_count"),
@@ -332,6 +360,47 @@ def _normalize_activities(status: dict[str, Any], work_payload: Any) -> list[dic
             "is_mock": bool(merged.get("is_mock") or metrics.get("is_mock")),
         })
     return normalized
+
+
+def _positive_duration_ms(value: Any) -> float | None:
+    try:
+        duration = float(value)
+    except (TypeError, ValueError):
+        return None
+    if duration <= 0:
+        return None
+    return duration
+
+
+def _apply_observed_activity_durations(
+    activities: list[dict[str, Any]],
+    algorithms: dict[str, Any],
+) -> None:
+    """Backfill activity timing from observed algorithm calls when Commander omits it."""
+    durations_by_activity: dict[str, float] = {}
+    for algorithm in algorithms.get("items") or []:
+        duration = _positive_duration_ms(algorithm.get("duration_ms"))
+        if duration is None:
+            continue
+        activity_refs = [
+            str(ref).removeprefix("activity:")
+            for ref in algorithm.get("evidence_refs") or []
+            if str(ref).startswith("activity:")
+        ]
+        for activity_ref in activity_refs:
+            durations_by_activity[activity_ref] = durations_by_activity.get(activity_ref, 0.0) + duration
+
+    for activity in activities:
+        if _positive_duration_ms(activity.get("duration_ms")) is not None:
+            continue
+        aliases = [
+            str(value)
+            for value in (activity.get("activity_id"), activity.get("work_item"))
+            if value
+        ]
+        observed = sum(durations_by_activity.get(alias, 0.0) for alias in aliases)
+        if observed > 0:
+            activity["duration_ms"] = round(observed, 3)
 
 
 def _scalar_facts(value: Any, *, depth: int = 0) -> list[dict[str, Any]]:
@@ -1566,6 +1635,7 @@ def build_workflow_view(
     submission_view = deepcopy(submission or {})
     agents = _build_agent_view(activities, trace_rows, submission_view)
     algorithms = _build_algorithm_view(status, work_list, trace, submission_view)
+    _apply_observed_activity_durations(activities, algorithms)
     function_points = _build_function_point_view(status, work_list, trace, submission_view)
     execution_graph = _build_execution_graph(activities, trace)
     metrics = _build_metrics(status, activities, trace)

@@ -300,6 +300,13 @@ class MediaCaptureRuntime:
             associations_by_observation[str(association["observation_id"])] = str(association.get("truth_id") or "")
         targets = {str(value) for value in plan.get("target_refs") or [] if value}
         config = _sensor_config(plan)
+        required_damage_state = str(config.get("required_damage_state") or "").strip().casefold()
+        if required_damage_state and any(
+            str((threats.get(truth_id) or {}).get("damage_state") or "").strip().casefold()
+            != required_damage_state
+            for truth_id in targets
+        ):
+            return None
         platform_position = _position(platform)
         heading = _number(platform.get("heading_deg", platform.get("heading")))
         if config.get("gimbal_azimuth_deg") is not None:

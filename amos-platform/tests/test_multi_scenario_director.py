@@ -51,6 +51,32 @@ def test_midterm_catalog_exposes_maritime_scenario_and_builders_keep_v2_contract
     assert declared_functions == {item["function_id"] for item in FUNCTION_POINT_CATALOG}
 
 
+def test_maritime_scenario_declares_agent_device_compute_mapping() -> None:
+    scenario = get_scenario("maritime-convoy-air-defense")
+    assert scenario is not None
+
+    devices = {row["device_id"]: row for row in scenario["physical_devices"]}
+    nodes = {row["node_id"]: row for row in scenario["compute_nodes"]}
+    deployments = scenario["agent_deployments"]
+
+    assert {"ESCORT-01", "UAV-CONFIRM-01", "ASCM-01"}.issubset(devices)
+    assert devices["ASCM-01"]["device_type"] == "anti_ship_missile"
+    assert nodes["ESCORT-01-COMPUTE"]["host_device_id"] == "ESCORT-01"
+    assert nodes["UAV-CONFIRM-01-COMPUTE"]["host_device_id"] == "UAV-CONFIRM-01"
+    assert nodes["ASCM-01-COMPUTE"]["host_device_id"] == "ASCM-01"
+
+    escort_agents = {
+        row["agent_id"]
+        for row in deployments
+        if row["compute_node_id"] == "ESCORT-01-COMPUTE"
+    }
+    assert {"A2", "A3", "A4", "A5", "A6"}.issubset(escort_agents)
+    assert any(
+        row["agent_id"] == "A6" and row["compute_node_id"] == "ASCM-01-COMPUTE"
+        for row in deployments
+    )
+
+
 def test_document_requirement_ids_and_coverage_tiers_are_not_conflated() -> None:
     scenarios = [get_scenario(scenario_id) for scenario_id in SCENARIO_IDS]
     models = {
@@ -294,10 +320,42 @@ def test_each_scenario_can_reach_all_unconditional_declared_checkpoints() -> Non
                 or "standard" in set(item.get("branch_ids") or [])
             )
         ]
-        reached = [
-            director.action("advance_checkpoint")["current_checkpoint"]["checkpoint_id"]
-            for _ in expected
-        ]
+        reached = []
+        for _ in expected:
+            checkpoint_id = director.action("advance_checkpoint")["current_checkpoint"]["checkpoint_id"]
+            reached.append(checkpoint_id)
+            if scenario_id == "maritime-convoy-air-defense" and checkpoint_id == "MAR-CP-PLAN":
+                engine = runtime.get_engine()
+                hostile = next(
+                    track for track in engine.sensor_fusion.tracks.values()
+                    if engine._truth_target_for_track(track) == "CONTACT-HOSTILE-01"
+                )
+                hostile.classification = "FAST_ATTACK_CRAFT"
+                hostile.threat_level = "HIGH"
+                hostile.kill_chain_phase = "TARGET"
+                hostile.agent_assessment = {
+                    "status": "confirmed",
+                    "label": "高风险",
+                    "source": "test checkpoint workflow",
+                }
+                engine._tick(1.0)
+                prompt = engine.get_operator_state()["follow_launch_prompt"]
+                authorized = engine.authorize_follow_asset(
+                    str(prompt["asset_id"]),
+                    str(prompt["track_id"]),
+                    authorized=True,
+                )
+                assert authorized["status"] == "authorized"
+                warning = engine.issue_warning_at_track(hostile.id, authorized=True)
+                assert warning["status"] == "issued"
+                engine._tick(float(warning["delay_sec"]))
+                launched = engine.fire_weapon_at_track(
+                    hostile.id,
+                    asset_id="ESCORT-01",
+                    weapon_name="舰载反舰导弹",
+                    authorized=True,
+                )
+                assert launched["status"] == "launched"
         assert reached == [item["checkpoint_id"] for item in expected]
 
 

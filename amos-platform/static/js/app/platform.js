@@ -38,6 +38,14 @@ window.Platform = (function () {
   var authorizationAssetId = null;
   var authorizationSubmitting = false;
   var authorizationPreviousFocus = null;
+  var storyHeroGeneration = 0;
+  var storyHeroTarget = null;
+  var activeStoryCueId = null;
+  var speedRequestQueue = Promise.resolve();
+  var speedRequestGeneration = 0;
+  var pendingSpeedRequests = 0;
+  var speedControlLocked = false;
+  var speedResumeValue = 1;
 
   function escapeHtml(value) {
     return String(value == null ? "" : value)
@@ -47,6 +55,160 @@ window.Platform = (function () {
 
   function setHtmlIfChanged(element, html) {
     if (element && element.innerHTML !== html) element.innerHTML = html;
+  }
+
+  function prefersReducedMotion() {
+    return window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  }
+
+  function updateStoryHero(hero, media) {
+    var source = media && mediaUri(media);
+    if (!source) {
+      storyHeroGeneration += 1;
+      storyHeroTarget = null;
+      hero.hidden = true;
+      hero.classList.remove("story-image-changing");
+      hero.removeAttribute("src");
+      return;
+    }
+    hero.hidden = false;
+    hero.alt = media.title || "当前观测资料";
+    if (storyHeroTarget === source) return;
+    storyHeroTarget = source;
+    var generation = ++storyHeroGeneration;
+    if (!hero.getAttribute("src") || prefersReducedMotion()) {
+      hero.setAttribute("src", source);
+      return;
+    }
+    var preload = new Image();
+    preload.onload = function () {
+      if (generation !== storyHeroGeneration) return;
+      hero.classList.add("story-image-changing");
+      window.setTimeout(function () {
+        if (generation !== storyHeroGeneration) return;
+        hero.setAttribute("src", source);
+        window.requestAnimationFrame(function () {
+          window.requestAnimationFrame(function () {
+            if (generation === storyHeroGeneration) hero.classList.remove("story-image-changing");
+          });
+        });
+      }, 140);
+    };
+    preload.onerror = function () {
+      if (generation === storyHeroGeneration) hero.setAttribute("src", source);
+    };
+    preload.src = source;
+  }
+
+  function syncStoryMedia(items, activeMediaId) {
+    var root = document.getElementById("story-media-strip");
+    if (!root) return;
+    var existing = {};
+    root.querySelectorAll("[data-story-media-id]").forEach(function (element) {
+      existing[element.dataset.storyMediaId] = element;
+    });
+    if (items.length) {
+      var empty = root.querySelector(".empty-state");
+      if (empty) empty.remove();
+    }
+    var retained = {};
+    items.forEach(function (item) {
+      var mediaId = String(item.media_id || "");
+      if (!mediaId) return;
+      retained[mediaId] = true;
+      var button = existing[mediaId];
+      if (!button) {
+        button = document.createElement("button");
+        button.type = "button";
+        button.className = "story-media-item available story-item-enter";
+        button.dataset.storyMediaId = mediaId;
+        button.innerHTML = '<img alt=""><span></span>';
+        button.addEventListener("animationend", function () {
+          button.classList.remove("story-item-enter");
+        }, {once: true});
+        root.appendChild(button);
+      }
+      var image = button.querySelector("img");
+      var source = sourceMetadata(item);
+      var uri = mediaUri(item);
+      if (image.getAttribute("src") !== uri) image.setAttribute("src", uri);
+      image.alt = item.title || mediaId;
+      var labels = {sar: "SAR", eo_ir: "EO / IR", ir: "IR", telemetry: "数据产品", radar: "RADAR"};
+      button.querySelector("span").textContent =
+        (labels[item.modality] || String(item.modality || "INPUT").toUpperCase()) +
+        " · " + formatSimTime(source.capturedAt);
+      button.classList.toggle("current", mediaId === String(activeMediaId || ""));
+      button.setAttribute("aria-pressed", mediaId === String(activeMediaId || "") ? "true" : "false");
+    });
+    Object.keys(existing).forEach(function (mediaId) {
+      if (!retained[mediaId]) existing[mediaId].remove();
+    });
+    if (!items.length) setHtmlIfChanged(root, '<div class="empty-state">暂无可用观测资料</div>');
+  }
+
+  function syncStoryTimeline(items, activeCue) {
+    var root = document.getElementById("story-timeline");
+    if (!root) return;
+    var nextActiveId = activeCue && String(activeCue.cue_id || "");
+    var existing = {};
+    root.querySelectorAll("[data-story-cue-id]").forEach(function (element) {
+      existing[element.dataset.storyCueId] = element;
+    });
+    if (items.length) {
+      var empty = root.querySelector(".empty-state");
+      if (empty) empty.remove();
+    }
+    var retained = {};
+    items.forEach(function (item) {
+      var cueId = String(item.cue_id || "");
+      if (!cueId) return;
+      retained[cueId] = true;
+      var cue = existing[cueId];
+      if (!cue) {
+        cue = document.createElement("div");
+        cue.className = "story-cue story-item-enter";
+        cue.dataset.storyCueId = cueId;
+        cue.innerHTML = '<span class="story-cue-time"></span><span class="story-cue-phase"></span>' +
+          '<span class="story-cue-body"><b></b></span>';
+        cue.addEventListener("animationend", function () {
+          cue.classList.remove("story-item-enter");
+        }, {once: true});
+        root.appendChild(cue);
+      }
+      cue.querySelector(".story-cue-time").textContent = formatSimTime(item.at_sec);
+      cue.querySelector(".story-cue-phase").textContent = item.phase || "—";
+      cue.querySelector(".story-cue-body b").textContent = item.title || "阶段";
+      cue.classList.toggle("active", cueId === nextActiveId);
+      cue.classList.toggle("reached", cueId !== nextActiveId);
+    });
+    Object.keys(existing).forEach(function (cueId) {
+      if (!retained[cueId]) existing[cueId].remove();
+    });
+    if (!items.length) setHtmlIfChanged(root, '<div class="empty-state">暂无已发生事件</div>');
+    if (nextActiveId && nextActiveId !== activeStoryCueId) {
+      var activeElement = existing[nextActiveId] || Array.from(
+        root.querySelectorAll("[data-story-cue-id]")
+      ).find(function (element) { return element.dataset.storyCueId === nextActiveId; });
+      if (activeElement) activeElement.scrollIntoView({
+        block: "nearest", behavior: prefersReducedMotion() ? "auto" : "smooth"
+      });
+    }
+    activeStoryCueId = nextActiveId;
+  }
+
+  function resetStoryAnimation() {
+    storyHeroGeneration += 1;
+    storyHeroTarget = null;
+    activeStoryCueId = null;
+    ["story-media-strip", "story-timeline"].forEach(function (id) {
+      var element = document.getElementById(id);
+      if (element) element.replaceChildren();
+    });
+    var hero = document.getElementById("story-hero-image");
+    if (hero) {
+      hero.classList.remove("story-image-changing");
+      hero.removeAttribute("src");
+    }
   }
 
   function errorMessage(error) {
@@ -222,10 +384,23 @@ window.Platform = (function () {
     var card = document.getElementById("scenario-story-card");
     var definition = story && story.timeline && story.timeline.length ? story : currentScenario;
     if (!card || !definition || !(definition.timeline || []).length) {
-      if (card) card.hidden = true;
+      if (card && !card.hidden) {
+        card.hidden = true;
+        resetStoryAnimation();
+      }
       return;
     }
+    var revealCard = card.hidden;
     card.hidden = false;
+    if (revealCard && !prefersReducedMotion()) {
+      card.classList.remove("story-card-enter");
+      window.requestAnimationFrame(function () {
+        card.classList.add("story-card-enter");
+        card.addEventListener("animationend", function () {
+          card.classList.remove("story-card-enter");
+        }, {once: true});
+      });
+    }
     latestStory = definition;
     if (state) latestState = state;
     var elapsed = Number(state && state.clock && state.clock.elapsed_sec || 0);
@@ -255,37 +430,9 @@ window.Platform = (function () {
     document.getElementById("story-track-count").textContent = state && (state.fused_tracks || []).length || 0;
 
 
-    var hero = document.getElementById("story-hero-image");
-    hero.hidden = !activeMedia;
-    if (activeMedia) {
-      var heroSource = mediaUri(activeMedia);
-      if (hero.getAttribute("src") !== heroSource) hero.setAttribute("src", heroSource);
-      hero.alt = activeMedia.title || "当前观测资料";
-    } else {
-      hero.removeAttribute("src");
-    }
-
-    var labels = {sar: "SAR", eo_ir: "EO / IR", ir: "IR", telemetry: "数据产品", radar: "RADAR"};
-    setHtmlIfChanged(document.getElementById("story-media-strip"), availableMedia.length
-      ? availableMedia.map(function (item) {
-        var source = sourceMetadata(item);
-        return '<button type="button" class="story-media-item available" data-story-media-id="' +
-          escapeHtml(item.media_id) + '"><img src="' + escapeHtml(mediaUri(item)) + '" alt="' +
-          escapeHtml(item.title || item.media_id) + '"><span>' +
-          escapeHtml(labels[item.modality] || String(item.modality || "INPUT").toUpperCase()) +
-          " · " + escapeHtml(formatSimTime(source.capturedAt)) + "</span></button>";
-      }).join("")
-      : '<div class="empty-state">暂无可用观测资料</div>');
-
-    setHtmlIfChanged(document.getElementById("story-timeline"), reached.length
-      ? reached.map(function (item) {
-        var active = cue && item.cue_id === cue.cue_id ? "active" : "reached";
-        return '<div class="story-cue ' + active + '"><span class="story-cue-time">' +
-          escapeHtml(formatSimTime(item.at_sec)) + '</span><span class="story-cue-phase">' +
-          escapeHtml(item.phase || "—") + '</span><span class="story-cue-body"><b>' +
-          escapeHtml(item.title || "阶段") + "</b></span></div>";
-      }).join("")
-      : '<div class="empty-state">暂无已发生事件</div>');
+    updateStoryHero(document.getElementById("story-hero-image"), activeMedia);
+    syncStoryMedia(availableMedia, currentMediaId);
+    syncStoryTimeline(reached, cue);
     renderStoryAnalysis(definition.agent_analysis || null);
   }
 
@@ -435,12 +582,26 @@ window.Platform = (function () {
     var startButton = document.getElementById("btn-start");
     var directorStatus = currentDirectorState && currentDirectorState.director_status;
     var directorBusy = ["auto_running", "awaiting_analysis", "awaiting_authorization"].indexOf(directorStatus) >= 0;
+    var clock = latestState && latestState.clock || {};
+    var speedLocked = speedControlLocked || Boolean(clock.speed_locked_reason) ||
+      directorStatus === "awaiting_authorization";
     startButton.disabled = running || directorBusy || !currentScenarioId;
     startButton.textContent = directorStatus === "awaiting_analysis" ? "等待分析" :
       (directorStatus === "awaiting_authorization" ? "等待授权" : (paused ? "继续" : "启动"));
     document.getElementById("btn-pause").disabled = !running;
     document.getElementById("btn-stop").disabled = !running && !directorBusy;
-    document.querySelectorAll(".speed-btn").forEach(function (button) { button.disabled = !running; });
+    document.querySelectorAll(".speed-btn").forEach(function (button) {
+      button.disabled = !running || speedLocked;
+    });
+    var speedGroup = document.querySelector(".speed-group");
+    if (speedGroup) {
+      speedGroup.classList.toggle("speed-locked", speedLocked);
+      speedGroup.setAttribute("aria-busy", pendingSpeedRequests > 0 ? "true" : "false");
+      speedGroup.title = speedLocked
+        ? "等待确认期间固定为 1×，确认完成后恢复 " +
+          Number(clock.speed_resume_value || speedResumeValue || 1) + "×"
+        : "仿真倍率";
+    }
   }
 
   async function startSim() {
@@ -489,13 +650,59 @@ window.Platform = (function () {
     updateButtons();
   }
 
-  async function setSpeed(multiplier) {
-    var response = await API.post("/api/v1/sim/speed", {speed: multiplier});
-    var applied = Number(response.data && response.data.speed || multiplier);
+  function renderSpeedControls(multiplier, locked, resumeValue) {
+    var applied = Number(multiplier || 1);
+    speedControlLocked = Boolean(locked);
+    speedResumeValue = Number(resumeValue || 1);
     document.querySelectorAll(".speed-btn").forEach(function (button) {
       button.classList.toggle("speed-active", Number(button.dataset.speed) === applied);
+      button.setAttribute("aria-pressed", Number(button.dataset.speed) === applied ? "true" : "false");
     });
-    return response.data;
+    var speedGroup = document.querySelector(".speed-group");
+    if (speedGroup) {
+      speedGroup.classList.toggle("speed-locked", Boolean(locked));
+      speedGroup.dataset.currentSpeed = String(applied);
+      if (locked) speedGroup.dataset.resumeSpeed = String(Number(resumeValue || 1));
+      else delete speedGroup.dataset.resumeSpeed;
+    }
+  }
+
+  function syncSpeedFromClock(clock) {
+    if (!clock) return;
+    var locked = Boolean(clock.speed_locked_reason);
+    if (!pendingSpeedRequests || locked) {
+      renderSpeedControls(clock.speed, locked, clock.speed_resume_value);
+    }
+  }
+
+  function setSpeed(multiplier) {
+    var requested = Number(multiplier);
+    if (!Number.isFinite(requested) || requested <= 0) {
+      return Promise.reject(new Error("无效的仿真倍率"));
+    }
+    var generation = ++speedRequestGeneration;
+    pendingSpeedRequests += 1;
+    updateButtons();
+    var request = speedRequestQueue.catch(function () {}).then(function () {
+      return API.post("/api/v1/sim/speed", {speed: requested});
+    }).then(function (response) {
+      var data = response.data || {};
+      if (generation === speedRequestGeneration || data.speed_locked) {
+        renderSpeedControls(
+          Number(data.speed == null ? requested : data.speed),
+          Boolean(data.speed_locked),
+          data.speed_resume_value
+        );
+      }
+      return data;
+    }).finally(function () {
+      pendingSpeedRequests = Math.max(0, pendingSpeedRequests - 1);
+      updateButtons();
+    });
+    // Serialize requests so rapid clicks always leave the backend at the last
+    // selected multiplier, regardless of network response ordering.
+    speedRequestQueue = request.catch(function () {});
+    return request;
   }
 
   function trackById(trackId) {
@@ -511,6 +718,13 @@ window.Platform = (function () {
       return track.engagement_eligible === true && assessment.status === "confirmed" &&
         !/FISHING|CIVILIAN|MERCHANT/.test(classification);
     }) || null;
+  }
+
+  function warningDelaySeconds() {
+    var warning = latestState && latestState.engagement_warning || {};
+    var policy = currentScenario && currentScenario.engagement_policy || {};
+    var delay = Number(warning.delay_sec || policy.warning_delay_sec || 300);
+    return Number.isFinite(delay) && delay > 0 ? Math.round(delay) : 300;
   }
 
   function closeAuthorizationDialog() {
@@ -576,19 +790,46 @@ window.Platform = (function () {
       var dialog = document.getElementById("authorization-dialog");
       if (
         dialog && !dialog.hidden && !authorizationSubmitting &&
-        authorizationMode === "fire"
+        authorizationMode !== "launch_follow_uav"
       ) closeAuthorizationDialog();
       return;
     }
+    var stage = directorState && directorState.authorization_stage;
+    // Never infer FIRE from a generic awaiting_authorization status. The live
+    // clock can arrive before the director poll and that race previously opened
+    // the wrong dialog (or replaced WARN before the operator could see it).
+    if (stage !== "warning" && stage !== "fire") return;
     var target = authorizationTarget();
     if (!target) return;
     var checkpoint = directorState.current_checkpoint || directorState.checkpoint_id || "ENGAGE";
     var checkpointId = typeof checkpoint === "object" ? checkpoint.checkpoint_id : checkpoint;
     var runId = directorState.run_id || latestState && latestState.clock && latestState.clock.run_id || "run";
-    var key = [runId, checkpointId || "ENGAGE", target.id || target.track_id].join(":");
+    var key = [runId, checkpointId || "ENGAGE", stage, target.id || target.track_id].join(":");
     if (key === authorizationPromptKey) return;
-    authorizationPromptKey = key;
-    showAuthorizationDialog(target.id || target.track_id);
+    if (stage === "warning") {
+      if (showAuthorizationDialog(target.id || target.track_id, {
+        mode: "warn",
+        title: "无线电警告确认",
+        phase: "警告",
+        message: "武装船已进入警戒海域，是否立即发出一次无线电警告？",
+        actionLabel: "警告内容",
+        actionValue: "立即停止航行并驶离警戒海域",
+        confirmText: "发出警告",
+        cancelText: "暂不处置"
+      })) authorizationPromptKey = key;
+      return;
+    }
+    var followsWarning = directorState.authorization_not_before_sec != null;
+    if (showAuthorizationDialog(target.id || target.track_id, followsWarning ? {
+      mode: "fire",
+      title: "武器打击确认",
+      phase: "打击",
+      message: "目标未回应警告，是否授权实施武器打击？",
+      actionLabel: "拟用武器",
+      actionValue: "舰载反舰导弹",
+      confirmText: "确认打击",
+      cancelText: "暂不打击"
+    } : {mode: "fire"})) authorizationPromptKey = key;
   }
 
   function followLaunchPrompt() {
@@ -608,12 +849,11 @@ window.Platform = (function () {
       ) closeAuthorizationDialog();
       return;
     }
-    if (dialog && !dialog.hidden && authorizationMode === "fire") return;
+    if (dialog && !dialog.hidden && authorizationMode !== "launch_follow_uav") return;
     var runId = latestState && latestState.clock && latestState.clock.run_id || "run";
     var key = [runId, prompt.task_id || "follow", prompt.asset_id, prompt.track_id].join(":");
     if (key === authorizationPromptKey) return;
-    authorizationPromptKey = key;
-    showAuthorizationDialog(prompt.track_id, {
+    if (showAuthorizationDialog(prompt.track_id, {
       mode: "launch_follow_uav",
       assetId: prompt.asset_id || "UAV-CONFIRM-01",
       title: "补充侦察无人机派出确认",
@@ -623,7 +863,7 @@ window.Platform = (function () {
       actionValue: prompt.asset_label || "补充侦察无人机",
       confirmText: "派出无人机",
       cancelText: "暂不派出"
-    });
+    })) authorizationPromptKey = key;
   }
 
   async function issueWeaponAttack(trackId) {
@@ -669,6 +909,48 @@ window.Platform = (function () {
     }
   }
 
+  async function issueTargetWarning(trackId) {
+    if (!trackId || authorizationSubmitting) return;
+    authorizationSubmitting = true;
+    var confirmButton = document.getElementById("authorization-confirm");
+    var cancelButton = document.getElementById("authorization-cancel");
+    if (confirmButton) {
+      confirmButton.disabled = true;
+      confirmButton.textContent = "警告下达中";
+    }
+    if (cancelButton) cancelButton.disabled = true;
+    try {
+      var response = await API.issueSimCommand({
+        command_type: "warn",
+        params: {track_id: trackId},
+        authorization: {approved: true, authority: "operator"},
+      });
+      var result = response.data && response.data.result || {};
+      var delay = Math.round(Number(result.delay_sec || warningDelaySeconds()));
+      document.getElementById("status-text").textContent =
+        "无线电警告已发出；继续观察 " + delay +
+        " 个仿真秒，届时将弹出武器打击确认";
+      authorizationSubmitting = false;
+      if (cancelButton) cancelButton.disabled = false;
+      closeAuthorizationDialog();
+      onState(await API.loadSimState());
+    } catch (error) {
+      document.getElementById("status-text").textContent = "警告命令被拒绝：" + errorMessage(error);
+      var errorElement = document.getElementById("authorization-error");
+      if (errorElement) {
+        errorElement.textContent = "后端拒绝命令：" + errorMessage(error);
+        errorElement.hidden = false;
+      }
+    } finally {
+      authorizationSubmitting = false;
+      if (confirmButton) {
+        confirmButton.disabled = false;
+        confirmButton.textContent = "确认警告";
+      }
+      if (cancelButton) cancelButton.disabled = false;
+    }
+  }
+
   function onState(state) {
     if (
       !state || !state.clock ||
@@ -700,12 +982,24 @@ window.Platform = (function () {
       }
     }
     latestState = state;
+    var clock = state.clock || {};
+    if (currentDirectorState && clock.director_status) {
+      currentDirectorState = Object.assign({}, currentDirectorState, {
+        director_status: clock.director_status,
+        status: clock.director_status,
+        awaiting_authorization: clock.director_status === "awaiting_authorization",
+        authorization_stage: Object.prototype.hasOwnProperty.call(clock, "authorization_stage")
+          ? clock.authorization_stage : currentDirectorState.authorization_stage,
+        authorization_not_before_sec: Object.prototype.hasOwnProperty.call(clock, "authorization_not_before_sec")
+          ? clock.authorization_not_before_sec : currentDirectorState.authorization_not_before_sec,
+      });
+    }
     Panels.updateAll(state);
     Panels.updateWorkspace(state, currentScenario);
     Map.updateLiveState(state.assets || [], state.weapons || [], state.fused_tracks || []);
     renderStory(state.scenario_story, state);
     refreshEvidenceProducts(state);
-    var clock = state.clock || {};
+    syncSpeedFromClock(clock);
     updateReportControls(clock.run_id);
     running = Boolean(clock.running);
     var lifecycle = clock.lifecycle || (running ? "running" : "ready");
@@ -720,14 +1014,17 @@ window.Platform = (function () {
       running: "运行中", completed: "完成", paused: "暂停", stopped: "停止",
       error: "异常", ready: "就绪", empty: "就绪",
     })[lifecycle] || "就绪";
-    if (directorStatus === "awaiting_analysis") {
+    if (directorStatus === "awaiting_authorization") {
+      statusText = "等待操作员授权，仿真以 1× 继续运行";
+      modeText = "待授权";
+    } else if (clock.speed_locked_reason === "awaiting_follow_confirmation") {
+      statusText = "等待无人机派遣确认，仿真以 1× 继续运行";
+      modeText = "待确认";
+    } else if (directorStatus === "awaiting_analysis") {
       statusText = running
         ? "后端分析中，本阶段仿真继续"
         : "后端分析中，仿真保持在阶段边界";
       modeText = "分析中";
-    } else if (directorStatus === "awaiting_authorization") {
-      statusText = "等待操作员授权，仿真保持在 ENGAGE 入口";
-      modeText = "待授权";
     }
     document.getElementById("status-text").textContent = statusText;
     document.getElementById("mode-tag").textContent = modeText;
@@ -1007,12 +1304,11 @@ window.Platform = (function () {
     document.getElementById("authorization-confirm").addEventListener("click", function () {
       if (authorizationMode === "launch_follow_uav") {
         issueFollowUavLaunch(authorizationTrackId, authorizationAssetId);
+      } else if (authorizationMode === "warn") {
+        issueTargetWarning(authorizationTrackId);
       } else {
         issueWeaponAttack(authorizationTrackId);
       }
-    });
-    document.getElementById("authorization-dialog").addEventListener("click", function (event) {
-      if (event.target === this) closeAuthorizationDialog();
     });
     document.addEventListener("keydown", function (event) {
       if (event.key === "Escape" && document.getElementById("knowledge-graph-dialog").classList.contains("open")) {

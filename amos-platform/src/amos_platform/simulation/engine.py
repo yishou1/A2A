@@ -105,6 +105,9 @@ class SimEngine:
         self._lock = threading.RLock()
         self._tick_interval = 0.5  # seconds wall clock
         self._director_motion_limit_sec: float | None = None
+        self._speed_lock_reasons: set[str] = set()
+        self._speed_before_lock: float | None = None
+        self._engagement_warnings: dict[str, dict] = {}
         self.lifecycle_callback = None
 
     def _notify_lifecycle(self) -> None:
@@ -210,6 +213,8 @@ class SimEngine:
         if multiplier not in valid:
             multiplier = min(valid, key=lambda x: abs(x - multiplier))
         with self._lock:
+            if self._speed_lock_reasons:
+                multiplier = 1
             old = self.clock["speed"]
             self.clock["speed"] = multiplier
             if self.clock.get("running") and not (self._thread and self._thread.is_alive()):
@@ -220,6 +225,41 @@ class SimEngine:
             "msg": f"仿真速度: {old}x → {multiplier}x",
             "time": _now_iso(),
         })
+
+    def lock_speed_for_confirmation(self, reason: str) -> None:
+        """Hold playback at 1x until the named operator confirmation completes."""
+        reason = str(reason or "awaiting_confirmation")
+        with self._lock:
+            if reason in self._speed_lock_reasons:
+                return
+            if not self._speed_lock_reasons:
+                self._speed_before_lock = float(self.clock.get("speed", 1) or 1)
+            self._speed_lock_reasons.add(reason)
+            self.clock["speed_locked_reason"] = reason
+            self.clock["speed_locked_reasons"] = sorted(self._speed_lock_reasons)
+            self.clock["speed_resume_value"] = self._speed_before_lock
+            if float(self.clock.get("speed", 1) or 1) != 1:
+                self.set_speed(1)
+
+    def unlock_speed_for_confirmation(self, reason: str, *, restore: bool = True) -> None:
+        """Release one confirmation lock and restore speed after the final lock."""
+        reason = str(reason or "awaiting_confirmation")
+        with self._lock:
+            self._speed_lock_reasons.discard(reason)
+            if self._speed_lock_reasons:
+                self.clock["speed_locked_reason"] = sorted(self._speed_lock_reasons)[0]
+                self.clock["speed_locked_reasons"] = sorted(self._speed_lock_reasons)
+                return
+            resume_speed = self._speed_before_lock
+            self._speed_before_lock = None
+            self.clock.pop("speed_locked_reason", None)
+            self.clock.pop("speed_locked_reasons", None)
+            self.clock.pop("speed_resume_value", None)
+            if (
+                restore and resume_speed is not None
+                and float(self.clock.get("speed", 1) or 1) != resume_speed
+            ):
+                self.set_speed(resume_speed)
 
     def step(self, dt: float = 1.0) -> float:
         """Advance by one explicit simulation step while remaining paused."""
@@ -774,11 +814,21 @@ class SimEngine:
                 continue
             asset = self.assets[asset_id]
             if asset.get("status") not in {"active", "operational", "holding", "staged"}:
+                asset["_follow_pending_prompt"] = None
                 continue
             start_sec = float(task.get("start_sec", 0) or 0)
             end_raw = task.get("end_sec")
             if elapsed < start_sec or (end_raw is not None and elapsed >= float(end_raw)):
+                asset["_follow_pending_prompt"] = None
                 continue
+            pending_return_track_id = str(asset.get("_follow_return_pending_track_id") or "")
+            return_not_before = asset.get("_follow_return_not_before_sec")
+            if (
+                pending_return_track_id
+                and return_not_before is not None
+                and elapsed >= float(return_not_before)
+            ):
+                self._return_follow_assets_after_strike(pending_return_track_id)
             if asset.get("_follow_returning_home"):
                 self._update_follow_return_home(asset, task)
                 continue
@@ -816,14 +866,48 @@ class SimEngine:
             waypoint = {"lat": target_lat, "lng": target_lng, "label": "FOLLOW"}
             if standoff_nm > 0:
                 apos = asset.get("position", asset)
-                bearing = _bearing_deg(
-                    target_lat,
-                    target_lng,
-                    float(apos.get("lat", 0)),
-                    float(apos.get("lng", 0)),
-                )
-                lat, lng = _advance_position(target_lat, target_lng, bearing, standoff_nm)
+                target_heading = target.get("heading")
+                if target_heading is None:
+                    velocity = target.get("velocity") or {}
+                    north = float(velocity.get("lat", 0) or 0)
+                    east = float(velocity.get("lng", 0) or 0) * math.cos(math.radians(target_lat))
+                    if abs(north) + abs(east) > 1e-9:
+                        target_heading = (math.degrees(math.atan2(east, north)) + 360.0) % 360.0
+                if target_heading is not None:
+                    # Keep a stable trail position behind the contact. Using
+                    # target->UAV as the offset bearing makes the waypoint flip
+                    # by 180 degrees whenever the faster UAV crosses it.
+                    desired_bearing = (float(target_heading) + 180.0) % 360.0
+                else:
+                    desired_bearing = float(asset.get("_follow_station_bearing", _bearing_deg(
+                        target_lat,
+                        target_lng,
+                        float(apos.get("lat", 0)),
+                        float(apos.get("lng", 0)),
+                    )))
+                previous_bearing = asset.get("_follow_station_bearing")
+                last_guidance_time = asset.get("_follow_guidance_sim_time")
+                if previous_bearing is not None and last_guidance_time is not None:
+                    guidance_dt = max(0.0, elapsed - float(last_guidance_time))
+                    slew_rate = float(task.get("station_bearing_slew_dps", 0.35) or 0.35)
+                    desired_bearing = _turn_toward(
+                        float(previous_bearing), desired_bearing,
+                        min(30.0, max(1.0, slew_rate * guidance_dt)),
+                    )
+                asset["_follow_station_bearing"] = desired_bearing
+                asset["_follow_guidance_sim_time"] = elapsed
+                lat, lng = _advance_position(target_lat, target_lng, desired_bearing, standoff_nm)
                 waypoint = {"lat": lat, "lng": lng, "label": "FOLLOW"}
+                distance_to_station = self.waypoint_nav._haversine(
+                    float(apos.get("lat", 0)), float(apos.get("lng", 0)), lat, lng,
+                )
+                target_speed = self._estimated_track_speed_kts(target)
+                if target_speed <= 0:
+                    target_speed = float(task.get("fallback_target_speed_kts", 30.0) or 30.0)
+                cruise_speed = float(asset.get("_cruise_speed_kts", asset.get("speed_kts", 0)) or 0)
+                closure_gain = float(task.get("closure_gain_kts_per_nm", 12.0) or 12.0)
+                commanded_speed = target_speed + distance_to_station * closure_gain
+                asset["speed_kts"] = round(max(1.0, min(cruise_speed, commanded_speed)), 1)
             self.waypoint_nav.set_route(asset_id, [waypoint], mode="hold")
             asset["_follow_track_id"] = target_id
             asset["_follow_task_id"] = task.get("task_id")
@@ -838,6 +922,42 @@ class SimEngine:
                     "sim_time": round(elapsed, 2),
                     "timestamp": time.time(),
                 })
+
+        follow_confirmation_pending = any(
+            isinstance(asset.get("_follow_pending_prompt"), dict)
+            for asset in self.assets.values()
+        )
+        if follow_confirmation_pending:
+            self.lock_speed_for_confirmation("awaiting_follow_confirmation")
+        else:
+            self.unlock_speed_for_confirmation("awaiting_follow_confirmation")
+
+    @staticmethod
+    def _estimated_track_speed_kts(track: dict) -> float:
+        """Estimate public-track ground speed without consulting hidden truth."""
+        lat = float(track.get("lat", 0) or 0)
+        velocity = track.get("velocity") if isinstance(track.get("velocity"), dict) else {}
+        north_nmps = float(velocity.get("lat", 0) or 0) * 60.0
+        east_nmps = float(velocity.get("lng", 0) or 0) * 60.0 * math.cos(math.radians(lat))
+        speed_kts = math.hypot(north_nmps, east_nmps) * 3600.0
+        if 0.5 <= speed_kts <= 2000.0:
+            return speed_kts
+
+        history = [
+            point for point in track.get("history_path") or []
+            if isinstance(point, dict) and point.get("sim_time") is not None
+        ]
+        if len(history) < 2:
+            return 0.0
+        previous, current = history[-2], history[-1]
+        dt = float(current["sim_time"]) - float(previous["sim_time"])
+        if dt <= 0:
+            return 0.0
+        distance_nm = WaypointNav._haversine(
+            float(previous.get("lat", 0)), float(previous.get("lng", 0)),
+            float(current.get("lat", 0)), float(current.get("lng", 0)),
+        )
+        return distance_nm / dt * 3600.0
 
     def _follow_task_candidates(self, task: dict, asset: dict) -> list[dict]:
         required_levels = {
@@ -895,9 +1015,18 @@ class SimEngine:
                 continue
             if not task.get("return_to_launch_after_strike", True):
                 continue
+            return_after_sec = task.get("return_after_sec")
+            elapsed = float(self.clock.get("elapsed_sec", 0) or 0)
+            if return_after_sec is not None and elapsed < float(return_after_sec):
+                asset["_follow_return_pending_track_id"] = target_track_id
+                asset["_follow_return_not_before_sec"] = float(return_after_sec)
+                asset["_operator_follow_visible"] = True
+                continue
             retired = asset.setdefault("_follow_retired_track_ids", [])
             if target_track_id not in retired:
                 retired.append(target_track_id)
+            asset["_follow_return_pending_track_id"] = None
+            asset["_follow_return_not_before_sec"] = None
             asset["_follow_returning_home"] = True
             asset["_follow_track_id"] = None
             asset["_follow_target"] = None
@@ -929,6 +1058,10 @@ class SimEngine:
             asset["_follow_launch_origin_applied"] = False
             asset["_follow_launch_authorized_track_id"] = None
             asset["_follow_pending_prompt"] = None
+            asset["_follow_station_bearing"] = None
+            asset["_follow_guidance_sim_time"] = None
+            asset["_follow_return_pending_track_id"] = None
+            asset["_follow_return_not_before_sec"] = None
             self.waypoint_nav.clear(str(asset.get("id") or ""))
             return
         asset["status"] = asset.get("_configured_status", "active")
@@ -1049,6 +1182,9 @@ class SimEngine:
         prompts = self._operator_follow_launch_prompts(state.get("fused_tracks") or [])
         state["follow_launch_prompts"] = prompts
         state["follow_launch_prompt"] = prompts[0] if prompts else None
+        warnings = [dict(value) for value in self._engagement_warnings.values()]
+        state["engagement_warnings"] = warnings
+        state["engagement_warning"] = warnings[-1] if warnings else None
         return state
 
     def get_agent_visible_state(self) -> dict:
@@ -1319,6 +1455,16 @@ class SimEngine:
             )
             if not eligibility.get("eligible"):
                 return {"error": eligibility.get("reason", "目标不满足交战条件")}
+            policy = self._engagement_policy or {}
+            if policy.get("requires_prior_warning"):
+                warning = self._engagement_warnings.get(track_id)
+                if not warning:
+                    return {"error": "必须先向目标发出警告"}
+                not_before = float(warning.get("fire_not_before_sec", 0) or 0)
+                elapsed = float(self.clock.get("elapsed_sec", 0) or 0)
+                if elapsed < not_before:
+                    remaining = max(1, int(math.ceil(not_before - elapsed)))
+                    return {"error": f"警告观察期尚未结束，还需等待 {remaining} 个仿真秒"}
             result = self.fire_weapon(
                 asset_id,
                 str(eligibility["_truth_target_id"]),
@@ -1350,6 +1496,62 @@ class SimEngine:
                 }.items()
                 if key != "threat_id"
             }
+
+    def issue_warning_at_track(self, track_id: str, *, authorized: bool) -> dict:
+        """Record one operator-authorized warning before the fire gate opens."""
+        if not authorized:
+            return {"error": "警告命令缺少操作员明确授权"}
+        with self._lock:
+            policy = self._engagement_policy or {}
+            asset_ids = list(policy.get("authorized_asset_ids") or [])
+            weapon_names = list(policy.get("authorized_weapons") or [])
+            if not asset_ids or not weapon_names:
+                return {"error": "当前剧本未配置警告目标校验规则"}
+            eligibility = self.engagement_eligibility(
+                track_id,
+                asset_id=str(asset_ids[0]),
+                weapon_name=str(weapon_names[0]),
+            )
+            if not eligibility.get("eligible"):
+                return {"error": eligibility.get("reason", "目标不满足警告条件")}
+            existing = self._engagement_warnings.get(track_id)
+            if existing:
+                return dict(existing)
+            issued_at = float(self.clock.get("elapsed_sec", 0) or 0)
+            delay = max(0.0, float(policy.get("warning_delay_sec", 300) or 300))
+            warning = {
+                "track_id": track_id,
+                "status": "issued",
+                "issued_at_sec": round(issued_at, 3),
+                "fire_not_before_sec": round(issued_at + delay, 3),
+                "delay_sec": delay,
+                "authorization": "operator_confirmed",
+            }
+            track = self.sensor_fusion.tracks.get(track_id)
+            if track is not None:
+                # Keep the already-confirmed track available while the operator
+                # reads and answers the second dialog; this does not fabricate
+                # a new sensor observation or alter its last-observed time.
+                track.retain_until_sim_time = float(warning["fire_not_before_sec"]) + 300.0
+            self._engagement_warnings[track_id] = warning
+            self.events.append({
+                "type": "target_warning_issued",
+                "command_source": "operator",
+                **warning,
+                "timestamp": time.time(),
+            })
+            target_label, _ = self._operator_contact_for_threat(
+                str(eligibility["_truth_target_id"])
+            )
+            self.alerts.append({
+                "level": "WARNING",
+                "msg": (
+                    f"已向“{target_label}”发出无线电警告，"
+                    f"继续观察 {int(delay)} 个仿真秒"
+                ),
+                "time": _now_iso(),
+            })
+            return dict(warning)
 
     def fire_weapon(self, asset_id: str, threat_id: str,
                     weapon_name: str) -> dict:

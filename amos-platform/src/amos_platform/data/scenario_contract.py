@@ -256,6 +256,38 @@ def validate_scenario_definition(scenario: dict[str, Any]) -> list[str]:
     if any(item.get("role") == "commander" for item in functional_agent_rows):
         issues.append(f"{scenario_id}: Commander is an orchestrator, not a functional Agent")
 
+    physical_devices = [item for item in scenario.get("physical_devices") or [] if isinstance(item, dict)]
+    compute_nodes = [item for item in scenario.get("compute_nodes") or [] if isinstance(item, dict)]
+    agent_deployments = [item for item in scenario.get("agent_deployments") or [] if isinstance(item, dict)]
+    device_ids = [_identifier(item, "device_id") for item in physical_devices]
+    compute_node_ids = [_identifier(item, "node_id") for item in compute_nodes]
+    deployment_ids = [_identifier(item, "deployment_id") for item in agent_deployments]
+    if physical_devices or compute_nodes or agent_deployments:
+        if any(not value for value in device_ids) or len(set(device_ids)) != len(device_ids):
+            issues.append(f"{scenario_id}: physical device identifiers must be present and unique")
+        if any(not value for value in compute_node_ids) or len(set(compute_node_ids)) != len(compute_node_ids):
+            issues.append(f"{scenario_id}: compute node identifiers must be present and unique")
+        if any(not value for value in deployment_ids) or len(set(deployment_ids)) != len(deployment_ids):
+            issues.append(f"{scenario_id}: agent deployment identifiers must be present and unique")
+        unknown_compute_hosts = {
+            str(item.get("host_device_id") or "")
+            for item in compute_nodes
+        } - set(device_ids)
+        if unknown_compute_hosts:
+            issues.append(f"{scenario_id}: compute_nodes reference unknown devices {sorted(unknown_compute_hosts)}")
+        unknown_deployment_agents = {
+            str(item.get("agent_id") or "")
+            for item in agent_deployments
+        } - set(functional_agent_ids)
+        if unknown_deployment_agents:
+            issues.append(f"{scenario_id}: agent_deployments reference unknown agents {sorted(unknown_deployment_agents)}")
+        unknown_deployment_nodes = {
+            str(item.get("compute_node_id") or "")
+            for item in agent_deployments
+        } - set(compute_node_ids)
+        if unknown_deployment_nodes:
+            issues.append(f"{scenario_id}: agent_deployments reference unknown compute nodes {sorted(unknown_deployment_nodes)}")
+
     algorithm_coverage = [item for item in scenario.get("algorithm_coverage") or [] if isinstance(item, dict)]
     algorithm_ids = [_identifier(item, "algorithm_id") for item in algorithm_coverage]
     catalog_algorithm_ids = {str(item["algorithm_id"]) for item in MODEL_CATALOG}

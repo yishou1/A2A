@@ -37,7 +37,7 @@ class FusedTrack:
         "domain_hint",
         "history_path",
         "heading_deg", "agent_assessment", "motion_sim_time",
-        "created_sim_time", "last_sim_time",
+        "created_sim_time", "last_sim_time", "retain_until_sim_time",
     )
 
     def __init__(self, track_id: str, lat: float, lng: float, source_id: str,
@@ -82,6 +82,7 @@ class FusedTrack:
         self.motion_sim_time = sim_time
         self.created_sim_time = float(sim_time or 0.0)
         self.last_sim_time = float(sim_time or 0.0)
+        self.retain_until_sim_time = 0.0
 
     def update(self, lat: float, lng: float, source_id: str,
                classification: str | None = None, threat_level: str | None = None,
@@ -197,7 +198,10 @@ class FusedTrack:
         return (time.time() - self.last_update) < 60
 
     def is_active_at(self, sim_time: float, timeout_sec: float = 60.0) -> bool:
-        return float(sim_time) - self.last_sim_time < timeout_sec
+        return (
+            float(sim_time) <= self.retain_until_sim_time
+            or float(sim_time) - self.last_sim_time < timeout_sec
+        )
 
     def to_dict(self, *, current_sim_time: float | None = None) -> dict:
         return {
