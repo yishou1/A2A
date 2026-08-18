@@ -2,7 +2,7 @@ algorithm_id: marl_ppo_task_scheduler
 version: 1.0.0
 display_name: MARL-PPO Task Scheduler
 backend_type: python_http_service
-status: draft
+status: validated
 
 task_family: planning
 modalities:
@@ -16,9 +16,14 @@ capabilities:
   - reattack_planning
   - marl_ppo
 
+operational_functions:
+  - {function_id: KC-26, function_code: task_re_attack, function_name: Task Re-Attack, role: primary, coverage_level: full}
+  - {function_id: KC-22, function_code: issue_order, function_name: Issue Order, role: supporting, coverage_level: partial}
+
 agent_card:
   summary: >
-    MARL-PPO Task Scheduler from the TIA tactical intelligence agent pipeline.
+    Trained parameter-shared MARL-PPO Actor-Critic scheduler with valid-action
+    masking for sensor coverage and strike/reattack allocation.
   when_to_use:
     - Tracks and battlefield context are available for sensor coverage and reattack allocation.
     - TIA perception pipeline has produced tracks and verified detections.
@@ -49,35 +54,35 @@ constraints:
 performance:
   latency_ms_p50: 50
   latency_ms_p95: 500
-  primary_metric: schedule_coverage
-  primary_score: 0.82
+  primary_metric: synthetic_holdout_high_threat_coverage
+  primary_score: 0.70651
 
 resource_requirements:
-  min_cpu_cores: 2
-  recommended_cpu_cores: 4
-  min_memory_mb: 4096
-  recommended_memory_mb: 8192
+  min_cpu_cores: 1
+  recommended_cpu_cores: 2
+  min_memory_mb: 256
+  recommended_memory_mb: 512
   min_gpu_count: 0
   gpu_type: optional
   min_vram_mb: 0
-  recommended_vram_mb: 8192
-  disk_mb: 4096
+  recommended_vram_mb: 0
+  disk_mb: 10
 
 model_profile:
-  # MARLPPOSchedulerNet (obs_dim=102, n_actions=9, hidden=128):
-  # encoder L1: Linear(102->128)+bias = 13056+128=13184
-  # encoder L2: Linear(128->128)+bias = 16384+128=16512
-  # actor: Linear(128->9)+bias = 1152+9=1161
-  # critic L1: Linear(128->64)+bias = 8192+64=8256
-  # critic L2: Linear(64->1)+bias = 64+1=65
-  # Total: 39178 (~39K)
-  parameter_count: 39178
-  parameter_count_text: 39K (MARLPPOSchedulerNet obs_dim=102 hidden=128)
-  flops: 78000
-  flops_text: ~78 KFLOPs per agent observation (encoder+actor+critic)
-  flops_input_shape: [1, 102]
+  # Small profile: obs_dim=104, n_actions=9, hidden=128.
+  parameter_count: 39434
+  parameter_count_text: 39.4K_small_profile
+  flops: 78208
+  flops_text: ~78.2 KFLOPs per agent observation (encoder+actor+critic)
+  flops_input_shape: [1, 104]
   model_size_mb: 1
   precision: fp32
+
+provenance:
+  model_artifact_ref: ../../../models/checkpoints/marl_ppo_scheduler_s.safetensors
+  model_metadata_ref: ../../../models/checkpoints/marl_ppo_scheduler_s.metadata.json
+  training_script_ref: ../../../scripts/train_marl_ppo_scheduler.py
+  dataset_ref: ../../../data/marl_ppo/reference_holdout.json
 
 safety:
   risk_level: medium

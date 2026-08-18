@@ -17,6 +17,9 @@ capabilities:
   - logistic_risk_calibration
   - synapserag_rule_evidence
 
+operational_functions:
+  - {function_id: KC-21, function_code: verify_rules_of_engagement, function_name: Verify Rules of Engagement (ROE), role: primary, coverage_level: full}
+
 agent_card:
   summary: >
     Compliance core with authoritative rule matching, SynapseRAG evidence, and ONNX calibration.
@@ -34,9 +37,9 @@ machine_spec:
   output_schema_ref: output.schema.json
   runtime:
     backend_type: python_http_service
-    endpoint: http://127.0.0.1:9041/predict
-    health_endpoint: http://127.0.0.1:9041/health
-    metadata_endpoint: http://127.0.0.1:9041/metadata
+    endpoint: http://127.0.0.1:9037/predict
+    health_endpoint: http://127.0.0.1:9037/health
+    metadata_endpoint: http://127.0.0.1:9037/metadata
     timeout_ms: 65000
 
 constraints:

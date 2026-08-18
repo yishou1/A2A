@@ -1,0 +1,106 @@
+{
+  "model_id": "conditional_tabular_gan_onnx",
+  "model_version": "1.0.0",
+  "model_family": "onnx_conditional_tabular_generator",
+  "format": "onnx",
+  "artifact_path": "examples/conditional_tabular_gan_onnx/1.0.0/model.onnx",
+  "artifact_sha256": "d5b80c0029a14fa21eadb171a9d230145a7f2d7feda2fd4251557b9cd21c0199",
+  "export_script": "scripts/export_policy_generative_onnx_models.py",
+  "export_script_sha256": "f8e75a83d37c0174044d4c1d848e19af4a29265e74d599c3d66e669c5564d100",
+  "source_model": "models/conditional_tabular_gan_generator.pt",
+  "source_model_sha256": "d512ed46885a8d56fcbd682b8a997556d31994711b258cfc6c64208190f9eb47",
+  "source_metadata": "models/conditional_tabular_gan.metadata.json",
+  "source_metadata_sha256": "480428f51847814bdc05c1464e3a1b45dd932d587289ac62229be54be1b50ef9",
+  "precision": "float32",
+  "opset": 17,
+  "equivalence": {
+    "reference": "source PyTorch artifact in evaluation mode",
+    "compared_outputs": [
+      "generated_features"
+    ],
+    "maximum_absolute_difference": 1.1920928955078125e-07
+  },
+  "runtime_versions": {
+    "numpy": "2.2.6",
+    "onnx": "1.21.0",
+    "onnxruntime": "1.23.2",
+    "torch": "2.12.0+cpu"
+  },
+  "noise_dimension": 8,
+  "condition_order": [
+    "benign",
+    "surveillance",
+    "hostile"
+  ],
+  "feature_order": [
+    "radar_activity",
+    "communication_intensity",
+    "movement_consistency",
+    "weapon_signature",
+    "proximity_score"
+  ],
+  "parameter_count": 1605,
+  "source_evaluation": {
+    "metric": "class_conditional_feature_mean_absolute_error",
+    "generated_samples_per_class": 512,
+    "overall_mean_absolute_error": 0.056212,
+    "per_class": {
+      "benign": {
+        "real_feature_means": [
+          0.222797,
+          0.30433,
+          0.760019,
+          0.164759,
+          0.286352
+        ],
+        "generated_feature_means": [
+          0.221883,
+          0.432367,
+          0.90555,
+          0.145826,
+          0.335449
+        ],
+        "mean_absolute_error": 0.068502
+      },
+      "surveillance": {
+        "real_feature_means": [
+          0.653204,
+          0.555592,
+          0.650454,
+          0.322966,
+          0.55259
+        ],
+        "generated_feature_means": [
+          0.631655,
+          0.576843,
+          0.82063,
+          0.319633,
+          0.565814
+        ],
+        "mean_absolute_error": 0.045906
+      },
+      "hostile": {
+        "real_feature_means": [
+          0.787774,
+          0.724991,
+          0.453953,
+          0.800586,
+          0.754553
+        ],
+        "generated_feature_means": [
+          0.715811,
+          0.706447,
+          0.54228,
+          0.842419,
+          0.805025
+        ],
+        "mean_absolute_error": 0.054228
+      }
+    }
+  },
+  "limitations": [
+    "The caller supplies noise and one-hot conditions; seed and temperature handling remain in the full Python service.",
+    "Outputs are synthetic development data and must not be represented as real sensor observations.",
+    "Synthetic reference observations only; generated output must not be represented as real sensor data."
+  ]
+}

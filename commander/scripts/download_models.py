@@ -18,12 +18,15 @@ def bootstrap_auxiliary_heads() -> None:
 
     from agent.inference.models.edl_head import EvidentialHead
     from agent.inference.models.marl_policy import MARLPolicyNetwork
+    from agent.inference.models.marl_ppo_scheduler import MARLPPOSchedulerNet
+    from agent.training.battlefield_scheduling_env import BattlefieldSchedulingEnv
     from agent.inference.models.mamba_fusion import MultimodalMambaBlock
     from agent.inference.models.motr_kalman import MOTRTracker
     from agent.inference.models.odconv import ODConvRefiner
     from agent.inference.models.supcon_meta import SupConMetaNet
 
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+    sched_env = BattlefieldSchedulingEnv()
     heads = {
         "odconv_refiner.pt": ODConvRefiner(),
         "edl_head.pt": EvidentialHead(),
@@ -31,6 +34,11 @@ def bootstrap_auxiliary_heads() -> None:
         "mamba_fusion.pt": MultimodalMambaBlock(1024),
         "supcon_meta.pt": SupConMetaNet(in_dim=1024),
         "marl_policy.pt": MARLPolicyNetwork(),
+        "marl_ppo_scheduler.pt": MARLPPOSchedulerNet(
+            obs_dim=sched_env.obs_dim,
+            n_actions=sched_env.n_actions,
+            n_agents=sched_env.n_agents,
+        ),
     }
     for name, module in heads.items():
         path = CHECKPOINT_DIR / name
@@ -93,9 +101,31 @@ def prefetch_pretrained() -> None:
 
 
 def main() -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Download or bootstrap TIA model weights")
+    parser.add_argument(
+        "--heads-only",
+        action="store_true",
+        help="Only bootstrap auxiliary .pt heads under models/checkpoints",
+    )
+    parser.add_argument(
+        "--offline-bundle",
+        action="store_true",
+        help="Delegate to scripts/package_offline_models.py for full offline packaging",
+    )
+    args = parser.parse_args()
+
+    if args.offline_bundle:
+        from scripts.package_offline_models import main as package_main
+
+        return package_main()
+
     bootstrap_auxiliary_heads()
-    prefetch_pretrained()
+    if not args.heads_only:
+        prefetch_pretrained()
     print("\n[DONE] models/checkpoints 与预训练权重已就绪。")
+    print("内网部署请改用: python scripts/package_offline_models.py")
     return 0
 
 

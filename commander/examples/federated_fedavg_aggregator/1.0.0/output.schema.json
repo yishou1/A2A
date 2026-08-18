@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Federated FedAvg Aggregator Output",
+  "type": "object",
+  "required": [
+    "round_id",
+    "aggregated_weights",
+    "tensor_shapes",
+    "participants",
+    "participant_count",
+    "total_samples",
+    "aggregation_method",
+    "global_weights_sha256",
+    "model_runtime"
+  ],
+  "properties": {
+    "round_id": {"type": "string"},
+    "aggregated_weights": {"type": "object"},
+    "tensor_shapes": {"type": "object"},
+    "participants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["client_id", "sample_count", "aggregation_weight", "update_l2_norm"],
+        "properties": {
+          "client_id": {"type": "string"},
+          "sample_count": {"type": "integer", "minimum": 1},
+          "aggregation_weight": {"type": "number", "minimum": 0, "maximum": 1},
+          "update_l2_norm": {"type": "number", "minimum": 0}
+        },
+        "additionalProperties": false
+      }
+    },
+    "participant_count": {"type": "integer", "minimum": 1},
+    "total_samples": {"type": "integer", "minimum": 1},
+    "aggregation_method": {"type": "string"},
+    "global_weights_sha256": {"type": "string"},
+    "model_runtime": {
+      "type": "object",
+      "required": ["backend", "used", "implementation_version"],
+      "properties": {
+        "backend": {"type": "string"},
+        "used": {"type": "boolean"},
+        "implementation_version": {"type": "string"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

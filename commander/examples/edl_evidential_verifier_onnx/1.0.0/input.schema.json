@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EDL Evidential Verifier ONNX Input",
+  "type": "object",
+  "required": ["features"],
+  "properties": {
+    "features": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10000,
+      "items": {
+        "type": "array",
+        "minItems": 6,
+        "maxItems": 6,
+        "items": {"type": "number"}
+      },
+      "description": "Rows ordered as detector confidence, normalized bbox width/height/center x/center y, damage score."
+    }
+  },
+  "additionalProperties": false
+}

@@ -6,15 +6,22 @@
   ],
   "properties": {
     "damage_probability": {
-      "type": "number",
+      "type": [
+        "number",
+        "null"
+      ],
       "minimum": 0,
       "maximum": 1
     },
     "damage_label": {
-      "type": "integer",
+      "type": [
+        "integer",
+        "null"
+      ],
       "enum": [
         0,
-        1
+        1,
+        null
       ]
     },
     "damage_result": {

@@ -15,8 +15,14 @@ $LegacyAlgorithms = @(
     @{ Id = "mission_completion_scorer"; Port = 9014 },
     @{ Id = "closed_loop_decision_advisor"; Port = 9015 },
     @{ Id = "xbd_damage_assessor"; Port = 9016 },
-    @{ Id = "decision_planning_core"; Port = 9020 },
-    @{ Id = "compliance_authorization_core"; Port = 9021 }
+    @{ Id = "clustering_engine"; Port = 9031 },
+    @{ Id = "threat_priority_random_forest"; Port = 9032 },
+    @{ Id = "intent_gaussian_naive_bayes"; Port = 9033 },
+    @{ Id = "federated_fedavg_aggregator"; Port = 9034 },
+    @{ Id = "conditional_tabular_gan"; Port = 9035 },
+    @{ Id = "decision_planning_core"; Port = 9036 },
+    @{ Id = "compliance_authorization_core"; Port = 9037 },
+    @{ Id = "track_threat_algorithms"; Port = 9038 }
 )
 
 $TiaAlgorithms = @(
@@ -41,34 +47,16 @@ if ($TiaOnly) {
     $Algorithms = $LegacyAlgorithms + $TiaAlgorithms
 }
 
-$Requirements = Join-Path $Services "requirements.txt"
-if (Test-Path $Requirements) {
-    Write-Host "Installing Python service dependencies..."
-    & $Python -m pip install -r $Requirements
-}
+Write-Host "Installing Python service dependencies..."
+& $Python -m pip install -r (Join-Path $Services "requirements.txt")
 
 $env:TIA_USE_MOCK = "1"
 
-$StartedCount = 0
 foreach ($item in $Algorithms) {
     $env:PORT = "$($item.Port)"
     $main = Join-Path $Services "$($item.Id)\app\main.py"
-    if (-not (Test-Path $main)) {
-        Write-Warning "Skipping $($item.Id): service entrypoint not found at $main"
-        continue
-    }
     Write-Host "Starting $($item.Id) on port $($item.Port)..."
-    Start-Process -FilePath $Python -ArgumentList $main -WorkingDirectory $Root -WindowStyle Hidden
-    $StartedCount++
+    Start-Process -FilePath $Python -ArgumentList $main -WorkingDirectory $Root -WindowStyle Minimized
 }
 
-Write-Host "Started $StartedCount algorithm services."
-
-$GatewayPort = if ($env:TIA_ALGOLIB_GATEWAY_PORT) { $env:TIA_ALGOLIB_GATEWAY_PORT } else { "8088" }
-$gatewayMain = Join-Path $Services "tia_algolib_gateway\app\main.py"
-if (Test-Path $gatewayMain) {
-    $env:PORT = "$GatewayPort"
-    $env:ALGOLIB_BASE_URL = "http://127.0.0.1:$GatewayPort"
-    Write-Host "Starting TIA algolib gateway on port $GatewayPort (GET /algorithms, POST /run)..."
-    Start-Process -FilePath $Python -ArgumentList $gatewayMain -WorkingDirectory $Root -WindowStyle Hidden
-}
+Write-Host "Started $($Algorithms.Count) algorithm services."

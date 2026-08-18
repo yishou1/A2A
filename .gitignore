@@ -25,6 +25,7 @@ tools/ollama-runtime/
 
 commander/build/
 commander/build-*/
+commander/.algolib/
 commander/runs/
 commander/track_threat_agent/artifacts/
 amos-platform/.playwright/

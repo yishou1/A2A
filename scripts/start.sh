@@ -139,6 +139,7 @@ fi
 export ALGOLIB_BASE_URL="${ALGOLIB_BASE_URL:-http://127.0.0.1:8088}"
 export ALGOLIB_REGISTRY_PATH="$ALGOLIB_DIR/registry.json"
 export ALGOLIB_EXECUTION_LOG_PATH="$ALGOLIB_DIR/executions.jsonl"
+export ALGOLIB_FUNCTION_CATALOG_PATH="${ALGOLIB_FUNCTION_CATALOG_PATH:-$COMMANDER_DIR/config/operational_function_catalog.yaml}"
 export ALGORITHM_LIBRARY_ENABLED=true
 export ALGORITHM_LIBRARY_REQUIRED=true
 export A2A_FORCE_ALGOLIB_FIRST="${A2A_FORCE_ALGOLIB_FIRST:-1}"
@@ -153,6 +154,75 @@ export A2A_COMMANDER_URL="${A2A_COMMANDER_URL:-http://127.0.0.1:8021}"
 export AMOS_BASE_URL="${AMOS_BASE_URL:-http://127.0.0.1:5000}"
 export COMMANDER_BASE_URL="${COMMANDER_BASE_URL:-http://127.0.0.1:8021}"
 export GATEWAY_PUBLIC_BASE_URL="${GATEWAY_PUBLIC_BASE_URL:-http://127.0.0.1:8030}"
+
+algorithm_card_rows() {
+  "$A2A_PYTHON" - "$COMMANDER_DIR/examples" <<'PY'
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+
+
+def field(text: str, name: str, default: str = "") -> str:
+    match = re.search(rf"^{re.escape(name)}:\s*([^\s#]+)", text, re.MULTILINE)
+    return match.group(1).strip() if match else default
+
+
+def runtime_field(text: str, name: str, default: str = "") -> str:
+    match = re.search(rf"^\s*{re.escape(name)}:\s*([^\s#]+)", text, re.MULTILINE)
+    return match.group(1).strip() if match else default
+
+
+for card in sorted(root.glob("*/1.0.0/algorithm_card.yaml")):
+    text = card.read_text(encoding="utf-8")
+    package_dir = card.parents[1].name
+    algorithm_id = field(text, "algorithm_id", package_dir)
+    version = field(text, "version", "1.0.0")
+    backend_type = field(text, "backend_type", runtime_field(text, "backend_type", ""))
+    health_endpoint = runtime_field(text, "health_endpoint", "")
+    if not backend_type:
+        continue
+    print("\t".join([package_dir, algorithm_id, version, backend_type, health_endpoint]))
+PY
+}
+
+url_port() {
+  "$A2A_PYTHON" - "$1" <<'PY'
+from urllib.parse import urlparse
+import sys
+
+parsed = urlparse(sys.argv[1])
+if parsed.port:
+    print(parsed.port)
+elif parsed.scheme == "https":
+    print(443)
+else:
+    print(80)
+PY
+}
+
+url_host() {
+  "$A2A_PYTHON" - "$1" <<'PY'
+from urllib.parse import urlparse
+import sys
+
+print(urlparse(sys.argv[1]).hostname or "127.0.0.1")
+PY
+}
+
+is_track_threat_mounted_algorithm() {
+  case "$1" in
+    multimodal_feature_fuser|target_type_classifier|track_state_updater|trajectory_predictor|graph_relation_reasoner)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
 
 echo "[infra] checking Docker Desktop connection"
 docker info >/dev/null
@@ -185,65 +255,74 @@ if [[ "${ENABLE_LLM:-false}" == "true" && "$llm_provider" != "azure" && "$llm_pr
   fi
 fi
 
-declare -a TIA_SERVICES=(
-  battlefield_rtdetr_detector
-  siamese_mask2former_damage
-  edl_evidential_verifier
-  motr_neural_kalman_tracker
-  marl_ppo_task_scheduler
-  imagebind_multimodal_encoder
-  multimodal_mamba_fusion
-  supcon_meta_classifier
-  synapse_rag_retriever
-  knowledge_semantic_comm
-  marl_dynamic_router
-)
-declare -a TIA_PORTS=(9020 9021 9022 9023 9024 9025 9026 9027 9028 9029 9030)
+if [[ "${ALGOLIB_RESET_REGISTRY:-true}" == "true" ]]; then
+  "$A2A_PYTHON" - "$ALGOLIB_REGISTRY_PATH" "$ALGOLIB_EXECUTION_LOG_PATH" <<'PY'
+from pathlib import Path
+import sys
+
+for item in sys.argv[1:]:
+    path = Path(item)
+    if path.exists() and path.is_file():
+        path.unlink()
+PY
+fi
+
+mapfile -t ALGORITHM_CARD_ROWS < <(algorithm_card_rows)
+ALGOLIB_REAL_ONNX=0
+if [[ -f "$COMMANDER_DIR/build/CMakeCache.txt" ]] \
+  && grep -q '^ALGOLIB_WITH_ONNXRUNTIME:BOOL=ON$' "$COMMANDER_DIR/build/CMakeCache.txt"; then
+  ALGOLIB_REAL_ONNX=1
+fi
 
 echo "[algorithms] starting HTTP services"
-for index in "${!TIA_SERVICES[@]}"; do
-  name="${TIA_SERVICES[$index]}"
-  port="${TIA_PORTS[$index]}"
-  start_service "algorithm-$name" "$COMMANDER_DIR" "http://127.0.0.1:$port/health" \
-    env PORT="$port" "$A2A_PYTHON" "services/$name/app/main.py"
+track_threat_algorithms_started=0
+for row in "${ALGORITHM_CARD_ROWS[@]}"; do
+  IFS=$'\t' read -r package_dir algorithm_id version backend_type health_endpoint <<< "$row"
+  if [[ "$backend_type" != "python_http_service" ]]; then
+    continue
+  fi
+  if is_track_threat_mounted_algorithm "$algorithm_id"; then
+    if [[ "$track_threat_algorithms_started" == 0 ]]; then
+      port="$(url_port "$health_endpoint")"
+      start_service "algorithm-track-threat" "$COMMANDER_DIR" "http://127.0.0.1:$port/health" \
+        env PORT="$port" "$A2A_PYTHON" services/track_threat_algorithms/app/main.py
+      track_threat_algorithms_started=1
+    fi
+    continue
+  fi
+  if [[ ! -f "$COMMANDER_DIR/services/$package_dir/app/main.py" ]]; then
+    echo "[skip] $algorithm_id has no bundled runtime service; not registering it for this demo."
+    continue
+  fi
+  port="$(url_port "$health_endpoint")"
+  host="$(url_host "$health_endpoint")"
+  if [[ "$host" != "127.0.0.1" && "$host" != "localhost" ]]; then
+    echo "[skip] $algorithm_id uses non-local health endpoint $health_endpoint."
+    continue
+  fi
+  start_service "algorithm-$algorithm_id" "$COMMANDER_DIR" "$health_endpoint" \
+    env PORT="$port" "$A2A_PYTHON" "services/$package_dir/app/main.py"
 done
-
-start_service "algorithm-track-threat" "$COMMANDER_DIR" "http://127.0.0.1:9042/health" \
-  env PORT=9042 "$A2A_PYTHON" services/track_threat_algorithms/app/main.py
-start_service "algorithm-decision-planning" "$COMMANDER_DIR" "http://127.0.0.1:9040/health" \
-  env PORT=9040 "$A2A_PYTHON" services/decision_planning_core/app/main.py
-start_service "algorithm-compliance" "$COMMANDER_DIR" "http://127.0.0.1:9041/health" \
-  env PORT=9041 "$A2A_PYTHON" services/compliance_authorization_core/app/main.py
-start_service "algorithm-execution" "$COMMANDER_DIR" "http://127.0.0.1:9012/health" \
-  env PORT=9012 "$A2A_PYTHON" services/execution_control_planner/app/main.py
-for item in mission_feature_adapter:9013 mission_completion_scorer:9014 closed_loop_decision_advisor:9015; do
-  name="${item%%:*}"
-  port="${item##*:}"
-  start_service "algorithm-$name" "$COMMANDER_DIR" "http://127.0.0.1:$port/health" \
-    env PORT="$port" "$A2A_PYTHON" "services/$name/app/main.py"
-done
-start_service "algorithm-xbd_damage_assessor" "$COMMANDER_DIR" "http://127.0.0.1:9016/health" \
-  env PORT=9016 "$A2A_PYTHON" services/xbd_damage_assessor/app/main.py
-
-declare -a ALGORITHM_CARDS=(
-  battlefield_rtdetr_detector siamese_mask2former_damage edl_evidential_verifier
-  motr_neural_kalman_tracker marl_ppo_task_scheduler imagebind_multimodal_encoder
-  multimodal_mamba_fusion supcon_meta_classifier synapse_rag_retriever
-  knowledge_semantic_comm marl_dynamic_router multimodal_feature_fuser
-  target_type_classifier track_state_updater trajectory_predictor graph_relation_reasoner
-  decision_planning_core compliance_authorization_core execution_control_planner
-  mission_feature_adapter mission_completion_scorer closed_loop_decision_advisor
-  xbd_damage_assessor
-)
 
 echo "[algorithms] registering and activating packages"
-for algorithm_id in "${ALGORITHM_CARDS[@]}"; do
-  if ! "$COMMANDER_DIR/build/algolib" show-card "$algorithm_id" 1.0.0 python_http_service >/dev/null 2>&1; then
-    "$COMMANDER_DIR/build/algolib" register \
-      "$COMMANDER_DIR/examples/$algorithm_id/1.0.0/algorithm_card.yaml" >/dev/null
+for row in "${ALGORITHM_CARD_ROWS[@]}"; do
+  IFS=$'\t' read -r package_dir algorithm_id version backend_type health_endpoint <<< "$row"
+  if [[ "$backend_type" == "onnx" && "$ALGOLIB_REAL_ONNX" != 1 \
+    && "${ALGOLIB_REGISTER_STUB_ONNX:-false}" != "true" \
+    && "$algorithm_id" != "onnx_text_classifier" ]]; then
+    echo "[skip] $algorithm_id requires real ONNX Runtime; current algolib build uses stub."
+    continue
   fi
-  "$COMMANDER_DIR/build/algolib" validate "$algorithm_id" 1.0.0 python_http_service >/dev/null
-  "$COMMANDER_DIR/build/algolib" activate "$algorithm_id" 1.0.0 python_http_service >/dev/null
+  if [[ "$backend_type" == "python_http_service" \
+    && ! -f "$COMMANDER_DIR/services/$package_dir/app/main.py" ]]; then
+    if ! is_track_threat_mounted_algorithm "$algorithm_id"; then
+      continue
+    fi
+  fi
+  "$COMMANDER_DIR/build/algolib" register \
+    "$COMMANDER_DIR/examples/$package_dir/$version/algorithm_card.yaml" >/dev/null
+  "$COMMANDER_DIR/build/algolib" validate "$algorithm_id" "$version" "$backend_type" >/dev/null
+  "$COMMANDER_DIR/build/algolib" activate "$algorithm_id" "$version" "$backend_type" >/dev/null
 done
 
 start_service algolib "$COMMANDER_DIR" "http://127.0.0.1:8088/health" \

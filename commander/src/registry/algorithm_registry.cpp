@@ -97,7 +97,11 @@ Result<AlgorithmEntry> AlgorithmRegistry::Validate(const AlgorithmKey& key) {
 
     const AlgorithmStatus effective_status =
         entry->status == AlgorithmStatus::kDraft ? AlgorithmStatus::kValidated : entry->status;
+    // Re-validation refreshes card/schema metadata but must not discard runtime
+    // deployment records that are maintained independently from the package.
+    auto deployments = std::move(entry->deployments);
     *entry = BuildEntry(validated_result.value(), effective_status);
+    entry->deployments = std::move(deployments);
 
     auto persist_status = Persist();
     if (!persist_status.ok()) {
@@ -261,6 +265,22 @@ bool FilterMatches(const AlgorithmEntry& entry, const AlgorithmQueryFilter& f) {
     if (f.capability.has_value()) {
         const auto& caps = entry.card.capabilities;
         const bool found = std::find(caps.begin(), caps.end(), f.capability.value()) != caps.end();
+        if (!found) {
+            return false;
+        }
+    }
+
+    if (f.function_id.has_value() || f.function_code.has_value()) {
+        const bool found = std::find_if(
+            entry.card.operational_functions.begin(),
+            entry.card.operational_functions.end(),
+            [&](const OperationalFunctionSpec& function) {
+                const bool id_matches = !f.function_id.has_value() ||
+                                        function.function_id == f.function_id.value();
+                const bool code_matches = !f.function_code.has_value() ||
+                                          function.function_code == f.function_code.value();
+                return id_matches && code_matches;
+            }) != entry.card.operational_functions.end();
         if (!found) {
             return false;
         }

@@ -1,0 +1,87 @@
+algorithm_id: clustering_engine
+version: 1.0.0
+display_name: Deterministic Clustering Engine
+backend_type: python_http_service
+status: validated
+
+task_family: clustering
+modalities:
+  input:
+    - structured_json
+    - numeric_vectors
+  output:
+    - structured_json
+
+capabilities:
+  - kmeans_clustering
+  - dbscan_density_clustering
+  - noise_detection
+
+operational_functions:
+  - {function_id: KC-12, function_code: sort, function_name: Sort, role: primary, coverage_level: full}
+  - {function_id: KC-05, function_code: characterize, function_name: Characterize, role: supporting, coverage_level: partial}
+
+agent_card:
+  summary: >
+    Deterministic CPU clustering with real K-Means and DBSCAN implementations.
+  when_to_use:
+    - Numeric feature vectors must be grouped without labelled training data.
+    - Density-based grouping and explicit noise detection are required.
+  when_not_to_use:
+    - Inputs are raw media or text that have not been converted to numeric vectors.
+    - Supervised class labels rather than unsupervised groups are required.
+  input_description: >
+    A points array containing at least two finite, equal-length numeric vectors.
+    Select kmeans or dbscan and its parameters in the request params object.
+  output_description: >
+    Cluster labels, centroids, member indices, noise indices, convergence details,
+    and the exact implementation runtime used.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  runtime:
+    backend_type: python_http_service
+    endpoint: http://127.0.0.1:9031/predict
+    health_endpoint: http://127.0.0.1:9031/health
+    metadata_endpoint: http://127.0.0.1:9031/metadata
+    timeout_ms: 5000
+
+constraints:
+  max_input_chars: 2000000
+  max_request_bytes: 4194304
+  batch_supported: true
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 10
+  latency_ms_p95: 100
+  primary_metric: golden_case_correctness
+  primary_score: 1.0
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 2
+  min_memory_mb: 128
+  recommended_memory_mb: 512
+  min_gpu_count: 0
+  gpu_type: none
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 10
+
+model_profile:
+  parameter_count: 0
+  parameter_count_text: non_parametric_algorithm
+  flops: 0
+  flops_text: input_dependent
+  precision: fp64
+
+provenance:
+  implementation_metadata_ref: implementation.metadata.json
+  implementation_kind: deterministic_source_algorithm
+  training_required: false
+
+safety:
+  risk_level: low
+  requires_human_review: false

@@ -150,7 +150,7 @@ void TestRegisterAndPersistOnnxAlgorithm() {
     Expect(reloaded_registry.Reload().ok(), "Reload after persistence should succeed.");
     auto get_result = reloaded_registry.Get(OnnxKey());
     Expect(get_result.ok(), "Reloaded registry should find the persisted ONNX entry.");
-    Expect(get_result.value().card.display_name == "ONNX Text Classifier",
+    Expect(get_result.value().card.display_name == "ONNX Text Classification Contract Fixture",
            "Persisted entry should keep the original display_name.");
     Expect(get_result.value().card.performance.has_value(),
            "Persisted entry should keep the performance block.");
@@ -162,7 +162,8 @@ void TestRegisterAndPersistOnnxAlgorithm() {
            "Persisted entry should keep recommended memory metadata.");
     Expect(get_result.value().card.model_profile.has_value(),
            "Persisted entry should keep the model profile block.");
-    Expect(get_result.value().card.model_profile->parameter_count_text == "120K",
+    Expect(get_result.value().card.model_profile->parameter_count_text ==
+               "constant_logit_contract_fixture",
            "Persisted entry should keep human-readable parameter count.");
 }
 
@@ -318,7 +319,7 @@ void TestInvalidCardReturnsMissingRequiredField() {
 
     std::string card_content = ReadTextFile(fixture_dir / "algorithm_card.yaml");
     ReplaceAll(&card_content,
-               "    timeout_ms: 10000\n",
+               "    timeout_ms: 10000",
                "");
     WriteTextFile(fixture_dir / "algorithm_card.yaml", card_content);
 

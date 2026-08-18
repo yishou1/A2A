@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SupCon Meta Classifier ONNX Input",
+  "type": "object",
+  "required": ["features"],
+  "properties": {
+    "features": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10000,
+      "items": {
+        "type": "array",
+        "minItems": 256,
+        "maxItems": 256,
+        "items": {"type": "number"}
+      },
+      "description": "Rows of 256-dimensional fused target embeddings."
+    }
+  },
+  "additionalProperties": false
+}

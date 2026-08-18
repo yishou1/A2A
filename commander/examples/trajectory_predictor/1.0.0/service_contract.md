@@ -4,7 +4,7 @@
 - GET `/trajectory_predictor/metadata`
 - POST `/trajectory_predictor/predict`
 
-Port: `9022`
+Port: `9038`
 
 Algorithm class: `M06 时间序列预测`
 

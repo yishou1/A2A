@@ -8,17 +8,30 @@ namespace algolib {
 namespace {
 
 std::string StripFileScheme(const std::string& raw_value) {
-    constexpr const char* kFileScheme = "file:";
+    constexpr const char* kFileSchemeLong = "file://";
+    constexpr const char* kFileSchemeShort = "file:/";
 
-    if (raw_value.rfind(kFileScheme, 0) != 0) {
+    std::string stripped = raw_value;
+    if (raw_value.rfind(kFileSchemeLong, 0) == 0) {
+        stripped = raw_value.substr(std::char_traits<char>::length(kFileSchemeLong));
+    } else if (raw_value.rfind(kFileSchemeShort, 0) == 0) {
+        stripped = raw_value.substr(std::char_traits<char>::length(kFileSchemeShort));
+    } else {
         return raw_value;
     }
-    // std::filesystem may collapse file:///path to file:/path. Remove only
-    // the URI scheme so the POSIX root slash remains intact.
-    std::string stripped = raw_value.substr(std::char_traits<char>::length(kFileScheme));
+    while (stripped.rfind("//", 0) == 0 &&
+           !(stripped.size() >= 3 &&
+             std::isalpha(static_cast<unsigned char>(stripped[1])) && stripped[2] == ':')) {
+        stripped.erase(stripped.begin());
+    }
     if (stripped.size() >= 3 && stripped[0] == '/' &&
         std::isalpha(static_cast<unsigned char>(stripped[1])) && stripped[2] == ':') {
         stripped.erase(stripped.begin());
+    }
+    if (!stripped.empty() && stripped[0] != '/' &&
+        !(stripped.size() >= 2 && std::isalpha(static_cast<unsigned char>(stripped[0])) &&
+          stripped[1] == ':')) {
+        stripped.insert(stripped.begin(), '/');
     }
     return stripped;
 }

@@ -25,7 +25,7 @@ TRACK_THREAT_CLASS_MAP = {
     "target_type_classifier": ("M04", "特征编码与分类"),
     "track_state_updater": ("M05", "多目标跟踪与定位"),
     "trajectory_predictor": ("M06", "时间序列预测"),
-    "graph_relation_reasoner": ("M07", "图神经网络"),
+    "graph_relation_reasoner": ("M20", "图神经网络"),
 }
 
 
@@ -73,11 +73,11 @@ def test_trajectory_predictor_returns_predicted_path() -> None:
     assert prediction["model_runtime"]["used"] is True
 
 
-def test_algorithm_cards_use_track_threat_port_9022() -> None:
+def test_algorithm_cards_use_track_threat_port_9038() -> None:
     for algorithm_id in TRACK_THREAT_CLASS_MAP:
         card_path = ROOT / "examples" / algorithm_id / "1.0.0" / "algorithm_card.yaml"
         card = card_path.read_text(encoding="utf-8")
-        assert "127.0.0.1:9022" in card
+        assert "127.0.0.1:9038" in card
         assert "127.0.0.1:9020" not in card
         assert f"algorithm_class: {TRACK_THREAT_CLASS_MAP[algorithm_id][0]}" in card
         assert "KG+Transformer" not in card

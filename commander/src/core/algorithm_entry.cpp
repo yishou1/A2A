@@ -186,6 +186,8 @@ nlohmann::json ToAgentViewJson(const AlgorithmEntry& entry) {
         {"output", entry.card.modalities.output},
     };
     agent_view["capabilities"] = entry.card.capabilities;
+    agent_view["operational_functions"] =
+        ToJson(entry.card).value("operational_functions", nlohmann::json::array());
 
     // 中文注释：examples 让 Agent 能通过具体的输入/输出样例判断此算法是否符合当前场景。
     nlohmann::json examples_json = nlohmann::json::array();

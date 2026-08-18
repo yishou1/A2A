@@ -18,6 +18,10 @@ capabilities:
   - structured_rule_matching
   - synapserag_rule_evidence
 
+operational_functions:
+  - {function_id: KC-16, function_code: nominate_engagement_option, function_name: Nominate Engagement Option, role: primary, coverage_level: full}
+  - {function_id: KC-20, function_code: select_attack_option, function_name: Select Attack Option, role: supporting, coverage_level: full}
+
 agent_card:
   summary: >
     Decision planning core with ONNX scoring, structured rules, and optional SynapseRAG evidence.
@@ -35,9 +39,9 @@ machine_spec:
   output_schema_ref: output.schema.json
   runtime:
     backend_type: python_http_service
-    endpoint: http://127.0.0.1:9040/predict
-    health_endpoint: http://127.0.0.1:9040/health
-    metadata_endpoint: http://127.0.0.1:9040/metadata
+    endpoint: http://127.0.0.1:9036/predict
+    health_endpoint: http://127.0.0.1:9036/health
+    metadata_endpoint: http://127.0.0.1:9036/metadata
     timeout_ms: 65000
 
 constraints:

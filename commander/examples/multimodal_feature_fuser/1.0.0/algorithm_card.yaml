@@ -19,6 +19,9 @@ capabilities:
   - structured_feature_fusion
   - track_scene_asset_feature_fusion
 
+operational_functions:
+  - {function_id: KC-05, function_code: characterize, function_name: Characterize, role: supporting, coverage_level: partial}
+
 agent_card:
   summary: >
     M03 package for the Track Threat Agent. Fuses detection, track, scene, and protected asset metadata into structured feature vectors.
@@ -37,9 +40,9 @@ machine_spec:
   output_schema_ref: output.schema.json
   runtime:
     backend_type: python_http_service
-    endpoint: http://127.0.0.1:9042/multimodal_feature_fuser/predict
-    health_endpoint: http://127.0.0.1:9042/multimodal_feature_fuser/health
-    metadata_endpoint: http://127.0.0.1:9042/multimodal_feature_fuser/metadata
+    endpoint: http://127.0.0.1:9038/multimodal_feature_fuser/predict
+    health_endpoint: http://127.0.0.1:9038/multimodal_feature_fuser/health
+    metadata_endpoint: http://127.0.0.1:9038/multimodal_feature_fuser/metadata
     timeout_ms: 3000
 
 constraints:

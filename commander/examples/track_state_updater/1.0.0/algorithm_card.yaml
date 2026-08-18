@@ -20,6 +20,10 @@ capabilities:
   - track_filtering
   - nearest_neighbor_association
 
+operational_functions:
+  - {function_id: KC-11, function_code: generate_update_track, function_name: Generate / Update Track, role: primary, coverage_level: full}
+  - {function_id: KC-19, function_code: maintain_track, function_name: Maintain Track, role: supporting, coverage_level: full}
+
 agent_card:
   summary: >
     M05 package for the Track Threat Agent. Updates track states from structured detections using nearest-neighbor association and lightweight filtering.
@@ -37,9 +41,9 @@ machine_spec:
   output_schema_ref: output.schema.json
   runtime:
     backend_type: python_http_service
-    endpoint: http://127.0.0.1:9042/track_state_updater/predict
-    health_endpoint: http://127.0.0.1:9042/track_state_updater/health
-    metadata_endpoint: http://127.0.0.1:9042/track_state_updater/metadata
+    endpoint: http://127.0.0.1:9038/track_state_updater/predict
+    health_endpoint: http://127.0.0.1:9038/track_state_updater/health
+    metadata_endpoint: http://127.0.0.1:9038/track_state_updater/metadata
     timeout_ms: 3000
 
 constraints:

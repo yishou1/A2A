@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -19,10 +20,12 @@
 #include "algolib/core/error_code.h"
 #include "algolib/core/status.h"
 #include "algolib/io/json_utils.h"
+#include "algolib/io/yaml_utils.h"
 #include "algolib/registry/algorithm_registry.h"
 #include "algolib/runtime/algorithm_request.h"
 #include "algolib/runtime/algorithm_result.h"
 #include "algolib/runtime/execution_coordinator.h"
+#include "algolib/runtime/execution_logger.h"
 #include "algolib/runtime/model_loader.h"
 #include "algolib/runtime/runtime_factory.h"
 #include "algolib/runtime/runtime_runner_cache.h"
@@ -38,6 +41,31 @@ HttpServerConfig NormalizeConfig(HttpServerConfig config) {
     }
     if (config.host.empty()) {
         config.host = "127.0.0.1";
+    }
+    if (config.execution_log_path.empty()) {
+        if (const char* env_value = std::getenv("ALGOLIB_EXECUTION_LOG_PATH");
+            env_value != nullptr && *env_value != '\0') {
+            config.execution_log_path = std::filesystem::path(env_value);
+        } else {
+            std::filesystem::path parent = config.registry_path.parent_path();
+            if (parent.empty()) {
+                parent = std::filesystem::current_path();
+            }
+            config.execution_log_path = parent / "execution_audit.jsonl";
+        }
+    }
+    if (config.operational_function_catalog_path.empty()) {
+        if (const char* env_value = std::getenv("ALGOLIB_FUNCTION_CATALOG_PATH");
+            env_value != nullptr && *env_value != '\0') {
+            config.operational_function_catalog_path = std::filesystem::path(env_value);
+        } else {
+            const auto local_path = std::filesystem::current_path() / "config" /
+                                    "operational_function_catalog.yaml";
+            const auto parent_path = std::filesystem::current_path().parent_path() /
+                                     "config" / "operational_function_catalog.yaml";
+            config.operational_function_catalog_path =
+                std::filesystem::exists(local_path) ? local_path : parent_path;
+        }
     }
     if (config.port <= 0) {
         config.port = 8088;
@@ -240,6 +268,19 @@ AlgorithmQueryFilter ParseQueryFilter(const httplib::Request& request) {
         }
     }
 
+    if (request.has_param("function_id")) {
+        const std::string v = request.get_param_value("function_id");
+        if (!v.empty()) {
+            f.function_id = v;
+        }
+    }
+    if (request.has_param("function_code")) {
+        const std::string v = request.get_param_value("function_code");
+        if (!v.empty()) {
+            f.function_code = v;
+        }
+    }
+
     // node (node_id)
     if (request.has_param("node")) {
         const std::string v = request.get_param_value("node");
@@ -362,6 +403,8 @@ private:
                 {"status", "ready"},
                 {"registry_path", config_.registry_path.generic_string()},
                 {"execution_log_path", config_.execution_log_path.generic_string()},
+                {"operational_function_catalog_path",
+                 config_.operational_function_catalog_path.generic_string()},
                 {"runner_cache_size", runner_cache_.Size()},
             };
             WriteJson(&response, 200, payload);
@@ -420,6 +463,12 @@ private:
             }
             if (filter.capability.has_value()) {
                 applied_filter["capability"] = filter.capability.value();
+            }
+            if (filter.function_id.has_value()) {
+                applied_filter["function_id"] = filter.function_id.value();
+            }
+            if (filter.function_code.has_value()) {
+                applied_filter["function_code"] = filter.function_code.value();
             }
             if (filter.node_id.has_value()) {
                 applied_filter["node"] = filter.node_id.value();
@@ -826,6 +875,52 @@ private:
                                                   : "UNKNOWN_ERROR");
             WriteJson(&response, status_code, payload);
         });
+
+        server_.Get("/operational-functions",
+                    [this](const httplib::Request&, httplib::Response& response) {
+            auto catalog_result =
+                YamlUtils::LoadYamlFile(config_.operational_function_catalog_path);
+            if (!catalog_result.ok()) {
+                WriteJson(&response, HttpStatusForStatus(catalog_result.status()),
+                          ErrorPayload(catalog_result.status()));
+                return;
+            }
+            const json catalog = YamlUtils::YamlNodeToJson(catalog_result.value());
+            const json functions = catalog.value("functions", json::array());
+            WriteJson(&response, 200,
+                      json{{"ok", true},
+                           {"schema_version",
+                            catalog.value("schema_version", json("1.0"))},
+                           {"count", functions.size()},
+                           {"functions", functions}});
+        });
+
+        server_.Get(
+            R"(/traces/([^/]+)/function-executions)",
+            [this](const httplib::Request& request, httplib::Response& response) {
+                if (request.matches.size() < 2 || request.matches[1].str().empty()) {
+                    const Status status = InvalidArgument("URL must contain trace_id.");
+                    WriteJson(&response, 400, ErrorPayload(status));
+                    return;
+                }
+
+                const std::string trace_id = request.matches[1].str();
+                std::lock_guard<std::mutex> lock(mutex_);
+                ExecutionLogger logger(config_.execution_log_path);
+                auto events_result = logger.ReadFunctionExecutions(trace_id);
+                if (!events_result.ok()) {
+                    WriteJson(&response, HttpStatusForStatus(events_result.status()),
+                              ErrorPayload(events_result.status()));
+                    return;
+                }
+
+                const auto& events = events_result.value();
+                WriteJson(&response, 200,
+                          json{{"ok", true},
+                               {"trace_id", trace_id},
+                               {"count", events.size()},
+                               {"function_executions", events}});
+            });
 
         // 中文注释：POST /load — 显式预加载模型到内存/显存（预热 runner 缓存）。
         // Body 字段（必填）：algorithm_id, version, backend_type

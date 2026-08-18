@@ -10,4 +10,4 @@ deterministic rule scoring and records a warning.
 
 It generates and ranks candidate plans from structured tasks, resources, risks, and constraints.
 
-Port: `9020`
+Port: `9036`

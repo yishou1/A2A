@@ -1,0 +1,90 @@
+algorithm_id: multimodal_mamba_fusion_onnx
+version: 1.0.0
+display_name: Multimodal Mamba Fusion ONNX
+backend_type: onnx
+status: validated
+algorithm_class: M15
+
+task_family: fusion
+modalities:
+  input: [embeddings, numeric_features]
+  output: [embeddings, structured_json]
+
+capabilities:
+  - temporal_fusion
+  - multimodal_mamba
+  - batch_inference
+  - lightweight_onnx_inference
+
+operational_functions:
+  - {function_id: KC-05, function_code: characterize, function_name: Characterize, role: supporting, coverage_level: full}
+
+agent_card:
+  summary: Native ONNX Runtime variant of the trained M15 Mamba-style multimodal embedding fusion block.
+  when_to_use:
+    - Up to four modality embeddings are already encoded as 256-float vectors.
+    - A portable global fused embedding is needed without a Python service.
+  when_not_to_use:
+    - Raw image, SAR, radar, or text observations still need encoding.
+    - Track-specific sensor association and target-ID attachment are required automatically.
+  input_description: Padded float32 sequences in eo_ir, sar, radar, text_report order plus a validity mask.
+  output_description: One unit-normalized 256-dimensional fused embedding per batch row.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  tensor_contract_ref: tensor_contract.yaml
+  runtime:
+    backend_type: onnx
+    model_uri: model.onnx
+    execution_provider: cpu
+  preprocess:
+    config_uri: preprocess.yaml
+  postprocess:
+    config_uri: postprocess.yaml
+
+constraints:
+  max_input_chars: 12000000
+  max_request_bytes: 16777216
+  batch_supported: true
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 5
+  latency_ms_p95: 25
+  primary_metric: synthetic_holdout_mean_cosine_similarity
+  primary_score: 0.771683
+  time_complexity: O(B*L*D^2)
+  space_complexity: O(B*L*D)
+  complexity_variable: B=batch rows, L=4 modalities, D=256 embedding dimensions
+  performance_notes: Reference metrics use deterministic synthetic latent vectors.
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 2
+  min_memory_mb: 256
+  recommended_memory_mb: 512
+  min_gpu_count: 0
+  gpu_type: none
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 2
+
+model_profile:
+  parameter_count: 412688
+  parameter_count_text: 412688_trainable_parameters
+  flops: 3300000
+  flops_text: approximately 3.3 MFLOPs per four-modality sequence
+  flops_input_shape: [1, 4, 256]
+  model_size_mb: 2
+  precision: fp32
+
+provenance:
+  model_artifact_ref: model.onnx
+  model_metadata_ref: model.metadata.json
+  training_script_ref: ../../../scripts/train_multimodal_mamba_fusion.py
+  dataset_ref: ../../../data/multimodal_mamba/reference_holdout_inputs.npy
+
+safety:
+  risk_level: medium
+  requires_human_review: true

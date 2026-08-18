@@ -7,6 +7,8 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ENV_NAME="${A2A_ENV_NAME:-a2a}"
 TORCH_INDEX_URL="${A2A_TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}"
 BUILD_JOBS="${A2A_BUILD_JOBS:-2}"
+ALGOLIB_WITH_ONNXRUNTIME="${ALGOLIB_WITH_ONNXRUNTIME:-OFF}"
+ALGOLIB_ONNXRUNTIME_ROOT="${ALGOLIB_ONNXRUNTIME_ROOT:-}"
 
 if ! command -v conda >/dev/null 2>&1; then
   echo "Conda was not found. Install Miniforge or Anaconda first." >&2
@@ -38,8 +40,17 @@ conda run -n "$ENV_NAME" python -m pip install -r requirements.txt
 conda run -n "$ENV_NAME" python -m pip check
 
 echo "[algolib] configuring and building the C++ service"
-conda run -n "$ENV_NAME" cmake -S commander -B commander/build -G Ninja \
-  -DALGOLIB_BUILD_TESTS=ON -DALGOLIB_WITH_ONNXRUNTIME=OFF
+cmake_args=(
+  -S commander
+  -B commander/build
+  -G Ninja
+  -DALGOLIB_BUILD_TESTS=ON
+  "-DALGOLIB_WITH_ONNXRUNTIME=$ALGOLIB_WITH_ONNXRUNTIME"
+)
+if [[ -n "$ALGOLIB_ONNXRUNTIME_ROOT" ]]; then
+  cmake_args+=("-DALGOLIB_ONNXRUNTIME_ROOT=$ALGOLIB_ONNXRUNTIME_ROOT")
+fi
+conda run -n "$ENV_NAME" cmake "${cmake_args[@]}"
 conda run -n "$ENV_NAME" cmake --build commander/build -j "$BUILD_JOBS"
 
 if [[ ! -f .env ]]; then

@@ -31,6 +31,8 @@ struct AlgorithmQueryFilter {
     std::optional<std::string>       task_family;
     std::optional<BackendType>       backend_type;
     std::optional<std::string>       capability;
+    std::optional<std::string>       function_id;
+    std::optional<std::string>       function_code;
     std::optional<std::string>       node_id;
     std::optional<AlgorithmStatus>   status;
     bool                             active_only  = true;

@@ -1,0 +1,70 @@
+{
+  "model_id": "graph_relation_reasoner_onnx",
+  "model_version": "1.0.0",
+  "model_family": "onnx_dense_message_passing_graph_neural_network",
+  "format": "onnx",
+  "artifact_path": "examples/graph_relation_reasoner_onnx/1.0.0/model.onnx",
+  "artifact_sha256": "dfac200a5952ac6bd9e230ddc356c227a37412ac3210cf3cc1d41f07826bed9c",
+  "export_script": "scripts/export_structured_neural_onnx_models.py",
+  "export_script_sha256": "877fec7a6444a11bbe9174089ee0c486c17ef1984e82e5d9a605abb2484c696e",
+  "source_model": "models/checkpoints/graph_relation_gnn_s.safetensors",
+  "source_model_sha256": "0569e21a27020df636b51a64bb32c381ffb314c38fb3fdff39ba36c78c8177b9",
+  "source_metadata": "models/checkpoints/graph_relation_gnn_s.metadata.json",
+  "source_metadata_sha256": "3fbee113ddebe55a0fec2861a3a0040a18711687201daa12bc8bf8f5421e8e06",
+  "precision": "float32",
+  "opset": 17,
+  "equivalence": {
+    "reference": "source PyTorch checkpoint in evaluation mode",
+    "compared_outputs": [
+      "relation_logits",
+      "relation_probabilities"
+    ],
+    "maximum_absolute_difference": 7.62939453125e-06
+  },
+  "runtime_versions": {
+    "numpy": "2.2.6",
+    "onnx": "1.21.0",
+    "onnxruntime": "1.23.2",
+    "torch": "2.12.0+cpu"
+  },
+  "input_contract": {
+    "node_features": [
+      "batch",
+      10,
+      7
+    ],
+    "edge_features": [
+      "batch",
+      10,
+      10,
+      6
+    ],
+    "node_mask": [
+      "batch",
+      10
+    ]
+  },
+  "parameter_count": 16673,
+  "source_evaluation": {
+    "distance_motion_rule_baseline": {
+      "accuracy": 0.982481,
+      "f1": 0.912402,
+      "precision": 0.947815,
+      "recall": 0.87954,
+      "roc_auc": 0.936968
+    },
+    "method": "independent_deterministic_graph_holdout",
+    "trained_gnn": {
+      "accuracy": 0.992088,
+      "f1": 0.962788,
+      "precision": 0.940023,
+      "recall": 0.986683,
+      "roc_auc": 0.999212
+    }
+  },
+  "limitations": [
+    "Accepts normalized graph tensors with a fixed maximum of 10 nodes.",
+    "Returns relation matrices; track preprocessing, thresholding, pair labels, and connected-component groups remain caller responsibilities.",
+    "Synthetic formation membership only; not an operational group-intelligence benchmark."
+  ]
+}

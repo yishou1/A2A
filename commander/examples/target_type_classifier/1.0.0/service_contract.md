@@ -4,7 +4,7 @@
 - GET `/target_type_classifier/metadata`
 - POST `/target_type_classifier/predict`
 
-Port: `9022`
+Port: `9038`
 
 Algorithm class: `M04 特征编码与分类`
 

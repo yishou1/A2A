@@ -1,10 +1,15 @@
 """Track-threat algorithm package functions for the A2A algorithm library."""
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Sequence
+
+import numpy as np
 
 try:
     import torch
@@ -14,6 +19,11 @@ except ImportError:  # pragma: no cover
 
 EARTH_RADIUS_M = 6_371_000.0
 OBJECT_TYPES = ("aircraft", "ship", "uav", "unknown")
+GRAPH_RELATION_CHECKPOINT = (
+    Path(__file__).resolve().parents[2]
+    / "models/checkpoints/graph_relation_gnn_s.safetensors"
+)
+GRAPH_RELATION_METADATA = GRAPH_RELATION_CHECKPOINT.with_suffix(".metadata.json")
 
 
 def target_type_classifier(inputs: dict, _params: dict) -> dict:
@@ -167,37 +177,159 @@ def graph_relation_reasoner(inputs: dict, params: dict) -> dict:
     tracks = list(inputs.get("tracks") or [])
     if not tracks:
         raise ValueError("tracks is required")
-    max_distance_m = float(params.get("max_distance_m", 8_000.0))
-    max_heading_delta = float(params.get("max_heading_delta_deg", 25.0))
-    max_speed_delta = float(params.get("max_speed_delta_mps", 80.0))
+    threshold = float(params.get("relation_threshold", 0.5))
+    if threshold <= 0.0 or threshold >= 1.0:
+        raise ValueError("relation_threshold must be between 0 and 1")
+
+    model = _load_graph_relation_model()
+    node_inputs, edge_inputs, node_mask = _graph_relation_tensors(tracks)
+    with torch.inference_mode():
+        probabilities = torch.sigmoid(
+            model(node_inputs, edge_inputs, node_mask)
+        )[0].cpu().numpy()
+
     relations = []
     for i, left in enumerate(tracks):
-        for right in tracks[i + 1 :]:
+        for j, right in enumerate(tracks[i + 1 :], start=i + 1):
+            probability = float(probabilities[i, j])
+            if probability < threshold:
+                continue
             distance = haversine_m(float(left["lat"]), float(left["lon"]), float(right["lat"]), float(right["lon"]))
             heading_delta = heading_difference(float(left.get("heading", 0.0)), float(right.get("heading", 0.0)))
             speed_delta = abs(float(left.get("speed", 0.0) or 0.0) - float(right.get("speed", 0.0) or 0.0))
-            if distance <= max_distance_m and heading_delta <= max_heading_delta and speed_delta <= max_speed_delta:
-                relations.append(
-                    {
-                        "source_track_id": str(left.get("track_id") or left.get("detection_id")),
-                        "target_track_id": str(right.get("track_id") or right.get("detection_id")),
-                        "distance_m": round(distance, 3),
-                        "heading_delta_deg": round(heading_delta, 3),
-                        "speed_delta_mps": round(speed_delta, 3),
-                        "relation_score": round(1.0 - min(distance / max_distance_m, 1.0) * 0.5, 4),
-                    }
-                )
+            relations.append(
+                {
+                    "source_track_id": str(left.get("track_id") or left.get("detection_id")),
+                    "target_track_id": str(right.get("track_id") or right.get("detection_id")),
+                    "distance_m": round(distance, 3),
+                    "heading_delta_deg": round(heading_delta, 3),
+                    "speed_delta_mps": round(speed_delta, 3),
+                    "relation_score": round(probability, 6),
+                    "relation_type": "formation_membership",
+                }
+            )
     groups = _connected_groups(tracks, relations)
+    metadata = _graph_relation_metadata()
     return {
-        "schema_version": "graph_relation_reasoner/v1",
+        "schema_version": "graph_relation_reasoner/v2",
         "relations": relations,
         "groups": groups,
         "graph_summary": {
             "node_count": len(tracks),
             "edge_count": len(relations),
             "group_count": len(groups),
+            "relation_threshold": threshold,
+            "message_passing_layers": metadata["architecture"]["message_passing_layers"],
+        },
+        "model": {
+            "model_id": metadata["model_id"],
+            "model_version": metadata["model_version"],
+            "model_family": metadata["model_family"],
+            "compute_profile": metadata["compute_profile"],
+            "artifact_sha256": metadata["artifact_sha256"],
         },
     }
+
+
+def graph_relation_model_loaded() -> bool:
+    try:
+        metadata = _graph_relation_metadata()
+        return (
+            metadata.get("model_id") == "graph_relation_reasoner"
+            and metadata.get("artifact_sha256") == _sha256(GRAPH_RELATION_CHECKPOINT)
+        )
+    except (OSError, ValueError, KeyError, json.JSONDecodeError):
+        return False
+
+
+@lru_cache(maxsize=1)
+def _graph_relation_metadata() -> dict:
+    if not GRAPH_RELATION_CHECKPOINT.is_file():
+        raise FileNotFoundError(
+            f"trained graph relation checkpoint not found: {GRAPH_RELATION_CHECKPOINT}"
+        )
+    metadata = json.loads(GRAPH_RELATION_METADATA.read_text(encoding="utf-8"))
+    actual_hash = _sha256(GRAPH_RELATION_CHECKPOINT)
+    if metadata.get("artifact_sha256") != actual_hash:
+        raise ValueError("graph relation checkpoint SHA256 does not match metadata")
+    return metadata
+
+
+@lru_cache(maxsize=1)
+def _load_graph_relation_model():
+    if torch is None:
+        raise RuntimeError("PyTorch is required for graph relation inference")
+    from safetensors.torch import load_file
+
+    from agent.inference.models.graph_relation_gnn import DenseGraphRelationGNN
+
+    metadata = _graph_relation_metadata()
+    architecture = metadata["architecture"]
+    model = DenseGraphRelationGNN(
+        node_features=int(architecture["node_feature_count"]),
+        edge_features=int(architecture["edge_feature_count"]),
+        hidden_size=int(architecture["hidden_size"]),
+        message_layers=int(architecture["message_passing_layers"]),
+    )
+    model.load_state_dict(
+        load_file(str(GRAPH_RELATION_CHECKPOINT), device="cpu"), strict=True
+    )
+    return model.eval()
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _graph_relation_tensors(tracks: list[dict]):
+    if torch is None:
+        raise RuntimeError("PyTorch is required for graph relation inference")
+    count = len(tracks)
+    mean_lat = sum(float(track["lat"]) for track in tracks) / count
+    mean_lon = sum(float(track["lon"]) for track in tracks) / count
+    longitude_scale = 111_320.0 * max(math.cos(math.radians(mean_lat)), 0.1)
+    type_codes = {"aircraft": 0.0, "ship": 0.5, "uav": 1.0, "unknown": 0.5}
+    rows: list[list[float]] = []
+    headings: list[float] = []
+    speeds: list[float] = []
+    object_types: list[str] = []
+    for track in tracks:
+        x = (float(track["lon"]) - mean_lon) * longitude_scale / 20_000.0
+        y = (float(track["lat"]) - mean_lat) * 111_320.0 / 20_000.0
+        speed = max(0.0, min(float(track.get("speed", 0.0) or 0.0) / 350.0, 1.2))
+        heading = math.radians(float(track.get("heading", 0.0) or 0.0))
+        altitude = max(0.0, min(float(track.get("alt", 0.0) or 0.0) / 10_000.0, 1.2))
+        confidence = max(0.0, min(float(track.get("confidence", 0.8) or 0.8), 1.0))
+        object_type = _normalize_object_type(track.get("object_type"))
+        type_code = type_codes[object_type]
+        rows.append(
+            [x, y, speed, math.sin(heading), math.cos(heading), altitude, 0.8 * confidence + 0.2 * type_code]
+        )
+        headings.append(heading)
+        speeds.append(speed)
+        object_types.append(object_type)
+
+    edge_rows = np.zeros((count, count, 6), dtype=np.float32)
+    for left in range(count):
+        for right in range(count):
+            dx = rows[right][0] - rows[left][0]
+            dy = rows[right][1] - rows[left][1]
+            heading_delta = abs(
+                (headings[left] - headings[right] + math.pi) % (2.0 * math.pi) - math.pi
+            )
+            edge_rows[left, right] = [
+                dx,
+                dy,
+                math.sqrt(dx * dx + dy * dy),
+                math.cos(heading_delta),
+                abs(speeds[left] - speeds[right]),
+                float(object_types[left] == object_types[right]),
+            ]
+    return (
+        torch.tensor([rows], dtype=torch.float32),
+        torch.from_numpy(edge_rows).unsqueeze(0),
+        torch.ones(1, count, dtype=torch.bool),
+    )
 
 
 def _model_summary() -> dict:

@@ -17,11 +17,7 @@ PORT = int(os.environ.get("PORT", "9016"))
 
 
 def _predict(inputs: dict, params: dict) -> dict:
-    return {
-        key: value
-        for key, value in predict_xbd_damage_assessor(inputs, params).items()
-        if value is not None
-    }
+    return predict_xbd_damage_assessor(inputs, params)
 
 
 app = create_algorithm_app(

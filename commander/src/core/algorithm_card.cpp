@@ -104,6 +104,16 @@ json ToJson(const AlgorithmCard& card) {
         {"output", card.modalities.output},
     };
     card_json["capabilities"] = card.capabilities;
+    card_json["operational_functions"] = json::array();
+    for (const auto& function : card.operational_functions) {
+        card_json["operational_functions"].push_back({
+            {"function_id", function.function_id},
+            {"function_code", function.function_code},
+            {"function_name", function.function_name},
+            {"role", function.role},
+            {"coverage_level", function.coverage_level},
+        });
+    }
 
     json agent_card_json;
     agent_card_json["summary"] = card.agent_card.summary;
@@ -255,6 +265,27 @@ Result<AlgorithmCard> AlgorithmCardFromJson(const json& json_value) {
         card.modalities.input = ReadStringArray(json_value.at("modalities"), "input");
         card.modalities.output = ReadStringArray(json_value.at("modalities"), "output");
         card.capabilities = ReadStringArray(json_value, "capabilities");
+        if (json_value.contains("operational_functions")) {
+            if (!json_value.at("operational_functions").is_array()) {
+                return Status::Error(ErrorCode::kInvalidAlgorithmCard,
+                                     "operational_functions must be an array.");
+            }
+            for (const auto& function_json : json_value.at("operational_functions")) {
+                if (!function_json.is_object()) {
+                    return Status::Error(
+                        ErrorCode::kInvalidAlgorithmCard,
+                        "operational_functions items must be objects.");
+                }
+                OperationalFunctionSpec function;
+                function.function_id = ReadRequiredString(function_json, "function_id");
+                function.function_code = ReadRequiredString(function_json, "function_code");
+                function.function_name = ReadRequiredString(function_json, "function_name");
+                function.role = function_json.value("role", std::string("primary"));
+                function.coverage_level =
+                    function_json.value("coverage_level", std::string("full"));
+                card.operational_functions.push_back(std::move(function));
+            }
+        }
 
         if (!json_value.contains("agent_card") || !json_value.at("agent_card").is_object()) {
             return Status::Error(ErrorCode::kInvalidAlgorithmCard,

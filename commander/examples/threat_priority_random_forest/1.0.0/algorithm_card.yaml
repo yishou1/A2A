@@ -1,0 +1,87 @@
+algorithm_id: threat_priority_random_forest
+version: 1.0.0
+display_name: Threat Priority Random Forest
+backend_type: python_http_service
+status: validated
+
+task_family: classification
+modalities:
+  input:
+    - structured_json
+    - numeric_features
+  output:
+    - structured_json
+
+capabilities:
+  - random_forest_classification
+  - threat_priority_scoring
+  - batch_inference
+
+operational_functions:
+  - {function_id: KC-17, function_code: prioritize_target_threat, function_name: Prioritize Target / Threat, role: primary, coverage_level: full}
+  - {function_id: KC-13, function_code: determine_target_threat_urgency, function_name: Determine Target / Threat Urgency, role: supporting, coverage_level: partial}
+
+agent_card:
+  summary: >
+    Frozen sklearn Random Forest that classifies structured targets into low,
+    medium, or high priority using a reproducible repository reference dataset.
+  when_to_use:
+    - Structured target features require an explainable tree-ensemble baseline.
+    - Batch threat-priority classification is required on CPU.
+  when_not_to_use:
+    - Raw imagery, audio, or text has not been converted to the required features.
+    - Operational performance is assumed without evaluation on domain data.
+  input_description: >
+    One or more targets with threat score, distance, speed, asset value, and
+    intelligence confidence.
+  output_description: >
+    Priority class, confidence, all class probabilities, and verified model
+    artifact identity for each target.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  runtime:
+    backend_type: python_http_service
+    endpoint: http://127.0.0.1:9032/predict
+    health_endpoint: http://127.0.0.1:9032/health
+    metadata_endpoint: http://127.0.0.1:9032/metadata
+    timeout_ms: 5000
+
+constraints:
+  max_input_chars: 2000000
+  max_request_bytes: 4194304
+  batch_supported: true
+  streaming_supported: false
+
+performance:
+  primary_metric: reference_holdout_accuracy
+  primary_score: 0.888889
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 2
+  min_memory_mb: 256
+  recommended_memory_mb: 512
+  min_gpu_count: 0
+  gpu_type: none
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 10
+
+model_profile:
+  parameter_count: 160
+  parameter_count_text: 160_decision_trees
+  flops: 0
+  flops_text: tree_depth_and_batch_dependent
+  precision: fp64
+
+provenance:
+  model_artifact_ref: ../../../models/threat_priority_random_forest.joblib
+  model_metadata_ref: ../../../models/threat_priority_random_forest.metadata.json
+  training_script_ref: ../../../scripts/train_threat_priority_random_forest.py
+  dataset_ref: ../../../data/threat_priority/reference_training_data.csv
+
+safety:
+  risk_level: medium
+  requires_human_review: true

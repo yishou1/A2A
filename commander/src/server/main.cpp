@@ -47,7 +47,8 @@ int ResolvePort() {
 void PrintUsage() {
     std::cout << "algolib_server [--host <host>] [--port <port>] "
               << "[--registry <registry_json_path>] "
-              << "[--execution-log <audit_jsonl_path>]\n";
+              << "[--execution-log <audit_jsonl_path>] "
+              << "[--function-catalog <catalog_yaml_path>]\n";
 }
 
 void PrintError(const std::string& message) {
@@ -86,6 +87,8 @@ algolib::HttpServerConfig ParseConfigOrThrow(const std::vector<std::string>& arg
             config.registry_path = value;
         } else if (arg == "--execution-log") {
             config.execution_log_path = value;
+        } else if (arg == "--function-catalog") {
+            config.operational_function_catalog_path = value;
         } else {
             throw std::runtime_error("Unknown option: " + arg);
         }

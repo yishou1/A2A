@@ -16,4 +16,5 @@ inference:
   mamba_checkpoint: models/checkpoints/mamba_fusion.pt
   supcon_checkpoint: models/checkpoints/supcon_meta.pt
   marl_checkpoint: models/checkpoints/marl_policy.pt
+  marl_ppo_checkpoint: models/checkpoints/marl_ppo_scheduler.pt
   confidence_threshold: 0.35

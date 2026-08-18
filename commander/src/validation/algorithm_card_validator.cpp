@@ -141,6 +141,34 @@ Result<AlgorithmCard> ParseAlgorithmCard(const YAML::Node& root) {
         card.capabilities = capabilities_result.value();
     }
 
+    if (root["operational_functions"]) {
+        if (!root["operational_functions"].IsSequence()) {
+            return Status::Error(ErrorCode::kInvalidAlgorithmCard,
+                                 "operational_functions must be an array.");
+        }
+        for (const auto& function_node : root["operational_functions"]) {
+            if (!function_node.IsMap() || !function_node["function_id"] ||
+                !function_node["function_code"] || !function_node["function_name"]) {
+                return Status::Error(
+                    ErrorCode::kInvalidAlgorithmCard,
+                    "Each operational_functions item must contain function_id, "
+                    "function_code, and function_name.");
+            }
+            OperationalFunctionSpec function;
+            function.function_id = function_node["function_id"].as<std::string>();
+            function.function_code = function_node["function_code"].as<std::string>();
+            function.function_name = function_node["function_name"].as<std::string>();
+            if (function_node["role"]) {
+                function.role = function_node["role"].as<std::string>();
+            }
+            if (function_node["coverage_level"]) {
+                function.coverage_level =
+                    function_node["coverage_level"].as<std::string>();
+            }
+            card.operational_functions.push_back(std::move(function));
+        }
+    }
+
     if (root["agent_card"] && root["agent_card"].IsMap()) {
         const YAML::Node& agent_card_node = root["agent_card"];
         if (agent_card_node["summary"]) {

@@ -1,0 +1,12 @@
+type: raw_tensor_to_json
+outputs:
+  - tensor_name: predicted_class_indices
+    json_path: $.predicted_class_indices
+  - tensor_name: evidence
+    json_path: $.evidence
+  - tensor_name: dirichlet_alpha
+    json_path: $.dirichlet_alpha
+  - tensor_name: class_probabilities
+    json_path: $.class_probabilities
+  - tensor_name: epistemic_uncertainty
+    json_path: $.epistemic_uncertainty

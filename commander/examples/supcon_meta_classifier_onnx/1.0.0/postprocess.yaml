@@ -1,0 +1,6 @@
+type: raw_tensor_to_json
+outputs:
+  - tensor_name: predicted_class_indices
+    json_path: $.predicted_class_indices
+  - tensor_name: class_probabilities
+    json_path: $.class_probabilities

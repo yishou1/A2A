@@ -16,6 +16,10 @@ capabilities:
   - rt_detr
   - odconv
 
+operational_functions:
+  - {function_id: KC-01, function_code: initial_detection, function_name: Initial Detection, role: primary, coverage_level: partial}
+  - {function_id: KC-03, function_code: re_task_detection, function_name: Re-Task Detection, role: supporting, coverage_level: partial}
+
 agent_card:
   summary: >
     Battlefield RT-DETR Detector from the TIA tactical intelligence agent pipeline.

@@ -4,7 +4,7 @@
 - GET `/track_state_updater/metadata`
 - POST `/track_state_updater/predict`
 
-Port: `9022`
+Port: `9038`
 
 Algorithm class: `M05 多目标跟踪与定位`
 

@@ -9,7 +9,7 @@ pip install -r services/requirements.txt
 python services/track_threat_algorithms/app/main.py
 ```
 
-Default port: `9022`.
+Default port: `9038`.
 
 Mounted algorithm endpoints:
 
@@ -17,7 +17,7 @@ Mounted algorithm endpoints:
 - `target_type_classifier` - M04 特征编码与分类
 - `track_state_updater` - M05 多目标跟踪与定位
 - `trajectory_predictor` - M06 时间序列预测
-- `graph_relation_reasoner` - M07 图神经网络
+- `graph_relation_reasoner` - M20 图神经网络
 
 Each mounted algorithm exposes:
 

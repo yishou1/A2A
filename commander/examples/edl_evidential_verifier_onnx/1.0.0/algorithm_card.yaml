@@ -1,0 +1,91 @@
+algorithm_id: edl_evidential_verifier_onnx
+version: 1.0.0
+display_name: EDL Evidential Verifier ONNX
+backend_type: onnx
+status: validated
+algorithm_class: M14
+
+task_family: classification
+modalities:
+  input: [structured_json, numeric_features]
+  output: [structured_json]
+
+capabilities:
+  - evidential_detection_verification
+  - uncertainty_estimation
+  - batch_inference
+  - lightweight_onnx_inference
+
+operational_functions:
+  - {function_id: KC-09, function_code: validate_detection, function_name: Validate Detection, role: primary, coverage_level: full}
+  - {function_id: KC-15, function_code: validate_target_threat, function_name: Validate Target / Threat, role: supporting, coverage_level: partial}
+
+agent_card:
+  summary: Native ONNX Runtime variant of the trained M14 Dirichlet evidential classifier.
+  when_to_use:
+    - Detection features are already arranged into the documented six-column tensor.
+    - Portable evidence, probabilities, and epistemic uncertainty are required.
+  when_not_to_use:
+    - Raw detection objects still require feature extraction.
+    - Policy decisions, review queues, or aleatoric uncertainty must be produced automatically.
+  input_description: Six float32 detection-quality features per row in the documented order.
+  output_description: Evidence, Dirichlet alpha, class probabilities, epistemic uncertainty, and class indices.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  tensor_contract_ref: tensor_contract.yaml
+  runtime:
+    backend_type: onnx
+    model_uri: model.onnx
+    execution_provider: cpu
+  preprocess:
+    config_uri: preprocess.yaml
+  postprocess:
+    config_uri: postprocess.yaml
+
+constraints:
+  max_input_chars: 2000000
+  max_request_bytes: 4194304
+  batch_supported: true
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 1
+  latency_ms_p95: 5
+  primary_metric: reference_holdout_accuracy
+  primary_score: 0.903
+  time_complexity: O(B*D*H)
+  space_complexity: O(B*H)
+  complexity_variable: B=batch rows, D=6 input features, H=32 hidden dimensions
+  performance_notes: Reference metrics use deterministic synthetic detection-quality data.
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 1
+  min_memory_mb: 64
+  recommended_memory_mb: 128
+  min_gpu_count: 0
+  gpu_type: none
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 1
+
+model_profile:
+  parameter_count: 290
+  parameter_count_text: 290_trainable_parameters
+  flops: 256
+  flops_text: approximate multiply-add and evidential-operation count per row
+  flops_input_shape: [1, 6]
+  model_size_mb: 1
+  precision: fp32
+
+provenance:
+  model_artifact_ref: model.onnx
+  model_metadata_ref: model.metadata.json
+  training_script_ref: ../../../scripts/train_edl_evidential_verifier.py
+  dataset_ref: ../../../data/edl_verifier/reference_holdout.json
+
+safety:
+  risk_level: high
+  requires_human_review: true

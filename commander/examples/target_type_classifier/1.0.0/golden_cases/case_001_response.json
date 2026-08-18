@@ -10,7 +10,7 @@
       {
         "item_id": "det-air-001",
         "object_type": "aircraft",
-        "confidence": 0.84,
+        "confidence": 0.8598,
         "type_scores": {},
         "evidence": []
       }

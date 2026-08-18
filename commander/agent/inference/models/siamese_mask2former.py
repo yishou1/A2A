@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from pathlib import Path
+
 import numpy as np
 import torch
 
@@ -11,12 +13,16 @@ import torch
 class SiameseMask2Former(torch.nn.Module):
     """孪生 Mask2Former：对参考帧/当前帧分割掩码做差分得到毁伤区域。"""
 
-    def __init__(self, model_id: str = "facebook/mask2former-swin-tiny-ade-semantic", *, local_files_only: bool = True):
+    def __init__(self, model_id: str = "facebook/mask2former-swin-tiny-ade-semantic"):
         super().__init__()
         from transformers import Mask2FormerForUniversalSegmentation, Mask2FormerImageProcessor
 
-        self.processor = Mask2FormerImageProcessor.from_pretrained(model_id, local_files_only=local_files_only)
-        self.model = Mask2FormerForUniversalSegmentation.from_pretrained(model_id, local_files_only=local_files_only)
+        from agent.inference.offline import is_offline_mode, resolve_model_ref
+
+        path = resolve_model_ref(model_id)
+        local_only = is_offline_mode() or Path(path).is_dir()
+        self.processor = Mask2FormerImageProcessor.from_pretrained(path, local_files_only=local_only)
+        self.model = Mask2FormerForUniversalSegmentation.from_pretrained(path, local_files_only=local_only)
         self.model.eval()
 
     @property

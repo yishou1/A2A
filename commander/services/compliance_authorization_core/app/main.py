@@ -16,7 +16,7 @@ from a2a_algorithms_common.http_service import create_algorithm_app
 
 ALGORITHM_ID = "compliance_authorization_core"
 VERSION = "1.0.0"
-PORT = int(os.environ.get("PORT", "9041"))
+PORT = int(os.environ.get("PORT", "9037"))
 
 
 def _predict(inputs: dict, params: dict) -> dict:

@@ -1,0 +1,102 @@
+algorithm_id: intent_gaussian_naive_bayes_onnx
+version: 1.0.0
+display_name: Intent Gaussian Naive Bayes ONNX
+backend_type: onnx
+status: validated
+algorithm_class: M07
+
+task_family: classification
+modalities:
+  input:
+    - structured_json
+    - numeric_features
+  output:
+    - structured_json
+
+capabilities:
+  - gaussian_naive_bayes
+  - probabilistic_intent_classification
+  - posterior_probability_estimation
+  - lightweight_onnx_inference
+
+operational_functions:
+  - {function_id: KC-06, function_code: classify, function_name: Classify, role: primary, coverage_level: full}
+  - {function_id: KC-07, function_code: identify, function_name: Identify, role: supporting, coverage_level: partial}
+
+agent_card:
+  summary: >
+    Native ONNX Runtime variant of the frozen M07 Gaussian Naive Bayes model.
+    It reproduces sklearn posterior probabilities without a Python service.
+  when_to_use:
+    - Observation features are normalized and arranged into the documented five-column tensor.
+    - A small CPU-only probabilistic intent classifier is preferred.
+  when_not_to_use:
+    - Raw observations still require feature extraction or observation-id attachment.
+    - Feature dependence invalidates the Gaussian conditional-independence assumption.
+  input_description: >
+    Float32 rows ordered as radar_activity, communication_intensity,
+    movement_consistency, weapon_signature, and proximity_score.
+  output_description: >
+    Predicted class indices and posterior rows. Class order is benign,
+    surveillance, hostile.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  tensor_contract_ref: tensor_contract.yaml
+  runtime:
+    backend_type: onnx
+    model_uri: model.onnx
+    execution_provider: cpu
+  preprocess:
+    config_uri: preprocess.yaml
+  postprocess:
+    config_uri: postprocess.yaml
+
+constraints:
+  max_input_chars: 2000000
+  max_request_bytes: 4194304
+  batch_supported: true
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 1
+  latency_ms_p95: 5
+  primary_metric: synthetic_reference_holdout_macro_f1
+  primary_score: 0.97037
+  time_complexity: O(B*C*D)
+  space_complexity: O(C*D)
+  complexity_variable: B=batch rows, C=3 classes, D=5 features
+  performance_notes: >
+    The exported float32 graph matches source sklearn probabilities within
+    1e-7 on the golden batch. Metrics use synthetic reference observations.
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 1
+  min_memory_mb: 64
+  recommended_memory_mb: 128
+  min_gpu_count: 0
+  gpu_type: none
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 1
+
+model_profile:
+  parameter_count: 33
+  parameter_count_text: 15_means_15_variances_3_class_priors
+  flops: 75
+  flops_text: approximately 3 classes times 5 features of Gaussian log-likelihood arithmetic
+  flops_input_shape: [1, 5]
+  model_size_mb: 1
+  precision: fp32
+
+provenance:
+  model_artifact_ref: model.onnx
+  model_metadata_ref: model.metadata.json
+  training_script_ref: ../../../scripts/export_sklearn_onnx_models.py
+  dataset_ref: ../../../data/intent_naive_bayes/reference_observations.csv
+
+safety:
+  risk_level: medium
+  requires_human_review: true

@@ -11,6 +11,7 @@ struct HttpServerConfig {
     std::filesystem::path execution_log_path;
     std::string host = "127.0.0.1";
     int port = 8088;
+    std::filesystem::path operational_function_catalog_path;
 };
 
 // 中文注释：AlgolibHttpServer 是算法库的常驻 HTTP 入口，复用现有 registry 与 runtime。

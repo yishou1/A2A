@@ -1,0 +1,70 @@
+{
+  "model_id": "edl_evidential_verifier_onnx",
+  "model_version": "1.0.0",
+  "model_family": "onnx_dirichlet_evidential_neural_classifier",
+  "format": "onnx",
+  "artifact_path": "examples/edl_evidential_verifier_onnx/1.0.0/model.onnx",
+  "artifact_sha256": "8e259c3ebc43d1ed8988b31f52c9e2cdc1de860d78e74520b9f1d0cdea34fd38",
+  "export_script": "scripts/export_torch_classifier_onnx_models.py",
+  "export_script_sha256": "745e28412ff7ab3e1242c2777d28fa7a8b92e969258689ac295efe178e3ceb03",
+  "source_model": "models/checkpoints/edl_head_s.safetensors",
+  "source_model_sha256": "a9d6995d55652bfe3b87e16ea54a7322f514a25a9cbf504d30a9819221ca9441",
+  "source_metadata": "models/checkpoints/edl_head_s.metadata.json",
+  "source_metadata_sha256": "9940bee7fdbc9a5306a7f27b770e3606c81dcf2e1cc778514a9b4f205d155daf",
+  "feature_order": [
+    "detector_confidence",
+    "bbox_width_normalized",
+    "bbox_height_normalized",
+    "bbox_center_x_normalized",
+    "bbox_center_y_normalized",
+    "damage_score"
+  ],
+  "class_order": [
+    "rejected",
+    "verified"
+  ],
+  "precision": "float32",
+  "equivalence": {
+    "reference": "source PyTorch checkpoint in evaluation mode",
+    "compared_outputs": [
+      "predicted_class_indices",
+      "evidence",
+      "dirichlet_alpha",
+      "class_probabilities",
+      "epistemic_uncertainty"
+    ],
+    "maximum_absolute_difference": 3.814697265625e-06
+  },
+  "runtime_versions": {
+    "numpy": "2.2.6",
+    "onnx": "1.21.0",
+    "onnxruntime": "1.23.2",
+    "torch": "2.12.0+cpu"
+  },
+  "parameter_count": 290,
+  "source_evaluation": {
+    "accuracy": 0.903,
+    "brier_score": 0.066736,
+    "error_mean_epistemic_uncertainty": 0.093815,
+    "expected_calibration_error_10_bin": 0.035839,
+    "log_loss": 0.225159,
+    "macro_f1": 0.90141,
+    "mean_aleatoric_uncertainty": 0.267173,
+    "mean_epistemic_uncertainty": 0.077646,
+    "method": "independent_deterministic_synthetic_holdout",
+    "raw_detector_brier_baseline": 0.10548,
+    "raw_detector_ece_baseline": 0.136591,
+    "selective_accuracy_at_80_percent_coverage": 0.93875
+  },
+  "decision_policy": {
+    "human_review_required_for_manual_review_decision": true,
+    "manual_review_margin": 0.08,
+    "maximum_epistemic_uncertainty": 0.45,
+    "verified_probability_threshold": 0.5
+  },
+  "limitations": [
+    "Returns neural evidence tensors only; policy thresholds and manual-review routing remain caller responsibilities.",
+    "Aleatoric uncertainty is available in the full Python package but omitted from this portable graph.",
+    "Synthetic detection-quality labels only; not an operational detector benchmark."
+  ]
+}

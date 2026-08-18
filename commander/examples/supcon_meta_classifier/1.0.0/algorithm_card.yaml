@@ -2,7 +2,7 @@ algorithm_id: supcon_meta_classifier
 version: 1.0.0
 display_name: SupCon Meta Classifier
 backend_type: python_http_service
-status: draft
+status: validated
 
 task_family: classification
 modalities:
@@ -15,17 +15,25 @@ capabilities:
   - few_shot_classification
   - affiliation_labeling
 
+operational_functions:
+  - {function_id: KC-07, function_code: identify, function_name: Identify, role: primary, coverage_level: full}
+  - {function_id: KC-06, function_code: classify, function_name: Classify, role: supporting, coverage_level: full}
+
 agent_card:
   summary: >
-    SupCon Meta Classifier from the TIA tactical intelligence agent pipeline.
+    Trained small-profile neural classifier combining a two-layer projection
+    MLP, supervised contrastive loss, and learnable class prototypes.
   when_to_use:
-    - Fused target embeddings need hostile/friendly labels.
+    - Fused target embeddings need friendly, neutral, hostile, or unknown labels.
+    - CPU-compatible inference with traceable similarity probabilities is required.
   when_not_to_use:
     - No fused embeddings are available.
+    - Synthetic embedding metrics are being treated as operational identification accuracy.
   input_description: >
-    See input.schema.json for required structured fields.
+    Target-id to embedding-vector mapping with optional labeled support shots.
   output_description: >
-    See output.schema.json for structured outputs.
+    Per-target class, confidence, class probabilities, support-shot count, and
+    verified checkpoint identity in real mode.
 
 machine_spec:
   input_schema_ref: input.schema.json
@@ -46,33 +54,36 @@ constraints:
 performance:
   latency_ms_p50: 50
   latency_ms_p95: 500
-  primary_metric: classification_f1
-  primary_score: 0.8
+  primary_metric: synthetic_holdout_macro_f1
+  primary_score: 1.0
 
 resource_requirements:
-  min_cpu_cores: 2
-  recommended_cpu_cores: 4
-  min_memory_mb: 4096
-  recommended_memory_mb: 8192
+  min_cpu_cores: 1
+  recommended_cpu_cores: 2
+  min_memory_mb: 256
+  recommended_memory_mb: 512
   min_gpu_count: 0
   gpu_type: optional
   min_vram_mb: 0
-  recommended_vram_mb: 8192
-  disk_mb: 4096
+  recommended_vram_mb: 0
+  disk_mb: 10
 
 model_profile:
-  # SupConMetaNet (in_dim=1024, proj_dim=128, num_classes=4, medium profile):
-  # encoder Linear(1024->256)=262144+256=262400
-  # encoder Linear(256->128)=32768+128=32896
-  # prototypes: 4*128=512
-  # Total: ~295.8K (~296K)
-  parameter_count: 295808
-  parameter_count_text: 296K (SupConMetaNet in_dim=1024 medium profile)
-  flops: 590000
-  flops_text: ~590 KFLOPs per target embedding (2 linear layers + cosine sim)
-  flops_input_shape: [1, 1024]
-  model_size_mb: 2
+  # Published small profile uses in_dim=256, hidden_dim=256, proj_dim=128.
+  parameter_count: 99200
+  parameter_count_text: 99.2K_small_profile
+  flops: 198000
+  flops_text: ~198 KFLOPs per target embedding (small profile projection + cosine similarity)
+  flops_input_shape: [1, 256]
+  model_size_mb: 1
   precision: fp32
+
+provenance:
+  model_artifact_ref: ../../../models/checkpoints/supcon_meta_s.safetensors
+  model_metadata_ref: ../../../models/checkpoints/supcon_meta_s.metadata.json
+  training_script_ref: ../../../scripts/train_supcon_meta_classifier.py
+  dataset_ref: ../../../data/supcon_meta/reference_embeddings.npy
+  label_dataset_ref: ../../../data/supcon_meta/reference_labels.npy
 
 safety:
   risk_level: medium

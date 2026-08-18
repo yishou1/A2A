@@ -8,7 +8,7 @@
         "type": "object",
         "properties": {
           "sensor_id": { "type": "string" },
-          "target_id": { "type": "string" },
+          "target_id": { "type": ["string", "null"] },
           "task": { "type": "string" },
           "priority": { "type": "string" },
           "rationale": { "type": "string" }
@@ -41,6 +41,29 @@
     },
     "algorithm": {
       "type": "string"
+    },
+    "n_agents": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8
+    },
+    "model": {
+      "type": "object",
+      "required": [
+        "model_id",
+        "model_version",
+        "model_family",
+        "compute_profile",
+        "artifact_sha256"
+      ],
+      "properties": {
+        "model_id": { "const": "marl_ppo_task_scheduler" },
+        "model_version": { "type": "string" },
+        "model_family": { "type": "string" },
+        "compute_profile": { "type": "string" },
+        "artifact_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": true

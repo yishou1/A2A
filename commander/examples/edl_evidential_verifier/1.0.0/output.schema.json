@@ -1,13 +1,124 @@
 {
-  "title": "TIA Algorithm Output",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EDL Evidential Verifier Output",
   "type": "object",
-  "properties": {
-    "verified_detections": {
-      "type": "array"
-    },
-    "count": {
-      "type": "number"
+  "required": [
+    "assessments",
+    "verified_detections",
+    "rejected_detections",
+    "review_queue",
+    "count",
+    "summary"
+  ],
+  "$defs": {
+    "assessment": {
+      "type": "object",
+      "required": [
+        "confidence",
+        "verified",
+        "decision",
+        "review_required",
+        "epistemic_uncertainty",
+        "aleatoric_uncertainty"
+      ],
+      "properties": {
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "detector_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "verified": { "type": "boolean" },
+        "decision": {
+          "type": "string",
+          "enum": ["verified", "rejected", "manual_review"]
+        },
+        "review_required": { "type": "boolean" },
+        "epistemic_uncertainty": { "type": "number", "minimum": 0, "maximum": 1 },
+        "aleatoric_uncertainty": { "type": "number", "minimum": 0 },
+        "edl_belief": { "type": "number", "minimum": 0, "maximum": 1 },
+        "evidence": {
+          "type": "object",
+          "required": [
+            "features",
+            "class_probabilities",
+            "class_evidence",
+            "dirichlet_alpha",
+            "dirichlet_strength",
+            "decision_reasons"
+          ],
+          "properties": {
+            "features": { "type": "object" },
+            "class_probabilities": {
+              "type": "object",
+              "required": ["rejected", "verified"]
+            },
+            "class_evidence": {
+              "type": "object",
+              "required": ["rejected", "verified"]
+            },
+            "dirichlet_alpha": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": { "type": "number", "minimum": 1 }
+            },
+            "dirichlet_strength": { "type": "number", "minimum": 2 },
+            "decision_reasons": {
+              "type": "array",
+              "minItems": 2,
+              "items": { "type": "string" }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": true
     }
   },
-  "additionalProperties": true
+  "properties": {
+    "assessments": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/assessment" }
+    },
+    "verified_detections": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/assessment" }
+    },
+    "rejected_detections": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/assessment" }
+    },
+    "review_queue": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/assessment" }
+    },
+    "count": { "type": "integer", "minimum": 0 },
+    "summary": {
+      "type": "object",
+      "required": ["total", "verified", "rejected", "manual_review"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "verified": { "type": "integer", "minimum": 0 },
+        "rejected": { "type": "integer", "minimum": 0 },
+        "manual_review": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "model": {
+      "type": "object",
+      "required": [
+        "model_id",
+        "model_version",
+        "model_family",
+        "compute_profile",
+        "artifact_sha256"
+      ],
+      "properties": {
+        "model_id": { "const": "edl_evidential_verifier" },
+        "model_version": { "type": "string" },
+        "model_family": { "type": "string" },
+        "compute_profile": { "type": "string" },
+        "artifact_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
 }

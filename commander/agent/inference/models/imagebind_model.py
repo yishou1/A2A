@@ -57,17 +57,18 @@ def _to_vector(feat) -> np.ndarray:
 class _ClipEmbedder:
     """transformers CLIP 回退（无法从 GitHub 安装 ImageBind 时使用）。"""
 
-    def __init__(self, device: str):
+    def __init__(self, device: str, *, clip_model_id: str = "openai/clip-vit-base-patch32"):
+        from pathlib import Path
+
         from transformers import CLIPModel, CLIPProcessor
 
-        model_id = "openai/clip-vit-base-patch32"
+        from agent.inference.offline import is_offline_mode, resolve_model_ref
+
+        path = resolve_model_ref(clip_model_id)
+        local_only = is_offline_mode() or Path(path).is_dir()
         self.device = device
-        try:
-            self.processor = CLIPProcessor.from_pretrained(model_id, local_files_only=True)
-            self.model = CLIPModel.from_pretrained(model_id, local_files_only=True)
-        except OSError:
-            self.processor = CLIPProcessor.from_pretrained(model_id)
-            self.model = CLIPModel.from_pretrained(model_id)
+        self.processor = CLIPProcessor.from_pretrained(path, local_files_only=local_only)
+        self.model = CLIPModel.from_pretrained(path, local_files_only=local_only)
         self.model.eval()
         self.model.to(device)
 
@@ -102,7 +103,7 @@ class _ClipEmbedder:
 class ImageBindEmbedder:
     """封装 Meta ImageBind；不可用时使用 CLIP。"""
 
-    def __init__(self, device: str):
+    def __init__(self, device: str, *, clip_model_id: str = "openai/clip-vit-base-patch32"):
         self.device = device
         self._backend = "imagebind"
         self._clip: _ClipEmbedder | None = None
@@ -119,13 +120,12 @@ class ImageBindEmbedder:
             self.model.to(device)
         except ImportError:
             warnings.warn(
-                "ImageBind 未安装，认知嵌入使用 CLIP 回退（openai/clip-vit-base-patch32）。"
-                "若网络可访问 GitHub，可安装完整 ImageBind："
-                "pip install git+https://github.com/facebookresearch/ImageBind.git",
+                "ImageBind 未安装，认知嵌入使用 CLIP 回退。"
+                "离线环境请将 CLIP 打包到 models/pretrained/clip-vit-base-patch32。",
                 stacklevel=2,
             )
             self._backend = "clip"
-            self._clip = _ClipEmbedder(device)
+            self._clip = _ClipEmbedder(device, clip_model_id=clip_model_id)
 
     @torch.inference_mode()
     def embed_frames(self, frames: list[dict[str, Any]]) -> dict[str, list[float]]:
