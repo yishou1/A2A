@@ -31,6 +31,14 @@ nlohmann::json ToJson(const AlgorithmRequest& request) {
     if (!request.deploy_id.empty()) {
         j["deploy_id"] = request.deploy_id;
     }
+    if (request.function_context.has_value()) {
+        j["function_context"] = {
+            {"function_id", request.function_context->function_id},
+            {"function_code", request.function_context->function_code},
+            {"workflow_instance_id", request.function_context->workflow_instance_id},
+            {"step_instance_id", request.function_context->step_instance_id},
+        };
+    }
     return j;
 }
 
@@ -74,6 +82,29 @@ Result<AlgorithmRequest> AlgorithmRequestFromJson(const nlohmann::json& json_val
             ErrorCode::kInvalidArgument,
             "AlgorithmRequest params must be a JSON object when provided.");
     }
+    if (json_value.contains("function_context")) {
+        const auto& context = json_value.at("function_context");
+        if (!context.is_object()) {
+            return Status::Error(
+                ErrorCode::kInvalidArgument,
+                "AlgorithmRequest function_context must be an object when provided.");
+        }
+        for (const std::string& field_name : {"function_id", "function_code",
+                                               "workflow_instance_id", "step_instance_id"}) {
+            if (context.contains(field_name) && !context.at(field_name).is_string()) {
+                return Status::Error(
+                    ErrorCode::kInvalidArgument,
+                    "AlgorithmRequest function_context." + field_name +
+                        " must be a string when provided.");
+            }
+        }
+        if (context.value("function_id", std::string()).empty() &&
+            context.value("function_code", std::string()).empty()) {
+            return Status::Error(
+                ErrorCode::kInvalidArgument,
+                "AlgorithmRequest function_context must contain function_id or function_code.");
+        }
+    }
 
     AlgorithmRequest request;
     request.request_id = json_value.value("request_id", std::string());
@@ -84,6 +115,17 @@ Result<AlgorithmRequest> AlgorithmRequestFromJson(const nlohmann::json& json_val
     request.inputs = json_value.at("inputs");
     request.params     = json_value.value("params",     nlohmann::json::object());
     request.deploy_id   = json_value.value("deploy_id",  std::string());
+    if (json_value.contains("function_context")) {
+        const auto& context_json = json_value.at("function_context");
+        FunctionContext context;
+        context.function_id = context_json.value("function_id", std::string());
+        context.function_code = context_json.value("function_code", std::string());
+        context.workflow_instance_id =
+            context_json.value("workflow_instance_id", std::string());
+        context.step_instance_id =
+            context_json.value("step_instance_id", std::string());
+        request.function_context = std::move(context);
+    }
     return request;
 }
 

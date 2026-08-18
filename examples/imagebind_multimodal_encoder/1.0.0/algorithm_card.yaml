@@ -15,6 +15,9 @@ capabilities:
   - multimodal_embedding
   - cross_modal_encoding
 
+operational_functions:
+  - {function_id: KC-05, function_code: characterize, function_name: Characterize, role: supporting, coverage_level: partial}
+
 agent_card:
   summary: >
     ImageBind Multimodal Encoder from the TIA tactical intelligence agent pipeline.

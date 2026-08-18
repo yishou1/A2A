@@ -16,6 +16,10 @@ capabilities:
   - execution_rule_matching
   - reference_policy_action_selection
 
+operational_functions:
+  - {function_id: KC-21, function_code: verify_rules_of_engagement, function_name: Verify Rules of Engagement (ROE), role: primary, coverage_level: partial}
+  - {function_id: KC-20, function_code: select_attack_option, function_name: Select Attack Option, role: supporting, coverage_level: partial}
+
 agent_card:
   summary: >
     Deterministic Apriori-style association-rule matcher backed by a persisted,

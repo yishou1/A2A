@@ -77,6 +77,9 @@ nlohmann::json BuildEntrySummary(const AlgorithmEntry& entry) {
         {"status", algolib::ToString(entry.status)},
         {"display_name", entry.card.display_name},
         {"task_family", entry.card.task_family},
+        {"operational_functions",
+         algolib::ToJson(entry.card).value("operational_functions",
+                                            nlohmann::json::array())},
     };
 }
 
@@ -316,6 +319,18 @@ int main(int argc, char* argv[]) {
                 v = ExtractValue("--capability=");
                 if (!v.empty()) {
                     filter.capability = v;
+                    continue;
+                }
+
+                v = ExtractValue("--function-id=");
+                if (!v.empty()) {
+                    filter.function_id = v;
+                    continue;
+                }
+
+                v = ExtractValue("--function-code=");
+                if (!v.empty()) {
+                    filter.function_code = v;
                     continue;
                 }
 

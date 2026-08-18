@@ -147,6 +147,12 @@ void TestRunActiveOnnxAlgorithmWritesSuccessAuditLog() {
            "ONNX run should return the expected label.");
     Expect(result.usage.contains("latency_ms"),
            "Coordinator should populate latency_ms when runner omits it.");
+    Expect(result.function_execution.has_value(),
+           "Mapped algorithms should report inferred function telemetry.");
+    Expect(result.function_execution->function_id == "KC-06",
+           "Legacy requests should use the card's default function mapping.");
+    Expect(result.function_execution->mapping_source == "algorithm_card_default",
+           "Legacy requests should identify the card-default mapping source.");
 
     const auto audit_log = ReadLastAuditLog(log_path);
     Expect(audit_log.value("status", std::string()) == "success",
@@ -157,6 +163,60 @@ void TestRunActiveOnnxAlgorithmWritesSuccessAuditLog() {
            "Audit log should keep request_id.");
     Expect(audit_log.value("input_hash", std::string()).rfind("sha256:", 0) == 0,
            "Audit log should include SHA-256 input hash.");
+    Expect(audit_log.at("function_execution").value("function_id", std::string()) ==
+               "KC-06",
+           "Audit log should include inferred function telemetry.");
+}
+
+void TestExplicitFunctionContextIsPreservedWithoutStrictValidation() {
+    fs::path temp_dir = MakeTempDir("function_context");
+    fs::path registry_path = temp_dir / "registry.json";
+    fs::path log_path = temp_dir / "execution_audit.jsonl";
+
+    AlgorithmRegistry registry(registry_path);
+    Expect(registry.Reload().ok(), "Reload should succeed.");
+    Expect(registry.Register(SourceRoot() / "examples" / "onnx_text_classifier" / "1.0.0").ok(),
+           "ONNX example should register.");
+    Expect(registry.Activate(OnnxKey()).ok(), "ONNX example should activate.");
+
+    ExecutionCoordinator coordinator(registry, log_path);
+    algolib::AlgorithmRequest request;
+    request.request_id = "req_function_001";
+    request.trace_id = "trace_function_001";
+    request.algorithm_id = "onnx_text_classifier";
+    request.version = "1.0.0";
+    request.backend_type = BackendType::kOnnx;
+    request.inputs = {{"text", "Classify this task description"}};
+    request.function_context = algolib::FunctionContext{
+        "KC-06", "classify", "workflow-001", "step-006"};
+
+    const auto result = coordinator.Run(request);
+    Expect(result.ok, "Function-aware request should preserve normal execution.");
+    Expect(result.function_execution.has_value(),
+           "Function-aware request should return function_execution.");
+    Expect(result.function_execution->matched,
+           "Declared function mapping should be marked as matched.");
+    Expect(result.function_execution->mapping_source == "request",
+           "Explicit context should be identified as request-sourced.");
+    Expect(result.function_execution->workflow_instance_id == "workflow-001",
+           "Workflow identity should be preserved.");
+
+    const auto audit_log = ReadLastAuditLog(log_path);
+    Expect(audit_log.at("function_execution").value("step_instance_id", std::string()) ==
+               "step-006",
+           "Audit log should preserve step identity.");
+
+    request.request_id = "req_function_unmatched";
+    request.function_context = algolib::FunctionContext{
+        "KC-28", "evaluate", "workflow-001", "step-028"};
+    const auto unmatched_result = coordinator.Run(request);
+    Expect(unmatched_result.ok,
+           "Unmatched optional function context must not block algorithm execution.");
+    Expect(unmatched_result.function_execution.has_value() &&
+               !unmatched_result.function_execution->matched,
+           "Unmatched optional context should be reported instead of rejected.");
+    Expect(unmatched_result.function_execution->function_id == "KC-28",
+           "Unmatched telemetry should preserve the caller's requested function.");
 }
 
 void TestRunRejectsNonActiveAlgorithm() {
@@ -300,6 +360,8 @@ int RunPhase5ExecutionTests() {
         {"TestRunActiveOnnxAlgorithmWritesSuccessAuditLog",
          TestRunActiveOnnxAlgorithmWritesSuccessAuditLog},
         {"TestRunRejectsNonActiveAlgorithm", TestRunRejectsNonActiveAlgorithm},
+        {"TestExplicitFunctionContextIsPreservedWithoutStrictValidation",
+         TestExplicitFunctionContextIsPreservedWithoutStrictValidation},
         {"TestRunActivePythonServiceAlgorithm", TestRunActivePythonServiceAlgorithm},
         {"TestRunReturnsBackendFailureDirectly", TestRunReturnsBackendFailureDirectly},
     };

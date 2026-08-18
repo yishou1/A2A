@@ -15,6 +15,10 @@ capabilities:
   - few_shot_classification
   - affiliation_labeling
 
+operational_functions:
+  - {function_id: KC-07, function_code: identify, function_name: Identify, role: primary, coverage_level: full}
+  - {function_id: KC-06, function_code: classify, function_name: Classify, role: supporting, coverage_level: full}
+
 agent_card:
   summary: >
     Trained small-profile neural classifier combining a two-layer projection

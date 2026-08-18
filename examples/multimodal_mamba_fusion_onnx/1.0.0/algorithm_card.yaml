@@ -16,6 +16,9 @@ capabilities:
   - batch_inference
   - lightweight_onnx_inference
 
+operational_functions:
+  - {function_id: KC-05, function_code: characterize, function_name: Characterize, role: supporting, coverage_level: full}
+
 agent_card:
   summary: Native ONNX Runtime variant of the trained M15 Mamba-style multimodal embedding fusion block.
   when_to_use:

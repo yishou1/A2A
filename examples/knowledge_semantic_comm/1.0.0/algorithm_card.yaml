@@ -15,6 +15,9 @@ capabilities:
   - semantic_compression
   - intelligence_summary
 
+operational_functions:
+  - {function_id: KC-10, function_code: disseminate_target_threat_information, function_name: Disseminate Target/Threat Information, role: primary, coverage_level: full}
+
 agent_card:
   summary: >
     Knowledge Semantic Comm from the TIA tactical intelligence agent pipeline.

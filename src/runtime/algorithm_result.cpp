@@ -22,6 +22,22 @@ nlohmann::json ToJson(const AlgorithmResult& result) {
         };
     }
 
+    if (result.function_execution.has_value()) {
+        const auto& execution = result.function_execution.value();
+        json_value["function_execution"] = {
+            {"function_id", execution.function_id},
+            {"function_code", execution.function_code},
+            {"function_name", execution.function_name},
+            {"role", execution.role},
+            {"coverage_level", execution.coverage_level},
+            {"mapping_source", execution.mapping_source},
+            {"execution_status", execution.execution_status},
+            {"workflow_instance_id", execution.workflow_instance_id},
+            {"step_instance_id", execution.step_instance_id},
+            {"matched", execution.matched},
+        };
+    }
+
     return json_value;
 }
 

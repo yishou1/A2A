@@ -16,6 +16,9 @@ capabilities:
   - rule_explanation
   - structured_summary
 
+operational_functions:
+  - {function_id: KC-21, function_code: verify_rules_of_engagement, function_name: Verify Rules of Engagement (ROE), role: supporting, coverage_level: advisory}
+
 agent_card:
   summary: >
     Generate a readable explanation from rules and structured entities.

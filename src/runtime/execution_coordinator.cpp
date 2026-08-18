@@ -1,6 +1,7 @@
 #include "algolib/runtime/execution_coordinator.h"
 
 #include <atomic>
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <memory>
@@ -90,6 +91,68 @@ void EnsureLatency(AlgorithmResult* result, std::int64_t latency_ms) {
     }
 }
 
+std::optional<FunctionExecution> RequestedFunctionExecution(
+    const AlgorithmRequest& request) {
+    if (!request.function_context.has_value()) {
+        return std::nullopt;
+    }
+    FunctionExecution execution;
+    execution.function_id = request.function_context->function_id;
+    execution.function_code = request.function_context->function_code;
+    execution.workflow_instance_id = request.function_context->workflow_instance_id;
+    execution.step_instance_id = request.function_context->step_instance_id;
+    execution.mapping_source = "request";
+    return execution;
+}
+
+void ResolveFunctionExecution(const AlgorithmCard& card,
+                              const AlgorithmRequest& request,
+                              std::optional<FunctionExecution>* execution) {
+    const OperationalFunctionSpec* selected = nullptr;
+    if (request.function_context.has_value()) {
+        const auto& context = request.function_context.value();
+        const auto it = std::find_if(
+            card.operational_functions.begin(), card.operational_functions.end(),
+            [&](const OperationalFunctionSpec& candidate) {
+                const bool id_matches = context.function_id.empty() ||
+                                        candidate.function_id == context.function_id;
+                const bool code_matches = context.function_code.empty() ||
+                                          candidate.function_code == context.function_code;
+                return id_matches && code_matches;
+            });
+        if (it != card.operational_functions.end()) {
+            selected = &*it;
+        }
+    } else if (!card.operational_functions.empty()) {
+        const auto primary = std::find_if(
+            card.operational_functions.begin(), card.operational_functions.end(),
+            [](const OperationalFunctionSpec& candidate) {
+                return candidate.role == "primary";
+            });
+        selected = primary != card.operational_functions.end()
+                       ? &*primary
+                       : &card.operational_functions.front();
+        execution->emplace();
+        (*execution)->mapping_source = "algorithm_card_default";
+    }
+
+    if (selected == nullptr) {
+        return;
+    }
+    if (!execution->has_value()) {
+        execution->emplace();
+    }
+    (*execution)->function_id = selected->function_id;
+    (*execution)->function_code = selected->function_code;
+    (*execution)->function_name = selected->function_name;
+    (*execution)->role = selected->role;
+    (*execution)->coverage_level = selected->coverage_level;
+    (*execution)->matched = true;
+    if ((*execution)->mapping_source.empty()) {
+        (*execution)->mapping_source = "algorithm_card_default";
+    }
+}
+
 }  // namespace
 
 ExecutionCoordinator::ExecutionCoordinator(const AlgorithmRegistry& registry,
@@ -102,15 +165,25 @@ ExecutionCoordinator::ExecutionCoordinator(const AlgorithmRegistry& registry,
 AlgorithmResult ExecutionCoordinator::Run(const AlgorithmRequest& request) {
     AlgorithmRequest effective_request = request;
     EnsureRequestEnvelope(&effective_request);
+    std::optional<FunctionExecution> function_execution =
+        RequestedFunctionExecution(effective_request);
 
     const auto started_at = std::chrono::steady_clock::now();
-    const auto finalize = [this, &effective_request, started_at](AlgorithmResult result) {
+    const auto finalize = [this, &effective_request, &function_execution,
+                           started_at](AlgorithmResult result) {
         NormalizeResultEnvelope(effective_request, &result);
         const auto latency_ms =
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - started_at)
                 .count();
         EnsureLatency(&result, latency_ms);
+        if (function_execution.has_value()) {
+            function_execution->execution_status =
+                result.ok && function_execution->coverage_level == "external_handoff"
+                    ? "handoff_ready"
+                    : (result.ok ? "succeeded" : "failed");
+            result.function_execution = function_execution;
+        }
         const Status log_status =
             execution_logger_.Append(effective_request, result, latency_ms);
         (void)log_status;
@@ -129,6 +202,7 @@ AlgorithmResult ExecutionCoordinator::Run(const AlgorithmRequest& request) {
     }
 
     const AlgorithmEntry& entry = entry_result.value();
+    ResolveFunctionExecution(entry.card, effective_request, &function_execution);
     if (entry.status != AlgorithmStatus::kActive) {
         return finalize(BuildFailureResult(
             effective_request,

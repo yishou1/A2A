@@ -109,6 +109,16 @@ struct SafetySpec {
     std::optional<bool> requires_human_review;
 };
 
+// A business/operational function implemented by this algorithm. This metadata is
+// optional so existing cards and callers remain compatible.
+struct OperationalFunctionSpec {
+    std::string function_id;
+    std::string function_code;
+    std::string function_name;
+    std::string role = "primary";
+    std::string coverage_level = "full";
+};
+
 // 中文注释: AlgorithmCard 与 SPEC 顶层字段一一对应
 struct AlgorithmCard {
     std::string algorithm_id;
@@ -119,6 +129,7 @@ struct AlgorithmCard {
     std::string task_family;
     Modalities modalities;
     std::vector<std::string> capabilities;
+    std::vector<OperationalFunctionSpec> operational_functions;
     AgentCard agent_card;
     MachineSpec machine_spec;
     std::optional<ConstraintsSpec> constraints;

@@ -20,6 +20,10 @@ capabilities:
   - group_relation_reasoning
   - formation_group_detection
 
+operational_functions:
+  - {function_id: KC-05, function_code: characterize, function_name: Characterize, role: primary, coverage_level: full}
+  - {function_id: KC-14, function_code: assess_blue_force_proximity, function_name: Assess Blue Force Proximity, role: supporting, coverage_level: partial}
+
 agent_card:
   summary: >
     M20 package for the Track Threat Agent. Uses a trained dense message-passing

@@ -15,6 +15,10 @@ capabilities:
   - anti_jam_routing
   - semantic_comm_routing
 
+operational_functions:
+  - {function_id: KC-10, function_code: disseminate_target_threat_information, function_name: Disseminate Target/Threat Information, role: supporting, coverage_level: partial}
+  - {function_id: KC-22, function_code: issue_order, function_name: Issue Order, role: supporting, coverage_level: partial}
+
 agent_card:
   summary: >
     MARL Dynamic Router from the TIA tactical intelligence agent pipeline.

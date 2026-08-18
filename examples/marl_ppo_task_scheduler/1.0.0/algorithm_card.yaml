@@ -16,6 +16,10 @@ capabilities:
   - reattack_planning
   - marl_ppo
 
+operational_functions:
+  - {function_id: KC-26, function_code: task_re_attack, function_name: Task Re-Attack, role: primary, coverage_level: full}
+  - {function_id: KC-22, function_code: issue_order, function_name: Issue Order, role: supporting, coverage_level: partial}
+
 agent_card:
   summary: >
     Trained parameter-shared MARL-PPO Actor-Critic scheduler with valid-action

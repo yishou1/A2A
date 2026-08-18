@@ -15,6 +15,9 @@ capabilities:
   - temporal_fusion
   - multimodal_mamba
 
+operational_functions:
+  - {function_id: KC-05, function_code: characterize, function_name: Characterize, role: supporting, coverage_level: full}
+
 agent_card:
   summary: >
     Trained small-profile Mamba-style selective state-space block for denoising
