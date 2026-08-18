@@ -14,7 +14,7 @@ def _identified_tracks() -> tuple[SimEngine, object, object]:
     engine = SimEngine(seed=int(scenario["default_seed"]))
     engine.load_scenario(scenario)
     engine.clock.update({"run_id": "run-engagement", "scenario_id": SCENARIO_ID})
-    engine._tick(660)
+    engine._tick(990)
     assert len(engine.sensor_fusion.tracks) == 2
 
     by_truth = {
@@ -122,7 +122,46 @@ def test_weapon_impact_is_detected_when_director_uses_large_steps() -> None:
 
     weapon = engine.weapons[launched["weapon_id"]]
     assert weapon["status"] == "hit"
-    assert weapon["damage_state"] == "destroyed"
+    assert weapon["damage_state"] == "impact_pending"
+    assert weapon["impact_sim_time"] == engine.clock["elapsed_sec"]
+
+    public_state = engine.get_operator_state()
+    public_weapon = next(row for row in public_state["weapons"] if row["id"] == launched["weapon_id"])
+    public_track = next(row for row in public_state["fused_tracks"] if row["id"] == hostile.id)
+    assert public_weapon["impact_sim_time"] == weapon["impact_sim_time"]
+    assert public_weapon["damage_state"] == "impact_pending"
+    assert public_track["agent_assessment"]["damage_state"] == "impact_pending"
+    assert public_track["agent_assessment"]["behavior_label"] == "导弹命中 · 待毁伤评估"
+    public_impact = next(
+        row for row in public_state["kill_chain_events"]
+        if row.get("type") == "weapon_hit"
+    )
+    assert public_impact["target_track_id"] == hostile.id
+    assert public_impact["position"]["lat"] is not None
+    assert public_impact["position"]["lng"] is not None
+
+    engine._tick(120.0)
+    public_state = engine.get_operator_state()
+    public_weapon = next(row for row in public_state["weapons"] if row["id"] == launched["weapon_id"])
+    public_track = next(row for row in public_state["fused_tracks"] if row["id"] == hostile.id)
+    assert public_weapon["damage_state"] == "destroyed"
+    assert public_track["agent_assessment"]["damage_state"] == "destroyed"
+    assert public_track["agent_assessment"]["behavior_label"] == "已击毁，威胁解除"
+    assert any(
+        row.get("type") == "damage_assessment_confirmed"
+        and row.get("target_track_id") == hostile.id
+        for row in public_state["kill_chain_events"]
+    )
+
+    engine.sensor_fusion.current_sim_time = float(
+        engine.scenario_story["demo_controls"]["duration_sec"]
+    )
+    final_tracks = engine.get_operator_state()["fused_tracks"]
+    assert any(
+        row["id"] == hostile.id
+        and row["agent_assessment"].get("damage_state") == "destroyed"
+        for row in final_tracks
+    )
 
 
 def test_post_strike_capture_observes_destroyed_target_without_recreating_track() -> None:
@@ -174,6 +213,33 @@ def test_fishing_vessel_remains_no_strike_even_if_risk_is_overstated() -> None:
 
     assert result == {"error": "目标身份未知或属于民用禁射类别"}
     assert engine.weapons == {}
+
+
+def test_confirmed_fishing_vessel_changes_course_and_departs() -> None:
+    engine, _, fishing = _identified_tracks()
+
+    engine._tick(1.0)
+
+    truth_id = engine._truth_target_for_track(fishing)
+    assert truth_id == "CONTACT-FISHING-01"
+    truth = engine.threats[truth_id]
+    assert truth["_confirmed_behavior_applied"] is True
+    assert truth["_behavior_phase"] is None
+    assert truth["_behavior_phase_name"] == "驶离护航航线"
+    assert truth["_commanded_heading"] == 225.0
+    assert truth["speed_kts"] == 11.0
+    assert [row["label"] for row in truth["_flight_route"]] == [
+        "驶离转向点", "外海安全航线",
+    ]
+    assert truth["_hold_when_route_complete"] is True
+
+    public_track = next(
+        row for row in engine.get_operator_state()["fused_tracks"]
+        if row["id"] == fishing.id
+    )
+    assert public_track["agent_assessment"]["status"] == "cleared"
+    assert public_track["agent_assessment"]["behavior_state"] == "departing"
+    assert public_track["agent_assessment"]["behavior_label"] == "驶离护航航线"
 
 
 def test_operator_projection_exposes_only_safe_engagement_fields() -> None:
@@ -390,6 +456,8 @@ def test_confirm_uav_stays_visible_for_post_strike_assessment_media() -> None:
         if engine.weapons[launched["weapon_id"]]["status"] != "in_flight":
             break
 
+    assert engine.weapons[launched["weapon_id"]]["damage_state"] == "impact_pending"
+    engine._tick(120.0)
     assert engine.weapons[launched["weapon_id"]]["damage_state"] == "destroyed"
     assert uav.get("_follow_returning_home") is not True
     assert uav.get("_operator_follow_visible") is True
@@ -398,6 +466,23 @@ def test_confirm_uav_stays_visible_for_post_strike_assessment_media() -> None:
 
     assert "MAR-MEDIA-07" in engine.media_capture.captured_media_ids
     assert any(
+        asset["id"] == "UAV-CONFIRM-01"
+        for asset in engine.get_operator_state()["assets"]
+    )
+
+    engine.clock["elapsed_sec"] = 5609.0
+    engine._tick(1.0)
+    assert uav.get("_follow_returning_home") is True
+    assert engine.waypoint_nav.get_route("UAV-CONFIRM-01")[0]["label"] == "RETURN"
+
+    duration_sec = float(scenario["demo_controls"]["duration_sec"])
+    while engine.clock["elapsed_sec"] < duration_sec and uav["status"] != "staged":
+        engine._tick(min(30.0, duration_sec - float(engine.clock["elapsed_sec"])))
+
+    assert uav["status"] == "staged"
+    assert engine.clock["elapsed_sec"] <= duration_sec
+    assert uav.get("_operator_follow_visible") is False
+    assert not any(
         asset["id"] == "UAV-CONFIRM-01"
         for asset in engine.get_operator_state()["assets"]
     )

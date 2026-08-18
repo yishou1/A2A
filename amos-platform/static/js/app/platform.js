@@ -996,7 +996,10 @@ window.Platform = (function () {
     }
     Panels.updateAll(state);
     Panels.updateWorkspace(state, currentScenario);
-    Map.updateLiveState(state.assets || [], state.weapons || [], state.fused_tracks || []);
+    Map.updateLiveState(
+      state.assets || [], state.weapons || [], state.fused_tracks || [],
+      Number(clock.elapsed_sec || 0), state.kill_chain_events || []
+    );
     renderStory(state.scenario_story, state);
     refreshEvidenceProducts(state);
     syncSpeedFromClock(clock);

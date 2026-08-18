@@ -21,15 +21,16 @@ SCENARIO_IDS = (
 OBSERVATION_GATES = {
     "amphibious-landing-joint-operation": [(450, 1), (780, 2), (1110, 3)],
     "border-uav-evacuation": [(420, 1), (780, 2)],
-    # AEW collection starts one minute before the T+720 PPI product so the
-    # evidence contains a real 60-second observation window.
-    "maritime-convoy-air-defense": [(660, 2)],
+    # The high-speed contact appears first; the slower AIS-correlated contact
+    # is admitted later so discovery follows the declared sensor products.
+    "maritime-convoy-air-defense": [(600, 1), (960, 2)],
 }
 
 EVIDENCE_SENSOR_CHECKS = (
     ("amphibious-landing-joint-operation", 780, "DDG-01", 1),
     ("border-uav-evacuation", 1080, "MOUNTAIN-RADAR-01", 2),
-    ("maritime-convoy-air-defense", 720, "AEW-01", 2),
+    ("maritime-convoy-air-defense", 720, "AEW-01", 1),
+    ("maritime-convoy-air-defense", 1080, "SHORE-RADAR-01", 2),
 )
 
 
@@ -177,7 +178,16 @@ def test_formal_scenario_route_length_matches_speed_and_motion_window(scenario_i
         assert 0 <= start_sec < end_sec <= duration
         reachable_nm = float(asset["speed_kts"]) * (end_sec - start_sec) / 3600.0
         assert reachable_nm > 0
-        if modes[asset_id] == "hold":
+        if (
+            scenario_id == "maritime-convoy-air-defense"
+            and asset_id in {"MERCHANT-01", "MERCHANT-02", "ESCORT-01"}
+        ):
+            # The convoy deliberately has a little more route than fits in
+            # the demo window, so it is still underway in the final frame.
+            assert reachable_nm < route_nm <= reachable_nm * 1.15, (
+                scenario_id, asset_id, route_nm, reachable_nm
+            )
+        elif modes[asset_id] == "hold":
             assert route_nm <= reachable_nm * 1.05, (
                 scenario_id, asset_id, route_nm, reachable_nm
             )
@@ -211,9 +221,31 @@ def test_full_scenario_motion_remains_in_ao_and_never_projects_future_routes(
             for row in engine.assets.values()
         )
         assert all(_inside_ao(row["lat"], row["lng"], ao) for row in engine.threats.values())
+        if scenario_id == "maritime-convoy-air-defense":
+            fishing = engine.threats["CONTACT-FISHING-01"]
+            assert not (21.94 <= fishing["lat"] <= 22.16 and 121.47 <= fishing["lng"] <= 121.64)
 
     assert all(engine.assets[asset_id]["position"] == position for asset_id, position in fixed_initial.items())
     assert set(engine.waypoint_nav.get_all()) == set(scenario["asset_routes"])
+    trail_cutoff = duration - 900.0
+    assert all(
+        float(point.get("sim_time", 0) or 0) >= trail_cutoff
+        for asset in engine.assets.values()
+        for point in asset.get("_history_path") or []
+    )
+    assert all(
+        len(track.history_path) <= 1 or all(
+            float(point.get("sim_time", 0) or 0) >= trail_cutoff
+            for point in track.history_path
+        )
+        for track in engine.sensor_fusion.tracks.values()
+    )
+    if scenario_id == "maritime-convoy-air-defense":
+        assert all(
+            engine.assets[asset_id]["status"] == "active"
+            and float(engine.assets[asset_id]["speed_kts"]) > 0
+            for asset_id in ("MERCHANT-01", "MERCHANT-02", "ESCORT-01", "AEW-01")
+        )
 
 
 @pytest.mark.parametrize("scenario_id", SCENARIO_IDS)
@@ -317,6 +349,11 @@ def test_maritime_scenario_has_two_unknown_surface_targets_and_engagement_policy
     assert scenario["engagement_policy"]["protected_truth_ids"] == ["CONTACT-FISHING-01"]
     assert scenario["engagement_policy"]["requires_prior_warning"] is True
     assert scenario["engagement_policy"]["warning_delay_sec"] == 300
+    assert scenario["demo_controls"]["duration_sec"] == 6600
+    assert scenario["threat_observation_windows"] == {
+        "CONTACT-HOSTILE-01": {"start_sec": 600},
+            "CONTACT-FISHING-01": {"start_sec": 960},
+    }
     assert scenario["acceptance_profile"]["requires_explicit_fire_authorization"] is True
     assert {row["branch_id"] for row in scenario["expected_branches"]} >= {
         "resource_unavailable", "behavior_changed"

@@ -43,8 +43,10 @@ GEOMETRY_ANCHORS = {
     },
     "maritime-convoy-air-defense": {
         "MAR-MEDIA-03": ((22.216446, 121.359430, 0), 141.30, 0.00, [7.61], [7.61]),
-        "MAR-MEDIA-04": ((22.245648, 121.403350, 0), 171.33, 0.00, [13.09], [13.09]),
-        "MAR-MEDIA-07": ((22.169479, 121.605630, 8000), 13.07, 33.86, [1.96], [2.36]),
+        "MAR-MEDIA-04": ((22.245648, 121.403350, 0), 187.65, 0.00, [15.47], [15.47]),
+        # The confirmation UAV records this frame after post-impact visual
+        # assessment, then begins its documented return to the escort.
+        "MAR-MEDIA-07": ((22.185548, 121.634398, 8000), 309.31, 41.39, [1.49], [1.99]),
     },
 }
 

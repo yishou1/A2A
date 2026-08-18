@@ -110,6 +110,8 @@ def build_internal_state(engine: Any) -> dict:
             "eta_sec": weapon.get("eta_sec"),
             "p_kill": weapon.get("p_kill"),
             "status": weapon.get("status", "unknown"),
+            "damage_state": weapon.get("damage_state"),
+            "impact_sim_time": weapon.get("impact_sim_time"),
         })
 
     return {

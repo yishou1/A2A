@@ -4,6 +4,9 @@ window.PlatformMap = (function () {
   var map = null;
   var ownMarkers = {};
   var weaponMarkers = {};
+  var weaponImpactLayers = {};
+  var processedWeaponImpacts = {};
+  var destroyedImpactMarkers = {};
   var trackMarkers = {};
   var ownTrails = {};
   var trackTrails = {};
@@ -25,6 +28,9 @@ window.PlatformMap = (function () {
     ground: '<svg viewBox="0 0 40 40"><path d="M7 13h23l4 9v8H7Z" fill="#12351d" stroke="#52ff79" stroke-width="2.2"/><path d="M12 13l4-6h10l4 6" fill="none" stroke="#dfffe6" stroke-width="2"/><circle cx="13" cy="31" r="4" fill="#07131b" stroke="#52ff79" stroke-width="2"/><circle cx="29" cy="31" r="4" fill="#07131b" stroke="#52ff79" stroke-width="2"/></svg>',
     unknown: '<svg viewBox="0 0 40 40"><path d="M20 4L36 20L20 36L4 20Z" fill="#3c2b0c" stroke="#ffbf47" stroke-width="2.6"/><text x="20" y="26" text-anchor="middle" font-size="17" font-weight="700" fill="#fff1c9">?</text></svg>',
     threat: '<svg viewBox="0 0 40 40"><path d="M20 4L36 20L20 36L4 20Z" fill="#3b1010" stroke="#ff5544" stroke-width="2.6"/><text x="20" y="26" text-anchor="middle" font-size="15" font-weight="700" fill="#ffd8d3">!</text></svg>',
+    impact: '<svg viewBox="0 0 40 40"><path d="M6 25h28l-5 8H11Z" fill="#412d17" stroke="#ffb24a" stroke-width="2.2"/><path d="M10 12l20 17M30 12L10 29" stroke="#ffe0a8" stroke-width="2.3"/><circle cx="20" cy="20" r="5" fill="none" stroke="#ff7c50" stroke-width="1.8"/></svg>',
+    civilian: '<svg viewBox="0 0 40 40"><path d="M6 24h28l-5 9H11Z" fill="#0b302c" stroke="#55dfb5" stroke-width="2.2"/><path d="M13 24v-8h12l4 8M18 16v-5h5v5" fill="none" stroke="#d5fff2" stroke-width="2"/><path d="M9 35q5 3 10 0t10 0" fill="none" stroke="#55dfb5" stroke-width="1.7"/></svg>',
+    destroyed: '<svg viewBox="0 0 40 40"><path d="M6 25h28l-6 8H12Z" fill="#242a2e" stroke="#9aa7ad" stroke-width="2.2"/><path d="M11 10L29 28M29 10L11 28" stroke="#ff8a71" stroke-width="3"/><path d="M9 35q5 2 10 0t10 0" fill="none" stroke="#7d8b91" stroke-width="1.7"/></svg>',
     weapon: '<svg viewBox="0 0 40 40"><path d="M20 3L26 25L20 37L14 25Z" fill="#451515" stroke="#ff705f" stroke-width="2.2"/><path d="M14 25L7 31L15 30M26 25L33 31L25 30" fill="none" stroke="#ffd0c8" stroke-width="2"/></svg>',
   };
 
@@ -37,7 +43,7 @@ window.PlatformMap = (function () {
   function icon(kind, heading, size) {
     var actualSize = size || 34;
     return L.divIcon({
-      className: "rotating-marker",
+      className: "rotating-marker marker-" + kind,
       html: '<div class="marker-rotator" style="transform:rotate(' + Number(heading || 0) + 'deg);width:' + actualSize + 'px;height:' + actualSize + 'px">' + (ICONS[kind] || ICONS.unknown) + "</div>",
       iconSize: [actualSize, actualSize],
       iconAnchor: [actualSize / 2, actualSize / 2],
@@ -55,6 +61,14 @@ window.PlatformMap = (function () {
 
   function trackKind(track) {
     var assessment = track.agent_assessment || {};
+    var classification = String(track.classification || "").toUpperCase();
+    if (assessment.damage_state === "destroyed" || assessment.engagement_status === "destroyed") {
+      return "destroyed";
+    }
+    if (assessment.damage_state === "impact_pending" || assessment.engagement_status === "pending_assessment") {
+      return "impact";
+    }
+    if (assessment.source && /FISHING|CIVILIAN|MERCHANT/.test(classification)) return "civilian";
     return assessment.status === "confirmed" && /high|hostile|threat/i.test(String(assessment.level || assessment.label || ""))
       ? "threat" : "unknown";
   }
@@ -62,8 +76,32 @@ window.PlatformMap = (function () {
   function trackAssessmentLabel(track) {
     var assessment = track.agent_assessment || {};
     var classification = String(track.classification || "").toUpperCase();
-    if (assessment.source && /FISHING|CIVILIAN|MERCHANT/.test(classification)) return "民用禁射";
+    if (assessment.damage_state === "destroyed" || assessment.engagement_status === "destroyed") {
+      return "已击毁 · 威胁解除";
+    }
+    if (assessment.damage_state === "impact_pending" || assessment.engagement_status === "pending_assessment") {
+      return "导弹命中 · 待毁伤评估";
+    }
+    if (assessment.source && /FISHING|CIVILIAN|MERCHANT/.test(classification)) {
+      return assessment.behavior_label || "民用禁射";
+    }
     return assessment.source ? (assessment.label || "已评估") : "未分类";
+  }
+
+  function trackLabelClass(kind) {
+    if (kind === "threat") return "threat-label";
+    if (kind === "civilian") return "civilian-label";
+    if (kind === "destroyed") return "destroyed-label";
+    if (kind === "impact") return "impact-label";
+    return "unknown-label";
+  }
+
+  function trackTrailColor(kind) {
+    if (kind === "threat") return "#ff5544";
+    if (kind === "civilian") return "#55dfb5";
+    if (kind === "destroyed") return "#87969d";
+    if (kind === "impact") return "#ffb24a";
+    return "#ffbf47";
   }
 
   function sensorCapabilityHtml(asset) {
@@ -142,6 +180,60 @@ window.PlatformMap = (function () {
       layer._amosMotionTarget = null;
     }
     if (layer && map && map.hasLayer(layer)) map.removeLayer(layer);
+  }
+
+  function showWeaponImpact(weaponId, impactPosition) {
+    if (!map || processedWeaponImpacts[weaponId]) return;
+    processedWeaponImpacts[weaponId] = true;
+    var layer = L.marker([impactPosition.lat, impactPosition.lng], {
+      interactive: false,
+      keyboard: false,
+      zIndexOffset: 1200,
+      icon: L.divIcon({
+        className: "weapon-impact-marker",
+        html: '<span class="weapon-impact-effect"><i class="impact-core"></i><i class="impact-ring impact-ring-one"></i><i class="impact-ring impact-ring-two"></i><i class="impact-sparks"></i></span>',
+        iconSize: [54, 54],
+        iconAnchor: [27, 27],
+      }),
+    }).addTo(map);
+    weaponImpactLayers[weaponId] = layer;
+    window.setTimeout(function () {
+      removeLayer(layer);
+      delete weaponImpactLayers[weaponId];
+    }, 1700);
+  }
+
+  function updateDestroyedImpactMarkers(events, destroyedTrackIds) {
+    var seen = {};
+    (events || []).forEach(function (event) {
+      if ((event.type !== "weapon_hit" && event.type !== "damage_assessment_confirmed") ||
+          event.damage_state !== "destroyed") return;
+      var trackId = String(event.target_track_id || "");
+      if (trackId && destroyedTrackIds[trackId]) return;
+      var impact = position(event.position || {});
+      var markerId = String(event.weapon_id || trackId || "impact");
+      if (!Number.isFinite(impact.lat) || !Number.isFinite(impact.lng)) return;
+      seen[markerId] = true;
+      if (!destroyedImpactMarkers[markerId]) {
+        destroyedImpactMarkers[markerId] = L.marker([impact.lat, impact.lng], {
+          interactive: true,
+          icon: icon("destroyed", 0, 32),
+        }).addTo(map);
+        destroyedImpactMarkers[markerId]._amosIconKind = "destroyed";
+        destroyedImpactMarkers[markerId]._amosIconSize = 32;
+        bindLabel(destroyedImpactMarkers[markerId], "打击点 · 已击毁", "destroyed-label");
+      } else {
+        moveMarker(destroyedImpactMarkers[markerId], impact);
+      }
+      updateMarkerPopup(destroyedImpactMarkers[markerId],
+        "<b>打击点</b><br>目标已击毁 · 威胁解除");
+    });
+    Object.keys(destroyedImpactMarkers).forEach(function (markerId) {
+      if (!seen[markerId]) {
+        removeLayer(destroyedImpactMarkers[markerId]);
+        delete destroyedImpactMarkers[markerId];
+      }
+    });
   }
 
   function updateMarkerIcon(marker, kind, heading, size) {
@@ -360,12 +452,17 @@ window.PlatformMap = (function () {
   function clearAll() {
     removeCollection(ownMarkers);
     removeCollection(weaponMarkers);
+    removeCollection(weaponImpactLayers);
+    removeCollection(destroyedImpactMarkers);
     removeCollection(trackMarkers);
     removeCollection(ownTrails);
     removeCollection(trackTrails);
     clearSensors();
     ownMarkers = {};
     weaponMarkers = {};
+    weaponImpactLayers = {};
+    processedWeaponImpacts = {};
+    destroyedImpactMarkers = {};
     trackMarkers = {};
     ownTrails = {};
     trackTrails = {};
@@ -433,6 +530,28 @@ window.PlatformMap = (function () {
     return result;
   }
 
+  function trailDistanceNm(a, b) {
+    var meanLat = (a[0] + b[0]) * Math.PI / 360;
+    var northNm = (b[0] - a[0]) * 60;
+    var eastNm = (b[1] - a[1]) * 60 * Math.cos(meanLat);
+    return Math.sqrt(northNm * northNm + eastNm * eastNm);
+  }
+
+  function latestContinuousTrail(points, maximumJumpNm) {
+    if (points.length < 2) return points;
+    var segment = [points[0]];
+    for (var index = 1; index < points.length; index += 1) {
+      if (trailDistanceNm(points[index - 1], points[index]) > maximumJumpNm) {
+        // Do not connect an association reset or a stale state refresh with a
+        // map-spanning line. Show the current, continuous segment instead.
+        segment = [points[index]];
+      } else {
+        segment.push(points[index]);
+      }
+    }
+    return segment;
+  }
+
   function renderTrail(store, id, rawPoints, color, maxPoints, smooth) {
     var points = (rawPoints || []).filter(function (item) {
       return item && item.lat != null && (item.lng != null || item.lon != null);
@@ -442,6 +561,7 @@ window.PlatformMap = (function () {
       if (!Number.isFinite(item[0]) || !Number.isFinite(item[1])) return false;
       return index === 0 || Math.abs(item[0] - rows[index - 1][0]) + Math.abs(item[1] - rows[index - 1][1]) > 1e-8;
     });
+    points = latestContinuousTrail(points, smooth ? 12 : 6);
     if (smooth) points = smoothTrailPoints(points, 2);
     var geometrySignature = color + ":" + JSON.stringify(points);
     if (points.length > 1) {
@@ -460,7 +580,7 @@ window.PlatformMap = (function () {
     }
   }
 
-  function updateLiveState(assets, weapons, tracks) {
+  function updateLiveState(assets, weapons, tracks, elapsedSec, events) {
     var liveFocusPoints = (assets || []).filter(sensorOperational).map(function (asset) {
       var point = position(asset);
       return [point.lat, point.lng];
@@ -518,6 +638,19 @@ window.PlatformMap = (function () {
       var id = weapon.id || weapon.weapon_id;
       var pos = position(weapon);
       if (!id || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lng)) return;
+      var status = String(weapon.status || "").toLowerCase();
+      if (status === "hit") {
+        var impactAt = Number(weapon.impact_sim_time);
+        var currentElapsed = Number(elapsedSec);
+        if (Number.isFinite(impactAt) && Number.isFinite(currentElapsed) &&
+            currentElapsed >= impactAt && currentElapsed - impactAt <= 90) {
+          showWeaponImpact(id, pos);
+        } else {
+          processedWeaponImpacts[id] = true;
+        }
+        return;
+      }
+      if (status === "aborted") return;
       seenWeapons[id] = true;
       if (!weaponMarkers[id]) {
         weaponMarkers[id] = L.marker([pos.lat, pos.lng], {
@@ -544,35 +677,39 @@ window.PlatformMap = (function () {
     });
 
     var seenTracks = {};
+    var destroyedTrackIds = {};
     (tracks || []).forEach(function (track, trackIndex) {
       if (track.lat == null || (track.lng == null && track.lon == null)) return;
       var id = track.id || track.track_id;
       var pos = position(track);
       var kind = trackKind(track);
+      var heading = Number(track.heading || track.heading_deg || 0);
+      if (kind === "destroyed") destroyedTrackIds[id] = true;
       seenTracks[id] = true;
       if (!trackMarkers[id]) {
-        trackMarkers[id] = L.marker([pos.lat, pos.lng], {icon: icon(kind, 0, 34)}).addTo(map);
+        trackMarkers[id] = L.marker([pos.lat, pos.lng], {icon: icon(kind, heading, 34)}).addTo(map);
         trackMarkers[id]._amosIconKind = kind;
         trackMarkers[id]._amosIconSize = 34;
         trackMarkers[id]._amosTrackKind = kind;
         trackMarkers[id]._amosLabelDirection = trackIndex % 2 === 0 ? "right" : "left";
         bindLabel(
           trackMarkers[id], trackLabel(track),
-          kind === "threat" ? "threat-label" : "unknown-label",
+          trackLabelClass(kind),
           trackMarkers[id]._amosLabelDirection
         );
       } else {
         moveMarker(trackMarkers[id], pos);
         if (trackMarkers[id]._amosTrackKind !== kind) {
-          updateMarkerIcon(trackMarkers[id], kind, 0, 34);
+          updateMarkerIcon(trackMarkers[id], kind, heading, 34);
           trackMarkers[id].unbindTooltip();
           bindLabel(
             trackMarkers[id], trackLabel(track),
-            kind === "threat" ? "threat-label" : "unknown-label",
+            trackLabelClass(kind),
             trackMarkers[id]._amosLabelDirection
           );
           trackMarkers[id]._amosTrackKind = kind;
         } else {
+          updateMarkerIcon(trackMarkers[id], kind, heading, 34);
           updateMarkerLabel(trackMarkers[id], trackLabel(track));
         }
       }
@@ -580,7 +717,7 @@ window.PlatformMap = (function () {
         escapeHtml(id) + "<br>融合置信度 " +
         escapeHtml(track.confidence == null ? "—" : track.confidence) + "<br>分析状态 " +
         escapeHtml(trackAssessmentLabel(track)));
-      renderTrail(trackTrails, id, track.history_path, kind === "threat" ? "#ff5544" : "#ffbf47", 120);
+      renderTrail(trackTrails, id, track.history_path, trackTrailColor(kind), 120);
     });
     Object.keys(trackMarkers).forEach(function (id) {
       if (!seenTracks[id]) {
@@ -588,6 +725,7 @@ window.PlatformMap = (function () {
         delete trackMarkers[id]; delete trackTrails[id];
       }
     });
+    updateDestroyedImpactMarkers(events, destroyedTrackIds);
   }
 
   function focusScenarioView() {

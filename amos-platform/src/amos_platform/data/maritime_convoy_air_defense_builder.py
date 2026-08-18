@@ -25,13 +25,13 @@ SCENARIO_ID = "maritime-convoy-air-defense"
 MEDIA_ROOT = f"/static/assets/scenarios/{SCENARIO_ID}"
 CHECKSUMS = {
     "00-convoy-overview.png": "81235f981034c097678c071a5d0b80cbdfa166521b486a8d44edc406e552406f",
-    "01-aew-radar-picture.svg": "c66106d37a6004688c64eaad188eb895775efa401c454c3b5c961f95116e125c",
-    "02-civil-traffic-correlation.svg": "afe0f5e360562e2d3de4578c900ed288fe46fdabf987bcd82aab2e11b6cf72c1",
-    "03-fast-surface-contact.png": "5fcd2ea562e4a8e613fa538d5b53d252b0848f2d7576ec6c10ee887cf843a0c5",
-    "04-low-altitude-contact-ir.png": "aadc7052ac1035f5edf2423f548b0df8d2dd8c13582365d7eb8cd304baba2047",
-    "05-elint-interference.svg": "8e4c9eb10ea1a4ef1597a279ea736415e88a542060e3b1187c4728b64457cf72",
-    "06-convoy-maneuver-current.svg": "58eeb714d6ef7727833d51124d59e72bb6487dad82f0e4595b221bd9d048cb8f",
-    "07-post-maneuver-observation.png": "64b1aca4782d7d466803406edbcfd3513958318b285f86041822747728d72a04",
+    "01-aew-radar-picture.svg": "c9918e29243b9560cd91fb60bdae6af9fb4f62853b16ae60f270ebef5fab7ea3",
+    "02-civil-traffic-correlation.svg": "e21d3021ee32910bca1c4003d80e590e606ff940ed40be29b414415545d171df",
+    "03-fast-surface-contact.png": "2350517e8782677684f8442196da6bc66466ec6b0677961649449e1c84c822a6",
+    "04-low-altitude-contact-ir.png": "8285ed1ab25980c6733e081ec865cc11dec0919f00fd57b017974c4684c4385a",
+    "05-elint-interference.svg": "847100d22e535cb3bc6ef981e94383e91b4e736d65aac5a79b34804570c6860d",
+    "06-convoy-maneuver-current.svg": "b3f6b95f8fde76f864de745ebe650df7a3d3cbc3365df26ddc6bd4f8b157689e",
+    "07-post-maneuver-observation.png": "1345a0e0e095ef0f92e0650473148c5c8e840dd16205c18e5fd32aa1b5e42a59",
 }
 
 PRODUCT_TYPES = {
@@ -49,13 +49,13 @@ PRODUCT_TYPES = {
 def _media_cues() -> list[dict[str, Any]]:
     rows = (
         ("MAR-MEDIA-00", "00-convoy-overview.png", 0, "FIND", "海上编队初始态势", "外部预采集光电资料记录编队、护航舰与周边民船的初始相对位置，所有外部接触均保持待识别。", "EXTERNAL-IMAGERY-01/EO", "eo_ir", "image/png"),
-        ("MAR-MEDIA-01", "01-aew-radar-picture.svg", 720, "FIND", "双目标雷达批次", "侦察无人机形成两个海面接触的雷达批次，两者身份、属性和威胁等级均保持未知。", "AEW-01/AEW_RADAR", "radar", "image/svg+xml"),
-        ("MAR-MEDIA-02", "02-civil-traffic-correlation.svg", 1440, "FIX", "AIS 与雷达关联记录", "AIS、岸基雷达和舰载雷达提供两个海面接触的跨源记录，后端负责区分敌方资源与渔船。", "SHORE-RADAR-01/AIS-RADAR", "telemetry", "image/svg+xml"),
-        ("MAR-MEDIA-03", "03-fast-surface-contact.png", 2160, "TRACK", "高速海面目标光电复核", "舰载光电形成高速接触当前帧，外形、航速和接近行为供后端识别，前端不预设敌我结论。", "ESCORT-01/EO-IR", "eo_ir", "image/png"),
+        ("MAR-MEDIA-01", "01-aew-radar-picture.svg", 720, "FIND", "首个高速海面雷达接触", "侦察无人机先发现一个速度较高的未知海面接触，系统持续积累航迹但不预设敌我属性。", "AEW-01/AEW_RADAR", "radar", "image/svg+xml"),
+        ("MAR-MEDIA-02", "02-civil-traffic-correlation.svg", 1080, "FIX", "第二海面接触 AIS/雷达记录", "第二个慢速海面接触在首个高速航迹稳定后进入岸基雷达覆盖，并与 AIS 回波建立初步关联；两个目标仍由后端分别识别。", "SHORE-RADAR-01/AIS-RADAR", "telemetry", "image/svg+xml"),
+        ("MAR-MEDIA-03", "03-fast-surface-contact.png", 2160, "TRACK", "高速海面目标光电复核", "舰载光电在目标南向规避机动中形成稳定长焦当前帧，外形、航速和机动行为供后端识别，前端不预设敌我结论。", "ESCORT-01/EO-IR", "eo_ir", "image/png"),
         ("MAR-MEDIA-04", "04-low-altitude-contact-ir.png", 2880, "TRACK", "渔船目标红外复核", "护航舰光电红外形成慢速海面接触的当前帧，供后端确认渔船身份并建立禁射约束。", "ESCORT-01/IR", "ir", "image/png"),
-        ("MAR-MEDIA-05", "05-elint-interference.svg", 3600, "TARGET", "敌方目标辐射源复核", "护航舰电子侦察载荷冻结高速目标的当前频谱观测，供后端完成目标优先级、交战规则和武器方案审查。", "ESCORT-01/ELINT", "telemetry", "image/svg+xml"),
-        ("MAR-MEDIA-06", "06-convoy-maneuver-current.svg", 4560, "ENGAGE", "武器攻击命令执行状态", "仅在后端完成敌方识别、渔船排除且操作员明确授权后，展示当前模拟发射和武器飞行状态。", "COMMANDER/EXECUTION", "telemetry", "image/svg+xml"),
-        ("MAR-MEDIA-07", "07-post-maneuver-observation.png", 5580, "ASSESS", "攻击后效果评估", "补充侦察无人机在目标西南约 1.96 海里处冻结光电画面，记录高速攻击艇已毁、停航并局部燃烧的状态；渔船位于镜头视场外且保持安全。", "UAV-CONFIRM-01/EO", "eo_ir", "image/png"),
+        ("MAR-MEDIA-05", "05-elint-interference.svg", 3600, "TARGET", "敌方目标辐射源复核", "护航舰电子侦察载荷冻结高速目标的当前频谱观测；环境背景频点与目标辐射源分开标注，供后端完成目标优先级、交战规则和武器方案审查。", "ESCORT-01/ELINT", "telemetry", "image/svg+xml"),
+        ("MAR-MEDIA-06", "06-convoy-maneuver-current.svg", 4560, "ENGAGE", "警告观察期与攻击准备状态", "已完成敌方识别、渔船排除和操作员警告授权；观察期内各己方资源持续按既有航线运动，满足规则后才可执行模拟发射。", "COMMANDER/EXECUTION", "telemetry", "image/svg+xml"),
+        ("MAR-MEDIA-07", "07-post-maneuver-observation.png", 5580, "ASSESS", "攻击后效果评估", "补充侦察无人机在目标东南约 1.49 海里处冻结光电画面，记录高速攻击艇已确认摧毁、停航并局部燃烧的状态；渔船位于镜头视场外且保持安全。", "UAV-CONFIRM-01/EO", "eo_ir", "image/png"),
     )
     return [
         media_record(
@@ -99,8 +99,8 @@ def _capture_contract() -> tuple[list[dict[str, Any]], list[dict[str, Any]], lis
     by_id = {row["capability_id"]: row for row in capabilities}
     specs = (
         ("MAR-TASK-00", "MAR-CAP-EXT-EO", "ingest", 0, 1, [], ["*"]),
-        ("MAR-TASK-01", "MAR-CAP-AEW-RADAR", "derive", 660, 750, ["CONTACT-HOSTILE-01", "CONTACT-FISHING-01"], ["*"]),
-        ("MAR-TASK-02", "MAR-CAP-SHORE-CORRELATION", "derive", 1380, 1470, ["CONTACT-HOSTILE-01", "CONTACT-FISHING-01"], ["*"]),
+        ("MAR-TASK-01", "MAR-CAP-AEW-RADAR", "derive", 660, 750, ["CONTACT-HOSTILE-01"], ["*"]),
+        ("MAR-TASK-02", "MAR-CAP-SHORE-CORRELATION", "derive", 1020, 1110, ["CONTACT-HOSTILE-01", "CONTACT-FISHING-01"], ["*"]),
         ("MAR-TASK-03", "MAR-CAP-ESCORT-EO", "capture", 2100, 2190, ["CONTACT-HOSTILE-01"], ["*"]),
         ("MAR-TASK-04", "MAR-CAP-ESCORT-IR", "capture", 2820, 2910, ["CONTACT-FISHING-01"], ["*"]),
         ("MAR-TASK-05", "MAR-CAP-ESCORT-ELINT", "derive", 3540, 3630, ["CONTACT-HOSTILE-01"], ["*"]),
@@ -116,11 +116,11 @@ def _capture_contract() -> tuple[list[dict[str, Any]], list[dict[str, Any]], lis
         "MAR-MEDIA-00": {"ground_sample_distance_m": 1.5, "collection_age_sec": 300, "precollected": True, "resolution_px": [1672, 941]},
         "MAR-MEDIA-01": {"instrumented_range_nm": 120, "azimuth_coverage_deg": 360, "range_resolution_m": 120, "observation_window_sec": 60, "data_source": "sensor_observations", "renderer_type": "radar_ppi"},
         "MAR-MEDIA-02": {"radar_range_nm": 40, "ais_range_nm": 40, "association_gate_nm": 1.2, "source_sensors": ["AESA_RADAR", "AIS"], "data_source": "sensor_observations", "renderer_type": "ais_radar_correlation"},
-        "MAR-MEDIA-03": {"effective_range_nm": 12, "horizontal_fov_deg": 35, "look_angle_deg": 0, "point_at_target": True, "registration_group": "MAR-SURFACE-CONTACT-A", "frame_role": "initial_surface_eo", "resolution_px": [1672, 941]},
-        "MAR-MEDIA-04": {"effective_range_nm": 16, "horizontal_fov_deg": 24, "look_angle_deg": 0, "spectral_band_um": [8, 12], "point_at_target": True, "resolution_px": [1672, 941]},
-        "MAR-MEDIA-05": {"frequency_band_mhz": [500, 8000], "observation_window_sec": 180, "bearing_error_deg": 4, "data_source": "sensor_observations", "renderer_type": "elint_spectrum"},
+        "MAR-MEDIA-03": {"effective_range_nm": 12, "horizontal_fov_deg": 0.4, "look_angle_deg": 0, "point_at_target": True, "frame_crop": "stabilized_telephoto_roi", "registration_group": "MAR-SURFACE-CONTACT-A", "frame_role": "initial_surface_eo", "resolution_px": [1672, 941]},
+        "MAR-MEDIA-04": {"effective_range_nm": 16, "horizontal_fov_deg": 1.0, "look_angle_deg": 0, "spectral_band_um": [8, 12], "point_at_target": True, "frame_crop": "stabilized_telephoto_roi", "resolution_px": [1672, 941]},
+        "MAR-MEDIA-05": {"frequency_band_mhz": [500, 8000], "background_frequency_ranges_mhz": [[2400, 2500]], "observation_window_sec": 180, "bearing_error_deg": 4, "data_source": "sensor_observations", "renderer_type": "elint_spectrum"},
         "MAR-MEDIA-06": {"input_cutoff_sec": 4560, "simulation_execution_only": True, "data_source": "task_state", "renderer_type": "execution_state"},
-        "MAR-MEDIA-07": {"effective_range_nm": 12, "horizontal_fov_deg": 35, "look_angle_deg": 34, "point_at_target": True, "required_damage_state": "destroyed", "registration_group": "MAR-SURFACE-CONTACT-A", "reference_media_id": "MAR-MEDIA-03", "frame_role": "post_maneuver_eo", "subject_asset_ids": ["MERCHANT-01", "MERCHANT-02", "ESCORT-01"], "resolution_px": [1672, 941]},
+        "MAR-MEDIA-07": {"effective_range_nm": 12, "horizontal_fov_deg": 35, "look_angle_deg": 41.39, "point_at_target": True, "required_damage_state": "destroyed", "registration_group": "MAR-SURFACE-CONTACT-A", "reference_media_id": "MAR-MEDIA-03", "frame_role": "post_maneuver_eo", "subject_asset_ids": ["MERCHANT-01", "MERCHANT-02", "ESCORT-01"], "resolution_px": [1672, 941]},
     }
     captures = []
     for index, task in enumerate(tasks):
@@ -138,8 +138,9 @@ def _capture_contract() -> tuple[list[dict[str, Any]], list[dict[str, Any]], lis
 def _timeline() -> list[dict[str, Any]]:
     return [
         {"cue_id": "MAR-CUE-01", "at_sec": 0, "phase": "FIND", "level": "INFO", "title": "海上编队进入责任区", "description": "编队、护航舰和民用航道交通进入当前态势。", "media_ids": ["MAR-MEDIA-00"], "functional_agent_ids": ["A1"], "model_requirement_ids": ["M17"]},
-        {"cue_id": "MAR-CUE-02", "at_sec": 720, "phase": "FIND", "level": "INFO", "title": "发现两个待识别海面目标", "description": "侦察无人机、岸基和舰载雷达形成两个相互独立的未知海面航迹。", "media_ids": ["MAR-MEDIA-01"], "functional_agent_ids": ["A1"], "model_requirement_ids": ["M01", "M15", "M17"]},
-        {"cue_id": "MAR-CUE-03", "at_sec": 1440, "phase": "FIX", "level": "INFO", "title": "双目标跨源关联完成", "description": "AIS 与多部雷达记录已到达，可由后端分别固定目标位置并保持身份未知。", "media_ids": ["MAR-MEDIA-02"], "functional_agent_ids": ["A1"], "model_requirement_ids": ["M06", "M07", "M19"]},
+        {"cue_id": "MAR-CUE-02", "at_sec": 720, "phase": "FIND", "level": "INFO", "title": "发现首个高速海面接触", "description": "侦察无人机首先形成一个连续高速雷达航迹，其身份与威胁等级保持未知。", "media_ids": ["MAR-MEDIA-01"], "functional_agent_ids": ["A1"], "model_requirement_ids": ["M01", "M15", "M17"]},
+        {"cue_id": "MAR-CUE-02B", "at_sec": 1080, "phase": "FIND", "level": "INFO", "title": "发现第二个慢速海面接触", "description": "首个高速航迹稳定后，岸基雷达在南侧民用航道形成第二个慢速航迹，并收到可关联的 AIS 信息。", "media_ids": ["MAR-MEDIA-02"], "functional_agent_ids": ["A1"], "model_requirement_ids": ["M01", "M06", "M17"]},
+        {"cue_id": "MAR-CUE-03", "at_sec": 1440, "phase": "FIX", "level": "INFO", "title": "双目标跨源关联完成", "description": "AIS 与多部雷达记录已到达，可由后端分别固定目标位置并保持身份未知。", "media_ids": [], "functional_agent_ids": ["A1"], "model_requirement_ids": ["M06", "M07", "M19"]},
         {"cue_id": "MAR-CUE-04", "at_sec": 2160, "phase": "TRACK", "level": "WARNING", "title": "高速目标持续接近编队", "description": "高速海面目标形成连续航迹与光电证据，但前端不预设其敌我属性。", "media_ids": ["MAR-MEDIA-03"], "functional_agent_ids": ["A2"], "model_requirement_ids": ["M05", "M16", "M19", "M20"]},
         {"cue_id": "MAR-CUE-05", "at_sec": 2880, "phase": "TRACK", "level": "INFO", "title": "慢速目标渔船特征形成", "description": "第二目标形成渔船外形、低速航行和 AIS 关联证据，等待后端给出民用识别结论。", "media_ids": ["MAR-MEDIA-04"], "functional_agent_ids": ["A2"], "model_requirement_ids": ["M03", "M05", "M16"]},
         {"cue_id": "MAR-CUE-06", "at_sec": 3600, "phase": "TARGET", "level": "WARNING", "title": "敌方目标与禁射目标完成区分", "description": "后端应把高速目标识别为敌方资源并生成攻击候选，同时把渔船列入禁射清单，完成规则和武器方案审查。", "media_ids": ["MAR-MEDIA-05"], "functional_agent_ids": ["A3", "A4", "A5"], "model_requirement_ids": ["M02", "M09", "M10", "M11", "M13", "M14"]},
@@ -159,12 +160,12 @@ def build_maritime_convoy_air_defense_scenario() -> dict[str, Any]:
     ]
     threats = [
         ThreatSnapshot("CONTACT-HOSTILE-01", "敌方高速攻击艇", "maritime", 22.30, 121.62, heading=245, speed_kts=31, risk_level="UNKNOWN", rcs_dbsm=7, ir_signature="medium", iff_status="unknown", ais_match=False, rf_freq_mhz=5600, power_dbm=-58, behavior_script={"phases": [{"phase": 1, "name": "向编队方向高速接近", "duration_sec": 1200, "heading": 245, "speed_kts": 31, "risk_level": "UNKNOWN"}, {"phase": 2, "name": "向南实施规避机动", "duration_sec": 1200, "heading": 180, "speed_kts": 25, "risk_level": "UNKNOWN"}, {"phase": 3, "name": "向东侧外海转向", "duration_sec": 1200, "heading": 80, "speed_kts": 22, "risk_level": "UNKNOWN"}, {"phase": 4, "name": "沿责任区北侧机动", "duration_sec": 2400, "heading": 20, "speed_kts": 18, "risk_level": "UNKNOWN"}]}),
-        ThreatSnapshot("CONTACT-FISHING-01", "民用渔船", "maritime", 22.10, 121.40, heading=145, speed_kts=8, risk_level="UNKNOWN", rcs_dbsm=12, ir_signature="low", iff_status="unknown", ais_match=True, behavior_script={"phases": [{"phase": 1, "name": "沿渔区低速航行", "duration_sec": 1500, "heading": 145, "speed_kts": 8, "risk_level": "UNKNOWN"}, {"phase": 2, "name": "减速进行捕捞作业", "duration_sec": 1500, "heading": 170, "speed_kts": 4, "risk_level": "UNKNOWN"}, {"phase": 3, "name": "恢复沿渔区航行", "duration_sec": 1500, "heading": 80, "speed_kts": 7, "risk_level": "UNKNOWN"}, {"phase": 4, "name": "驶离护航航线", "duration_sec": 1500, "heading": 35, "speed_kts": 9, "risk_level": "UNKNOWN"}]}),
+        ThreatSnapshot("CONTACT-FISHING-01", "民用渔船", "maritime", 22.04, 121.44, heading=225, speed_kts=8, risk_level="UNKNOWN", rcs_dbsm=12, ir_signature="low", iff_status="unknown", ais_match=True, behavior_script={"phases": [{"phase": 1, "name": "沿兰屿西南外海低速转场", "duration_sec": 1200, "heading": 225, "speed_kts": 8, "risk_level": "UNKNOWN"}, {"phase": 2, "name": "减速进行捕捞作业", "duration_sec": 900, "heading": 235, "speed_kts": 4, "risk_level": "UNKNOWN"}, {"phase": 3, "name": "沿兰屿西侧外海航行", "duration_sec": 2400, "heading": 250, "speed_kts": 7, "risk_level": "UNKNOWN"}], "on_confirmed_classification": {"classifications": ["FISHING_VESSEL", "FISHING BOAT", "FISHING", "CIVILIAN", "MERCHANT"], "state": "departing", "label": "驶离护航航线", "speed_kts": 11, "route_legs": [{"bearing": 225, "distance_nm": 4.5, "label": "驶离转向点"}, {"bearing": 250, "distance_nm": 4.0, "label": "外海安全航线"}], "hold_after_route": True}}),
     ]
     routes = {
-        "MERCHANT-01": [{"lat": 22.15, "lng": 121.38}, {"lat": 22.22, "lng": 121.50}, {"lat": 22.30, "lng": 121.62}],
-        "MERCHANT-02": [{"lat": 22.11, "lng": 121.34}, {"lat": 22.18, "lng": 121.46}, {"lat": 22.26, "lng": 121.58}],
-        "ESCORT-01": [{"lat": 22.19, "lng": 121.32}, {"lat": 22.27, "lng": 121.44}, {"lat": 22.35, "lng": 121.56}],
+        "MERCHANT-01": [{"lat": 22.15, "lng": 121.38}, {"lat": 22.22, "lng": 121.50}, {"lat": 22.30, "lng": 121.62}, {"lat": 22.34, "lng": 121.69}],
+        "MERCHANT-02": [{"lat": 22.11, "lng": 121.34}, {"lat": 22.18, "lng": 121.46}, {"lat": 22.26, "lng": 121.58}, {"lat": 22.30, "lng": 121.65}],
+        "ESCORT-01": [{"lat": 22.19, "lng": 121.32}, {"lat": 22.27, "lng": 121.44}, {"lat": 22.35, "lng": 121.56}, {"lat": 22.42, "lng": 121.68}],
         "AEW-01": [
             {"lat": 22.32, "lng": 121.47, "label": "ORBIT-SE"},
             {"lat": 22.26, "lng": 121.32, "label": "ORBIT-S"},
@@ -248,7 +249,7 @@ def build_maritime_convoy_air_defense_scenario() -> dict[str, Any]:
             "station_bearing_slew_dps": 0.35,
             "fallback_target_speed_kts": 31,
             "closure_gain_kts_per_nm": 12,
-            "return_to_launch_after_strike": False,
+            "return_to_launch_after_strike": True,
             "return_after_sec": 5610,
             "return_hide_distance_nm": 0.2,
         }],
@@ -260,13 +261,13 @@ def build_maritime_convoy_air_defense_scenario() -> dict[str, Any]:
         "asset_task_schedule": asset_task_schedule,
         "capture_plans": capture_plans,
         "threat_observation_windows": {
-            "CONTACT-HOSTILE-01": {"start_sec": 660},
-            "CONTACT-FISHING-01": {"start_sec": 660},
+            "CONTACT-HOSTILE-01": {"start_sec": 600},
+            "CONTACT-FISHING-01": {"start_sec": 960},
         },
         "assets": assets, "threats": threats,
         "protected_assets": [{"asset_id": "CONVOY-GROUP-01", "asset_name": "海上运输编队", "asset_type": "convoy", "lat": 22.08, "lon": 121.26, "alt": 0, "protection_radius_m": 18000, "criticality": 0.92, "status": "protected", "metadata": {"simulation_only": True, "location_profile": "fictional_training_area"}}],
         "timeline": timeline, "media_cues": media_cues, "cover_media_id": "MAR-MEDIA-00",
-        "demo_controls": {"recommended_speed": 32, "duration_sec": 6000, "auto_agent_interval_sec": 600, "show_truth": False, "latest_visual_only": True, "auto_stop": True, "advance_while_analyzing": True},
+        "demo_controls": {"recommended_speed": 32, "duration_sec": 6600, "auto_agent_interval_sec": 600, "show_truth": False, "latest_visual_only": True, "auto_stop": True, "advance_while_analyzing": True},
         "default_seed": 33031, "supported_modes": ["integration", "demonstration"],
         "functional_agents": scenario_agents(), "required_agents": required_backend_roles(),
         "algorithm_coverage": planned_algorithms("clustering", "association", "linear_regression", "logistic_regression", "random_forest", "neural_network", "naive_bayes_network", "large_language_model", "retrieval_augmented_generation", "agent_collaboration", "federated_learning", "reinforcement_learning", "explainable_ai", "multimodal_fusion", "time_series_prediction", "real_time_object_detection", "change_detection", "multi_target_tracking", "graph_neural_network"),

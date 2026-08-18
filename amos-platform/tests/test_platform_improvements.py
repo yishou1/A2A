@@ -368,6 +368,14 @@ def test_live_renderers_do_not_rebuild_unchanged_panels_or_map_layers() -> None:
     assert "preferCanvas: false" in map_script
     assert "_amosMotionTarget" in map_script
     assert "顺序流程容器" in workflow
+    assert "showWeaponImpact" in map_script
+    assert "impact_sim_time" in map_script
+    assert 'return "civilian"' in map_script
+    assert 'return "destroyed"' in map_script
+    assert "updateDestroyedImpactMarkers" in map_script
+    assert "destroyedImpactMarkers" in map_script
+    assert 'return "impact"' in map_script
+    assert "damage_assessment_confirmed" in map_script
 
 
 def test_story_animation_is_incremental_and_speed_ui_tracks_backend_state() -> None:
@@ -385,6 +393,10 @@ def test_story_animation_is_incremental_and_speed_ui_tracks_backend_state() -> N
     assert "speed_resume_value" in controller
     assert ".speed-group.speed-locked" in styles
     assert ".leaflet-overlay-pane path.leaflet-interactive:focus{outline:none}" in styles
+    assert "@keyframes weapon-impact-ring" in styles
+    assert ".map-resource-label.civilian-label" in styles
+    assert ".map-resource-label.destroyed-label" in styles
+    assert ".map-resource-label.impact-label" in styles
 
 
 def test_execution_workspace_inspects_current_run_workflows_and_real_activity_details() -> None:

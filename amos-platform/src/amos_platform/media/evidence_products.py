@@ -43,6 +43,11 @@ def _xml(value: Any) -> str:
     return escape(_text(value), {'"': "&quot;", "'": "&apos;"})
 
 
+def _xml_optional(value: Any) -> str:
+    """Escape optional inline content without rendering an unavailable marker."""
+    return escape(str(value or ""), {'"': "&quot;", "'": "&apos;"})
+
+
 def _number(value: Any) -> float | None:
     if isinstance(value, bool) or value is None or value == "":
         return None
@@ -574,6 +579,19 @@ def _render_spectrum(capture: dict[str, Any], snapshot: dict[str, Any]) -> str:
         if configured_min is not None and configured_max is not None
         else UNAVAILABLE
     )
+    background_frequency_ranges = [
+        (float(item[0]), float(item[1]))
+        for item in parameters.get("background_frequency_ranges_mhz") or []
+        if isinstance(item, (list, tuple)) and len(item) >= 2
+    ]
+
+    def source_label(frequency: float | None) -> str:
+        if frequency is not None and any(
+            lower <= frequency <= upper
+            for lower, upper in background_frequency_ranges
+        ):
+            return "环境背景"
+        return "目标候选" if background_frequency_ranges else ""
 
     measured_frequencies = [frequency for _, frequency, _ in samples]
     measured_powers = [power for _, _, power in samples]
@@ -678,9 +696,11 @@ def _render_spectrum(capture: dict[str, Any], snapshot: dict[str, Any]) -> str:
         frequency = _number(item.get("frequency_mhz") or item.get("rf_freq_mhz"))
         bearing = _number(item.get("bearing_deg"))
         range_nm = _number(item.get("range_nm"))
+        label = source_label(frequency)
+        prefix = f"{label} · " if label else ""
         latest_details.append(
             f'<text x="790" y="{390 + index * 20}" class="tiny">'
-            f'{_xml(_fmt(frequency, 1, " MHz"))} · {_xml(_fmt(bearing, 1, "°"))} · {_xml(_fmt(range_nm, 1, " NM"))}</text>'
+            f'{_xml_optional(prefix)}{_xml(_fmt(frequency, 1, " MHz"))} · {_xml(_fmt(bearing, 1, "°"))} · {_xml(_fmt(range_nm, 1, " NM"))}</text>'
         )
     legend_min = min_power if min_power is not None else 0.0
     legend_max = max_power if max_power is not None else 1.0
@@ -726,7 +746,7 @@ def _render_spectrum(capture: dict[str, Any], snapshot: dict[str, Any]) -> str:
       <rect x="80" y="402" width="690" height="58" fill="#081721" stroke="#31505f"/>
       <line x1="80" y1="431" x2="770" y2="431" class="grid"/>{bearing_trace}
       {'' if bearing_samples else '<text x="425" y="436" text-anchor="middle" class="unknown">当前窗口未提供测向序列</text>'}
-      <text x="88" y="476" class="tiny">方位范围 {_xml(bearing_extent)} · 发射源类别需后端判定</text>
+      <text x="88" y="476" class="tiny">方位范围 {_xml(bearing_extent)} · {'已标注环境背景频点；' if background_frequency_ranges else ''}发射源类别需后端判定</text>
       <text x="790" y="142" class="small">观测窗口</text><text x="790" y="164" class="value">{_xml(window_text)}</text>
       <text x="790" y="198" class="small">采样时刻 / 频点</text><text x="790" y="220" class="value">{_xml(unique_times if measured_times else UNAVAILABLE)} / {_xml(unique_frequencies if samples else UNAVAILABLE)}</text>
       <text x="790" y="254" class="small">最强测量</text>

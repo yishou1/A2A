@@ -494,7 +494,11 @@ class SensorFusionEngine:
             if dist < best_dist:
                 best = track
                 best_dist = dist
-        return best if best is not None and best_dist <= 3.0 else None
+        # Surface contacts in this scenario can pass within a few nautical
+        # miles while following different courses.  A narrow gate preserves
+        # their identities instead of joining two independent tracks into one
+        # long, physically impossible trail.
+        return best if best is not None and best_dist <= 1.5 else None
 
     def _find_track_for_threat(self, threat_id: str) -> FusedTrack | None:
         for t in self.tracks.values():

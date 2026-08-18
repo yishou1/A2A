@@ -481,6 +481,14 @@ class SimEngine:
         for asset in self.assets.values():
             pos = asset.get("position") or {}
             history = asset.setdefault("_history_path", [])
+            cutoff = sim_time - 900.0
+            # A platform that has already reached a hold point must not keep
+            # drawing an old approach route throughout the final assessment.
+            # Keep only the last 15 simulated minutes of actual motion.
+            history[:] = [
+                point for point in history[-240:]
+                if float(point.get("sim_time", 0) or 0) >= cutoff
+            ]
             sample = {"lat": pos.get("lat", 0), "lng": pos.get("lng", 0), "sim_time": sim_time}
             previous = history[-1] if history else None
             moved = previous is None or (
@@ -490,7 +498,6 @@ class SimEngine:
             enough_time = previous is None or sim_time - float(previous.get("sim_time", 0)) >= 3.0
             if moved and enough_time:
                 history.append(sample)
-                cutoff = sim_time - 900.0
                 asset["_history_path"] = [
                     point for point in history[-240:]
                     if float(point.get("sim_time", 0) or 0) >= cutoff
@@ -520,6 +527,11 @@ class SimEngine:
                         t["lat"] = round(float(target["lat"]), 6)
                         t["lng"] = round(float(target["lng"]), 6)
                         flight_route.pop(0)
+                        if not flight_route and t.get("_hold_when_route_complete"):
+                            t["speed_kts"] = 0.0
+                            t["_behavior_phase_name"] = "已驶离护航航线"
+                            remaining_sec = 0.0
+                            break
                         if flight_route:
                             target = flight_route[0]
                     if flight_route:
@@ -548,7 +560,7 @@ class SimEngine:
         # 3.3. Execute behavior scripts for threats with _behavior_script
         for tid, t in list(self.threats.items()):
             script = t.get("_behavior_script")
-            if not script or t.get("neutralized"):
+            if not script or t.get("neutralized") or t.get("_impact_pending"):
                 continue
             phases = script.get("phases", [])
             current_phase_idx = t.get("_behavior_phase", 0)
@@ -668,12 +680,16 @@ class SimEngine:
 
             # Hit detection
             if dist_nm < 0.3 or reaches_target:  # within this simulation step -> impact
-                # This operator demonstration models a guided weapon that has
-                # already reached its authorized target.  Authorized impacts
-                # are deterministic in this demo and always destroy the target.
-                damage = "destroyed"
+                # A physical hit and a confirmed kill are separate tactical
+                # states.  Keep the target stopped at the impact point until a
+                # real post-impact EO/IR or SAR observation confirms effects.
+                damage = "impact_pending"
                 w["status"] = "hit"
                 w["damage_state"] = damage
+                w["eta_sec"] = 0.0
+                w["impact_sim_time"] = round(
+                    float(self.clock.get("elapsed_sec", 0.0) or 0.0), 2,
+                )
                 self._apply_damage(target, damage)
                 finished_weapons.append(wid)
                 target_track_id = str(w.get("target_track_id") or "")
@@ -681,7 +697,18 @@ class SimEngine:
                 if target_track is not None:
                     target_track.kill_chain_phase = "ASSESS"
                     target_track.kill_chain_times["ASSESS"] = time.time()
-                self._return_follow_assets_after_strike(target_track_id)
+                    target_track.retain_until_sim_time = max(
+                        float(getattr(target_track, "retain_until_sim_time", 0.0) or 0.0),
+                        float((self.scenario_story.get("demo_controls") or {}).get("duration_sec", 0.0) or 0.0),
+                    )
+                    target_track.history_path = list(target_track.history_path[-24:])
+                    assessment = dict(getattr(target_track, "agent_assessment", {}) or {})
+                    assessment.update({
+                        "damage_state": "impact_pending",
+                        "engagement_status": "pending_assessment",
+                        "behavior_label": "导弹命中 · 待毁伤评估",
+                    })
+                    target_track.agent_assessment = assessment
 
         # Clean up finished weapons (keep last 10 for history)
         for wid in finished_weapons:
@@ -692,7 +719,10 @@ class SimEngine:
                     "weapon_id": wid,
                     "weapon_type": w.get("weapon_type", ""),
                     "target_threat_id": w.get("target_threat_id", ""),
+                    "target_track_id": w.get("target_track_id", ""),
                     "damage_state": w.get("damage_state"),
+                    "position": {"lat": w.get("lat"), "lng": w.get("lng")},
+                    "sim_time": w.get("impact_sim_time"),
                     "timestamp": time.time(),
                 })
         if len(self.weapons) > 50:
@@ -714,6 +744,9 @@ class SimEngine:
         for ev in fusion_events:
             self.events.append(ev)
 
+        self._prune_track_motion_histories()
+        self._confirm_pending_damage_assessments()
+        self._apply_confirmed_contact_behaviors()
         self._update_asset_follow_tasks()
 
         # 4.5. Ordinary coverage gaps no longer carry truth IDs. Handover
@@ -1353,6 +1386,196 @@ class SimEngine:
             return None
         return max(counts, key=counts.get)
 
+    def _apply_confirmed_contact_behaviors(self) -> None:
+        """Apply scenario reactions that depend on a confirmed backend classification."""
+        for track in self.sensor_fusion.tracks.values():
+            assessment = dict(getattr(track, "agent_assessment", {}) or {})
+            if assessment.get("status") != "confirmed" or not assessment.get("source"):
+                continue
+            truth_id = self._truth_target_for_track(track)
+            threat = self.threats.get(str(truth_id or ""))
+            if not threat or threat.get("neutralized") or threat.get("_confirmed_behavior_applied"):
+                continue
+            reaction = dict(
+                ((threat.get("_behavior_script") or {}).get("on_confirmed_classification")) or {}
+            )
+            allowed = {
+                str(value).strip().upper()
+                for value in reaction.get("classifications", [])
+                if str(value).strip()
+            }
+            classification = str(getattr(track, "classification", "") or "").strip().upper()
+            if not reaction or classification not in allowed:
+                continue
+
+            route = []
+            route_lat = float(threat.get("lat", 0) or 0)
+            route_lng = float(threat.get("lng", 0) or 0)
+            for index, leg in enumerate(reaction.get("route_legs") or [], start=1):
+                if not isinstance(leg, dict):
+                    continue
+                bearing = leg.get("bearing")
+                distance_nm = leg.get("distance_nm")
+                if bearing is None or distance_nm is None:
+                    continue
+                route_lat, route_lng = _advance_position(
+                    route_lat, route_lng, float(bearing), max(0.0, float(distance_nm)),
+                )
+                route.append({
+                    "lat": route_lat,
+                    "lng": route_lng,
+                    "label": str(leg.get("label") or f"离场航点 {index}"),
+                })
+            if route:
+                threat["_flight_route"] = route
+                threat["_commanded_heading"] = float(reaction["route_legs"][0]["bearing"])
+                threat["_hold_when_route_complete"] = bool(reaction.get("hold_after_route"))
+            elif reaction.get("heading") is not None:
+                threat["_commanded_heading"] = float(reaction["heading"])
+            if reaction.get("speed_kts") is not None:
+                threat["speed_kts"] = float(reaction["speed_kts"])
+            threat["_behavior_phase"] = None
+            threat["_phase_elapsed"] = 0.0
+            threat["_behavior_phase_name"] = str(reaction.get("label") or "状态已更新")
+            threat["_confirmed_behavior_applied"] = True
+
+            assessment.update({
+                "behavior_state": str(reaction.get("state") or "updated"),
+                "behavior_label": str(reaction.get("label") or "状态已更新"),
+            })
+            track.agent_assessment = assessment
+            self.events.append({
+                "type": "confirmed_contact_behavior_changed",
+                "target_track_id": track.id,
+                "contact_label": self._operator_label_for_track(track.id),
+                "behavior_state": assessment["behavior_state"],
+                "behavior_label": assessment["behavior_label"],
+                "sim_time": round(float(self.clock.get("elapsed_sec", 0.0) or 0.0), 2),
+                "timestamp": time.time(),
+            })
+
+    def _confirm_pending_damage_assessments(self) -> None:
+        """Promote an impact to a confirmed kill after post-impact sensing."""
+        now = float(self.clock.get("elapsed_sec", 0.0) or 0.0)
+        observations = {
+            str(item.get("observation_id") or ""): item
+            for item in (self.sensor_fusion.last_observation_batch.get("observations") or [])
+            if isinstance(item, dict)
+        }
+        visual_sensors = {"EO/IR", "IR", "SAR"}
+        for weapon in self.weapons.values():
+            if weapon.get("status") != "hit" or weapon.get("damage_state") != "impact_pending":
+                continue
+            impact_time = float(weapon.get("impact_sim_time", now) or now)
+            if now - impact_time < 120.0:
+                continue
+            truth_id = str(weapon.get("target_threat_id") or "")
+            observer_id = None
+            for association in self.sensor_fusion.truth_associations or []:
+                if str(association.get("truth_id") or "") != truth_id:
+                    continue
+                observation = observations.get(str(association.get("observation_id") or "")) or {}
+                if str(observation.get("sensor_id") or "").upper() in visual_sensors:
+                    observer_id = str(observation.get("asset_id") or "") or None
+                    break
+            # The fusion batch can legitimately omit a low-rate visual frame
+            # even when the confirmation UAV is already over the impact site.
+            # Treat a platform's real, current EO/IR/SAR geometry as that
+            # post-impact observation rather than promoting a kill on time
+            # alone.  This keeps assessment causal without making it depend
+            # on an unrelated radar/AIS batch cadence.
+            if not observer_id:
+                observer_id = self._post_impact_visual_observer(truth_id)
+            if not observer_id:
+                continue
+
+            target = self.threats.get(truth_id)
+            if not target:
+                continue
+            self._apply_damage(target, "destroyed")
+            weapon["damage_state"] = "destroyed"
+            weapon["assessed_sim_time"] = round(now, 2)
+            target_track_id = str(weapon.get("target_track_id") or "")
+            track = self.sensor_fusion.tracks.get(target_track_id)
+            if track is not None:
+                track.retain_until_sim_time = max(
+                    float(getattr(track, "retain_until_sim_time", 0.0) or 0.0),
+                    float((self.scenario_story.get("demo_controls") or {}).get("duration_sec", 0.0) or 0.0),
+                )
+                assessment = dict(getattr(track, "agent_assessment", {}) or {})
+                assessment.update({
+                    "damage_state": "destroyed",
+                    "engagement_status": "destroyed",
+                    "behavior_label": "已击毁，威胁解除",
+                    "assessment_observer": observer_id,
+                })
+                track.agent_assessment = assessment
+            self._return_follow_assets_after_strike(target_track_id)
+            self.events.append({
+                "type": "damage_assessment_confirmed",
+                "weapon_id": weapon.get("id"),
+                "target_track_id": target_track_id,
+                "damage_state": "destroyed",
+                "observer_asset_id": observer_id,
+                "position": {"lat": weapon.get("lat"), "lng": weapon.get("lng")},
+                "sim_time": round(now, 2),
+                "timestamp": time.time(),
+            })
+
+    def _post_impact_visual_observer(self, truth_id: str) -> str | None:
+        """Return an active visual platform currently able to assess an impact.
+
+        This is deliberately a geometry check rather than a timer fallback:
+        the confirmation only happens after the assessment delay *and* a
+        configured EO/IR or SAR platform has actually reached visual range.
+        Prefer the dedicated confirmation UAV when it is available.
+        """
+        target = self.threats.get(str(truth_id or ""))
+        if not target:
+            return None
+        candidates = sorted(
+            self.assets,
+            key=lambda asset_id: (asset_id != "UAV-CONFIRM-01", asset_id),
+        )
+        for asset_id in candidates:
+            asset = self.assets[asset_id]
+            if asset.get("status") not in {"operational", "active", "holding"}:
+                continue
+            sensors = {
+                str(sensor).strip().upper()
+                for sensor in asset.get("sensors") or []
+            }
+            if not sensors.intersection({"EO/IR", "IR", "SAR"}):
+                continue
+            pos = asset.get("position") or asset
+            distance_nm = self.waypoint_nav._haversine(
+                float(pos.get("lat", 0) or 0),
+                float(pos.get("lng", 0) or 0),
+                float(target.get("lat", 0) or 0),
+                float(target.get("lng", 0) or 0),
+            )
+            # EO/IR confirmation is intentionally conservative.  SAR-only
+            # platforms can assess at a slightly longer, still local range.
+            visual_range_nm = 12.0 if sensors.intersection({"EO/IR", "IR"}) else 20.0
+            if distance_nm <= visual_range_nm:
+                return asset_id
+        return None
+
+    def _prune_track_motion_histories(self) -> None:
+        """Keep terminal map trails local to the current tactical picture."""
+        cutoff = float(self.clock.get("elapsed_sec", 0.0) or 0.0) - 900.0
+        for track in self.sensor_fusion.tracks.values():
+            history = list(getattr(track, "history_path", []) or [])
+            if not history:
+                continue
+            retained = [
+                point for point in history[-120:]
+                if float(point.get("sim_time", 0) or 0) >= cutoff
+            ]
+            # Static, retained contacts (such as a destroyed target) still
+            # need a final position, but no stale route should be rendered.
+            track.history_path = retained or [history[-1]]
+
     def _operator_label_for_track(self, track_id: str) -> str:
         """Return the run-stable public label assigned to a fused track."""
         label = self._operator_contact_labels.get(track_id)
@@ -1926,11 +2149,14 @@ class SimEngine:
         ``"damaged"``: speed halved, RF power reduced, RCS altered.
         ``"destroyed"``: speed zeroed, RF silent, marked neutralized.
         """
+        previous_damage_state = str(threat.get("damage_state") or "")
         threat["damage_state"] = damage_state
         threat.setdefault("hit_count", 0)
-        threat["hit_count"] += 1
+        if not (damage_state == "destroyed" and previous_damage_state == "impact_pending"):
+            threat["hit_count"] += 1
 
         if damage_state == "destroyed":
+            threat["_impact_pending"] = False
             threat["neutralized"] = True
             threat["speed_kts"] = 0
             threat["rf_freq_mhz"] = None
@@ -1944,6 +2170,21 @@ class SimEngine:
                 "msg": f"目标摧毁: {contact_label}",
                 "time": _now_iso(),
                 "type": "target_destroyed",
+                "target_track_id": track_id,
+            })
+        elif damage_state == "impact_pending":
+            threat["_impact_pending"] = True
+            threat["neutralized"] = False
+            threat["speed_kts"] = 0
+            threat["rf_freq_mhz"] = None
+            threat["power_dbm"] = None
+            threat["ir_signature"] = "high"
+            contact_label, track_id = self._operator_contact_for_threat(str(threat.get("id") or ""))
+            self.alerts.append({
+                "level": "WARNING",
+                "msg": f"导弹命中 {contact_label}，等待毁伤评估确认",
+                "time": _now_iso(),
+                "type": "target_impact_pending_assessment",
                 "target_track_id": track_id,
             })
         elif damage_state == "damaged":
