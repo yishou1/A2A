@@ -4,9 +4,12 @@ from __future__ import annotations
 import os
 import time
 import uuid
+from dataclasses import dataclass
 from typing import Any, List, Optional, Sequence, Tuple
 
 from algolib_bridge import AlgorithmLibraryClient, AlgorithmLibraryError, AlgolibSettings
+from algolib_bridge.client import AlgorithmRunCall
+from algolib_bridge.llm_planner import AlgolibLLMPlannerError, plan_algorithm_calls
 from closed_loop_agent.agent_results_mapping import execution_gate_from_results
 from closed_loop_agent.closed_loop_core import (
     _apply_action,
@@ -45,6 +48,41 @@ ALLOWED_CLOSED_LOOP_ALGORITHMS = [
     "xbd_damage_assessor",
     "closed_loop_decision_advisor",
 ]
+
+CLOSED_LOOP_STAGE_TASKS = [
+    {
+        "task": "mission_feature_adaptation",
+        "default_algorithm_id": "mission_feature_adapter",
+        "description": "Convert upstream agent results into mission feature vectors.",
+    },
+    {
+        "task": "mission_completion_scoring",
+        "default_algorithm_id": "mission_completion_scorer",
+        "description": "Score mission completion from extracted mission features.",
+    },
+    {
+        "task": "xbd_damage_assessment",
+        "default_algorithm_id": "xbd_damage_assessor",
+        "description": "Estimate damage probability for each target.",
+    },
+    {
+        "task": "closed_loop_decision_advice",
+        "default_algorithm_id": "closed_loop_decision_advisor",
+        "description": "Recommend per-target actions for the closed-loop controller.",
+    },
+]
+
+
+@dataclass
+class ClosedLoopStagePlan:
+    plan: dict[str, Any]
+    calls_by_task: dict[str, AlgorithmRunCall]
+    selected_algorithms: list[str]
+    planner_mode: str
+    warnings: list[str]
+
+    def call_for(self, task: str) -> AlgorithmRunCall | None:
+        return self.calls_by_task.get(task)
 
 
 def use_closed_loop_algolib() -> bool:
@@ -234,6 +272,223 @@ def _situation_label(threat_score: float, damage_prob: float) -> str:
     return "stable"
 
 
+def _stage_plan_specs(
+    *,
+    feature_mode: str,
+    preferred_damage_mode: str,
+    device: Optional[str],
+) -> list[dict[str, Any]]:
+    specs: list[dict[str, Any]] = []
+    for spec in CLOSED_LOOP_STAGE_TASKS:
+        params: dict[str, Any] = {}
+        if spec["default_algorithm_id"] == "xbd_damage_assessor":
+            if preferred_damage_mode:
+                params["damage_input_mode"] = preferred_damage_mode
+            if device:
+                params["device"] = device
+        elif spec["default_algorithm_id"] == "mission_feature_adapter":
+            params["mode"] = feature_mode if feature_mode in {"strict", "fixture", "hybrid"} else "hybrid"
+        specs.append({**spec, "params": params})
+    return specs
+
+
+def _default_stage_call(
+    client: AlgorithmLibraryClient,
+    *,
+    algorithm_id: str,
+    task: str,
+    inputs: dict[str, Any],
+    params: Optional[dict[str, Any]] = None,
+) -> AlgorithmRunCall:
+    version = client.settings.default_version
+    backend_type = client.settings.default_backend_type
+    return AlgorithmRunCall(
+        algorithm_id=algorithm_id,
+        version=version,
+        backend_type=backend_type,
+        inputs=inputs,
+        params=dict(params or {}),
+        reason="closed_loop_stage_default",
+    )
+
+
+def _build_closed_loop_stage_plan(
+    client: AlgorithmLibraryClient,
+    *,
+    request_id: str,
+    feature_mode: str,
+    preferred_damage_mode: str,
+    device: Optional[str],
+) -> ClosedLoopStagePlan:
+    settings = client.settings
+    warnings: list[str] = []
+    stage_specs = _stage_plan_specs(
+        feature_mode=feature_mode,
+        preferred_damage_mode=preferred_damage_mode,
+        device=device,
+    )
+    algorithms: list[dict[str, Any]] = []
+    try:
+        algorithms = client.list_algorithms()
+    except AlgorithmLibraryError as exc:
+        warnings.append(f"closed_loop_stage_plan:list_algorithms_failed:{exc}")
+    active_ids = {str(item.get("algorithm_id")): item for item in algorithms if isinstance(item, dict)}
+
+    if not settings.enable_llm:
+        calls = {
+            spec["task"]: _default_stage_call(
+                client,
+                algorithm_id=spec["default_algorithm_id"],
+                task=spec["task"],
+                inputs={},
+                params=spec.get("params"),
+            )
+            for spec in stage_specs
+        }
+        plan = {
+            "intent": "default_algorithm_stage",
+            "task": "closed_loop_stage",
+            "algorithm_calls": [
+                {
+                    "task": spec["task"],
+                    "algorithm_id": spec["default_algorithm_id"],
+                    "version": str(active_ids.get(spec["default_algorithm_id"], {}).get("version", settings.default_version)),
+                    "backend_type": str(
+                        active_ids.get(spec["default_algorithm_id"], {}).get(
+                            "backend_type",
+                            settings.default_backend_type,
+                        )
+                    ),
+                    "params": dict(spec.get("params") or {}),
+                    "reason": "LLM disabled; using default algorithm.",
+                    "inputs": {"_source": "caller_structured_inputs"},
+                }
+                for spec in stage_specs
+            ],
+            "missing_fields": [],
+            "explanation": "LLM disabled; using default algorithms for the closed-loop stage.",
+            "mode": "fixed",
+        }
+        return ClosedLoopStagePlan(
+            plan=plan,
+            calls_by_task=calls,
+            selected_algorithms=[call.algorithm_id for call in calls.values()],
+            planner_mode="fixed",
+            warnings=warnings,
+        )
+
+    try:
+        calls, plan = plan_algorithm_calls(
+            settings=settings,
+            algorithms=algorithms,
+            call_specs=stage_specs,
+            task="closed_loop_stage",
+        )
+        if isinstance(plan, dict):
+            plan["request_id"] = request_id
+    except (AlgorithmLibraryError, AlgolibLLMPlannerError, ValueError, TypeError) as exc:
+        warnings.append(f"closed_loop_stage_plan:llm_failed:{exc}")
+        calls = [
+            _default_stage_call(
+                client,
+                algorithm_id=spec["default_algorithm_id"],
+                task=spec["task"],
+                inputs={},
+                params=spec.get("params"),
+            )
+            for spec in stage_specs
+        ]
+        plan = {
+            "intent": "llm_stage_plan_fallback",
+            "task": "closed_loop_stage",
+            "algorithm_calls": [
+                {
+                    "task": spec["task"],
+                    "algorithm_id": spec["default_algorithm_id"],
+                    "version": str(active_ids.get(spec["default_algorithm_id"], {}).get("version", settings.default_version)),
+                    "backend_type": str(
+                        active_ids.get(spec["default_algorithm_id"], {}).get(
+                            "backend_type",
+                            settings.default_backend_type,
+                        )
+                    ),
+                    "params": dict(spec.get("params") or {}),
+                    "reason": f"plan_failed_fallback:{exc}",
+                    "inputs": {"_source": "caller_structured_inputs"},
+                }
+                for spec in stage_specs
+            ],
+            "missing_fields": [],
+            "explanation": f"LLM stage planning failed, fallback to default stage algorithms: {exc}",
+            "mode": "fallback",
+            "fallback_reason": str(exc),
+            "request_id": request_id,
+        }
+        return ClosedLoopStagePlan(
+            plan=plan,
+            calls_by_task={spec["task"]: call for spec, call in zip(stage_specs, calls)},
+            selected_algorithms=[call.algorithm_id for call in calls],
+            planner_mode="fallback",
+            warnings=warnings,
+        )
+
+    calls_by_task: dict[str, AlgorithmRunCall] = {}
+    for spec, call in zip(stage_specs, calls):
+        calls_by_task[spec["task"]] = call
+    plan = dict(plan or {})
+    plan.setdefault("task", "closed_loop_stage")
+    plan.setdefault("mode", "llm")
+    plan.setdefault("request_id", request_id)
+    plan.setdefault("selected_algorithms", [call.algorithm_id for call in calls])
+    return ClosedLoopStagePlan(
+        plan=plan,
+        calls_by_task=calls_by_task,
+        selected_algorithms=[call.algorithm_id for call in calls],
+        planner_mode="llm",
+        warnings=warnings,
+    )
+
+
+def _run_outputs_from_stage_plan(
+    client: AlgorithmLibraryClient,
+    *,
+    stage_plan: ClosedLoopStagePlan,
+    algorithm_id: str,
+    task: str,
+    inputs: dict[str, Any],
+    params: Optional[dict[str, Any]] = None,
+    request_id: str,
+    trace_id: str,
+) -> dict:
+    planned_call = stage_plan.call_for(task)
+    if planned_call is None:
+        planned_call = _default_stage_call(
+            client,
+            algorithm_id=algorithm_id,
+            task=task,
+            inputs=inputs,
+            params=params,
+        )
+    call = AlgorithmRunCall(
+        algorithm_id=planned_call.algorithm_id or algorithm_id,
+        version=planned_call.version or client.settings.default_version,
+        backend_type=planned_call.backend_type or client.settings.default_backend_type,
+        inputs=inputs,
+        params=dict(planned_call.params or params or {}),
+        reason=planned_call.reason,
+    )
+    result = client.run_algorithm(request_id=request_id, trace_id=trace_id, call=call)
+    if not result.get("ok", False):
+        error = result.get("error") if isinstance(result.get("error"), dict) else {}
+        raise AlgorithmLibraryError(
+            f"{call.algorithm_id} failed: {error.get('code', 'UNKNOWN')}: {error.get('message', '')}"
+        )
+    outputs = result.get("outputs")
+    if not isinstance(outputs, dict):
+        raise AlgorithmLibraryError(f"{call.algorithm_id} response missing outputs object.")
+    return outputs
+
+
 def assess_target_damage_via_algolib(
     client: AlgorithmLibraryClient,
     target: dict,
@@ -241,6 +496,7 @@ def assess_target_damage_via_algolib(
     request_id: str,
     preferred_mode: str = DAMAGE_INPUT_MODE_AUTO,
     device: Optional[str] = None,
+    stage_plan: Optional[ClosedLoopStagePlan] = None,
     llm_plans: Optional[List[dict]] = None,
 ) -> Tuple[float, str, dict, List[str]]:
     """Call xbd_damage_assessor for one target; returns prob, mode, raw_out, warnings."""
@@ -258,17 +514,29 @@ def assess_target_damage_via_algolib(
     params = {}
     if device:
         params["device"] = device
-    damage_out = _run_outputs_maybe_planned(
-        client,
-        settings=client.settings,
-        algorithm_id="xbd_damage_assessor",
-        inputs=inputs,
-        params=params,
-        request_id=request_id,
-        trace_id=request_id,
-        task="xbd_damage_assessment",
-        llm_plans=llm_plans,
-    )
+    if stage_plan is not None:
+        damage_out = _run_outputs_from_stage_plan(
+            client,
+            stage_plan=stage_plan,
+            algorithm_id="xbd_damage_assessor",
+            task="xbd_damage_assessment",
+            inputs=inputs,
+            params=params,
+            request_id=request_id,
+            trace_id=request_id,
+        )
+    else:
+        damage_out = _run_outputs_maybe_planned(
+            client,
+            settings=client.settings,
+            algorithm_id="xbd_damage_assessor",
+            inputs=inputs,
+            params=params,
+            request_id=request_id,
+            trace_id=request_id,
+            task="xbd_damage_assessment",
+            llm_plans=llm_plans,
+        )
     if damage_out.get("assessment_status") == "insufficient_data":
         warnings.append(f"xbd_damage_assessor:insufficient_data:{sample_id}:{mode}")
         # images incomplete at service → try features once if available
@@ -280,17 +548,29 @@ def assess_target_damage_via_algolib(
             )
             warnings.extend(feature_warnings)
             if feature_inputs is not None:
-                damage_out = _run_outputs_maybe_planned(
-                    client,
-                    settings=client.settings,
-                    algorithm_id="xbd_damage_assessor",
-                    inputs=feature_inputs,
-                    params=params,
-                    request_id=f"{request_id}-features",
-                    trace_id=request_id,
-                    task="xbd_damage_assessment_features_fallback",
-                    llm_plans=llm_plans,
-                )
+                if stage_plan is not None:
+                    damage_out = _run_outputs_from_stage_plan(
+                        client,
+                        stage_plan=stage_plan,
+                        algorithm_id="xbd_damage_assessor",
+                        task="xbd_damage_assessment",
+                        inputs=feature_inputs,
+                        params=params,
+                        request_id=f"{request_id}-features",
+                        trace_id=request_id,
+                    )
+                else:
+                    damage_out = _run_outputs_maybe_planned(
+                        client,
+                        settings=client.settings,
+                        algorithm_id="xbd_damage_assessor",
+                        inputs=feature_inputs,
+                        params=params,
+                        request_id=f"{request_id}-features",
+                        trace_id=request_id,
+                        task="xbd_damage_assessment_features_fallback",
+                        llm_plans=llm_plans,
+                    )
                 mode = feature_mode
                 if damage_out.get("assessment_status") != "insufficient_data":
                     return float(damage_out.get("damage_probability") or 0.0), mode, damage_out, warnings
@@ -305,23 +585,36 @@ def _score_mission_via_algolib(
     agent_results: dict,
     feature_mode: str,
     request_id: str,
+    stage_plan: Optional[ClosedLoopStagePlan] = None,
     llm_plans: Optional[List[dict]] = None,
 ) -> Tuple[dict, dict, List[str]]:
     warnings: List[str] = []
-    adapter_out = _run_outputs_maybe_planned(
-        client,
-        settings=client.settings,
-        algorithm_id="mission_feature_adapter",
-        inputs={
-            "source_type": "agent_results",
-            "mode": feature_mode if feature_mode in {"strict", "fixture", "hybrid"} else "hybrid",
-            "agent_results": agent_results,
-        },
-        request_id=request_id,
-        trace_id=request_id,
-        task="mission_feature_adaptation",
-        llm_plans=llm_plans,
-    )
+    adapter_inputs = {
+        "source_type": "agent_results",
+        "mode": feature_mode if feature_mode in {"strict", "fixture", "hybrid"} else "hybrid",
+        "agent_results": agent_results,
+    }
+    if stage_plan is not None:
+        adapter_out = _run_outputs_from_stage_plan(
+            client,
+            stage_plan=stage_plan,
+            algorithm_id="mission_feature_adapter",
+            task="mission_feature_adaptation",
+            inputs=adapter_inputs,
+            request_id=request_id,
+            trace_id=request_id,
+        )
+    else:
+        adapter_out = _run_outputs_maybe_planned(
+            client,
+            settings=client.settings,
+            algorithm_id="mission_feature_adapter",
+            inputs=adapter_inputs,
+            request_id=request_id,
+            trace_id=request_id,
+            task="mission_feature_adaptation",
+            llm_plans=llm_plans,
+        )
     if adapter_out.get("assessment_status") == "insufficient_data":
         warnings.append("mission_feature_adapter:insufficient_data")
 
@@ -333,16 +626,27 @@ def _score_mission_via_algolib(
         "warnings": list(adapter_out.get("warnings") or []),
     }
     if feature_values and adapter_out.get("assessment_status") != "insufficient_data":
-        mission_out = _run_outputs_maybe_planned(
-            client,
-            settings=client.settings,
-            algorithm_id="mission_completion_scorer",
-            inputs={"features": feature_values},
-            request_id=request_id,
-            trace_id=request_id,
-            task="mission_completion_scoring",
-            llm_plans=llm_plans,
-        )
+        if stage_plan is not None:
+            mission_out = _run_outputs_from_stage_plan(
+                client,
+                stage_plan=stage_plan,
+                algorithm_id="mission_completion_scorer",
+                task="mission_completion_scoring",
+                inputs={"features": feature_values},
+                request_id=request_id,
+                trace_id=request_id,
+            )
+        else:
+            mission_out = _run_outputs_maybe_planned(
+                client,
+                settings=client.settings,
+                algorithm_id="mission_completion_scorer",
+                inputs={"features": feature_values},
+                request_id=request_id,
+                trace_id=request_id,
+                task="mission_completion_scoring",
+                llm_plans=llm_plans,
+            )
     else:
         warnings.append("mission_completion_scorer:skipped_missing_features")
     return adapter_out, mission_out, warnings
@@ -424,6 +728,16 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
     damage_mode_counts = {"images": 0, "features": 0}
     probs: List[float] = []
     llm_plans: List[dict] = []
+    stage_plan = _build_closed_loop_stage_plan(
+        client,
+        request_id=request_id,
+        feature_mode=feature_mode,
+        preferred_damage_mode=damage_mode_pref,
+        device=device,
+    )
+    warnings.extend(stage_plan.warnings)
+    if stage_plan.planner_mode != "fixed":
+        llm_plans.append(stage_plan.plan)
 
     for cycle in range(1, cycles + 1):
         cycle_start = time.perf_counter()
@@ -434,6 +748,7 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
                 agent_results=cycle_results,
                 feature_mode=feature_mode,
                 request_id=f"{request_id}-m{cycle}",
+                stage_plan=stage_plan,
                 llm_plans=llm_plans,
             )
             warnings.extend(mission_warnings)
@@ -465,6 +780,7 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
                     request_id=f"{request_id}-c{cycle}-{index}",
                     preferred_mode=damage_mode_pref,
                     device=device,
+                    stage_plan=stage_plan,
                     llm_plans=llm_plans,
                 )
             except AlgorithmLibraryError as exc:
@@ -479,21 +795,33 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
             threat_score = float(target.get("threat_score") or 0.5)
             situation = _situation_label(threat_score, damage_prob)
             try:
-                advice = _run_outputs_maybe_planned(
-                    client,
-                    settings=settings,
-                    algorithm_id="closed_loop_decision_advisor",
-                    inputs={
-                        "target": target,
-                        "damage_probability": damage_prob,
-                        "situation": situation,
-                        "mission_completion": mission_completion,
-                    },
-                    request_id=f"{request_id}-c{cycle}-adv-{index}",
-                    trace_id=request_id,
-                    task="closed_loop_decision_advice",
-                    llm_plans=llm_plans,
-                )
+                advice_inputs = {
+                    "target": target,
+                    "damage_probability": damage_prob,
+                    "situation": situation,
+                    "mission_completion": mission_completion,
+                }
+                if stage_plan is not None:
+                    advice = _run_outputs_from_stage_plan(
+                        client,
+                        stage_plan=stage_plan,
+                        algorithm_id="closed_loop_decision_advisor",
+                        task="closed_loop_decision_advice",
+                        inputs=advice_inputs,
+                        request_id=f"{request_id}-c{cycle}-adv-{index}",
+                        trace_id=request_id,
+                    )
+                else:
+                    advice = _run_outputs_maybe_planned(
+                        client,
+                        settings=settings,
+                        algorithm_id="closed_loop_decision_advisor",
+                        inputs=advice_inputs,
+                        request_id=f"{request_id}-c{cycle}-adv-{index}",
+                        trace_id=request_id,
+                        task="closed_loop_decision_advice",
+                        llm_plans=llm_plans,
+                    )
             except AlgorithmLibraryError as exc:
                 advice = {"action": "continue_tracking", "effect_delta": 0.04}
                 warnings.append(f"closed_loop_decision_advisor:error:{sample_id}:{exc}")
@@ -662,6 +990,7 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
             "xbd_damage_assessor",
             "closed_loop_decision_advisor",
         ],
+        "selected_algorithms": list(stage_plan.selected_algorithms),
         "llm_algorithm_plans": llm_plans,
         "warnings": unique_warnings,
         "warning_counts": warning_counts,

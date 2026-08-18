@@ -26,7 +26,7 @@ fi
 conda run -n "$ENV_NAME" python -m pip install --upgrade pip setuptools wheel
 
 if ! conda run -n "$ENV_NAME" python -c 'import torch, torchvision' >/dev/null 2>&1; then
-  echo "[dependencies] installing CPU PyTorch"
+  echo "[dependencies] installing PyTorch from $TORCH_INDEX_URL"
   conda run -n "$ENV_NAME" python -m pip install \
     torch torchvision --index-url "$TORCH_INDEX_URL"
 else

@@ -75,7 +75,121 @@ def _mock_run_outputs(algorithm_id: str, inputs: dict, **kwargs):
     raise AssertionError(f"unexpected algorithm_id={algorithm_id}")
 
 
+def _mock_run_algorithm(*, request_id: str, trace_id: str, call):
+    return {
+        "ok": True,
+        "outputs": _mock_run_outputs(call.algorithm_id, call.inputs),
+    }
+
+
 class ClosedLoopAlgolibOrchestrationTest(unittest.TestCase):
+    def test_closed_loop_llm_stage_plans_once_and_reuses(self):
+        stage_plan = {
+            "intent": "closed_loop_stage_plan",
+            "explanation": "plan once",
+            "algorithm_calls": [
+                {
+                    "task": "mission_feature_adaptation",
+                    "algorithm_id": "mission_feature_adapter",
+                    "version": "1.0.0",
+                    "backend_type": "python_http_service",
+                    "params": {"mode": "hybrid"},
+                    "reason": "feature adapter",
+                },
+                {
+                    "task": "mission_completion_scoring",
+                    "algorithm_id": "mission_completion_scorer",
+                    "version": "1.0.0",
+                    "backend_type": "python_http_service",
+                    "params": {},
+                    "reason": "completion scorer",
+                },
+                {
+                    "task": "xbd_damage_assessment",
+                    "algorithm_id": "xbd_damage_assessor",
+                    "version": "1.0.0",
+                    "backend_type": "python_http_service",
+                    "params": {"damage_input_mode": "features"},
+                    "reason": "damage assessor",
+                },
+                {
+                    "task": "closed_loop_decision_advice",
+                    "algorithm_id": "closed_loop_decision_advisor",
+                    "version": "1.0.0",
+                    "backend_type": "python_http_service",
+                    "params": {},
+                    "reason": "advisor",
+                },
+            ],
+            "missing_fields": [],
+        }
+        algorithms = [
+            {
+                "algorithm_id": "mission_feature_adapter",
+                "version": "1.0.0",
+                "backend_type": "python_http_service",
+            },
+            {
+                "algorithm_id": "mission_completion_scorer",
+                "version": "1.0.0",
+                "backend_type": "python_http_service",
+            },
+            {
+                "algorithm_id": "xbd_damage_assessor",
+                "version": "1.0.0",
+                "backend_type": "python_http_service",
+            },
+            {
+                "algorithm_id": "closed_loop_decision_advisor",
+                "version": "1.0.0",
+                "backend_type": "python_http_service",
+            },
+        ]
+        with mock.patch.dict(
+            os.environ,
+            {
+                "ALGOLIB_ENABLE_LLM": "true",
+                "ALGOLIB_LLM_BASE_URL": "http://127.0.0.1:9999/v1",
+                "ALGOLIB_LLM_MODEL": "qwen",
+                "ALGOLIB_LLM_API_KEY": "secret",
+            },
+            clear=False,
+        ):
+            with mock.patch(
+                "closed_loop_agent.algolib_runtime.AlgorithmLibraryClient.list_algorithms",
+                return_value=algorithms,
+            ):
+                with mock.patch(
+                    "algolib_bridge.llm_planner.OpenAICompatiblePlannerClient.chat_json",
+                    return_value=stage_plan,
+                ) as chat_json:
+                    with mock.patch(
+                        "closed_loop_agent.algolib_runtime.AlgorithmLibraryClient.run_algorithm",
+                        side_effect=_mock_run_algorithm,
+                    ):
+                        result = run_closed_loop_via_algolib(
+                            {
+                                "seed": 7,
+                                "cycles": 2,
+                                "target_count": 2,
+                                "enforce_min_target_count": False,
+                                "results": {
+                                    "threat_evaluation": {"output_data": {"priority_score": 0.7}},
+                                },
+                            }
+                        )
+
+        output = result["output_data"]
+        self.assertEqual(chat_json.call_count, 1)
+        self.assertEqual(output["selected_algorithms"], [
+            "mission_feature_adapter",
+            "mission_completion_scorer",
+            "xbd_damage_assessor",
+            "closed_loop_decision_advisor",
+        ])
+        self.assertEqual(len(output["llm_algorithm_plans"]), 1)
+        self.assertEqual(output["llm_algorithm_plans"][0]["mode"], "llm")
+
     def test_live_targets_accept_null_optional_numeric_fields(self):
         null_numeric_target = {
             "target_id": "TRK-AMOS-01",

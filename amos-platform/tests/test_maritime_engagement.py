@@ -346,7 +346,7 @@ def test_follow_uav_keeps_a_stable_trailing_station_and_slows_near_it() -> None:
     assert 1.0 <= uav["speed_kts"] < uav["_cruise_speed_kts"]
 
 
-def test_confirm_uav_returns_to_escort_and_hides_after_authorized_strike() -> None:
+def test_confirm_uav_stays_visible_for_post_strike_assessment_media() -> None:
     scenario = get_scenario(SCENARIO_ID)
     assert scenario is not None
     engine = SimEngine(seed=int(scenario["default_seed"]))
@@ -391,23 +391,13 @@ def test_confirm_uav_returns_to_escort_and_hides_after_authorized_strike() -> No
             break
 
     assert engine.weapons[launched["weapon_id"]]["damage_state"] == "destroyed"
-    assert uav.get("_follow_return_pending_track_id") == hostile.id
-    assert not uav.get("_follow_returning_home")
-    assert engine.waypoint_nav.get_route("UAV-CONFIRM-01")[0]["label"] == "FOLLOW"
+    assert uav.get("_follow_returning_home") is not True
+    assert uav.get("_operator_follow_visible") is True
 
-    engine.clock["elapsed_sec"] = 5609.0
-    engine._tick(1.0)
-    assert uav.get("_follow_returning_home") is True
-    assert engine.waypoint_nav.get_route("UAV-CONFIRM-01")[0]["label"] == "RETURN"
+    engine._tick(max(0.0, 5580.0 - float(engine.clock["elapsed_sec"])))
 
-    escort_current = engine.assets["ESCORT-01"]["position"]
-    uav["position"]["lat"] = escort_current["lat"]
-    uav["position"]["lng"] = escort_current["lng"]
-    engine._tick(1)
-
-    assert uav["status"] == "staged"
-    assert uav.get("_operator_follow_visible") is False
-    assert not any(
+    assert "MAR-MEDIA-07" in engine.media_capture.captured_media_ids
+    assert any(
         asset["id"] == "UAV-CONFIRM-01"
         for asset in engine.get_operator_state()["assets"]
     )

@@ -847,7 +847,27 @@ class CommanderAgent:
     def _lease_allows_response(self, lease, target_label: str, work_item: str, role: str) -> bool:
         if lease is None or self.lease_manager is None:
             return True
-        if self.lease_manager.is_current(lease) and self.lease_manager.is_lease_fresh(lease):
+        if not self.lease_manager.is_current(lease):
+            error_info = classify_agent_error("late response ignored after failover")
+            self._trace(
+                "agent_late_response_ignored",
+                role=role,
+                work_item=work_item,
+                target=target_label,
+                lease_instance=lease.instance_key,
+                **error_info.trace_fields(),
+            )
+            return False
+        if self.lease_manager.is_lease_fresh(lease):
+            return True
+        if os.environ.get("A2A_ACCEPT_STALE_SUCCESS_RESPONSE", "").lower() in {"1", "true", "yes", "on"}:
+            self._trace(
+                "agent_stale_response_accepted",
+                role=role,
+                work_item=work_item,
+                target=target_label,
+                lease_instance=lease.instance_key,
+            )
             return True
         error_info = classify_agent_error("late response ignored after failover")
         self._trace(

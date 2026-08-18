@@ -68,6 +68,7 @@ class AlgolibBridgeConfigTest(unittest.TestCase):
             os.environ,
             {
                 "ALGOLIB_ENABLE_LLM": "true",
+                "LLM_PROVIDER": "azure_openai",
                 "AZURE_OPENAI_ENDPOINT": "https://example.openai.azure.com/",
                 "AZURE_OPENAI_DEPLOYMENT": "gpt-4o-min",
                 "AZURE_OPENAI_API_KEY": "secret",

@@ -8,28 +8,116 @@ source "$SCRIPT_DIR/common.sh"
 
 OFFLINE=0
 REQUIRE_LLM=0
-for arg in "$@"; do
-  case "$arg" in
+LLM_PROFILE_OVERRIDE=""
+
+usage() {
+  cat >&2 <<'EOF'
+Usage: scripts/start.sh [--offline] [--require-llm] [--llm-profile PROFILE]
+
+LLM profiles:
+  azure            Use Azure OpenAI / API-hosted model from .env AZURE_OPENAI_*.
+  local-qwen-gpu   Use/start local OpenAI-compatible Qwen service.
+  offline          Disable LLM planning and use deterministic/fixed routing.
+
+The LLM_PROFILE environment variable is also supported. Command-line
+--llm-profile takes precedence over .env and environment values.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --offline) OFFLINE=1 ;;
     --require-llm) REQUIRE_LLM=1 ;;
-    *) echo "Usage: $0 [--offline] [--require-llm]" >&2; exit 2 ;;
+    --llm-profile)
+      if [[ $# -lt 2 || "$2" == --* ]]; then
+        echo "--llm-profile requires a value." >&2
+        usage
+        exit 2
+      fi
+      LLM_PROFILE_OVERRIDE="$2"
+      shift
+      ;;
+    --llm-profile=*)
+      LLM_PROFILE_OVERRIDE="${1#*=}"
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
   esac
+  shift
 done
 
 load_root_env
 resolve_a2a_python
 
+if [[ -n "$LLM_PROFILE_OVERRIDE" ]]; then
+  export LLM_PROFILE="$LLM_PROFILE_OVERRIDE"
+fi
+
+case "${LLM_PROFILE:-}" in
+  "")
+    ;;
+  azure|azure-openai|azure_openai)
+    export ENABLE_LLM=true
+    export LLM_PROVIDER=azure_openai
+    export TOOL_LLM_URL="${AZURE_OPENAI_ENDPOINT:-${TOOL_LLM_URL:-}}"
+    export TOOL_LLM_NAME="${AZURE_OPENAI_CHAT_DEPLOYMENT:-${AZURE_OPENAI_DEPLOYMENT:-${TOOL_LLM_NAME:-gpt-4o-mini}}}"
+    export LLM_JSON_MODE="${LLM_JSON_MODE:-true}"
+    ;;
+  local|local-qwen|local-qwen-gpu|qwen-gpu)
+    export ENABLE_LLM=true
+    export LLM_PROVIDER=openai_compatible
+    export TOOL_LLM_URL="${LOCAL_QWEN_BASE_URL:-http://127.0.0.1:${LOCAL_QWEN_PORT:-11435}/v1}"
+    export TOOL_LLM_NAME="${LOCAL_QWEN_MODEL_NAME:-qwen3:1.7b}"
+    export API_KEY="${API_KEY:-ollama}"
+    export LOCAL_QWEN_DEVICE="${LOCAL_QWEN_DEVICE:-cuda}"
+    export LOCAL_QWEN_DTYPE="${LOCAL_QWEN_DTYPE:-float16}"
+    export LLM_TIMEOUT_SECONDS="${LLM_TIMEOUT_SECONDS:-120}"
+    export LLM_MAX_TOKENS="${LLM_MAX_TOKENS:-512}"
+    export LLM_TEMPERATURE="${LLM_TEMPERATURE:-0.1}"
+    export LLM_JSON_MODE="${LLM_JSON_MODE:-true}"
+    export LLM_STRIP_THINKING="${LLM_STRIP_THINKING:-true}"
+    export LLM_JSON_RETRY_COUNT="${LLM_JSON_RETRY_COUNT:-1}"
+    export LLM_REASONING_EFFORT="${LLM_REASONING_EFFORT:-none}"
+    ;;
+  offline|fixed|deterministic)
+    export ENABLE_LLM=false
+    export ALGOLIB_ENABLE_LLM=false
+    export A2A_ACT_AGENT_LLM=false
+    ;;
+  *)
+    echo "Unsupported LLM_PROFILE='$LLM_PROFILE'. Use azure, local-qwen-gpu, or offline." >&2
+    exit 2
+    ;;
+esac
+
+llm_provider="${LLM_PROVIDER:-azure_openai}"
+llm_provider="${llm_provider,,}"
+llm_api_key="${AZURE_OPENAI_API_KEY:-}"
+if [[ "$llm_provider" != "azure" && "$llm_provider" != "azure_openai" ]]; then
+  llm_api_key="${API_KEY:-${ALGOLIB_LLM_API_KEY:-}}"
+fi
+
 if [[ "$OFFLINE" == 1 ]]; then
+  active_llm_profile="offline"
   export ENABLE_LLM=false
   export ALGOLIB_ENABLE_LLM=false
-elif [[ "${ENABLE_LLM:-false}" == "true" && -z "${AZURE_OPENAI_API_KEY:-}" ]]; then
+elif [[ "${ENABLE_LLM:-false}" == "true" && -z "$llm_api_key" ]]; then
+  active_llm_profile="${LLM_PROFILE:-env-default}:disabled-no-key"
   if [[ "$REQUIRE_LLM" == 1 ]]; then
-    echo "ENABLE_LLM=true but AZURE_OPENAI_API_KEY is empty." >&2
+    echo "ENABLE_LLM=true but no LLM API key is configured for provider '$llm_provider'." >&2
     exit 1
   fi
-  echo "[notice] Azure key is empty; using deterministic algorithm planning for this run."
+  echo "[notice] LLM API key is empty; using deterministic algorithm planning for this run."
   export ENABLE_LLM=false
   export ALGOLIB_ENABLE_LLM=false
+else
+  active_llm_profile="${LLM_PROFILE:-env-default}"
 fi
 
 export PYTHONPATH="$COMMANDER_DIR:$COMMANDER_DIR/services:$AMOS_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
@@ -42,6 +130,9 @@ export HEARTBEAT_INTERVAL="$A2A_HEARTBEAT_INTERVAL"
 if [[ "${ENABLE_LLM:-false}" == "true" ]]; then
   export A2A_REQUEST_TIMEOUT="${A2A_REQUEST_TIMEOUT:-180}"
   export LLM_TIMEOUT_SECONDS="${LLM_TIMEOUT_SECONDS:-60}"
+  export A2A_HEARTBEAT_GRACE_SECONDS="${A2A_HEARTBEAT_GRACE_SECONDS:-$A2A_REQUEST_TIMEOUT}"
+  export A2A_LEASE_HEARTBEAT_GRACE_SECONDS="${A2A_LEASE_HEARTBEAT_GRACE_SECONDS:-$A2A_REQUEST_TIMEOUT}"
+  export A2A_ACCEPT_STALE_SUCCESS_RESPONSE="${A2A_ACCEPT_STALE_SUCCESS_RESPONSE:-true}"
 else
   export A2A_REQUEST_TIMEOUT="${A2A_REQUEST_TIMEOUT:-60}"
 fi
@@ -55,6 +146,7 @@ export TASK_SCHEDULING_USE_ALGOLIB=true
 export TIA_ALGOLIB_CALL_MODE=run
 export TIA_ALGORITHM_PLANNER="$([[ "${ENABLE_LLM:-false}" == "true" ]] && echo llm || echo fixed)"
 export TASK_SCHEDULING_ALGORITHM_PLANNER="$TIA_ALGORITHM_PLANNER"
+export A2A_ACT_AGENT_LLM="${A2A_ACT_AGENT_LLM:-${ALGOLIB_ENABLE_LLM:-${ENABLE_LLM:-false}}}"
 export A2A_BACKEND_MODE="${A2A_BACKEND_MODE:-gateway}"
 export A2A_GATEWAY_URL="${A2A_GATEWAY_URL:-http://127.0.0.1:8030}"
 export A2A_COMMANDER_URL="${A2A_COMMANDER_URL:-http://127.0.0.1:8021}"
@@ -67,6 +159,31 @@ docker info >/dev/null
 docker compose -f "$COMMANDER_DIR/docker-compose.yml" up -d nacos auth-server
 wait_http "Nacos" "http://127.0.0.1:8848/nacos/v1/console/health/readiness" 120
 wait_http "A2A auth mock" "http://127.0.0.1:8080/get" 60
+
+llm_url="${TOOL_LLM_URL:-}"
+if [[ "${ENABLE_LLM:-false}" == "true" && "$llm_provider" != "azure" && "$llm_provider" != "azure_openai" ]]; then
+  llm_port=""
+  if [[ "$llm_url" == http://127.0.0.1:* || "$llm_url" == http://localhost:* ]]; then
+    llm_host_port="${llm_url#http://}"
+    llm_host_port="${llm_host_port%%/*}"
+    llm_port="${llm_host_port##*:}"
+  fi
+  if [[ "$llm_port" =~ ^[0-9]+$ ]]; then
+    if curl --noproxy '*' -fsS --max-time 2 "http://127.0.0.1:$llm_port/health" >/dev/null 2>&1 \
+      || curl --noproxy '*' -fsS --max-time 2 "http://127.0.0.1:$llm_port/api/tags" >/dev/null 2>&1; then
+      echo "[running] local LLM endpoint at 127.0.0.1:$llm_port"
+    else
+      echo "[llm] starting local Qwen endpoint"
+      export LOCAL_QWEN_DEVICE="${LOCAL_QWEN_DEVICE:-cuda}"
+      export LOCAL_QWEN_DTYPE="${LOCAL_QWEN_DTYPE:-float16}"
+      start_service "local-qwen" "$ROOT_DIR" "http://127.0.0.1:$llm_port/health" \
+        "$A2A_PYTHON" scripts/local_qwen_openai_server.py \
+        --host 127.0.0.1 --port "$llm_port" \
+        --model-dir "${LOCAL_QWEN_MODEL_DIR:-local_models/qwen3-1.7b}" \
+        --model-name "${TOOL_LLM_NAME:-qwen3:1.7b}"
+    fi
+  fi
+fi
 
 declare -a TIA_SERVICES=(
   battlefield_rtdetr_detector
@@ -146,10 +263,10 @@ start_service agent-decision-planning "$COMMANDER_DIR" "http://127.0.0.1:10202/h
 start_service agent-compliance "$COMMANDER_DIR" "http://127.0.0.1:10203/health" \
   env COMPLIANCE_AUTHORIZATION_AGENT_PORT=10203 "$A2A_PYTHON" -m compliance_authorization_agent.main
 start_service agent-simulation-execution "$COMMANDER_DIR" "http://127.0.0.1:10204/health" \
-  env EXECUTION_CONTROL_AGENT_ROLE=simulation_execution SIMULATION_EXECUTION_AGENT_PORT=10204 \
+  env ALGOLIB_ENABLE_LLM="$A2A_ACT_AGENT_LLM" EXECUTION_CONTROL_AGENT_ROLE=simulation_execution SIMULATION_EXECUTION_AGENT_PORT=10204 \
   "$A2A_PYTHON" -m execution_control_agent.main
 start_service agent-closed-loop "$COMMANDER_DIR" "http://127.0.0.1:10205/health" \
-  env CLOSED_LOOP_AGENT_PORT=10205 "$A2A_PYTHON" -m closed_loop_agent.main
+  env ALGOLIB_ENABLE_LLM="$A2A_ACT_AGENT_LLM" CLOSED_LOOP_AGENT_PORT=10205 "$A2A_PYTHON" -m closed_loop_agent.main
 
 start_service commander-manager "$COMMANDER_DIR" "http://127.0.0.1:8021/health" \
   "$A2A_PYTHON" commander_agent/main.py --mode remote --workflow bpel \
@@ -165,5 +282,10 @@ echo "System is running:"
 echo "  AMOS UI:       http://127.0.0.1:5000/"
 echo "  Commander:     http://127.0.0.1:8021/supervisor"
 echo "  Nacos console: http://127.0.0.1:8848/nacos/"
+echo "  LLM profile:   $active_llm_profile"
+echo "  LLM provider:  ${LLM_PROVIDER:-disabled}"
 echo "  Planner mode:  $TIA_ALGORITHM_PLANNER"
 echo "  Logs:          $LOG_DIR"
+echo
+echo "Note: if you change --llm-profile, run ./scripts/stop.sh before ./scripts/start.sh so"
+echo "      already-running Agent processes reload the new environment."

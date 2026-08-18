@@ -12,6 +12,15 @@ ALGOLIB_DIR="$RUNTIME_DIR/algolib"
 
 mkdir -p "$LOG_DIR" "$PID_DIR" "$ALGOLIB_DIR"
 
+WINDOWS_DOCKER_CLI="/mnt/c/Program Files/Docker/Docker/resources/bin/docker.exe"
+if ! command -v docker >/dev/null 2>&1 || ! command docker info >/dev/null 2>&1; then
+  if [[ -x "$WINDOWS_DOCKER_CLI" ]] && "$WINDOWS_DOCKER_CLI" info >/dev/null 2>&1; then
+    docker() {
+      "$WINDOWS_DOCKER_CLI" "$@"
+    }
+  fi
+fi
+
 load_root_env() {
   if [[ -f "$ROOT_DIR/.env" ]]; then
     set -a
@@ -117,4 +126,3 @@ stop_service() {
   rm -f "$(pid_file "$name")"
   echo "[stopped] $name"
 }
-

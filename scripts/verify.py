@@ -485,7 +485,15 @@ def run_scenario(
     if require_llm_evidence:
         require(llm_evidence["llm_plan_count"] > 0, "no dynamic LLM algorithm plan was recorded")
         require(llm_evidence["raw_plan_count"] > 0, "no raw TIA LLM plan was recorded")
-        require("azure_gpt_4o_mini" in llm_evidence["modes"], "Track Threat did not use Azure GPT-4o-mini")
+        require(
+            any(
+                "azure" in mode
+                or "openai_compatible" in mode
+                or "qwen" in mode
+                for mode in llm_evidence["modes"]
+            ),
+            "Track Threat did not record an LLM planner provider",
+        )
         require(not llm_evidence["fallbacks"], f"LLM planner fallback detected: {sorted(llm_evidence['fallbacks'])}")
     return {
         "run_id": run_id,
@@ -510,7 +518,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-scenario", action="store_true", help="create and execute a clean four-checkpoint run")
     parser.add_argument("--authorize-fire", action="store_true", help="explicitly authorize one simulated fire command")
-    parser.add_argument("--require-llm-evidence", action="store_true", help="fail unless Azure dynamic-planning evidence is present")
+    parser.add_argument("--require-llm-evidence", action="store_true", help="fail unless dynamic LLM planning evidence is present")
     parser.add_argument("--workflow-timeout", type=float, default=180.0)
     parser.add_argument(
         "--wall-clock",

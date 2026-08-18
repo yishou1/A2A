@@ -40,10 +40,13 @@ cd a2a-amos-integrated
 ```
 
 运行统一初始化脚本。脚本会创建或更新 Python 3.11 Conda 环境 `a2a`、安装完整的
-Commander/算法服务/AMOS 依赖、安装 CPU 版 PyTorch，并编译 AlgoLib：
+Commander/算法服务/AMOS 依赖、安装 PyTorch，并编译 AlgoLib。默认安装 CPU 版 PyTorch；
+需要本地 GPU 跑 Qwen 时，先指定 CUDA wheel 源：
 
 ```bash
 ./scripts/bootstrap.sh
+# 或：
+A2A_TORCH_INDEX_URL=https://download.pytorch.org/whl/cu121 ./scripts/bootstrap.sh
 ```
 
 环境入口文件分别是：
@@ -57,7 +60,7 @@ Commander/算法服务/AMOS 依赖、安装 CPU 版 PyTorch，并编译 AlgoLib�
 ```bash
 conda env create -f environment.yml
 conda run -n a2a python -m pip install torch torchvision \
-  --index-url https://download.pytorch.org/whl/cpu
+  --index-url https://download.pytorch.org/whl/cu121
 conda run -n a2a python -m pip install -r requirements.txt
 conda run -n a2a cmake -S commander -B commander/build -G Ninja \
   -DALGOLIB_BUILD_TESTS=ON -DALGOLIB_WITH_ONNXRUNTIME=OFF
@@ -76,6 +79,7 @@ cp .env.example .env
 关键配置如下。`.env` 已被 `.gitignore` 排除，脚本不会打印密钥。
 
 ```dotenv
+LLM_PROFILE=azure
 ENABLE_LLM=true
 AZURE_OPENAI_ENDPOINT=https://wysengine.openai.azure.com/
 AZURE_OPENAI_DEPLOYMENT=4o-mini
@@ -96,11 +100,32 @@ Sentence Transformers 的 `paraphrase-MiniLM-L6-v2`，首次使用可能需要�
 ./scripts/start.sh --offline
 ```
 
-要求使用 Azure GPT-4o-mini 动态选择算法；密钥缺失时启动会直接失败：
+推荐给大多数开发者：使用 Azure/API-hosted GPT-4o-mini 动态选择算法，不需要本地部署大模型。
+密钥缺失时启动会直接失败：
 
 ```bash
-./scripts/start.sh --require-llm
+./scripts/start.sh --llm-profile azure --require-llm
 ```
+
+可选：使用本地 Qwen3-1.7B 动态选择算法，并优先使用 CUDA/GPU；如果 `127.0.0.1:11435`
+没有现成 OpenAI-compatible 服务，启动脚本会自动拉起 `scripts/local_qwen_openai_server.py`：
+
+```bash
+./scripts/start.sh --llm-profile local-qwen-gpu --require-llm
+```
+
+快速切换方式：
+
+- `./scripts/start.sh --llm-profile azure --require-llm`：Azure OpenAI，使用 `.env` 中的 `AZURE_OPENAI_*`；
+- `./scripts/start.sh --llm-profile local-qwen-gpu --require-llm`：本地 OpenAI-compatible Qwen，默认 `http://127.0.0.1:11435/v1`；
+- `./scripts/start.sh --llm-profile offline` 或 `./scripts/start.sh --offline`：不调用 LLM，使用固定/确定性算法规划。
+
+也可以继续使用环境变量 `LLM_PROFILE=azure|local-qwen-gpu|offline`；命令行
+`--llm-profile` 优先级更高。切换 profile 时先执行 `./scripts/stop.sh`，再重新
+`./scripts/start.sh`，否则已经运行的 Agent 进程不会重新加载新环境。
+
+Act 阶段是否也使用 LLM 选算法由 `A2A_ACT_AGENT_LLM` 控制。默认跟随全局 LLM 开关；
+如需演示速度优先，可在 `.env` 中设为 `false`。
 
 查看状态、停止应用但保留 Nacos，或全部停止：
 

@@ -20,13 +20,14 @@ LLMTransport = Callable[[str, dict[str, str], dict[str, Any], float], dict[str, 
 
 
 class AzureToolLLM:
-    """Azure OpenAI chat-completions client returning one strict JSON plan."""
+    """OpenAI-compatible chat-completions client returning one strict JSON plan."""
 
     def __init__(self, settings: Any, *, transport: LLMTransport | None = None) -> None:
         self.endpoint = str(settings.llm_endpoint).rstrip("/")
         self.deployment = str(settings.llm_deployment).strip()
         self.api_version = str(settings.llm_api_version).strip()
         self.api_key = str(settings.llm_api_key).strip()
+        self.provider = str(getattr(settings, "llm_provider", "azure_openai")).strip().lower()
         self.timeout_seconds = float(settings.llm_timeout_seconds)
         self.transport = transport or _post_json
 
@@ -38,11 +39,11 @@ class AzureToolLLM:
         request_summary: dict[str, Any],
     ) -> dict[str, Any]:
         if not self.endpoint:
-            raise ToolLLMError("Azure OpenAI endpoint is not configured")
+            raise ToolLLMError("LLM endpoint is not configured")
         if not self.deployment:
-            raise ToolLLMError("Azure OpenAI chat deployment is not configured")
+            raise ToolLLMError("LLM chat model/deployment is not configured")
         if not self.api_key:
-            raise ToolLLMError("Azure OpenAI API key is not configured")
+            raise ToolLLMError("LLM API key is not configured")
 
         system_prompt = (
             "You are the tool planner inside the Track Threat Agent. Return one valid JSON object only. "
@@ -75,29 +76,40 @@ class AzureToolLLM:
         }
         response = self.transport(
             self._chat_completions_url(),
-            {"Content-Type": "application/json", "api-key": self.api_key},
+            self._headers(),
             payload,
             self.timeout_seconds,
         )
         try:
             content = response["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
-            raise ToolLLMError("Azure OpenAI response does not contain message content") from exc
+            raise ToolLLMError("LLM response does not contain message content") from exc
         try:
             parsed = json.loads(_strip_json_fence(str(content)))
         except json.JSONDecodeError as exc:
-            raise ToolLLMError("Azure OpenAI response is not valid JSON") from exc
+            raise ToolLLMError("LLM response is not valid JSON") from exc
         if not isinstance(parsed, dict):
-            raise ToolLLMError("Azure OpenAI plan must be a JSON object")
+            raise ToolLLMError("LLM plan must be a JSON object")
         return parsed
 
     def _chat_completions_url(self) -> str:
         if "/chat/completions" in self.endpoint:
             return self.endpoint
+        if not self._is_azure_provider():
+            return f"{self.endpoint}/chat/completions"
         return (
             f"{self.endpoint}/openai/deployments/{self.deployment}/chat/completions"
             f"?api-version={self.api_version}"
         )
+
+    def _headers(self) -> dict[str, str]:
+        if self._is_azure_provider():
+            return {"Content-Type": "application/json", "api-key": self.api_key}
+        return {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
+
+    def _is_azure_provider(self) -> bool:
+        provider = str(getattr(self, "provider", "")).lower()
+        return provider in {"azure", "azure_openai"} or ".openai.azure.com" in self.endpoint
 
 
 def _post_json(

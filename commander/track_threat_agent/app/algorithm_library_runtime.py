@@ -63,11 +63,19 @@ class AlgorithmLibrarySettings:
 
     @classmethod
     def from_env(cls) -> "AlgorithmLibrarySettings":
-        endpoint = os.getenv("AZURE_OPENAI_ENDPOINT") or os.getenv("TOOL_LLM_URL", "")
-        deployment = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT") or os.getenv(
-            "TOOL_LLM_NAME", "gpt-4o-mini"
-        )
-        api_key = os.getenv("AZURE_OPENAI_API_KEY") or os.getenv("API_KEY", "")
+        provider = os.getenv("LLM_PROVIDER", "azure_openai").strip().lower()
+        if provider in {"azure", "azure_openai"}:
+            endpoint = os.getenv("AZURE_OPENAI_ENDPOINT") or os.getenv("TOOL_LLM_URL", "")
+            deployment = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT") or os.getenv(
+                "TOOL_LLM_NAME", "gpt-4o-mini"
+            )
+            api_key = os.getenv("AZURE_OPENAI_API_KEY") or os.getenv("API_KEY", "")
+        else:
+            endpoint = os.getenv("TOOL_LLM_URL") or os.getenv("AZURE_OPENAI_ENDPOINT", "")
+            deployment = os.getenv("TOOL_LLM_NAME") or os.getenv(
+                "AZURE_OPENAI_CHAT_DEPLOYMENT", "gpt-4o-mini"
+            )
+            api_key = os.getenv("API_KEY") or os.getenv("AZURE_OPENAI_API_KEY", "")
         return cls(
             enabled=_env_bool("ALGORITHM_LIBRARY_ENABLED", False),
             required=_env_bool("ALGORITHM_LIBRARY_REQUIRED", False),
@@ -75,7 +83,7 @@ class AlgorithmLibrarySettings:
             timeout_seconds=float(os.getenv("ALGOLIB_TIMEOUT_SECONDS", "10")),
             llm_enabled=_env_bool("ENABLE_LLM", False),
             llm_required=_env_bool("TOOL_LLM_REQUIRED", False),
-            llm_provider=os.getenv("LLM_PROVIDER", "azure_openai").strip().lower(),
+            llm_provider=provider,
             llm_endpoint=endpoint.rstrip("/"),
             llm_deployment=deployment.strip(),
             llm_api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview"),
@@ -214,7 +222,7 @@ class TrackThreatAlgorithmRuntime:
                 )
                 raw_calls = self._raw_llm_calls(llm_plan, allowed)
                 raw_calls = self._complete_skill_coverage(raw_calls, requested_skills)
-                self._trace["planner_mode"] = "azure_gpt_4o_mini"
+                self._trace["planner_mode"] = self._llm_planner_mode()
                 self._trace["llm_plan"] = {
                     "intent": str(llm_plan.get("intent") or ""),
                     "explanation": str(llm_plan.get("explanation") or ""),
@@ -236,6 +244,12 @@ class TrackThreatAlgorithmRuntime:
 
     def should_run(self, algorithm_id: str) -> bool:
         return algorithm_id in self._planned_by_id
+
+    def _llm_planner_mode(self) -> str:
+        provider = str(self.settings.llm_provider or "llm").strip().lower()
+        deployment = str(self.settings.llm_deployment or "chat").strip().lower()
+        label = f"{provider}_{deployment}"
+        return "".join(character if character.isalnum() else "_" for character in label).strip("_")
 
     def run(
         self,

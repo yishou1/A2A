@@ -1487,6 +1487,20 @@ class SimEngine:
                 "weapon_id": result.get("weapon_id"),
                 "timestamp": time.time(),
             })
+            # In the maritime demo the operator confirms one engagement
+            # action.  The post-strike assessment UAV is an execution support
+            # asset for that same authorized action, not a separate weapon
+            # release decision.  Mark configured follow/assessment assets as
+            # authorized for this track so the ASSESS evidence window can be
+            # satisfied after the confirmed fire command.
+            for task in self._scenario_asset_follow_tasks:
+                if not task.get("requires_operator_authorization"):
+                    continue
+                follow_asset = self.assets.get(str(task.get("asset_id") or ""))
+                if follow_asset is None:
+                    continue
+                follow_asset["_follow_launch_authorized_track_id"] = track_id
+                follow_asset["_follow_pending_prompt"] = None
             return {
                 key: value
                 for key, value in {

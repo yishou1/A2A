@@ -20,6 +20,8 @@ htmlcov/
 .a2a_state/
 *.log
 *.pid
+local_models/
+tools/ollama-runtime/
 
 commander/build/
 commander/build-*/

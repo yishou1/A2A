@@ -67,6 +67,42 @@ class AlgolibSettings:
             transport = "direct"
         if backend not in {"local", "algolib"}:
             backend = "local"
+        provider = os.environ.get("ALGOLIB_LLM_PROVIDER", os.environ.get("LLM_PROVIDER", "azure")).strip().lower() or "azure"
+        if provider in {"azure", "azure_openai"}:
+            llm_base_url = os.environ.get(
+                "AZURE_OPENAI_ENDPOINT",
+                os.environ.get(
+                    "ALGOLIB_LLM_BASE_URL",
+                    os.environ.get("TOOL_LLM_URL", "https://wysengine.openai.azure.com/"),
+                ),
+            )
+            llm_model = os.environ.get(
+                "AZURE_OPENAI_DEPLOYMENT",
+                os.environ.get(
+                    "ALGOLIB_LLM_MODEL",
+                    os.environ.get("TOOL_LLM_NAME", "gpt-4o-mini"),
+                ),
+            )
+            llm_api_key = os.environ.get(
+                "AZURE_OPENAI_API_KEY",
+                os.environ.get("ALGOLIB_LLM_API_KEY", os.environ.get("API_KEY", "")),
+            )
+        else:
+            llm_base_url = os.environ.get(
+                "TOOL_LLM_URL",
+                os.environ.get("ALGOLIB_LLM_BASE_URL", os.environ.get("AZURE_OPENAI_ENDPOINT", "")),
+            )
+            llm_model = os.environ.get(
+                "TOOL_LLM_NAME",
+                os.environ.get(
+                    "ALGOLIB_LLM_MODEL",
+                    os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4o-mini"),
+                ),
+            )
+            llm_api_key = os.environ.get(
+                "API_KEY",
+                os.environ.get("ALGOLIB_LLM_API_KEY", os.environ.get("AZURE_OPENAI_API_KEY", "")),
+            )
         return cls(
             backend=backend,
             transport=transport,
@@ -76,25 +112,10 @@ class AlgolibSettings:
             default_version=os.environ.get("ALGOLIB_DEFAULT_VERSION", "1.0.0"),
             default_backend_type=os.environ.get("ALGOLIB_BACKEND_TYPE", "python_http_service"),
             enable_llm=_env_bool("ALGOLIB_ENABLE_LLM", _env_bool("ENABLE_LLM", False)),
-            llm_provider=os.environ.get("ALGOLIB_LLM_PROVIDER", "azure").strip().lower() or "azure",
-            llm_base_url=os.environ.get(
-                "AZURE_OPENAI_ENDPOINT",
-                os.environ.get(
-                    "ALGOLIB_LLM_BASE_URL",
-                    os.environ.get("TOOL_LLM_URL", "https://wysengine.openai.azure.com/"),
-                ),
-            ).rstrip("/"),
-            llm_model=os.environ.get(
-                "AZURE_OPENAI_DEPLOYMENT",
-                os.environ.get(
-                    "ALGOLIB_LLM_MODEL",
-                    os.environ.get("TOOL_LLM_NAME", "gpt-4o-mini"),
-                ),
-            ),
-            llm_api_key=os.environ.get(
-                "AZURE_OPENAI_API_KEY",
-                os.environ.get("ALGOLIB_LLM_API_KEY", os.environ.get("API_KEY", "")),
-            ),
+            llm_provider=provider,
+            llm_base_url=llm_base_url.rstrip("/"),
+            llm_model=llm_model,
+            llm_api_key=llm_api_key,
             llm_api_version=os.environ.get(
                 "AZURE_OPENAI_API_VERSION",
                 os.environ.get("ALGOLIB_LLM_API_VERSION", "2024-12-01-preview"),

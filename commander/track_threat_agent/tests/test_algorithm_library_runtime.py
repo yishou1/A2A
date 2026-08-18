@@ -107,7 +107,7 @@ def test_llm_plan_is_restricted_to_active_track_threat_algorithms():
     )
 
     assert plan[0].algorithm_id == "trajectory_predictor"
-    assert runtime.status()["planner_mode"] == "azure_gpt_4o_mini"
+    assert runtime.status()["planner_mode"] == "azure_openai_gpt_4o_mini"
     assert {
         item["algorithm_id"] for item in llm.last_kwargs["algorithms"]
     } == {"track_state_updater", "trajectory_predictor"}

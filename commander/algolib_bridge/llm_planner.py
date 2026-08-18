@@ -129,12 +129,119 @@ def plan_algorithm_call(
     return call, plan
 
 
+def plan_algorithm_calls(
+    *,
+    settings: AlgolibSettings,
+    algorithms: Sequence[dict[str, Any]],
+    call_specs: Sequence[dict[str, Any]],
+    task: str = "algorithm_stage",
+    client: Optional[OpenAICompatiblePlannerClient] = None,
+) -> tuple[list[AlgorithmRunCall], dict[str, Any]]:
+    """Plan multiple algorithm calls in one LLM round-trip.
+
+    Each spec should include:
+      - task: logical task name
+      - default_algorithm_id: fallback algorithm id
+      - allowed_algorithm_ids: optional explicit allow-list for this task
+      - inputs: structured inputs that will be supplied at execution time
+      - params: optional parameters to preserve
+    """
+    active = _active_by_id(algorithms)
+
+    if not settings.enable_llm:
+        calls: list[AlgorithmRunCall] = []
+        raw_calls: list[dict[str, Any]] = []
+        for spec in call_specs:
+            default_algorithm_id = str(spec.get("default_algorithm_id") or "")
+            algorithm = _require_active(default_algorithm_id, active)
+            raw_call = {
+                "task": str(spec.get("task") or task),
+                "algorithm_id": default_algorithm_id,
+                "version": str(algorithm.get("version", settings.default_version)),
+                "backend_type": str(algorithm.get("backend_type", settings.default_backend_type)),
+                "inputs": spec.get("inputs") if isinstance(spec.get("inputs"), dict) else {},
+                "params": dict(spec.get("params") if isinstance(spec.get("params"), dict) else {}),
+                "reason": "LLM disabled; using default algorithm.",
+            }
+            call = _normalize_and_validate(raw_call, active, {default_algorithm_id})
+            calls.append(call)
+            raw_calls.append({**raw_call, "inputs": {"_source": "caller_structured_inputs"}})
+        return calls, {
+            "intent": "default_algorithm_stage",
+            "task": task,
+            "algorithm_calls": raw_calls,
+            "missing_fields": [],
+            "explanation": "LLM disabled; using default algorithms for the stage.",
+            "mode": "fixed",
+        }
+
+    planner = client or OpenAICompatiblePlannerClient(settings)
+    catalog = _catalog(algorithms, {str(spec.get("default_algorithm_id") or "") for spec in call_specs})
+    payload = planner.chat_json(
+        system_prompt=_SYSTEM_PROMPT_STAGE,
+        user_prompt=_user_prompt_stage(task=task, call_specs=call_specs, algorithms=catalog),
+    )
+    raw_calls = payload.get("algorithm_calls")
+    if not isinstance(raw_calls, list) or not raw_calls:
+        raise AlgolibLLMPlannerError("LLM plan did not include algorithm_calls.")
+
+    calls: list[AlgorithmRunCall] = []
+    normalized_plan_calls: list[dict[str, Any]] = []
+    for index, spec in enumerate(call_specs):
+        default_algorithm_id = str(spec.get("default_algorithm_id") or "")
+        algorithm = _require_active(default_algorithm_id, active)
+        raw_item = raw_calls[index] if index < len(raw_calls) and isinstance(raw_calls[index], dict) else {}
+        raw_call = {
+            **raw_item,
+            "task": str(raw_item.get("task") or spec.get("task") or f"task-{index}"),
+            "algorithm_id": str(raw_item.get("algorithm_id") or default_algorithm_id),
+            "version": str(raw_item.get("version") or algorithm.get("version", settings.default_version)),
+            "backend_type": str(raw_item.get("backend_type") or algorithm.get("backend_type", settings.default_backend_type)),
+            "inputs": spec.get("inputs") if isinstance(spec.get("inputs"), dict) else {},
+            "params": dict(raw_item.get("params") if isinstance(raw_item.get("params"), dict) else spec.get("params") or {}),
+            "reason": str(raw_item.get("reason") or spec.get("reason") or ""),
+        }
+        try:
+            call = _normalize_and_validate(raw_call, active, {default_algorithm_id})
+        except AlgolibLLMPlannerError as exc:
+            raw_call = {
+                "task": str(spec.get("task") or task),
+                "algorithm_id": default_algorithm_id,
+                "version": str(algorithm.get("version", settings.default_version)),
+                "backend_type": str(algorithm.get("backend_type", settings.default_backend_type)),
+                "inputs": spec.get("inputs") if isinstance(spec.get("inputs"), dict) else {},
+                "params": dict(spec.get("params") if isinstance(spec.get("params"), dict) else {}),
+                "reason": f"plan_failed_fallback:{exc}",
+            }
+            call = _normalize_and_validate(raw_call, active, {default_algorithm_id})
+        calls.append(call)
+        normalized_plan_calls.append({**raw_call, "inputs": {"_source": "caller_structured_inputs"}})
+
+    plan = {
+        **payload,
+        "task": task,
+        "algorithm_calls": normalized_plan_calls,
+        "mode": "llm",
+    }
+    return calls, plan
+
+
 _SYSTEM_PROMPT = (
     "You select one algorithm-library call for an A2A agent. "
     "Return only one JSON object. Use only algorithms from the catalog. "
     "Do not invent algorithm ids, versions, or backend types. "
     "If the default algorithm fits, choose it. "
     "Schema: {\"intent\": string, \"algorithm_calls\": [{\"algorithm_id\": string, "
+    "\"version\": string, \"backend_type\": string, \"params\": object, \"reason\": string}], "
+    "\"missing_fields\": array, \"explanation\": string}."
+)
+
+_SYSTEM_PROMPT_STAGE = (
+    "You plan one closed-loop stage with multiple algorithm-library calls. "
+    "Return only one JSON object. Use only algorithms from the catalog. "
+    "Do not invent algorithm ids, versions, or backend types. "
+    "For each requested task, return one algorithm call in the same order. "
+    "Schema: {\"intent\": string, \"algorithm_calls\": [{\"task\": string, \"algorithm_id\": string, "
     "\"version\": string, \"backend_type\": string, \"params\": object, \"reason\": string}], "
     "\"missing_fields\": array, \"explanation\": string}."
 )
@@ -152,6 +259,28 @@ def _user_prompt(*, task: str, inputs: dict[str, Any], algorithms: list[dict[str
         },
         ensure_ascii=False,
     )
+
+
+def _user_prompt_stage(
+    *,
+    task: str,
+    call_specs: Sequence[dict[str, Any]],
+    algorithms: list[dict[str, Any]],
+) -> str:
+    payload = {
+        "task": task,
+        "requested_calls": [
+            {
+                "task": str(spec.get("task") or ""),
+                "default_algorithm_id": str(spec.get("default_algorithm_id") or ""),
+                "description": str(spec.get("description") or ""),
+                "inputs_preview": json.dumps(spec.get("inputs") or {}, ensure_ascii=False, default=str)[:2000],
+            }
+            for spec in call_specs
+        ],
+        "algorithm_catalog": algorithms,
+    }
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def _loads_json_object(content: str) -> dict[str, Any]:
