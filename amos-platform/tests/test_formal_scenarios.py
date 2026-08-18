@@ -315,6 +315,8 @@ def test_maritime_scenario_has_two_unknown_surface_targets_and_engagement_policy
     assert len(scenario["asset_routes"]["AEW-01"]) == 8
     assert scenario["asset_route_modes"]["AEW-01"] == "loop"
     assert scenario["engagement_policy"]["protected_truth_ids"] == ["CONTACT-FISHING-01"]
+    assert scenario["engagement_policy"]["requires_prior_warning"] is True
+    assert scenario["engagement_policy"]["warning_delay_sec"] == 300
     assert scenario["acceptance_profile"]["requires_explicit_fire_authorization"] is True
     assert {row["branch_id"] for row in scenario["expected_branches"]} >= {
         "resource_unavailable", "behavior_changed"

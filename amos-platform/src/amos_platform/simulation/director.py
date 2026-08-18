@@ -64,6 +64,8 @@ class DirectorService:
             "current_checkpoint": None,
             "awaiting_analysis": False,
             "awaiting_authorization": False,
+            "authorization_stage": None,
+            "authorization_not_before_sec": None,
             "requested_faults": [],
             "verified_faults": [],
             "last_error": None,
@@ -126,12 +128,16 @@ class DirectorService:
                 "current_checkpoint": None,
                 "awaiting_analysis": False,
                 "awaiting_authorization": False,
+                "authorization_stage": None,
+                "authorization_not_before_sec": None,
                 "requested_faults": [],
                 "verified_faults": [],
                 "last_error": None,
             })
             engine.clock["director_status"] = "configured"
             engine.clock["director_analysis_status"] = None
+            engine.clock["authorization_stage"] = None
+            engine.clock["authorization_not_before_sec"] = None
             self._record("configure", scenario_id=scenario_id, mode=mode, branch=branch, seed=selected_seed)
             result = self.state()
         self.runtime.record_director_state(result)
@@ -267,17 +273,39 @@ class DirectorService:
         )
 
     def _authorization_gate_required(self) -> bool:
+        return self._authorization_stage() in {"warning", "fire"}
+
+    def _authorization_stage(self) -> str | None:
         policy = (self._scenario or {}).get("engagement_policy") or {}
-        return bool(
-            policy.get("requires_explicit_authorization")
-            and self._current_phase() == "ENGAGE"
-            and not self._has_authorized_engagement()
-        )
+        if (
+            not policy.get("requires_explicit_authorization")
+            or self._current_phase() != "ENGAGE"
+            or self._has_authorized_engagement()
+        ):
+            return None
+        if not policy.get("requires_prior_warning"):
+            return "fire"
+        engine = self.runtime.get_engine()
+        warnings = list(engine._engagement_warnings.values())
+        if not warnings:
+            return "warning"
+        warning = warnings[-1]
+        not_before = float(warning.get("fire_not_before_sec", 0) or 0)
+        if float(engine.clock.get("elapsed_sec", 0) or 0) < not_before:
+            return "warning_wait"
+        return "fire"
 
     def _set_status(self, status: str, *, analysis_status: str | None = None) -> None:
         self._state["director_status"] = status
         engine = self.runtime.get_engine()
         engine.clock["director_status"] = status
+        # Publish the exact authorization stage with the live simulation clock.
+        # The browser receives this stream more frequently than director polling,
+        # so it must not have to guess whether the pending dialog is WARN or FIRE.
+        engine.clock["authorization_stage"] = self._state.get("authorization_stage")
+        engine.clock["authorization_not_before_sec"] = self._state.get(
+            "authorization_not_before_sec"
+        )
         if analysis_status is not None:
             engine.clock["director_analysis_status"] = analysis_status
 
@@ -502,10 +530,19 @@ class DirectorService:
                             return
                         continue
 
-                if self._authorization_gate_required():
-                    if not self._state.get("awaiting_authorization"):
+                authorization_stage = self._authorization_stage()
+                if authorization_stage in {"warning", "fire"}:
+                    if (
+                        not self._state.get("awaiting_authorization")
+                        or self._state.get("authorization_stage") != authorization_stage
+                    ):
                         with self._lock:
                             self._state["awaiting_authorization"] = True
+                            self._state["authorization_stage"] = authorization_stage
+                            warnings = list(engine._engagement_warnings.values())
+                            self._state["authorization_not_before_sec"] = (
+                                warnings[-1].get("fire_not_before_sec") if warnings else None
+                            )
                             self._set_status("awaiting_authorization")
                             self._enter_authorization_wait()
                             if (
@@ -513,15 +550,32 @@ class DirectorService:
                                 and engine.clock.get("lifecycle") != "completed"
                             ):
                                 engine.resume()
-                            self._record("authorization_required", phase="ENGAGE")
+                            self._record(
+                                "authorization_required",
+                                phase="ENGAGE",
+                                authorization_stage=authorization_stage,
+                            )
                             self.runtime.record_director_state(self.state())
                     continue
-                if self._state.get("awaiting_authorization") and self._has_authorized_engagement():
+                if self._state.get("awaiting_authorization"):
                     with self._lock:
+                        completed_stage = self._state.get("authorization_stage")
                         self._state["awaiting_authorization"] = False
+                        self._state["authorization_stage"] = (
+                            "warning_wait" if authorization_stage == "warning_wait" else None
+                        )
+                        self._state["authorization_not_before_sec"] = (
+                            list(engine._engagement_warnings.values())[-1].get("fire_not_before_sec")
+                            if authorization_stage == "warning_wait" and engine._engagement_warnings
+                            else None
+                        )
                         self._set_status("auto_running")
                         self._leave_authorization_wait()
-                        self._record("authorization_completed", phase="ENGAGE")
+                        self._record(
+                            "authorization_completed",
+                            phase="ENGAGE",
+                            authorization_stage=completed_stage,
+                        )
                         engine.resume()
                         self.runtime.record_director_state(self.state())
 

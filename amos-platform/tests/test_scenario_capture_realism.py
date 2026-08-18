@@ -44,7 +44,7 @@ GEOMETRY_ANCHORS = {
     "maritime-convoy-air-defense": {
         "MAR-MEDIA-03": ((22.216446, 121.359430, 0), 141.30, 0.00, [7.61], [7.61]),
         "MAR-MEDIA-04": ((22.245648, 121.403350, 0), 171.33, 0.00, [13.09], [13.09]),
-        "MAR-MEDIA-07": ((22.146010, 121.596697, 8000), 12.46, 33.87, [1.96], [2.36]),
+        "MAR-MEDIA-07": ((22.169479, 121.605630, 8000), 13.07, 33.86, [1.96], [2.36]),
     },
 }
 
@@ -203,11 +203,19 @@ def _replay(scenario_id: str) -> Replay:
                     authorized=True,
                 )
                 assert authorized["status"] == "authorized"
-            if next_elapsed in command_at and not engine.weapons:
+            if next_elapsed in command_at and not engine._engagement_warnings:
                 hostile = next(
                     track for track in engine.sensor_fusion.tracks.values()
                     if engine._truth_target_for_track(track) == "CONTACT-HOSTILE-01"
                 )
+                warning = engine.issue_warning_at_track(hostile.id, authorized=True)
+                assert warning["status"] == "issued"
+            if engine._engagement_warnings and not engine.weapons:
+                warning = list(engine._engagement_warnings.values())[-1]
+                if float(engine.clock["elapsed_sec"]) < float(warning["fire_not_before_sec"]):
+                    _record_new_capture_context(engine, known_media_ids, context)
+                    continue
+                hostile = engine.sensor_fusion.tracks[str(warning["track_id"])]
                 launched = engine.fire_weapon_at_track(
                     hostile.id,
                     asset_id="ESCORT-01",

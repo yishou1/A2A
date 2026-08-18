@@ -21,6 +21,7 @@ def load_scenario_into_engine(engine: Any, scenario: dict[str, Any], now_iso: An
     engine.weapons.clear()
     engine.alerts.clear()
     engine.events.clear()
+    engine._engagement_warnings.clear()
     engine.tasks.clear()
     engine._scenario_task_schedule = [
         dict(task) for task in scenario.get("asset_task_schedule") or []

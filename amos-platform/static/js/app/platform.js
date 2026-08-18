@@ -720,6 +720,13 @@ window.Platform = (function () {
     }) || null;
   }
 
+  function warningDelaySeconds() {
+    var warning = latestState && latestState.engagement_warning || {};
+    var policy = currentScenario && currentScenario.engagement_policy || {};
+    var delay = Number(warning.delay_sec || policy.warning_delay_sec || 300);
+    return Number.isFinite(delay) && delay > 0 ? Math.round(delay) : 300;
+  }
+
   function closeAuthorizationDialog() {
     var dialog = document.getElementById("authorization-dialog");
     if (!dialog || authorizationSubmitting) return;
@@ -783,19 +790,46 @@ window.Platform = (function () {
       var dialog = document.getElementById("authorization-dialog");
       if (
         dialog && !dialog.hidden && !authorizationSubmitting &&
-        authorizationMode === "fire"
+        authorizationMode !== "launch_follow_uav"
       ) closeAuthorizationDialog();
       return;
     }
+    var stage = directorState && directorState.authorization_stage;
+    // Never infer FIRE from a generic awaiting_authorization status. The live
+    // clock can arrive before the director poll and that race previously opened
+    // the wrong dialog (or replaced WARN before the operator could see it).
+    if (stage !== "warning" && stage !== "fire") return;
     var target = authorizationTarget();
     if (!target) return;
     var checkpoint = directorState.current_checkpoint || directorState.checkpoint_id || "ENGAGE";
     var checkpointId = typeof checkpoint === "object" ? checkpoint.checkpoint_id : checkpoint;
     var runId = directorState.run_id || latestState && latestState.clock && latestState.clock.run_id || "run";
-    var key = [runId, checkpointId || "ENGAGE", target.id || target.track_id].join(":");
+    var key = [runId, checkpointId || "ENGAGE", stage, target.id || target.track_id].join(":");
     if (key === authorizationPromptKey) return;
-    authorizationPromptKey = key;
-    showAuthorizationDialog(target.id || target.track_id);
+    if (stage === "warning") {
+      if (showAuthorizationDialog(target.id || target.track_id, {
+        mode: "warn",
+        title: "无线电警告确认",
+        phase: "警告",
+        message: "武装船已进入警戒海域，是否立即发出一次无线电警告？",
+        actionLabel: "警告内容",
+        actionValue: "立即停止航行并驶离警戒海域",
+        confirmText: "发出警告",
+        cancelText: "暂不处置"
+      })) authorizationPromptKey = key;
+      return;
+    }
+    var followsWarning = directorState.authorization_not_before_sec != null;
+    if (showAuthorizationDialog(target.id || target.track_id, followsWarning ? {
+      mode: "fire",
+      title: "武器打击确认",
+      phase: "打击",
+      message: "目标未回应警告，是否授权实施武器打击？",
+      actionLabel: "拟用武器",
+      actionValue: "舰载反舰导弹",
+      confirmText: "确认打击",
+      cancelText: "暂不打击"
+    } : {mode: "fire"})) authorizationPromptKey = key;
   }
 
   function followLaunchPrompt() {
@@ -815,12 +849,11 @@ window.Platform = (function () {
       ) closeAuthorizationDialog();
       return;
     }
-    if (dialog && !dialog.hidden && authorizationMode === "fire") return;
+    if (dialog && !dialog.hidden && authorizationMode !== "launch_follow_uav") return;
     var runId = latestState && latestState.clock && latestState.clock.run_id || "run";
     var key = [runId, prompt.task_id || "follow", prompt.asset_id, prompt.track_id].join(":");
     if (key === authorizationPromptKey) return;
-    authorizationPromptKey = key;
-    showAuthorizationDialog(prompt.track_id, {
+    if (showAuthorizationDialog(prompt.track_id, {
       mode: "launch_follow_uav",
       assetId: prompt.asset_id || "UAV-CONFIRM-01",
       title: "补充侦察无人机派出确认",
@@ -830,7 +863,7 @@ window.Platform = (function () {
       actionValue: prompt.asset_label || "补充侦察无人机",
       confirmText: "派出无人机",
       cancelText: "暂不派出"
-    });
+    })) authorizationPromptKey = key;
   }
 
   async function issueWeaponAttack(trackId) {
@@ -876,6 +909,48 @@ window.Platform = (function () {
     }
   }
 
+  async function issueTargetWarning(trackId) {
+    if (!trackId || authorizationSubmitting) return;
+    authorizationSubmitting = true;
+    var confirmButton = document.getElementById("authorization-confirm");
+    var cancelButton = document.getElementById("authorization-cancel");
+    if (confirmButton) {
+      confirmButton.disabled = true;
+      confirmButton.textContent = "警告下达中";
+    }
+    if (cancelButton) cancelButton.disabled = true;
+    try {
+      var response = await API.issueSimCommand({
+        command_type: "warn",
+        params: {track_id: trackId},
+        authorization: {approved: true, authority: "operator"},
+      });
+      var result = response.data && response.data.result || {};
+      var delay = Math.round(Number(result.delay_sec || warningDelaySeconds()));
+      document.getElementById("status-text").textContent =
+        "无线电警告已发出；继续观察 " + delay +
+        " 个仿真秒，届时将弹出武器打击确认";
+      authorizationSubmitting = false;
+      if (cancelButton) cancelButton.disabled = false;
+      closeAuthorizationDialog();
+      onState(await API.loadSimState());
+    } catch (error) {
+      document.getElementById("status-text").textContent = "警告命令被拒绝：" + errorMessage(error);
+      var errorElement = document.getElementById("authorization-error");
+      if (errorElement) {
+        errorElement.textContent = "后端拒绝命令：" + errorMessage(error);
+        errorElement.hidden = false;
+      }
+    } finally {
+      authorizationSubmitting = false;
+      if (confirmButton) {
+        confirmButton.disabled = false;
+        confirmButton.textContent = "确认警告";
+      }
+      if (cancelButton) cancelButton.disabled = false;
+    }
+  }
+
   function onState(state) {
     if (
       !state || !state.clock ||
@@ -913,6 +988,10 @@ window.Platform = (function () {
         director_status: clock.director_status,
         status: clock.director_status,
         awaiting_authorization: clock.director_status === "awaiting_authorization",
+        authorization_stage: Object.prototype.hasOwnProperty.call(clock, "authorization_stage")
+          ? clock.authorization_stage : currentDirectorState.authorization_stage,
+        authorization_not_before_sec: Object.prototype.hasOwnProperty.call(clock, "authorization_not_before_sec")
+          ? clock.authorization_not_before_sec : currentDirectorState.authorization_not_before_sec,
       });
     }
     Panels.updateAll(state);
@@ -1225,6 +1304,8 @@ window.Platform = (function () {
     document.getElementById("authorization-confirm").addEventListener("click", function () {
       if (authorizationMode === "launch_follow_uav") {
         issueFollowUavLaunch(authorizationTrackId, authorizationAssetId);
+      } else if (authorizationMode === "warn") {
+        issueTargetWarning(authorizationTrackId);
       } else {
         issueWeaponAttack(authorizationTrackId);
       }

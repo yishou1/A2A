@@ -290,7 +290,7 @@ def build_maritime_convoy_air_defense_scenario() -> dict[str, Any]:
         ],
         "default_branch": "standard",
         "acceptance_profile": {"functional_agents": 6, "core_algorithms": 15, "engineering_models": 4, "function_points": 29, "evidence_policy": "backend_trace_only", "required_target_count": 2, "requires_civilian_no_strike": True, "requires_explicit_fire_authorization": True},
-        "engagement_policy": {"decision_authority": "operator", "requires_backend_identification": True, "requires_explicit_authorization": True, "minimum_threat_levels": ["HIGH", "CRITICAL"], "eligible_kill_chain_phases": ["TARGET", "ENGAGE"], "authorized_asset_ids": ["ESCORT-01"], "authorized_weapons": ["舰载反舰导弹"], "protected_classifications": ["FISHING_VESSEL", "FISHING BOAT", "FISHING", "CIVILIAN", "MERCHANT"], "protected_truth_ids": ["CONTACT-FISHING-01"]},
+        "engagement_policy": {"decision_authority": "operator", "requires_backend_identification": True, "requires_explicit_authorization": True, "requires_prior_warning": True, "warning_delay_sec": 300, "minimum_threat_levels": ["HIGH", "CRITICAL"], "eligible_kill_chain_phases": ["TARGET", "ENGAGE"], "authorized_asset_ids": ["ESCORT-01"], "authorized_weapons": ["舰载反舰导弹"], "protected_classifications": ["FISHING_VESSEL", "FISHING BOAT", "FISHING", "CIVILIAN", "MERCHANT"], "protected_truth_ids": ["CONTACT-FISHING-01"]},
         "agent_plan": {"mode": "commander_workflow", "steps": ["submit_current_snapshot", "execute_a1_a6_workflow", "project_run_scoped_evidence", "request_operator_fire_authorization", "execute_authorized_fire_command", "assess_effects"]},
         "events": [row["title"] for row in _timeline()],
     }

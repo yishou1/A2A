@@ -145,6 +145,20 @@ def register_sim_routes(bp: Any) -> None:
             if isinstance(data.get("authorization"), dict)
             else {}
         )
+        if command_type == "warn":
+            if not params.get("track_id"):
+                return err(400, "missing command parameters: track_id"), 400
+            result = get_engine().issue_warning_at_track(
+                str(params["track_id"]),
+                authorized=authorization.get("approved") is True,
+            )
+            if result.get("error"):
+                return err(409, str(result["error"])), 409
+            return ok({
+                "command_type": "warn",
+                "status": "executed",
+                "result": result,
+            })
         if command_type == "launch_follow_uav":
             required = ("track_id", "asset_id")
             missing = [name for name in required if not params.get(name)]

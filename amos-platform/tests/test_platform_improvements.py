@@ -122,7 +122,7 @@ def test_weapon_confirmation_keeps_clock_running_at_one_x(monkeypatch) -> None:
     engine = runtime.get_engine()
     engine.set_speed(8)
     engine.pause()
-    monkeypatch.setattr(director, "_authorization_gate_required", lambda: True)
+    monkeypatch.setattr(director, "_authorization_stage", lambda: "fire")
     monkeypatch.setattr(
         runtime,
         "record_director_state",
@@ -136,8 +136,38 @@ def test_weapon_confirmation_keeps_clock_running_at_one_x(monkeypatch) -> None:
     assert engine.clock["speed"] == 1
     assert engine.clock["running"] is True
     assert engine.clock["lifecycle"] == "running"
+    assert engine.clock["authorization_stage"] == "fire"
     director._leave_authorization_wait()
     engine.stop()
+
+
+def test_maritime_warning_stage_opens_fire_gate_after_three_hundred_sim_seconds() -> None:
+    runtime = PlatformRuntime()
+    director = runtime.get_director()
+    director.configure(
+        scenario_id="maritime-convoy-air-defense",
+        mode="demonstration",
+        branch="standard",
+        seed=33031,
+    )
+    engine = runtime.get_engine()
+    engine.clock["elapsed_sec"] = 4560.0
+
+    assert director._authorization_stage() == "warning"
+
+    engine._engagement_warnings["TRK-TEST"] = {
+        "track_id": "TRK-TEST",
+        "status": "issued",
+        "issued_at_sec": 4560.0,
+        "fire_not_before_sec": 4860.0,
+        "delay_sec": 300.0,
+    }
+    assert director._authorization_stage() == "warning_wait"
+
+    engine.clock["elapsed_sec"] = 4859.999
+    assert director._authorization_stage() == "warning_wait"
+    engine.clock["elapsed_sec"] = 4860.0
+    assert director._authorization_stage() == "fire"
 
 
 def test_completed_simulation_cannot_be_started_or_resumed() -> None:
@@ -286,6 +316,7 @@ def test_frontend_authorization_is_non_blocking_and_backend_driven() -> None:
     html = (ROOT / "templates/dashboard.html").read_text(encoding="utf-8")
     controller = (ROOT / "static/js/app/platform.js").read_text(encoding="utf-8")
     panels = (ROOT / "static/js/panels/platform-panels.js").read_text(encoding="utf-8")
+    map_script = (ROOT / "static/js/map/platform-map.js").read_text(encoding="utf-8")
     styles = (ROOT / "static/css/platform.css").read_text(encoding="utf-8")
 
     assert 'id="authorization-dialog"' in html
@@ -295,6 +326,16 @@ def test_frontend_authorization_is_non_blocking_and_backend_driven() -> None:
     assert "syncAuthorizationDialog" in controller
     assert 'status === "awaiting_authorization"' in controller
     assert "authorizationPromptKey" in controller
+    assert 'command_type: "warn"' in controller
+    assert 'mode: "warn"' in controller
+    assert "authorization_stage" in controller
+    assert 'if (stage !== "warning" && stage !== "fire") return;' in controller
+    assert "无线电警告确认" in controller
+    assert "目标未回应警告，是否授权实施武器打击？" in controller
+    assert "警告发出已满" not in controller
+    assert "warningDelaySeconds" in controller
+    assert "interactive: false" in map_script
+    assert "sensorCapabilityHtml" in map_script
     assert "amos:fire-track" not in controller + panels
     assert "data-fire-track-id" not in panels
     assert 'selectWorkspace("execution");' not in controller
@@ -343,6 +384,7 @@ def test_story_animation_is_incremental_and_speed_ui_tracks_backend_state() -> N
     assert "Boolean(clock.speed_locked_reason)" in controller
     assert "speed_resume_value" in controller
     assert ".speed-group.speed-locked" in styles
+    assert ".leaflet-overlay-pane path.leaflet-interactive:focus{outline:none}" in styles
 
 
 def test_execution_workspace_inspects_current_run_workflows_and_real_activity_details() -> None:

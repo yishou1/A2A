@@ -66,6 +66,27 @@ window.PlatformMap = (function () {
     return assessment.source ? (assessment.label || "已评估") : "未分类";
   }
 
+  function sensorCapabilityHtml(asset) {
+    var entries = (asset.sensors || []).map(function (name) {
+      var key = String(name).replace(/ /g, "_").toUpperCase();
+      var spec = sensorModels[key] || sensorModels[name];
+      if (!spec || !Number(spec.range_nm)) return escapeHtml(name);
+      return escapeHtml(name) + "（" + escapeHtml(spec.range_nm) + " NM / " +
+        escapeHtml(Number(spec.fov_deg || 360)) + "°）";
+    });
+    return entries.length ? "<br>传感器 " + entries.join("；") : "";
+  }
+
+  function assetPopupHtml(asset) {
+    var id = asset.asset_id || asset.id;
+    return "<b>" + escapeHtml(id) + "</b><br>" + escapeHtml(asset.role || "") +
+      "<br>航向 " + escapeHtml(Math.round(Number(asset.heading || asset.heading_deg || 0))) + "° · " +
+      escapeHtml(Math.round(Number(asset.speed_kts || 0))) + " kt" +
+      (asset.domain === "air" ? "<br>高度 " +
+        escapeHtml(Math.round(Number((asset.position || {}).alt_ft || 0))) + " ft" : "") +
+      sensorCapabilityHtml(asset);
+  }
+
   function position(item) {
     var pos = item.position || item;
     return {lat: Number(pos.lat), lng: Number(pos.lng == null ? pos.lon : pos.lng)};
@@ -273,6 +294,9 @@ window.PlatformMap = (function () {
         color: directional ? "#42d7ff" : "#52ff79",
         weight: 1, dashArray: "4 4", fillOpacity: layerState.sensors ? 0.025 : 0,
         opacity: layerState.sensors ? 0.5 : 0,
+        // Moving/overlapping footprints must not compete for pointer hover.
+        // Sensor details are available from the owning platform's stable popup.
+        interactive: false,
       };
       var layer = directional
         ? L.polygon(sectorPoints(pos, asset.heading || asset.heading_deg, spec.range_nm, fov), style).addTo(map)
@@ -280,7 +304,6 @@ window.PlatformMap = (function () {
       layer._amosDirectional = directional;
       layer._amosRangeNm = Number(spec.range_nm);
       layer._amosFovDeg = fov;
-      layer.bindTooltip(escapeHtml(name) + " · " + spec.range_nm + " NM · " + fov + "°");
       layers.push(layer);
     });
     return layers;
@@ -295,6 +318,9 @@ window.PlatformMap = (function () {
       sensorLayerSignatures[id] = JSON.stringify(asset.sensors || []);
       var pos = position(asset);
       sensorPoseSignatures[id] = JSON.stringify([pos.lat, pos.lng, asset.heading || asset.heading_deg || 0]);
+      // Sensor models arrive after the base scenario is drawn. Refresh the
+      // platform popup now so range/FOV details are available before start.
+      if (ownMarkers[id]) updateMarkerPopup(ownMarkers[id], assetPopupHtml(asset));
     });
   }
 
@@ -379,9 +405,7 @@ window.PlatformMap = (function () {
       marker._amosIconKind = ownKind(asset);
       marker._amosIconSize = 34;
       bindLabel(marker, ownLabel(asset), "own-label");
-      updateMarkerPopup(marker, "<b>" + escapeHtml(id) + "</b><br>" + escapeHtml(asset.role || "") +
-        "<br>航速 " + escapeHtml(asset.speed_kts || 0) + " kt" +
-        (asset.domain === "air" ? "<br>高度 " + escapeHtml(Math.round(Number((asset.position || {}).alt_ft || 0))) + " ft" : ""));
+      updateMarkerPopup(marker, assetPopupHtml(asset));
       ownMarkers[id] = marker;
     });
     focusScenarioView();
@@ -468,10 +492,7 @@ window.PlatformMap = (function () {
         updateMarkerIcon(ownMarkers[id], ownKind(asset), asset.heading, 34);
         updateMarkerLabel(ownMarkers[id], ownLabel(asset));
       }
-      updateMarkerPopup(ownMarkers[id], "<b>" + escapeHtml(id) + "</b><br>" + escapeHtml(asset.role || "") +
-        "<br>航向 " + escapeHtml(Math.round(Number(asset.heading || 0))) + "° · " +
-        escapeHtml(Math.round(Number(asset.speed_kts || 0))) + " kt" +
-        (asset.domain === "air" ? "<br>高度 " + escapeHtml(Math.round(Number((asset.position || {}).alt_ft || 0))) + " ft" : ""));
+      updateMarkerPopup(ownMarkers[id], assetPopupHtml(asset));
       renderTrail(
         ownTrails, id, asset.history_path, "#42d7ff",
         asset.domain === "air" ? 90 : 180,

@@ -343,6 +343,9 @@ def test_each_scenario_can_reach_all_declared_checkpoints() -> None:
                     authorized=True,
                 )
                 assert authorized["status"] == "authorized"
+                warning = engine.issue_warning_at_track(hostile.id, authorized=True)
+                assert warning["status"] == "issued"
+                engine._tick(float(warning["delay_sec"]))
                 launched = engine.fire_weapon_at_track(
                     hostile.id,
                     asset_id="ESCORT-01",

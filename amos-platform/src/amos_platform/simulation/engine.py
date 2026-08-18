@@ -107,6 +107,7 @@ class SimEngine:
         self._director_motion_limit_sec: float | None = None
         self._speed_lock_reasons: set[str] = set()
         self._speed_before_lock: float | None = None
+        self._engagement_warnings: dict[str, dict] = {}
         self.lifecycle_callback = None
 
     def _notify_lifecycle(self) -> None:
@@ -1181,6 +1182,9 @@ class SimEngine:
         prompts = self._operator_follow_launch_prompts(state.get("fused_tracks") or [])
         state["follow_launch_prompts"] = prompts
         state["follow_launch_prompt"] = prompts[0] if prompts else None
+        warnings = [dict(value) for value in self._engagement_warnings.values()]
+        state["engagement_warnings"] = warnings
+        state["engagement_warning"] = warnings[-1] if warnings else None
         return state
 
     def get_agent_visible_state(self) -> dict:
@@ -1451,6 +1455,16 @@ class SimEngine:
             )
             if not eligibility.get("eligible"):
                 return {"error": eligibility.get("reason", "目标不满足交战条件")}
+            policy = self._engagement_policy or {}
+            if policy.get("requires_prior_warning"):
+                warning = self._engagement_warnings.get(track_id)
+                if not warning:
+                    return {"error": "必须先向目标发出警告"}
+                not_before = float(warning.get("fire_not_before_sec", 0) or 0)
+                elapsed = float(self.clock.get("elapsed_sec", 0) or 0)
+                if elapsed < not_before:
+                    remaining = max(1, int(math.ceil(not_before - elapsed)))
+                    return {"error": f"警告观察期尚未结束，还需等待 {remaining} 个仿真秒"}
             result = self.fire_weapon(
                 asset_id,
                 str(eligibility["_truth_target_id"]),
@@ -1482,6 +1496,62 @@ class SimEngine:
                 }.items()
                 if key != "threat_id"
             }
+
+    def issue_warning_at_track(self, track_id: str, *, authorized: bool) -> dict:
+        """Record one operator-authorized warning before the fire gate opens."""
+        if not authorized:
+            return {"error": "警告命令缺少操作员明确授权"}
+        with self._lock:
+            policy = self._engagement_policy or {}
+            asset_ids = list(policy.get("authorized_asset_ids") or [])
+            weapon_names = list(policy.get("authorized_weapons") or [])
+            if not asset_ids or not weapon_names:
+                return {"error": "当前剧本未配置警告目标校验规则"}
+            eligibility = self.engagement_eligibility(
+                track_id,
+                asset_id=str(asset_ids[0]),
+                weapon_name=str(weapon_names[0]),
+            )
+            if not eligibility.get("eligible"):
+                return {"error": eligibility.get("reason", "目标不满足警告条件")}
+            existing = self._engagement_warnings.get(track_id)
+            if existing:
+                return dict(existing)
+            issued_at = float(self.clock.get("elapsed_sec", 0) or 0)
+            delay = max(0.0, float(policy.get("warning_delay_sec", 300) or 300))
+            warning = {
+                "track_id": track_id,
+                "status": "issued",
+                "issued_at_sec": round(issued_at, 3),
+                "fire_not_before_sec": round(issued_at + delay, 3),
+                "delay_sec": delay,
+                "authorization": "operator_confirmed",
+            }
+            track = self.sensor_fusion.tracks.get(track_id)
+            if track is not None:
+                # Keep the already-confirmed track available while the operator
+                # reads and answers the second dialog; this does not fabricate
+                # a new sensor observation or alter its last-observed time.
+                track.retain_until_sim_time = float(warning["fire_not_before_sec"]) + 300.0
+            self._engagement_warnings[track_id] = warning
+            self.events.append({
+                "type": "target_warning_issued",
+                "command_source": "operator",
+                **warning,
+                "timestamp": time.time(),
+            })
+            target_label, _ = self._operator_contact_for_threat(
+                str(eligibility["_truth_target_id"])
+            )
+            self.alerts.append({
+                "level": "WARNING",
+                "msg": (
+                    f"已向“{target_label}”发出无线电警告，"
+                    f"继续观察 {int(delay)} 个仿真秒"
+                ),
+                "time": _now_iso(),
+            })
+            return dict(warning)
 
     def fire_weapon(self, asset_id: str, threat_id: str,
                     weapon_name: str) -> dict:

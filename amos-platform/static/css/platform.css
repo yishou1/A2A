@@ -210,6 +210,7 @@ select,input{
 /* Map overlays */
 .military-popup{font-family:Consolas,monospace;font-size:11px;color:#b9dce8;background:#09131b;border:1px solid #416171}
 .rotating-marker{background:transparent!important;border:none!important}.marker-rotator{display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(5,20,29,.84);box-shadow:0 0 0 2px rgba(82,160,190,.2),0 0 10px rgba(55,135,165,.25);transition:transform .3s ease}.marker-rotator svg{width:100%;height:100%;filter:drop-shadow(0 0 2px rgba(80,173,205,.35))}.marker-thrUnknown{box-shadow:0 0 0 2px rgba(205,162,78,.24),0 0 10px rgba(185,140,58,.3)}.marker-thrAir,.marker-thrShip{box-shadow:0 0 0 2px rgba(205,100,91,.26),0 0 11px rgba(184,75,67,.33)}
+.leaflet-overlay-pane path.leaflet-interactive:focus{outline:none}
 .map-resource-label{margin-top:4px!important;padding:2px 5px!important;border:1px solid rgba(83,154,181,.55)!important;border-radius:3px!important;background:rgba(5,18,26,.92)!important;color:#d4e5eb!important;box-shadow:none!important;font:600 10px/13px Consolas,monospace!important;white-space:nowrap}.map-resource-label::before{display:none!important}.map-resource-label.unknown-label{border-color:rgba(202,163,84,.62)!important;color:#ead7a8!important}.map-resource-label.threat-label{border-color:rgba(205,99,91,.68)!important;color:#e8b5b1!important}
 .leaflet-control-scale-line{border-color:#77909d!important;background:rgba(6,18,26,.86)!important;color:#c7d7df!important;text-shadow:none!important;font:10px/1.2 Consolas,monospace!important}
 

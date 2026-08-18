@@ -43,6 +43,13 @@ def _identified_tracks() -> tuple[SimEngine, object, object]:
     return engine, hostile, fishing
 
 
+def _issue_warning_and_wait(engine: SimEngine, track: object) -> dict:
+    warning = engine.issue_warning_at_track(track.id, authorized=True)
+    assert warning["status"] == "issued"
+    engine._tick(float(warning["delay_sec"]))
+    return warning
+
+
 def test_fire_command_requires_identification_and_explicit_authorization() -> None:
     engine, hostile, _ = _identified_tracks()
 
@@ -52,6 +59,21 @@ def test_fire_command_requires_identification_and_explicit_authorization() -> No
         weapon_name="舰载反舰导弹",
         authorized=False,
     )
+    before_warning = engine.fire_weapon_at_track(
+        hostile.id,
+        asset_id="ESCORT-01",
+        weapon_name="舰载反舰导弹",
+        authorized=True,
+    )
+    warning = engine.issue_warning_at_track(hostile.id, authorized=True)
+    warning_alert = engine.get_operator_state()["alerts"][-1]
+    during_wait = engine.fire_weapon_at_track(
+        hostile.id,
+        asset_id="ESCORT-01",
+        weapon_name="舰载反舰导弹",
+        authorized=True,
+    )
+    engine._tick(300.0)
     launched = engine.fire_weapon_at_track(
         hostile.id,
         asset_id="ESCORT-01",
@@ -60,6 +82,12 @@ def test_fire_command_requires_identification_and_explicit_authorization() -> No
     )
 
     assert "error" in rejected
+    assert before_warning == {"error": "必须先向目标发出警告"}
+    assert "还需等待 300 个仿真秒" in during_wait["error"]
+    assert warning["fire_not_before_sec"] - warning["issued_at_sec"] == 300
+    assert "海面接触 " in warning_alert["msg"]
+    assert "高速攻击艇" in warning_alert["msg"]
+    assert "TRK-" not in warning_alert["msg"]
     assert launched["status"] == "launched"
     assert launched["track_id"] == hostile.id
     assert launched["authorization"] == "operator_confirmed"
@@ -78,6 +106,7 @@ def test_fire_command_requires_identification_and_explicit_authorization() -> No
 
 def test_weapon_impact_is_detected_when_director_uses_large_steps() -> None:
     engine, hostile, _ = _identified_tracks()
+    _issue_warning_and_wait(engine, hostile)
     launched = engine.fire_weapon_at_track(
         hostile.id,
         asset_id="ESCORT-01",
@@ -349,6 +378,7 @@ def test_confirm_uav_returns_to_escort_and_hides_after_authorized_strike() -> No
     uav = engine.assets["UAV-CONFIRM-01"]
     assert uav.get("_operator_follow_visible") is True
 
+    _issue_warning_and_wait(engine, hostile)
     launched = engine.fire_weapon_at_track(
         hostile.id,
         asset_id="ESCORT-01",
@@ -401,6 +431,21 @@ def test_fire_command_api_applies_the_same_server_side_gates(monkeypatch) -> Non
         },
         "authorization": {"approved": True},
     })
+    warning = client.post("/api/v1/sim/commands", json={
+        "command_type": "warn",
+        "params": {"track_id": hostile.id},
+        "authorization": {"approved": True},
+    })
+    too_early = client.post("/api/v1/sim/commands", json={
+        "command_type": "fire",
+        "params": {
+            "track_id": hostile.id,
+            "asset_id": "ESCORT-01",
+            "weapon_name": "舰载反舰导弹",
+        },
+        "authorization": {"approved": True},
+    })
+    engine._tick(300.0)
     accepted = client.post("/api/v1/sim/commands", json={
         "command_type": "fire",
         "params": {
@@ -412,6 +457,8 @@ def test_fire_command_api_applies_the_same_server_side_gates(monkeypatch) -> Non
     })
 
     assert denied.status_code == 409
+    assert warning.status_code == 200
+    assert too_early.status_code == 409
     assert accepted.status_code == 200
     result = accepted.get_json()["data"]["result"]
     assert result["track_id"] == hostile.id
