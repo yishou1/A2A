@@ -1,0 +1,55 @@
+{
+  "model_id": "marl_ppo_task_scheduler_onnx",
+  "model_version": "1.0.0",
+  "model_family": "onnx_parameter_shared_marl_ppo_actor_critic",
+  "format": "onnx",
+  "artifact_path": "examples/marl_ppo_task_scheduler_onnx/1.0.0/model.onnx",
+  "artifact_sha256": "cc403be9c832dce06b37304276e43cb7cd89316aa94d4e22eddffc7854e35941",
+  "export_script": "scripts/export_policy_generative_onnx_models.py",
+  "export_script_sha256": "f8e75a83d37c0174044d4c1d848e19af4a29265e74d599c3d66e669c5564d100",
+  "source_model": "models/checkpoints/marl_ppo_scheduler_s.safetensors",
+  "source_model_sha256": "e827dd1abf59e35e146f84afb13a6296c5f7f4e18c51584025afa0082baedfc8",
+  "source_metadata": "models/checkpoints/marl_ppo_scheduler_s.metadata.json",
+  "source_metadata_sha256": "609d4cf16510166a15c9aa9086ae81d0d9154d7f10d38851867cce4f3c13623c",
+  "precision": "float32",
+  "opset": 17,
+  "equivalence": {
+    "reference": "source PyTorch artifact in evaluation mode",
+    "compared_outputs": [
+      "masked_action_logits",
+      "action_probabilities",
+      "selected_actions",
+      "state_values"
+    ],
+    "maximum_absolute_difference": 1.430511474609375e-06
+  },
+  "runtime_versions": {
+    "numpy": "2.2.6",
+    "onnx": "1.21.0",
+    "onnxruntime": "1.23.2",
+    "torch": "2.12.0+cpu"
+  },
+  "observation_dimension": 104,
+  "action_count": 9,
+  "maximum_agent_count": 8,
+  "parameter_count": 39434,
+  "source_evaluation": {
+    "method": "independent_deterministic_synthetic_holdout",
+    "random_policy_baseline": {
+      "high_threat_coverage": 0.510352,
+      "reattack_coverage": 0.340495,
+      "total_reward": 2.066525
+    },
+    "reward_improvement": 1.434468,
+    "trained_policy": {
+      "high_threat_coverage": 0.70651,
+      "reattack_coverage": 0.627474,
+      "total_reward": 3.500993
+    }
+  },
+  "limitations": [
+    "The caller constructs 104-dimensional per-agent observations and valid-action masks.",
+    "Returns independent deterministic policy decisions; sequential cross-agent de-duplication and assignment object construction remain in the full Python service.",
+    "Synthetic reference scenarios only; not an operational scheduling benchmark."
+  ]
+}

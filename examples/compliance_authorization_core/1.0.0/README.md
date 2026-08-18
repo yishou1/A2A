@@ -10,4 +10,4 @@ blocking decisions and forces all other outcomes to human review.
 
 It checks candidate plans against structured rules, authorization state, and constraints.
 
-Port: `9021`
+Port: `9037`

@@ -38,9 +38,9 @@ machine_spec:
   output_schema_ref: output.schema.json
   runtime:
     backend_type: python_http_service
-    endpoint: http://127.0.0.1:9022/trajectory_predictor/predict
-    health_endpoint: http://127.0.0.1:9022/trajectory_predictor/health
-    metadata_endpoint: http://127.0.0.1:9022/trajectory_predictor/metadata
+    endpoint: http://127.0.0.1:9038/trajectory_predictor/predict
+    health_endpoint: http://127.0.0.1:9038/trajectory_predictor/health
+    metadata_endpoint: http://127.0.0.1:9038/trajectory_predictor/metadata
     timeout_ms: 5000
 
 constraints:

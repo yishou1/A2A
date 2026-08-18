@@ -1,6 +1,6 @@
 # 算法库实现与可调用性报告（M01–M20）
 
-报告日期：2026-08-16  
+报告日期：2026-08-18
 项目：A2A-lkf-algorithmrepo  
 对照依据：`18 类算法模型清单.md`。该文件名写“18 类”，正文实际列出 M01–M20 共 20 类。
 
@@ -16,10 +16,10 @@
 | `PARTIAL` | 6 类（M09–M11、M17–M19） |
 | `CALLABLE` 但未完成 | 0 类（原 M16 已完成闭环） |
 | `MISSING` | 0 类 |
-| 仓库内算法包 | 35 个 |
-| `validated` 算法包 | 15 个 |
+| 仓库内算法包 | 43 个 |
+| `validated` 算法包 | 23 个 |
 | `draft` 算法包 | 20 个 |
-| 后端构成 | 31 个 `python_http_service`、4 个 ONNX |
+| 后端构成 | 31 个 `python_http_service`、12 个 ONNX |
 
 当前可以得出三个核心结论：
 
@@ -59,26 +59,26 @@ M 类状态是类别级结论。例如 M15 由 `multimodal_mamba_fusion` 完成�
 | M02 | 关联算法 | `execution_rule_matcher` | Python HTTP；Apriori 风格规则 | 可真实调用 | `COMPLETE` | 固化 28 条规则，12 条独立留出场景动作和角色准确率均为 1.0；需用真实脱敏记录重新挖掘 |
 | M03 | 线性回归模型 | `trajectory_linear_predictor` | Python HTTP；逐请求二维 OLS | 可真实调用 | `COMPLETE` | 160 条合成留出轨迹 MAE 0.519819、RMSE 0.964136；需在真实航迹上分层评估 |
 | M04 | 逻辑回归模型 | `decision_plan_recommender_onnx`、`compliance_risk_scorer_onnx` | 原生 ONNX | 可真实调用 | `COMPLETE` | 两模型分别用 1200 条参考数据训练；留出 ROC AUC 0.960621、0.995357，Python/C++ ORT 均通过 |
-| M05 | 随机森林模型 | `threat_priority_random_forest` | Python HTTP；sklearn/joblib | 可真实调用 | `COMPLETE` | 训练数据、脚本、模型哈希、留出指标及严格门禁闭环；生产使用前需换真实标注 |
-| M06 | 传统神经网络模型 | `supcon_meta_classifier` | Python HTTP；PyTorch/safetensors | 可真实调用 | `COMPLETE` | 99,200 参数 MLP 与类别原型，合成留出 accuracy/macro-F1 均为 1.0；指标不是实际识别精度 |
-| M07 | 朴素贝叶斯网络 | `intent_gaussian_naive_bayes` | Python HTTP；GaussianNB/joblib | 可真实调用 | `COMPLETE` | 模型、后验概率、留出指标和哈希闭环；仍需真实数据概率校准和漂移监测 |
-| M08 | 生成对抗网络 | `conditional_tabular_gan` | Python HTTP；PyTorch 条件 GAN | 可真实调用 | `COMPLETE` | 已完成对抗训练、条件生成、分布指标和产物固化；合成输出不可冒充真实观测 |
+| M05 | 随机森林模型 | `threat_priority_random_forest`、`threat_priority_random_forest_onnx` | Python HTTP + 原生 ONNX | 可真实调用 | `COMPLETE` | ONNX-ML 轻量版保持低/中/高三类概率，Python/C++ ORT 均通过；生产使用前需换真实标注 |
+| M06 | 传统神经网络模型 | `supcon_meta_classifier`、`supcon_meta_classifier_onnx` | Python HTTP + 原生 ONNX | 可真实调用 | `COMPLETE` | 99,200 参数 MLP 与类别原型；ONNX 固定原型轻量版与 PyTorch 最大误差 1.20e-7，Python/C++ ORT 均通过；动态 support-shot 仍使用完整服务版 |
+| M07 | 朴素贝叶斯网络 | `intent_gaussian_naive_bayes`、`intent_gaussian_naive_bayes_onnx` | Python HTTP + 原生 ONNX | 可真实调用 | `COMPLETE` | ONNX轻量版保持三类后验概率，Python/C++ ORT 均通过；仍需真实数据概率校准和漂移监测 |
+| M08 | 生成对抗网络 | `conditional_tabular_gan`、`conditional_tabular_gan_onnx` | Python HTTP + 原生 ONNX | 可真实调用 | `COMPLETE` | ONNX 版接收噪声与 one-hot 条件并生成五维特征，与 PyTorch 最大误差 1.20e-7，Python/C++ ORT 均通过；合成输出不可冒充真实观测 |
 | M09 | 大语言模型 | `llm_rule_explainer` | Python HTTP；外部 LLM API | 配置真实 API 后可调用 | `PARTIAL` | 接口契约存在，本仓库无需训练 LLM；缺真实凭据环境下的端到端成功、超时和错误路径验收 |
 | M10 | 检索增强生成模型 | `synapse_rag_retriever`、`knowledge_semantic_comm` | Python HTTP；外部/本地 RAG 能力 | Mock 可调用，真实 RAG 未闭环 | `PARTIAL` | 算法包和调用路径存在；全量 real 核验中 SynapseRAG 真实调用失败，需固定服务端点与凭据 |
 | M11 | 智能体模型 | `decision_planning_core` | Python HTTP；外部 A2A Agent/编排 API | 服务包装可调用，外部 Agent 未闭环 | `PARTIAL` | 按 API 边界管理；需要伴随 A2A 仓库或真实 Agent 端点完成计划生成链路验收 |
 | M12 | 联邦学习模型 | `federated_fedavg_aggregator` | Python HTTP；FedAvg | 可真实调用 | `COMPLETE` | 通用嵌套权重聚合和三客户端八轮可复现实验已闭环；生产化仍缺安全聚合、认证和掉线恢复 |
-| M13 | 强化学习模型 | `marl_ppo_task_scheduler` | Python HTTP；PyTorch/safetensors | 可真实调用 | `COMPLETE` | 39,434 参数参数共享 MARL-PPO；平均奖励 3.500993，优于随机基线 2.066525；`marl_dynamic_router` 仍是补充候选 |
-| M14 | 可解释 AI 模型 | `edl_evidential_verifier`、规则证据链 | Python HTTP；EDL/safetensors | 可真实调用 | `COMPLETE` | 290 参数 Dirichlet EDL，留出 accuracy 0.903、macro-F1 0.901410，并返回完整证据与人工复核分流 |
-| M15 | 多模态融合模型 | `multimodal_mamba_fusion` | Python HTTP；Mamba 风格嵌入融合/safetensors | 可真实调用 | `COMPLETE` | 412,688 参数；留出 mean cosine 0.771683、RMSE 0.042234，优于均值基线；只完成嵌入融合，不包含原始媒体编码 |
+| M13 | 强化学习模型 | `marl_ppo_task_scheduler`、`marl_ppo_task_scheduler_onnx` | Python HTTP + 原生 ONNX | 可真实调用 | `COMPLETE` | ONNX 版执行动作掩码、概率、确定性动作与价值估计，与 PyTorch 最大误差 1.44e-6，Python/C++ ORT 均通过；完整服务版负责观测构造与跨智能体去重 |
+| M14 | 可解释 AI 模型 | `edl_evidential_verifier`、`edl_evidential_verifier_onnx`、规则证据链 | Python HTTP + 原生 ONNX | 可真实调用 | `COMPLETE` | 290 参数 Dirichlet EDL；ONNX 核心证据张量与 PyTorch 最大误差 3.82e-6，Python/C++ ORT 均通过；自动决策与复核分流仍使用完整服务版 |
+| M15 | 多模态融合模型 | `multimodal_mamba_fusion`、`multimodal_mamba_fusion_onnx` | Python HTTP + 原生 ONNX | 可真实调用 | `COMPLETE` | ONNX 版执行四模态掩码融合，与 PyTorch 最大误差 5.97e-8，Python/C++ ORT 均通过；原始媒体编码及目标 ID 关联仍由上游和完整服务负责 |
 | M16 | 时间序列预测模型 | `target_trend_predictor_onnx` | 原生 ONNX；训练 LSTM | 可真实调用 | `COMPLETE` | 1,425 参数，以 12 步预测未来第 4 步；留出 RMSE 0.051080、R² 0.980410，优于末值基线 RMSE 0.095422 |
 | M17 | 实时目标检测模型 | `battlefield_rtdetr_detector` | Python HTTP；RT-DETR/Ultralytics | 接口与 Mock 可调用，严格 real 未通过 | `PARTIAL` | 存在通用 `rtdetr-l.pt`，但战场微调 checkpoint、检测数据指标和正式模型解析尚未闭环 |
 | M18 | 差分与变化检测模型 | `siamese_mask2former_damage`、`xbd_damage_assessor` | Python HTTP；Siamese/Mask2Former 路径及 xBD 辅助模型 | 现有真实路径可调用，类别证据未闭环 | `PARTIAL` | xBD 与部分真实路径可运行，但 Siamese 正式产物、变化检测数据集指标及发布状态不完整 |
 | M19 | 多目标跟踪与定位模型 | `motr_neural_kalman_tracker` | Python HTTP；MOTR/Neural Kalman 路径 | 接口与 Mock 可调用，严格 real 未通过 | `PARTIAL` | 缺 `motr_tracker` 正式 checkpoint、连续帧数据集指标和真实连续航迹验收 |
-| M20 | 图神经网络模型 | `graph_relation_reasoner` | Python HTTP；训练 GNN/safetensors | 可真实调用 | `COMPLETE` | 16,673 参数两层消息传递 GNN；600 个合成留出图 edge F1 0.962788、ROC AUC 0.999212，优于规则基线 F1 0.912402；缺权重或哈希错误拒绝启动，无规则 fallback |
+| M20 | 图神经网络模型 | `graph_relation_reasoner`、`graph_relation_reasoner_onnx` | Python HTTP + 原生 ONNX | 可真实调用 | `COMPLETE` | ONNX 版执行十节点密集消息传递并输出关系矩阵，与 PyTorch 最大误差 7.63e-6，Python/C++ ORT 均通过；航迹特征构造与编组对象生成仍由完整服务负责 |
 
-## 4. 当前 35 个算法包清单
+## 4. 当前 43 个算法包清单
 
-### 4.1 已严格闭环的 15 个 `validated` 包
+### 4.1 已严格闭环的 23 个 `validated` 包
 
 | algorithm_id | 对应类别 | 后端/产物 | 当前调用结论 |
 |---|---|---|---|
@@ -88,15 +88,23 @@ M 类状态是类别级结论。例如 M15 由 `multimodal_mamba_fusion` 完成�
 | `decision_plan_recommender_onnx` | M04 | ONNX | Python ORT + C++ ORT 通过 |
 | `compliance_risk_scorer_onnx` | M04 | ONNX | Python ORT + C++ ORT 通过 |
 | `threat_priority_random_forest` | M05 | Python HTTP / joblib | 真实 HTTP + `algolib` 通过 |
+| `threat_priority_random_forest_onnx` | M05 | ONNX / 160棵树 | Python ORT + C++ ORT 通过 |
 | `supcon_meta_classifier` | M06 | Python HTTP / safetensors | 真实 HTTP + `algolib` 通过 |
+| `supcon_meta_classifier_onnx` | M06 | ONNX / 固定类别原型 | Python ORT + C++ ORT 通过 |
 | `intent_gaussian_naive_bayes` | M07 | Python HTTP / joblib | 真实 HTTP + `algolib` 通过 |
+| `intent_gaussian_naive_bayes_onnx` | M07 | ONNX / GaussianNB | Python ORT + C++ ORT 通过 |
 | `conditional_tabular_gan` | M08 | Python HTTP / PyTorch `.pt` | 真实 HTTP + `algolib` 通过 |
+| `conditional_tabular_gan_onnx` | M08 | ONNX / 条件生成器 | Python ORT + C++ ORT 通过 |
 | `federated_fedavg_aggregator` | M12 | Python HTTP / FedAvg | 真实 HTTP + `algolib` 通过 |
 | `marl_ppo_task_scheduler` | M13 | Python HTTP / safetensors | 真实 HTTP + `algolib` 通过 |
+| `marl_ppo_task_scheduler_onnx` | M13 | ONNX / 掩码 Actor-Critic | Python ORT + C++ ORT 通过 |
 | `edl_evidential_verifier` | M14 | Python HTTP / safetensors | 真实 HTTP + `algolib` 通过 |
+| `edl_evidential_verifier_onnx` | M14 | ONNX / Dirichlet 证据头 | Python ORT + C++ ORT 通过 |
 | `multimodal_mamba_fusion` | M15 | Python HTTP / safetensors | 真实 HTTP + `algolib` 通过 |
+| `multimodal_mamba_fusion_onnx` | M15 | ONNX / 四模态掩码融合 | Python ORT + C++ ORT 通过 |
 | `target_trend_predictor_onnx` | M16 | ONNX | Python ORT + C++ ORT 通过 |
 | `graph_relation_reasoner` | M20 | Python HTTP / safetensors | 真实 HTTP + `algolib` 通过 |
+| `graph_relation_reasoner_onnx` | M20 | ONNX / 十节点关系矩阵 | Python ORT + C++ ORT 通过 |
 
 ### 4.2 仍为 `draft` 的 20 个包
 
@@ -127,8 +135,14 @@ M 类状态是类别级结论。例如 M15 由 `multimodal_mamba_fusion` 完成�
 
 截至报告日期，最近一次全量结果为：
 
-- 35 个算法包静态验收：35/35 通过；其中 20 个 draft 包产生 27 条生命周期/资料警告。
-- Python 自动化测试：115 passed，另有 5 个子测试通过。
+- 43 个算法包静态验收：新增 M08/M13 ONNX 包严格静态验收与真实运行验收 2/2 通过。
+- M05–M08、M13–M16、M20 源模型、导出一致性及全部既有 ONNX 回归：43 passed，另有 5 个子测试通过。
+- M05/M07 ONNX 概率相对源 sklearn 模型的最大绝对误差分别为 1.43e-6 和 5.11e-8。
+- M06/M14 ONNX 相对源 PyTorch checkpoint 的最大绝对误差分别为 1.20e-7 和 3.82e-6。
+- M15/M20 ONNX 相对源 PyTorch checkpoint 的最大绝对误差分别为 5.97e-8 和 7.63e-6。
+- M08/M13 ONNX 相对源 PyTorch artifact/checkpoint 的最大绝对误差分别为 1.20e-7 和 1.44e-6。
+- 全量 `tests/python` 当前受合并后缺失的 `decision_agents.common.schemas` 与
+  `decision_agents.compliance_authorization.local_algorithm` 模块阻塞于收集阶段；该问题不在本次 ONNX 包内。
 - C++ CTest：1/1 通过。
 - TIA Mock：11/11 可用。
 - TIA Real：6/11 可用；M15 `multimodal_mamba_fusion` 已进入真实通过集合，其余失败项主要是
@@ -158,7 +172,9 @@ runtime/`algolib` 报告或 TIA real 报告。
 
 ### 6.2 ONNX 算法
 
-M04 和 M16 的业务 ONNX 包由 C++ ONNX Runtime 后端直接运行，无需 Python HTTP 服务：
+M04–M08、M13–M16 和 M20 的业务 ONNX 包由 C++ ONNX Runtime 后端直接运行，
+无需 Python HTTP 服务。M06 ONNX 版使用固定类别原型，M14 ONNX 版输出核心证据张量；需要动态
+support-shot 或自动人工复核分流时，应选择对应 Python HTTP 完整版。例如：
 
 ```powershell
 .\build-smoke-offline\Debug\algolib.exe register .\examples\target_trend_predictor_onnx\1.0.0
@@ -177,15 +193,15 @@ M09–M11 的算法库职责是参数校验、请求封装、超时/错误处理
 2. M15 完成的是嵌入级融合，原始图像、SAR、雷达和文本编码仍依赖 ImageBind/CLIP 等上游模型。
 3. M09–M11 的 API 边界已明确，但缺当前环境下的真实端到端验收证据。
 4. M17–M19 的主要问题分别是检测微调权重、变化检测产物和跟踪 checkpoint；M20 已关闭 GNN 模型与 fallback 缺口。
-5. 当前存在两个端口冲突：`9020` 同时用于目标检测和决策核心，`9021` 同时用于合规核心和
-   Siamese 变化检测。分组验收不受影响，但在同一主机同时启动全部服务前必须改为唯一端口或
-   使用统一网关路由。
+5. 原有端口冲突已处理：TIA 服务保留 `9020`–`9030`；`decision_planning_core`、
+   `compliance_authorization_core` 和共享航迹/图推理服务分别迁移到 `9036`、`9037`、`9038`，
+   可在同一主机同时启动。
 
 ## 8. 建议的后续顺序
 
 1. 若 M09–M11 的外部服务已经部署，补充真实端点配置并生成 API real-gate 报告，将“业务上
    已可用”转化为可审计证据。
-2. 在暂缓 M17–M19 期间，先固化 35 个算法包版本、产物清单、SHA256 和统一一键验收入口。
+2. 在暂缓 M17–M19 期间，固化 43 个算法包版本、产物清单、SHA256 和统一一键验收入口。
 3. 获取真实脱敏数据后，优先替换 M01–M08、M12–M16 的合成参考数据并进行独立时间/场景切分评估。
 4. 恢复 M17–M19 工作时，按 M17 检测、M18 变化检测、M19 跟踪的顺序逐类关闭
    checkpoint、指标和严格平台调用缺口。

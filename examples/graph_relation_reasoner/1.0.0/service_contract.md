@@ -4,7 +4,7 @@
 - GET `/graph_relation_reasoner/metadata`
 - POST `/graph_relation_reasoner/predict`
 
-Port: `9022`
+Port: `9038`
 
 Algorithm class: `M20 图神经网络`
 

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EDL Evidential Verifier ONNX Output",
+  "type": "object",
+  "required": ["predicted_class_indices", "evidence", "dirichlet_alpha", "class_probabilities", "epistemic_uncertainty"],
+  "properties": {
+    "predicted_class_indices": {
+      "type": "array",
+      "items": {"type": "integer", "minimum": 0, "maximum": 1},
+      "description": "Indices into rejected, verified."
+    },
+    "evidence": {"$ref": "#/$defs/class_rows"},
+    "dirichlet_alpha": {"$ref": "#/$defs/class_rows"},
+    "class_probabilities": {"$ref": "#/$defs/class_rows"},
+    "epistemic_uncertainty": {
+      "type": "array",
+      "items": {"type": "number", "minimum": 0.0}
+    }
+  },
+  "$defs": {
+    "class_rows": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 2,
+        "items": {"type": "number", "minimum": 0.0}
+      }
+    }
+  },
+  "additionalProperties": false
+}

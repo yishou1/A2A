@@ -1,0 +1,10 @@
+type: raw_tensor_to_json
+outputs:
+  - tensor_name: masked_action_logits
+    json_path: $.masked_action_logits
+  - tensor_name: action_probabilities
+    json_path: $.action_probabilities
+  - tensor_name: selected_actions
+    json_path: $.selected_actions
+  - tensor_name: state_values
+    json_path: $.state_values

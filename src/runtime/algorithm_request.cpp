@@ -19,15 +19,19 @@ Status RequireStringField(const nlohmann::json& json_value,
 }  // namespace
 
 nlohmann::json ToJson(const AlgorithmRequest& request) {
-    return nlohmann::json{
-        {"request_id", request.request_id},
-        {"trace_id", request.trace_id},
+    nlohmann::json j{
+        {"request_id",   request.request_id},
+        {"trace_id",     request.trace_id},
         {"algorithm_id", request.algorithm_id},
-        {"version", request.version},
+        {"version",      request.version},
         {"backend_type", ToString(request.backend_type)},
-        {"inputs", request.inputs},
-        {"params", request.params},
+        {"inputs",       request.inputs},
+        {"params",       request.params},
     };
+    if (!request.deploy_id.empty()) {
+        j["deploy_id"] = request.deploy_id;
+    }
+    return j;
 }
 
 Result<AlgorithmRequest> AlgorithmRequestFromJson(const nlohmann::json& json_value) {
@@ -78,7 +82,8 @@ Result<AlgorithmRequest> AlgorithmRequestFromJson(const nlohmann::json& json_val
     request.version = json_value.at("version").get<std::string>();
     request.backend_type = backend_result.value();
     request.inputs = json_value.at("inputs");
-    request.params = json_value.value("params", nlohmann::json::object());
+    request.params     = json_value.value("params",     nlohmann::json::object());
+    request.deploy_id   = json_value.value("deploy_id",  std::string());
     return request;
 }
 

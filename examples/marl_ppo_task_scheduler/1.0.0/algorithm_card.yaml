@@ -65,10 +65,13 @@ resource_requirements:
   disk_mb: 10
 
 model_profile:
+  # Small profile: obs_dim=104, n_actions=9, hidden=128.
   parameter_count: 39434
   parameter_count_text: 39.4K_small_profile
-  flops: 0
-  flops_text: varies_by_submodel
+  flops: 78208
+  flops_text: ~78.2 KFLOPs per agent observation (encoder+actor+critic)
+  flops_input_shape: [1, 104]
+  model_size_mb: 1
   precision: fp32
 
 provenance:

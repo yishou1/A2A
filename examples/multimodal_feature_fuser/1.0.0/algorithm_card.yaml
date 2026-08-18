@@ -37,9 +37,9 @@ machine_spec:
   output_schema_ref: output.schema.json
   runtime:
     backend_type: python_http_service
-    endpoint: http://127.0.0.1:9022/multimodal_feature_fuser/predict
-    health_endpoint: http://127.0.0.1:9022/multimodal_feature_fuser/health
-    metadata_endpoint: http://127.0.0.1:9022/multimodal_feature_fuser/metadata
+    endpoint: http://127.0.0.1:9038/multimodal_feature_fuser/predict
+    health_endpoint: http://127.0.0.1:9038/multimodal_feature_fuser/health
+    metadata_endpoint: http://127.0.0.1:9038/multimodal_feature_fuser/metadata
     timeout_ms: 3000
 
 constraints:

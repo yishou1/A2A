@@ -145,7 +145,10 @@ AlgorithmResult ExecutionCoordinator::Run(const AlgorithmRequest& request) {
     std::shared_ptr<IAlgorithmRunner> cached_runner;
     IAlgorithmRunner* runner = nullptr;
     if (runner_cache_ != nullptr) {
-        auto runner_result = runner_cache_->GetOrLoad(entry, runtime_factory_);
+        // 中文注释：若请求携带 deploy_id，则路由到该节点对应的缓存 runner；
+        // 否则使用空 deploy_id（回退到原始行为）。
+        auto runner_result = runner_cache_->GetOrLoad(
+            entry, runtime_factory_, effective_request.deploy_id);
         if (!runner_result.ok()) {
             return finalize(BuildFailureResult(effective_request, runner_result.status()));
         }

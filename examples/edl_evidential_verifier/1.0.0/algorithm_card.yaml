@@ -64,10 +64,13 @@ resource_requirements:
   disk_mb: 10
 
 model_profile:
+  # Small profile EvidentialHead: Linear(6->32), Linear(32->2).
   parameter_count: 290
   parameter_count_text: 290_small_profile
-  flops: 0
-  flops_text: varies_by_submodel
+  flops: 580
+  flops_text: ~580 FLOPs per detection sample (small profile, 2 linear layers)
+  flops_input_shape: [1, 6]
+  model_size_mb: 1
   precision: fp32
 
 provenance:

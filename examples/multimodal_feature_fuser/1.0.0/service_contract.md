@@ -4,7 +4,7 @@
 - GET `/multimodal_feature_fuser/metadata`
 - POST `/multimodal_feature_fuser/predict`
 
-Port: `9022`
+Port: `9038`
 
 Algorithm class: `M03 多模态融合`
 

@@ -62,10 +62,16 @@ resource_requirements:
   disk_mb: 4096
 
 model_profile:
-  parameter_count: 0
-  parameter_count_text: varies_by_submodel
-  flops: 0
-  flops_text: varies_by_submodel
+  # RT-DETR-L (official): ResNet-50 backbone 25.6M + transformer decoder 6.4M = 32M
+  # ODConv Refiner (from odconv.py, embed_dim=64):
+  #   Conv2d(3->32)+BN + ODConvd(32->64)+BN + Linear(65->64)+Linear(64->1) = ~24K
+  # Dominant cost: RT-DETR-L 32M params / 91.9 GFLOPs (official paper table)
+  parameter_count: 32024000
+  parameter_count_text: 32.0M (RT-DETR-L 32M + ODConv refiner 24K)
+  flops: 91900000000
+  flops_text: 91.9 GFLOPs @ 640x640 (RT-DETR-L official); ODConv adds ~5 MFLOPs per crop
+  flops_input_shape: [1, 3, 640, 640]
+  model_size_mb: 122
   precision: fp32
 
 safety:

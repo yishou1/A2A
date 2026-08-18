@@ -1,0 +1,97 @@
+algorithm_id: threat_priority_random_forest_onnx
+version: 1.0.0
+display_name: Threat Priority Random Forest ONNX
+backend_type: onnx
+status: validated
+algorithm_class: M05
+
+task_family: classification
+modalities:
+  input:
+    - structured_json
+    - numeric_features
+  output:
+    - structured_json
+
+capabilities:
+  - random_forest_classification
+  - threat_priority_scoring
+  - batch_inference
+  - lightweight_onnx_inference
+
+agent_card:
+  summary: >
+    Native ONNX Runtime variant of the frozen M05 threat-priority Random Forest.
+    It preserves the source sklearn class probabilities without a Python service.
+  when_to_use:
+    - Target features have already been arranged into the documented five-column tensor.
+    - A lightweight CPU-only threat-priority classifier is preferred.
+  when_not_to_use:
+    - Raw target objects still require feature extraction or target-id attachment.
+    - Operational accuracy is assumed without domain-data evaluation.
+  input_description: >
+    Float32 rows ordered as threat_score, distance_km, speed_mps, asset_value,
+    and intel_confidence.
+  output_description: >
+    Predicted class indices and probability rows. Class order is low, medium, high.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  tensor_contract_ref: tensor_contract.yaml
+  runtime:
+    backend_type: onnx
+    model_uri: model.onnx
+    execution_provider: cpu
+  preprocess:
+    config_uri: preprocess.yaml
+  postprocess:
+    config_uri: postprocess.yaml
+
+constraints:
+  max_input_chars: 2000000
+  max_request_bytes: 4194304
+  batch_supported: true
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 2
+  latency_ms_p95: 10
+  primary_metric: reference_holdout_accuracy
+  primary_score: 0.888889
+  time_complexity: O(B*T*D)
+  space_complexity: O(T*N)
+  complexity_variable: B=batch rows, T=160 trees, D=tree depth, N=tree nodes
+  performance_notes: >
+    The exported float32 graph matches source sklearn probabilities within
+    1.5e-6 on the golden batch. Reference metrics use synthetic policy data.
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 1
+  min_memory_mb: 128
+  recommended_memory_mb: 256
+  min_gpu_count: 0
+  gpu_type: none
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 1
+
+model_profile:
+  parameter_count: 9818
+  parameter_count_text: 9818_tree_nodes_across_160_trees
+  flops: 1280
+  flops_text: approximately 160 trees times depth 8 comparisons per row
+  flops_input_shape: [1, 5]
+  model_size_mb: 1
+  precision: fp32
+
+provenance:
+  model_artifact_ref: model.onnx
+  model_metadata_ref: model.metadata.json
+  training_script_ref: ../../../scripts/export_sklearn_onnx_models.py
+  dataset_ref: ../../../data/threat_priority/reference_training_data.csv
+
+safety:
+  risk_level: medium
+  requires_human_review: true

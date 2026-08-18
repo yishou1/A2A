@@ -1,0 +1,79 @@
+{
+  "model_id": "threat_priority_random_forest_onnx",
+  "model_version": "1.0.0",
+  "model_family": "onnx_ml_random_forest_classifier",
+  "format": "onnx",
+  "artifact_path": "examples/threat_priority_random_forest_onnx/1.0.0/model.onnx",
+  "artifact_sha256": "cd9f2361e2eb89e726a72867f3468b50af6f5ecd5edd4f15863d27287353d411",
+  "export_script": "scripts/export_sklearn_onnx_models.py",
+  "export_script_sha256": "709caa97c257555a486ef3469952fb783a874f20a17e19bd776d0fac33dbb3e9",
+  "source_model": "models/threat_priority_random_forest.joblib",
+  "source_model_sha256": "2c9219eec2fd48cbd9cd95258069280f60723d9595fb09f423789fee73ec4ea1",
+  "source_metadata": "models/threat_priority_random_forest.metadata.json",
+  "source_metadata_sha256": "bb177d986fb264d3bf3e7ec238942a4b21faa52aea0dcdaec608d52e867dd698",
+  "feature_order": [
+    "threat_score",
+    "distance_km",
+    "speed_mps",
+    "asset_value",
+    "intel_confidence"
+  ],
+  "class_order": [
+    "low",
+    "medium",
+    "high"
+  ],
+  "precision": "float32",
+  "equivalence": {
+    "reference": "source sklearn predict_proba",
+    "maximum_absolute_probability_difference": 1.4291968166713076e-06
+  },
+  "runtime_versions": {
+    "joblib": "1.5.3",
+    "numpy": "2.2.6",
+    "onnx": "1.21.0",
+    "onnxruntime": "1.23.2"
+  },
+  "tree_count": 160,
+  "total_node_count": 9818,
+  "source_class_order": [
+    "high",
+    "low",
+    "medium"
+  ],
+  "output_class_order": [
+    "low",
+    "medium",
+    "high"
+  ],
+  "source_evaluation": {
+    "method": "stratified_holdout",
+    "test_ratio": 0.25,
+    "train_count": 270,
+    "test_count": 90,
+    "accuracy": 0.888889,
+    "macro_f1": 0.873302,
+    "confusion_matrix_labels": [
+      "low",
+      "medium",
+      "high"
+    ],
+    "confusion_matrix": [
+      [
+        18,
+        3,
+        0
+      ],
+      [
+        1,
+        49,
+        1
+      ],
+      [
+        0,
+        5,
+        13
+      ]
+    ]
+  }
+}

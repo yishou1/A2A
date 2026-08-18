@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cctype>
 #include <exception>
+#include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -21,6 +23,8 @@
 #include "algolib/runtime/algorithm_request.h"
 #include "algolib/runtime/algorithm_result.h"
 #include "algolib/runtime/execution_coordinator.h"
+#include "algolib/runtime/model_loader.h"
+#include "algolib/runtime/runtime_factory.h"
 #include "algolib/runtime/runtime_runner_cache.h"
 
 namespace algolib {
@@ -187,6 +191,91 @@ bool ParseActiveOnly(const httplib::Request& request) {
     return !(value == "false" || value == "0" || value == "no");
 }
 
+// 中文注释：ParseQueryFilter — 从 HTTP 查询参数中构建 AlgorithmQueryFilter。
+// 支持的参数：
+//   active_only    (bool, 默认 true)  — 覆盖 status 过滤
+//   status         (string)           — 仅在 active_only=false 时生效
+//   task_family    (string)
+//   backend        (string)           — onnx / python_http_service
+//   capability     (string)
+//   node           (string)           — node_id
+//   max_vram       (int, MB)
+//   max_memory     (int, MB)
+//   max_cpu_cores  (int)
+AlgorithmQueryFilter ParseQueryFilter(const httplib::Request& request) {
+    AlgorithmQueryFilter f;
+
+    // active_only
+    f.active_only = ParseActiveOnly(request);
+
+    // status（active_only=false 时才有意义）
+    if (!f.active_only && request.has_param("status")) {
+        auto parsed = ParseAlgorithmStatus(request.get_param_value("status"));
+        if (parsed.ok()) {
+            f.status = parsed.value();
+        }
+    }
+
+    // task_family
+    if (request.has_param("task_family")) {
+        const std::string v = request.get_param_value("task_family");
+        if (!v.empty()) {
+            f.task_family = v;
+        }
+    }
+
+    // backend (backend_type)
+    if (request.has_param("backend")) {
+        auto parsed = ParseBackendType(request.get_param_value("backend"));
+        if (parsed.ok()) {
+            f.backend_type = parsed.value();
+        }
+    }
+
+    // capability
+    if (request.has_param("capability")) {
+        const std::string v = request.get_param_value("capability");
+        if (!v.empty()) {
+            f.capability = v;
+        }
+    }
+
+    // node (node_id)
+    if (request.has_param("node")) {
+        const std::string v = request.get_param_value("node");
+        if (!v.empty()) {
+            f.node_id = v;
+        }
+    }
+
+    // max_vram (MB)
+    if (request.has_param("max_vram")) {
+        try {
+            f.max_vram_mb = std::stoi(request.get_param_value("max_vram"));
+        } catch (...) {
+            // 解析失败则忽略该参数
+        }
+    }
+
+    // max_memory (MB)
+    if (request.has_param("max_memory")) {
+        try {
+            f.max_memory_mb = std::stoi(request.get_param_value("max_memory"));
+        } catch (...) {
+        }
+    }
+
+    // max_cpu_cores
+    if (request.has_param("max_cpu_cores")) {
+        try {
+            f.max_cpu_cores = std::stoi(request.get_param_value("max_cpu_cores"));
+        } catch (...) {
+        }
+    }
+
+    return f;
+}
+
 json EntryPayload(const AlgorithmEntry& entry) {
     return json{
         {"ok", true},
@@ -289,6 +378,17 @@ private:
             WriteJson(&response, 200, json{{"ok", true}, {"status", "reloaded"}});
         });
 
+        // 中文注释：GET /algorithms — 多维过滤查询算法列表
+        // 查询参数（均可选）：
+        //   active_only   (bool)   默认 true，false 时返回所有非 deleted 算法
+        //   status        (string) draft/validated/active/disabled；仅 active_only=false 时生效
+        //   task_family   (string) 精确匹配 task_family 字段
+        //   backend       (string) onnx / python_http_service
+        //   capability    (string) capabilities 列表中包含该值
+        //   node          (string) deployments 中至少有一个 node_id 等于该值
+        //   max_vram      (int)    单位 MB；筛选 min_vram_mb <= max_vram 的模型
+        //   max_memory    (int)    单位 MB；筛选 min_memory_mb <= max_memory 的模型
+        //   max_cpu_cores (int)    筛选 min_cpu_cores <= max_cpu_cores 的模型
         server_.Get("/algorithms", [this](const httplib::Request& request,
                                            httplib::Response& response) {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -299,17 +399,143 @@ private:
                 return;
             }
 
+            const AlgorithmQueryFilter filter = ParseQueryFilter(request);
+
             json algorithms = json::array();
-            for (const auto& view : registry_.ListAgentViews(ParseActiveOnly(request))) {
+            for (const auto& view : registry_.QueryAgentViews(filter)) {
                 algorithms.push_back(view);
+            }
+
+            // 中文注释：在响应中回显生效的过滤条件，方便调用方调试。
+            json applied_filter = json::object();
+            applied_filter["active_only"] = filter.active_only;
+            if (filter.status.has_value()) {
+                applied_filter["status"] = ToString(filter.status.value());
+            }
+            if (filter.task_family.has_value()) {
+                applied_filter["task_family"] = filter.task_family.value();
+            }
+            if (filter.backend_type.has_value()) {
+                applied_filter["backend"] = ToString(filter.backend_type.value());
+            }
+            if (filter.capability.has_value()) {
+                applied_filter["capability"] = filter.capability.value();
+            }
+            if (filter.node_id.has_value()) {
+                applied_filter["node"] = filter.node_id.value();
+            }
+            if (filter.max_vram_mb.has_value()) {
+                applied_filter["max_vram"] = filter.max_vram_mb.value();
+            }
+            if (filter.max_memory_mb.has_value()) {
+                applied_filter["max_memory"] = filter.max_memory_mb.value();
+            }
+            if (filter.max_cpu_cores.has_value()) {
+                applied_filter["max_cpu_cores"] = filter.max_cpu_cores.value();
             }
 
             WriteJson(&response, 200,
                       json{{"ok", true},
                            {"count", algorithms.size()},
-                           {"active_only", ParseActiveOnly(request)},
+                           {"filter", applied_filter},
                            {"algorithms", algorithms}});
         });
+
+        // 中文注释：GET /algorithms/{id}/{version}/{backend}/files/{relative_path}
+        // 文件服务端点：向远端节点暴露 package_root 下的模型文件（流式下载）。
+        // 安全约束：
+        //   1. relative_path 不允许包含 ".." 路径分量（防止目录穿越）。
+        //   2. 只允许下载 package_root 下实际存在的普通文件。
+        // 用途：远端节点在收到 http_pull 加载指令后，通过此接口拉取 .onnx 及配套文件。
+        server_.Get(
+            R"(/algorithms/([^/]+)/([^/]+)/([^/]+)/files/(.+))",
+            [this](const httplib::Request& request, httplib::Response& response) {
+                if (request.matches.size() < 5) {
+                    const Status status =
+                        InvalidArgument("URL must contain algorithm_id, version, "
+                                        "backend_type and relative_path.");
+                    WriteJson(&response, 400, ErrorPayload(status));
+                    return;
+                }
+
+                auto key_result = ParseKeyFromMatches(request);
+                if (!key_result.ok()) {
+                    WriteJson(&response, HttpStatusForStatus(key_result.status()),
+                              ErrorPayload(key_result.status()));
+                    return;
+                }
+                const std::string relative_path_str = request.matches[4].str();
+
+                // 中文注释：拒绝任何包含 ".." 分量的路径，防止目录穿越攻击。
+                if (relative_path_str.find("..") != std::string::npos) {
+                    const Status status =
+                        InvalidArgument("relative_path must not contain '..'.");
+                    WriteJson(&response, 400, ErrorPayload(status));
+                    return;
+                }
+
+                std::lock_guard<std::mutex> lock(mutex_);
+                const Status reload_status = ReloadRegistryLocked();
+                if (!reload_status.ok()) {
+                    WriteJson(&response, HttpStatusForStatus(reload_status),
+                              ErrorPayload(reload_status));
+                    return;
+                }
+
+                auto entry_result = registry_.Get(key_result.value());
+                if (!entry_result.ok()) {
+                    WriteJson(&response, HttpStatusForStatus(entry_result.status()),
+                              ErrorPayload(entry_result.status()));
+                    return;
+                }
+
+                const std::filesystem::path package_root =
+                    entry_result.value().package_root;
+                const std::filesystem::path target_file =
+                    std::filesystem::weakly_canonical(package_root / relative_path_str);
+
+                // 中文注释：确保解析后的绝对路径仍在 package_root 下（二次安全检查）。
+                const std::string root_str =
+                    std::filesystem::weakly_canonical(package_root).generic_string();
+                const std::string file_str = target_file.generic_string();
+                if (file_str.rfind(root_str, 0) != 0) {
+                    const Status status =
+                        InvalidArgument("relative_path escapes package_root.");
+                    WriteJson(&response, 403, ErrorPayload(status));
+                    return;
+                }
+
+                if (!std::filesystem::exists(target_file) ||
+                    !std::filesystem::is_regular_file(target_file)) {
+                    const Status status = Status::Error(
+                        ErrorCode::kIoError,
+                        "File not found: " + relative_path_str);
+                    WriteJson(&response, 404, ErrorPayload(status));
+                    return;
+                }
+
+                // 中文注释：以二进制流形式发送文件内容。
+                std::ifstream file_stream(target_file,
+                                          std::ios::in | std::ios::binary);
+                if (!file_stream.is_open()) {
+                    const Status status = Status::Error(
+                        ErrorCode::kIoError,
+                        "Cannot open file for reading: " + relative_path_str);
+                    WriteJson(&response, 500, ErrorPayload(status));
+                    return;
+                }
+                std::string file_content(
+                    (std::istreambuf_iterator<char>(file_stream)),
+                    std::istreambuf_iterator<char>());
+
+                response.status = 200;
+                response.set_header("Cache-Control", "no-store");
+                response.set_header("Content-Disposition",
+                                    "attachment; filename=\"" +
+                                        target_file.filename().string() + "\"");
+                response.set_content(file_content,
+                                     "application/octet-stream");
+            });
 
         server_.Get(R"(/algorithms/([^/]+)/([^/]+)/([^/]+))",
                     [this](const httplib::Request& request, httplib::Response& response) {
@@ -414,6 +640,153 @@ private:
                            WriteJson(&response, 200, EntrySummaryPayload(delete_result.value()));
                        });
 
+        // 中文注释：POST /algorithms/{id}/{version}/{backend}/deployments
+        // Body: DeploymentSpec JSON
+        // 向指定算法追加一条部署记录。
+        server_.Post(R"(/algorithms/([^/]+)/([^/]+)/([^/]+)/deployments)",
+                     [this](const httplib::Request& request, httplib::Response& response) {
+                         auto key_result = ParseKeyFromMatches(request);
+                         if (!key_result.ok()) {
+                             WriteJson(&response, HttpStatusForStatus(key_result.status()),
+                                       ErrorPayload(key_result.status()));
+                             return;
+                         }
+
+                         auto body_result = ParseJsonBody(request);
+                         if (!body_result.ok()) {
+                             WriteJson(&response, HttpStatusForStatus(body_result.status()),
+                                       ErrorPayload(body_result.status()));
+                             return;
+                         }
+
+                         auto spec_result = DeploymentSpecFromJson(body_result.value());
+                         if (!spec_result.ok()) {
+                             WriteJson(&response, HttpStatusForStatus(spec_result.status()),
+                                       ErrorPayload(spec_result.status()));
+                             return;
+                         }
+
+                         std::lock_guard<std::mutex> lock(mutex_);
+                         const Status reload_status = ReloadRegistryLocked();
+                         if (!reload_status.ok()) {
+                             WriteJson(&response, HttpStatusForStatus(reload_status),
+                                       ErrorPayload(reload_status));
+                             return;
+                         }
+
+                         auto result =
+                             registry_.AddDeployment(key_result.value(), spec_result.value());
+                         if (!result.ok()) {
+                             WriteJson(&response, HttpStatusForStatus(result.status()),
+                                       ErrorPayload(result.status()));
+                             return;
+                         }
+                         WriteJson(&response, 201, EntryPayload(result.value()));
+                     });
+
+        // 中文注释：DELETE /algorithms/{id}/{version}/{backend}/deployments/{deploy_id}
+        // 从指定算法删除一条部署记录。
+        server_.Delete(
+            R"(/algorithms/([^/]+)/([^/]+)/([^/]+)/deployments/([^/]+))",
+            [this](const httplib::Request& request, httplib::Response& response) {
+                if (request.matches.size() < 5) {
+                    const Status status =
+                        InvalidArgument("URL must contain algorithm_id, version, "
+                                        "backend_type, and deploy_id.");
+                    WriteJson(&response, HttpStatusForStatus(status), ErrorPayload(status));
+                    return;
+                }
+                auto key_result = ParseKeyFromMatches(request);
+                if (!key_result.ok()) {
+                    WriteJson(&response, HttpStatusForStatus(key_result.status()),
+                              ErrorPayload(key_result.status()));
+                    return;
+                }
+                const std::string deploy_id = request.matches[4].str();
+
+                std::lock_guard<std::mutex> lock(mutex_);
+                const Status reload_status = ReloadRegistryLocked();
+                if (!reload_status.ok()) {
+                    WriteJson(&response, HttpStatusForStatus(reload_status),
+                              ErrorPayload(reload_status));
+                    return;
+                }
+
+                auto result = registry_.RemoveDeployment(key_result.value(), deploy_id);
+                if (!result.ok()) {
+                    WriteJson(&response, HttpStatusForStatus(result.status()),
+                              ErrorPayload(result.status()));
+                    return;
+                }
+                WriteJson(&response, 200, EntryPayload(result.value()));
+            });
+
+        // 中文注释：PATCH /algorithms/{id}/{version}/{backend}/deployments/{deploy_id}/status
+        // Body: { "deploy_status": "ready"|"loading"|"error"|"unloaded",
+        //         "status_message": "...",
+        //         "updated_at": "2024-01-01T00:00:00Z" }
+        // 更新指定部署记录的状态。
+        server_.Patch(
+            R"(/algorithms/([^/]+)/([^/]+)/([^/]+)/deployments/([^/]+)/status)",
+            [this](const httplib::Request& request, httplib::Response& response) {
+                if (request.matches.size() < 5) {
+                    const Status status =
+                        InvalidArgument("URL must contain algorithm_id, version, "
+                                        "backend_type, and deploy_id.");
+                    WriteJson(&response, HttpStatusForStatus(status), ErrorPayload(status));
+                    return;
+                }
+                auto key_result = ParseKeyFromMatches(request);
+                if (!key_result.ok()) {
+                    WriteJson(&response, HttpStatusForStatus(key_result.status()),
+                              ErrorPayload(key_result.status()));
+                    return;
+                }
+                const std::string deploy_id = request.matches[4].str();
+
+                auto body_result = ParseJsonBody(request);
+                if (!body_result.ok()) {
+                    WriteJson(&response, HttpStatusForStatus(body_result.status()),
+                              ErrorPayload(body_result.status()));
+                    return;
+                }
+
+                const json& body = body_result.value();
+                const std::string raw_status = body.value("deploy_status", std::string());
+                if (raw_status.empty()) {
+                    const Status status = InvalidArgument("Body must contain deploy_status.");
+                    WriteJson(&response, HttpStatusForStatus(status), ErrorPayload(status));
+                    return;
+                }
+                auto new_status_result = ParseDeploymentStatus(raw_status);
+                if (!new_status_result.ok()) {
+                    WriteJson(&response, HttpStatusForStatus(new_status_result.status()),
+                              ErrorPayload(new_status_result.status()));
+                    return;
+                }
+
+                const std::string status_message = body.value("status_message", std::string());
+                const std::string updated_at = body.value("updated_at", std::string());
+
+                std::lock_guard<std::mutex> lock(mutex_);
+                const Status reload_status = ReloadRegistryLocked();
+                if (!reload_status.ok()) {
+                    WriteJson(&response, HttpStatusForStatus(reload_status),
+                              ErrorPayload(reload_status));
+                    return;
+                }
+
+                auto result = registry_.UpdateDeploymentStatus(
+                    key_result.value(), deploy_id, new_status_result.value(),
+                    status_message, updated_at);
+                if (!result.ok()) {
+                    WriteJson(&response, HttpStatusForStatus(result.status()),
+                              ErrorPayload(result.status()));
+                    return;
+                }
+                WriteJson(&response, 200, EntryPayload(result.value()));
+            });
+
         server_.Post("/run", [this](const httplib::Request& request,
                                      httplib::Response& response) {
             auto body_result = ParseJsonBody(request);
@@ -430,6 +803,10 @@ private:
                 return;
             }
 
+            // 中文注释：registry 访问和 runner 分派均在 mutex 保护下进行，保证线程安全。
+            // PythonHttpRunnerPool 内部的 Checkout/Return 使用自己的独立锁，不会与此 mutex 嵌套。
+            // 注意：持锁期间 coordinator.Run() 可能阻塞（Python 网络 I/O），属于预期行为；
+            // 真正的并发推理扩展点在 Runner 层（连接池），而非 Server 层的 mutex 粒度。
             std::lock_guard<std::mutex> lock(mutex_);
             const Status reload_status = ReloadRegistryLocked();
             if (!reload_status.ok()) {
@@ -438,7 +815,6 @@ private:
                 return;
             }
 
-            // 中文注释：先保持一次请求内 registry 与 runner 创建串行，后续可替换为共享锁和 runner 缓存。
             ExecutionCoordinator coordinator(registry_, config_.execution_log_path, &runner_cache_);
             const AlgorithmResult run_result = coordinator.Run(request_result.value());
             const json payload = ToJson(run_result);
@@ -449,6 +825,137 @@ private:
                                                   ? run_result.error->code
                                                   : "UNKNOWN_ERROR");
             WriteJson(&response, status_code, payload);
+        });
+
+        // 中文注释：POST /load — 显式预加载模型到内存/显存（预热 runner 缓存）。
+        // Body 字段（必填）：algorithm_id, version, backend_type
+        // Body 字段（可选）：
+        //   deploy_id        — 与注册表中 DeploymentSpec 对应；加载后自动更新 deploy_status
+        //   transfer_mode    — "none"（默认）或 "http_pull"
+        //   source_base_url  — http_pull 时，主库 HTTP Server 的 base URL
+        //   target_local_dir — http_pull 时，节点本地存放目录（空则自动生成）
+        //   files_to_pull    — http_pull 时，需下载的文件相对路径数组（空则自动推导）
+        // load_status 取值："loaded" / "already_loaded" / "error"
+        server_.Post("/load", [this](const httplib::Request& request,
+                                     httplib::Response& response) {
+            auto body_result = ParseJsonBody(request);
+            if (!body_result.ok()) {
+                WriteJson(&response, HttpStatusForStatus(body_result.status()),
+                          ErrorPayload(body_result.status()));
+                return;
+            }
+            const json& body = body_result.value();
+
+            const std::string algorithm_id    = body.value("algorithm_id",    std::string());
+            const std::string version         = body.value("version",         std::string());
+            const std::string raw_backend     = body.value("backend_type",    std::string());
+            const std::string deploy_id       = body.value("deploy_id",       std::string());
+            const std::string transfer_mode   = body.value("transfer_mode",   std::string("none"));
+            const std::string source_base_url = body.value("source_base_url", std::string());
+            const std::string target_local_dir= body.value("target_local_dir",std::string());
+            // 中文注释：Python 并发连接池容量（0 = 使用 RuntimeFactory 默认值 4）
+            const int pool_size_raw           = body.value("pool_size",       0);
+            const int pool_checkout_timeout   = body.value("pool_checkout_timeout_ms", 0);
+            const std::size_t pool_size =
+                pool_size_raw > 0 ? static_cast<std::size_t>(pool_size_raw) : 0;
+
+            if (algorithm_id.empty() || version.empty() || raw_backend.empty()) {
+                const Status s = InvalidArgument(
+                    "Body must contain algorithm_id, version, and backend_type.");
+                WriteJson(&response, 400, ErrorPayload(s));
+                return;
+            }
+            auto backend_result = ParseBackendType(raw_backend);
+            if (!backend_result.ok()) {
+                WriteJson(&response, HttpStatusForStatus(backend_result.status()),
+                          ErrorPayload(backend_result.status()));
+                return;
+            }
+
+            // 中文注释：解析 files_to_pull 数组（可选）
+            std::vector<std::string> files_to_pull;
+            if (body.contains("files_to_pull") && body.at("files_to_pull").is_array()) {
+                for (const auto& f : body.at("files_to_pull")) {
+                    if (f.is_string()) {
+                        files_to_pull.push_back(f.get<std::string>());
+                    }
+                }
+            }
+
+            std::lock_guard<std::mutex> lock(mutex_);
+            const Status reload_status = ReloadRegistryLocked();
+            if (!reload_status.ok()) {
+                WriteJson(&response, HttpStatusForStatus(reload_status),
+                          ErrorPayload(reload_status));
+                return;
+            }
+
+            // 中文注释：默认 factory 使用全局默认 pool_size；
+            // 若请求中指定了 pool_size，ModelLoader 内部会临时覆盖 factory 参数。
+            const RuntimeFactory factory;
+            ModelLoader loader(registry_, runner_cache_, factory);
+            ModelLoadRequest load_req;
+            load_req.algorithm_id         = algorithm_id;
+            load_req.version              = version;
+            load_req.backend_type         = backend_result.value();
+            load_req.deploy_id            = deploy_id;
+            load_req.transfer_mode        = transfer_mode;
+            load_req.source_base_url      = source_base_url;
+            load_req.target_local_dir     = target_local_dir;
+            load_req.files_to_pull        = std::move(files_to_pull);
+            load_req.pool_size            = pool_size;
+            load_req.pool_checkout_timeout_ms = pool_checkout_timeout;
+            const ModelLoadResult load_result = loader.Load(load_req);
+            const int status_code = load_result.ok ? 200 : 502;
+            WriteJson(&response, status_code, ToJson(load_result));
+        });
+
+        // 中文注释：POST /unload — 显式卸载模型，释放 runner 缓存及显存/内存。
+        // Body: { "algorithm_id": "...", "version": "...", "backend_type": "...",
+        //         "deploy_id": "<可选>" }
+        // load_status 取值："unloaded"
+        server_.Post("/unload", [this](const httplib::Request& request,
+                                       httplib::Response& response) {
+            auto body_result = ParseJsonBody(request);
+            if (!body_result.ok()) {
+                WriteJson(&response, HttpStatusForStatus(body_result.status()),
+                          ErrorPayload(body_result.status()));
+                return;
+            }
+            const json& body = body_result.value();
+
+            const std::string algorithm_id = body.value("algorithm_id", std::string());
+            const std::string version      = body.value("version", std::string());
+            const std::string raw_backend  = body.value("backend_type", std::string());
+            const std::string deploy_id    = body.value("deploy_id",    std::string());
+
+            if (algorithm_id.empty() || version.empty() || raw_backend.empty()) {
+                const Status s = InvalidArgument(
+                    "Body must contain algorithm_id, version, and backend_type.");
+                WriteJson(&response, 400, ErrorPayload(s));
+                return;
+            }
+            auto backend_result = ParseBackendType(raw_backend);
+            if (!backend_result.ok()) {
+                WriteJson(&response, HttpStatusForStatus(backend_result.status()),
+                          ErrorPayload(backend_result.status()));
+                return;
+            }
+
+            std::lock_guard<std::mutex> lock(mutex_);
+            const Status reload_status = ReloadRegistryLocked();
+            if (!reload_status.ok()) {
+                WriteJson(&response, HttpStatusForStatus(reload_status),
+                          ErrorPayload(reload_status));
+                return;
+            }
+
+            const RuntimeFactory factory;
+            ModelLoader loader(registry_, runner_cache_, factory);
+            const ModelLoadRequest unload_req{
+                algorithm_id, version, backend_result.value(), deploy_id};
+            const ModelLoadResult unload_result = loader.Unload(unload_req);
+            WriteJson(&response, 200, ToJson(unload_result));
         });
 
         server_.set_error_handler([](const httplib::Request&, httplib::Response& response) {

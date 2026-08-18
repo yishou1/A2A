@@ -1,0 +1,88 @@
+algorithm_id: marl_ppo_task_scheduler_onnx
+version: 1.0.0
+display_name: MARL-PPO Task Scheduler ONNX
+backend_type: onnx
+status: validated
+algorithm_class: M13
+
+task_family: planning
+modalities:
+  input: [numeric_features, action_mask]
+  output: [structured_json]
+
+capabilities:
+  - sensor_task_scheduling
+  - reattack_planning
+  - marl_ppo
+  - masked_policy_inference
+  - lightweight_onnx_inference
+
+agent_card:
+  summary: Native ONNX Runtime variant of the trained M13 parameter-shared MARL-PPO actor-critic policy.
+  when_to_use:
+    - Per-agent 104-dimensional observations and valid-action masks are already available.
+    - Portable deterministic action selection and value estimates are required.
+  when_not_to_use:
+    - Raw tracks, detections, sensors, and strike assets still need observation construction.
+    - Cross-agent target de-duplication or assignment objects must be produced automatically.
+  input_description: One 104-float observation and aligned nine-action validity mask per agent.
+  output_description: Masked logits, action probabilities, selected deterministic actions, and state values.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  tensor_contract_ref: tensor_contract.yaml
+  runtime:
+    backend_type: onnx
+    model_uri: model.onnx
+    execution_provider: cpu
+  preprocess:
+    config_uri: preprocess.yaml
+  postprocess:
+    config_uri: postprocess.yaml
+
+constraints:
+  max_input_chars: 4000000
+  max_request_bytes: 8388608
+  batch_supported: true
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 2
+  latency_ms_p95: 10
+  primary_metric: synthetic_holdout_high_threat_coverage
+  primary_score: 0.70651
+  time_complexity: O(A*D*H)
+  space_complexity: O(A*H)
+  complexity_variable: A=agent rows, D=104 observation dimensions, H=128 hidden dimensions
+  performance_notes: Reference metrics use deterministic synthetic battlefield scenarios.
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 1
+  min_memory_mb: 128
+  recommended_memory_mb: 256
+  min_gpu_count: 0
+  gpu_type: none
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 1
+
+model_profile:
+  parameter_count: 39434
+  parameter_count_text: 39434_actor_critic_parameters
+  flops: 78208
+  flops_text: approximately 78.2 KFLOPs per agent observation
+  flops_input_shape: [1, 104]
+  model_size_mb: 1
+  precision: fp32
+
+provenance:
+  model_artifact_ref: model.onnx
+  model_metadata_ref: model.metadata.json
+  training_script_ref: ../../../scripts/train_marl_ppo_scheduler.py
+  dataset_ref: ../../../data/marl_ppo/reference_holdout.json
+
+safety:
+  risk_level: medium
+  requires_human_review: true

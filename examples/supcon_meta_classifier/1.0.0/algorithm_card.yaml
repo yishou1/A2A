@@ -65,10 +65,13 @@ resource_requirements:
   disk_mb: 10
 
 model_profile:
+  # Published small profile uses in_dim=256, hidden_dim=256, proj_dim=128.
   parameter_count: 99200
   parameter_count_text: 99.2K_small_profile
-  flops: 0
-  flops_text: embedding_dimension_dependent
+  flops: 198000
+  flops_text: ~198 KFLOPs per target embedding (small profile projection + cosine similarity)
+  flops_input_shape: [1, 256]
+  model_size_mb: 1
   precision: fp32
 
 provenance:

@@ -13,8 +13,8 @@ This branch packages algorithms from the A2A `zh` branch as standalone `python_h
 | `mission_completion_scorer` | 9014 | Frozen SC2LE proxy random forest scorer |
 | `closed_loop_decision_advisor` | 9015 | Rule-based closed-loop action advisor |
 | `xbd_damage_assessor` | 9016 | Frozen xBD damage assessor (features or images + polygon) |
-| `decision_planning_core` | 9020 | Non-RAG decision planning core for candidate generation and ranking |
-| `compliance_authorization_core` | 9021 | Non-RAG compliance and authorization core for plan checking |
+| `decision_planning_core` | 9036 | Non-RAG decision planning core for candidate generation and ranking |
+| `compliance_authorization_core` | 9037 | Non-RAG compliance and authorization core for plan checking |
 
 ## Native ONNX packages
 

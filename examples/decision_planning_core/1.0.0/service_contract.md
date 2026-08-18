@@ -34,4 +34,4 @@ The service loads `models/decision_planning_lr.onnx` for candidate-plan scoring.
 `models/decision_planning_lstm.onnx` when a target has 12 history steps; shorter histories fall
 back to the Python formula and are marked in `model_runtime`.
 
-Port: `9020`
+Port: `9036`
