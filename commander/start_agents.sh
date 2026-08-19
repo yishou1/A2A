@@ -103,10 +103,14 @@ echo "Starting Closed Loop Agent..."
 sleep 2
 
 echo "Starting Decision Planning Agent..."
+export DECISION_AGENT_BACKEND="${DECISION_AGENT_BACKEND:-algolib}"
+export DECISION_AGENT_ALGOLIB_LLM="${DECISION_AGENT_ALGOLIB_LLM:-false}"
 "$PYTHON_EXEC" "$SCRIPT_DIR/decision_planning_agent/main.py" &
 sleep 2
 
 echo "Starting Compliance Authorization Agent..."
+export DECISION_AGENT_BACKEND="${DECISION_AGENT_BACKEND:-algolib}"
+export DECISION_AGENT_ALGOLIB_LLM="${DECISION_AGENT_ALGOLIB_LLM:-false}"
 "$PYTHON_EXEC" "$SCRIPT_DIR/compliance_authorization_agent/main.py" &
 sleep 2
 

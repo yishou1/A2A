@@ -2764,6 +2764,21 @@ class CommanderAgent:
 
     def _decision_agent_request(self, context: dict) -> dict:
         request = deepcopy(context.get("planning_input") or {})
+        task_scheduling_result = self._latest_context_value(context, "task_scheduling_result")
+        if isinstance(task_scheduling_result, dict):
+            for field in (
+                "risk_assessments",
+                "scheduled_tasks",
+                "resources",
+                "target_histories",
+                "planning_objectives",
+                "constraints",
+                "authorization",
+            ):
+                if request.get(field) in (None, [], {}):
+                    value = task_scheduling_result.get(field)
+                    if value not in (None, [], {}):
+                        request[field] = deepcopy(value)
         for field in (
             "agent_profile",
             "risk_assessments",

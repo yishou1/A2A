@@ -268,6 +268,54 @@ class BPELWorkflowTest(unittest.TestCase):
             self.assertEqual(compliance_request.candidate_plans[0].id, "PLAN-1")
             self.assertEqual(compliance_request.authorization.status, "pending_review")
 
+    def test_decision_planning_agent_request_falls_back_to_task_scheduling_result(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            commander = CommanderAgent(
+                mode="local",
+                workflow="bpel",
+                workflow_file="integrated_system/workflows/decide_workflow.bpel",
+                workflow_id="wf-decide-fallback",
+                state_dir=temp_dir,
+            )
+            context = commander.initial_workflow_context()
+            context["planning_input"] = {}
+            context["task_scheduling_result"] = [
+                commander._make_context_entry(
+                    {
+                        "scheduled_tasks": [
+                            {"id": "TASK-1", "target_id": "TRK-1", "priority": 1}
+                        ],
+                        "resources": [
+                            {"id": "AEW-1", "type": "sensor", "status": "available"}
+                        ],
+                        "risk_assessments": [
+                            {
+                                "target_id": "TRK-1",
+                                "priority": 1,
+                                "risk": "high",
+                                "threat_score": 91.0,
+                                "probability": 0.91,
+                                "rationale": "fallback test",
+                            }
+                        ],
+                    }
+                )
+            ]
+
+            activity = next(
+                item
+                for item in commander.bpel_definition._activatities
+                if item.role == "decision_planning"
+            )
+            payload, _ = commander._build_bpel_task_payload(activity, context)
+            request = AgentRequest.model_validate(
+                build_agent_request_payload("decision_planning_agent", payload)
+            )
+
+            self.assertEqual(request.scheduled_tasks[0].id, "TASK-1")
+            self.assertEqual(request.resources[0].id, "AEW-1")
+            self.assertEqual(request.risk_assessments[0].target_id, "TRK-1")
+
     def test_act_phase_requires_operator_authorization_evidence(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             commander = CommanderAgent(

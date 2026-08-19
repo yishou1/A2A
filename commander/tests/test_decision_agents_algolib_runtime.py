@@ -228,7 +228,7 @@ class DecisionAgentsAlgolibRuntimeTest(unittest.TestCase):
         self.assertEqual(response.status, "error")
         self.assertEqual(response.error_code, "ALGORITHM_RUNTIME_ERROR")
 
-    def test_llm_failure_uses_provider_error_code(self):
+    def test_llm_failure_falls_back_to_default_algolib_call(self):
         algorithms = [
             {
                 "algorithm_id": "decision_planning_core",
@@ -244,12 +244,28 @@ class DecisionAgentsAlgolibRuntimeTest(unittest.TestCase):
                 "decision_agents.common.algolib_runtime._llm_plan",
                 side_effect=LLMClientError("timeout"),
             ):
-                response = DecisionPlanningAgent().handle_query(
-                    json.dumps(sample_payload("decision_planning_input.json"), ensure_ascii=False)
-                )
+                with patch(
+                    "decision_agents.common.algolib_runtime.AlgorithmLibraryClient.run_algorithm",
+                    return_value={
+                        "ok": True,
+                        "algorithm_id": "decision_planning_core",
+                        "version": "1.0.0",
+                        "outputs": {
+                            "candidate_plans": [{"id": "PLAN-1"}],
+                            "recommended_plan_id": "PLAN-1",
+                        },
+                        "usage": {"latency_ms": 1.0},
+                    },
+                ):
+                    response = DecisionPlanningAgent().handle_query(
+                        json.dumps(sample_payload("decision_planning_input.json"), ensure_ascii=False)
+                    )
 
-        self.assertEqual(response.status, "input_required")
-        self.assertEqual(response.error_code, "LLM_PROVIDER_ERROR")
+        self.assertEqual(response.status, "completed")
+        self.assertEqual(response.selected_algorithms, ["decision_planning_core"])
+        self.assertIn("algorithm_calls", response.result)
+        self.assertTrue(response.warnings)
+        self.assertIn("algolib_llm_plan_fallback", response.warnings[0])
 
     def test_missing_algorithm_input_uses_input_error_code(self):
         payload = sample_payload("decision_planning_input.json")

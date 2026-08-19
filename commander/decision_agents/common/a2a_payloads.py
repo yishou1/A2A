@@ -38,12 +38,9 @@ NESTED_REQUEST_FIELDS = (
 
 def build_agent_request_payload(agent_name: str, payload: dict[str, Any]) -> dict[str, Any]:
     explicit_request = _find_agent_request(payload)
-    if explicit_request is not None:
-        request_payload: dict[str, Any] = {}
-        _merge_request_fields(request_payload, explicit_request, allow_empty=True)
-        return request_payload
-
     request_payload: dict[str, Any] = {}
+    if explicit_request is not None:
+        _merge_request_fields(request_payload, explicit_request, allow_empty=True)
     context = payload.get("context") if isinstance(payload.get("context"), dict) else {}
     input_payload = payload.get("input") if isinstance(payload.get("input"), dict) else {}
 

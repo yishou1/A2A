@@ -250,17 +250,17 @@
             <button id="btn-open-knowledge-graph" class="btn btn-sm btn-primary" type="button">打开图谱</button>
           </div>
         </div>
-        <div class="card">
+        <div class="card" hidden>
           <div class="card-heading"><div><span class="section-eyebrow">提交记录</span><h2>输入快照</h2></div></div>
           <div id="wf-input-snapshot"><div class="empty-state">流程尚未产生后端输入快照</div></div>
         </div>
-        <div class="card">
+        <div class="card" hidden>
           <div class="card-heading"><div><span class="section-eyebrow">输入 → 证据 → 输出</span><h2>可追溯关系</h2></div></div>
           <div id="wf-provenance" data-contract="amos.workflow-view.v2.provenance">
             <div class="empty-state">尚无结构化可追溯关系</div>
           </div>
         </div>
-        <div class="card">
+        <div class="card" hidden>
           <div class="card-heading"><h2>分析结果</h2></div>
           <div id="wf-warning-list" class="workflow-warning-list" hidden></div>
           <div class="workflow-panel-label">结果摘要</div>
@@ -270,7 +270,7 @@
           <div class="workflow-panel-label">航迹关联结果</div>
           <div id="wf-association-list" class="workflow-association-list"></div>
         </div>
-        <div class="card">
+        <div class="card" hidden>
           <div class="card-heading"><h2>运行指标</h2></div>
           <div id="wf-performance-metrics" data-contract="amos.workflow-view.v2.metrics">
             <span><small>端到端时延</small><b>未上报</b></span><span><small>吞吐</small><b>未上报</b></span>

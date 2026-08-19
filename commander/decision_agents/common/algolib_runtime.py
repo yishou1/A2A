@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from typing import Any
 
 from pydantic import ValidationError
@@ -37,6 +39,21 @@ AGENT_REQUIRED_FIELDS = {
 
 def use_algolib_backend() -> bool:
     return get_settings().decision_agent_backend == "algolib"
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _algolib_planner_llm_enabled() -> bool:
+    if os.getenv("DECISION_AGENT_ALGOLIB_LLM") is not None:
+        return _env_bool("DECISION_AGENT_ALGOLIB_LLM", False)
+    if os.getenv("ALGOLIB_ENABLE_LLM") is not None:
+        return _env_bool("ALGOLIB_ENABLE_LLM", False)
+    return llm_enabled()
 
 
 def run_agent_with_algolib(agent_name: str, request: AgentRequest) -> AgentResponse:
@@ -107,6 +124,11 @@ def run_agent_with_algolib(agent_name: str, request: AgentRequest) -> AgentRespo
     usage = result.get("usage") if isinstance(result.get("usage"), dict) else {}
     reported_latency = usage.get("latency_ms") or usage.get("duration_ms")
     duration_ms = round(float(reported_latency), 3) if reported_latency is not None else None
+    plan_warnings = [
+        str(item)
+        for item in llm_plan.get("warnings", [])
+        if item
+    ] if isinstance(llm_plan.get("warnings"), list) else []
     invocation = {
         "algorithm_id": call.algorithm_id,
         "algorithm_name": call.algorithm_id,
@@ -144,7 +166,7 @@ def run_agent_with_algolib(agent_name: str, request: AgentRequest) -> AgentRespo
         result=response_result,
         rag_evidence=response_result.get("rag_evidence", response_result.get("evidence", [])),
         summary=_summary(agent_name, response_result),
-        warnings=[],
+        warnings=plan_warnings,
     )
 
 
@@ -165,33 +187,41 @@ def _select_algorithm_call(
         for item in algorithms
         if isinstance(item.get("algorithm_id"), str)
     }
-    if llm_enabled():
-        llm_plan = _llm_plan(agent_name, request, algorithms)
-        calls = llm_plan.get("algorithm_calls")
-        if not isinstance(calls, list) or not calls:
-            raise ValueError("LLM plan did not include algorithm_calls.")
-        raw_call = calls[0]
-        if not isinstance(raw_call, dict):
-            raise ValueError("LLM algorithm call must be an object.")
+    if _algolib_planner_llm_enabled():
+        try:
+            llm_plan = _llm_plan(agent_name, request, algorithms)
+            calls = llm_plan.get("algorithm_calls")
+            if not isinstance(calls, list) or not calls:
+                raise ValueError("LLM plan did not include algorithm_calls.")
+            raw_call = calls[0]
+            if not isinstance(raw_call, dict):
+                raise ValueError("LLM algorithm call must be an object.")
+            raw_call = {
+                **raw_call,
+                "inputs": request.model_dump(mode="json"),
+            }
+            llm_plan = {
+                **llm_plan,
+                "algorithm_calls": [raw_call],
+            }
+            call = _normalize_call(raw_call)
+            _validate_call(agent_name, call, active_by_id)
+            return call, llm_plan
+        except (LLMClientError, ValidationError, ValueError) as exc:
+            raw_call, llm_plan = _default_algorithm_plan(
+                agent_name,
+                request,
+                active_by_id,
+                reason="LLM algorithm planning failed; using the agent default algorithm.",
+            )
+            llm_plan["warnings"] = [f"algolib_llm_plan_fallback:{exc}"]
     else:
-        default_id = AGENT_DEFAULT_ALGORITHMS[agent_name]
-        algorithm = active_by_id.get(default_id)
-        if not algorithm:
-            raise AlgorithmLibraryError(f"Default algorithm is not active: {default_id}")
-        raw_call = {
-            "algorithm_id": default_id,
-            "version": algorithm.get("version", "1.0.0"),
-            "backend_type": algorithm.get("backend_type", "python_http_service"),
-            "inputs": request.model_dump(mode="json"),
-            "params": {},
-            "reason": "LLM disabled; using the agent default algorithm.",
-        }
-        llm_plan = {
-            "intent": "default_algorithm_call",
-            "algorithm_calls": [raw_call],
-            "missing_fields": [],
-            "explanation": "LLM disabled; using default algorithm.",
-        }
+        raw_call, llm_plan = _default_algorithm_plan(
+            agent_name,
+            request,
+            active_by_id,
+            reason="LLM disabled; using the agent default algorithm.",
+        )
 
     raw_call = {
         **raw_call,
@@ -204,6 +234,33 @@ def _select_algorithm_call(
     call = _normalize_call(raw_call)
     _validate_call(agent_name, call, active_by_id)
     return call, llm_plan
+
+
+def _default_algorithm_plan(
+    agent_name: str,
+    request: AgentRequest,
+    active_by_id: dict[str, dict[str, Any]],
+    *,
+    reason: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    default_id = AGENT_DEFAULT_ALGORITHMS[agent_name]
+    algorithm = active_by_id.get(default_id)
+    if not algorithm:
+        raise AlgorithmLibraryError(f"Default algorithm is not active: {default_id}")
+    raw_call = {
+        "algorithm_id": default_id,
+        "version": algorithm.get("version", "1.0.0"),
+        "backend_type": algorithm.get("backend_type", "python_http_service"),
+        "inputs": request.model_dump(mode="json"),
+        "params": {},
+        "reason": reason,
+    }
+    return raw_call, {
+        "intent": "default_algorithm_call",
+        "algorithm_calls": [raw_call],
+        "missing_fields": [],
+        "explanation": reason,
+    }
 
 
 def _llm_plan(

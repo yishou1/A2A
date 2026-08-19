@@ -340,9 +340,13 @@ start_service agent-track-threat "$COMMANDER_DIR" "http://127.0.0.1:8102/health"
 start_service agent-task-scheduling "$COMMANDER_DIR" "http://127.0.0.1:10201/health" \
   env TASK_SCHEDULING_AGENT_PORT=10201 "$A2A_PYTHON" -m task_scheduling_agent.main
 start_service agent-decision-planning "$COMMANDER_DIR" "http://127.0.0.1:10202/health" \
-  env DECISION_PLANNING_AGENT_PORT=10202 "$A2A_PYTHON" -m decision_planning_agent.main
+  env DECISION_PLANNING_AGENT_PORT=10202 DECISION_AGENT_BACKEND=algolib \
+  DECISION_AGENT_ALGOLIB_LLM="${DECISION_AGENT_ALGOLIB_LLM:-false}" \
+  "$A2A_PYTHON" -m decision_planning_agent.main
 start_service agent-compliance "$COMMANDER_DIR" "http://127.0.0.1:10203/health" \
-  env COMPLIANCE_AUTHORIZATION_AGENT_PORT=10203 "$A2A_PYTHON" -m compliance_authorization_agent.main
+  env COMPLIANCE_AUTHORIZATION_AGENT_PORT=10203 DECISION_AGENT_BACKEND=algolib \
+  DECISION_AGENT_ALGOLIB_LLM="${DECISION_AGENT_ALGOLIB_LLM:-false}" \
+  "$A2A_PYTHON" -m compliance_authorization_agent.main
 start_service agent-simulation-execution "$COMMANDER_DIR" "http://127.0.0.1:10204/health" \
   env ALGOLIB_ENABLE_LLM="$A2A_ACT_AGENT_LLM" EXECUTION_CONTROL_AGENT_ROLE=simulation_execution SIMULATION_EXECUTION_AGENT_PORT=10204 \
   "$A2A_PYTHON" -m execution_control_agent.main
