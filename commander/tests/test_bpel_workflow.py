@@ -123,6 +123,70 @@ class BPELWorkflowTest(unittest.TestCase):
             ]
             self.assertEqual(actual, roles)
 
+    def test_act_phase_declares_authorization_result_as_execution_input(self):
+        definition = BPELWorkflowCatalog(PROJECT_ROOT).load(
+            "integrated_system/workflows/act_workflow.bpel"
+        )
+        execution = next(
+            activity
+            for activity in definition.activatities
+            if activity.role == "simulation_execution"
+        )
+
+        self.assertEqual(execution.input_variable, "ComplianceAuthorizationResult")
+        self.assertEqual(execution.output_variable, "ExecutionSimulationResult")
+
+    def test_workflow_result_persists_actual_agent_request_input(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            commander = CommanderAgent(
+                mode="local",
+                workflow="bpel",
+                workflow_file="integrated_system/workflows/act_workflow.bpel",
+                workflow_id="wf-actual-input",
+                state_dir=temp_dir,
+            )
+            context = commander.initial_workflow_context()
+            context["work_list"] = [{
+                "activity_id": "A-SIM",
+                "work_item": "wf-actual-input:A-SIM",
+                "role": "simulation_execution",
+                "status": "completed",
+            }]
+            request_payload = {
+                "workflow_id": "wf-actual-input",
+                "work_item": "wf-actual-input:A-SIM",
+                "command": "simulate_execution_control",
+                "required_skill": "execution_control",
+                "required_skills": ["execution_control"],
+                "input": {
+                    "phase": "strike",
+                    "results": {"compliance_authorization": {"output_data": {"decision": "approved"}}},
+                },
+                "context": {"mission_input": {"contacts": []}, "workflow_id": "wf-actual-input"},
+                "attachments": [{"id": "MEDIA-1", "name": "EO", "kind": "media_ref", "uri": "http://example/media"}],
+                "output_hint": "execution_simulation_result",
+            }
+            commander.workflow_context = context
+            commander._remember_task_response(
+                "wf-actual-input:A-SIM",
+                {
+                    "status": "completed",
+                    "agent": "Simulation_Execution_Agent",
+                    "output": {"execution_simulation_result": {"task_type": "execution_control"}},
+                },
+                role="simulation_execution",
+                target="test",
+                request_payload=request_payload,
+            )
+
+            result = commander._build_workflow_result(context)
+            activity = result["activity_results"][0]
+
+            self.assertEqual(activity["input"], request_payload["input"])
+            self.assertEqual(activity["input_source"], "agent_request.input")
+            self.assertEqual(activity["request"]["context_keys"], ["mission_input", "workflow_id"])
+            self.assertEqual(activity["request"]["attachment_count"], 1)
+
     def test_decide_phase_builds_valid_planning_and_compliance_contracts(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             commander = CommanderAgent(

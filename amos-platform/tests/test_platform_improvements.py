@@ -417,6 +417,13 @@ def test_execution_workspace_inspects_current_run_workflows_and_real_activity_de
     assert 'data("/api/v1/runs/" + encodeURIComponent(runId))' in api_script
     assert "runManifest.workflow_ids" in workflow
     assert "view.activity_details" in workflow
+    assert 'detail[scope + "_fields"]' in workflow
+    assert 'data-detail-scope="' in workflow
+    assert "后端未返回可展示的 JSON 字段" in workflow
+    assert "semanticIoSpec" not in workflow
+    assert "上一阶段形成的稳定航迹" not in workflow
+    assert "当前新增传感器观测" not in workflow
+    assert "当前传感器观测" not in workflow
     assert 'currentActivity && typeof currentActivity === "object"' in workflow
     assert "后端未上报该活动的算法调用" in workflow
     assert "processActiveView(view)" in workflow

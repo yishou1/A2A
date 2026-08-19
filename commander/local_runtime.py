@@ -506,23 +506,29 @@ class LocalAgentRuntime:
         return summary
 
     @classmethod
-    def _run_algolib_pipeline(cls, role: str, payload: dict, value: dict) -> tuple[list[dict], dict[str, dict], list[str]]:
+    def _run_algolib_pipeline(
+        cls,
+        role: str,
+        payload: dict,
+        value: dict,
+    ) -> tuple[list[dict], dict[str, dict], list[dict], list[str]]:
         if not cls._algolib_first_enabled():
-            return [], {}, []
+            return [], {}, [], []
         planned_ids = cls._algolib_pipeline_for(role, payload)
         if not planned_ids:
-            return [], {}, []
+            return [], {}, [], []
         client = AlgorithmLibraryClient()
         try:
             active_rows = client.list_algorithms(active_only=True)
         except AlgorithmLibraryError as exc:
-            return [], {}, [f"algolib_unavailable:{exc}"]
+            return [], {}, [], [f"algolib_unavailable:{exc}"]
         active = {
             str(item.get("algorithm_id")): item
             for item in active_rows
             if isinstance(item, dict) and item.get("algorithm_id")
         }
         calls = []
+        invocations = []
         outputs_by_algorithm: dict[str, dict] = {}
         warnings = []
         for algorithm_id in planned_ids:
@@ -539,43 +545,88 @@ class LocalAgentRuntime:
             )
             start = time.perf_counter()
             try:
-                outputs = client.predict(
-                    algorithm_id,
-                    inputs,
-                    request_id=str(payload.get("work_item") or payload.get("workflow_id") or ""),
-                    trace_id=str(payload.get("workflow_id") or ""),
-                    version=str(meta.get("version") or "1.0.0"),
-                    backend_type=str(meta.get("backend_type") or "python_http_service"),
-                )
+                request_id = str(payload.get("work_item") or payload.get("workflow_id") or "")
+                trace_id = str(payload.get("workflow_id") or "")
+                version = str(meta.get("version") or "1.0.0")
+                backend_type = str(meta.get("backend_type") or "python_http_service")
+                if callable(getattr(type(client), "predict_with_metadata", None)):
+                    envelope = client.predict_with_metadata(
+                        algorithm_id,
+                        inputs,
+                        request_id=request_id,
+                        trace_id=trace_id,
+                        version=version,
+                        backend_type=backend_type,
+                    )
+                    outputs = envelope["outputs"]
+                    usage = envelope.get("usage") if isinstance(envelope.get("usage"), dict) else {}
+                    reported_latency = usage.get("latency_ms") or usage.get("duration_ms")
+                    duration_source = "algorithm_usage" if reported_latency is not None else "client_measured"
+                else:
+                    outputs = client.predict(
+                        algorithm_id,
+                        inputs,
+                        request_id=request_id,
+                        trace_id=trace_id,
+                        version=version,
+                        backend_type=backend_type,
+                    )
+                    envelope = {
+                        "request_id": request_id,
+                        "trace_id": trace_id,
+                        "version": version,
+                        "backend_type": backend_type,
+                    }
+                    usage = {}
+                    reported_latency = None
+                    duration_source = "client_measured"
             except AlgorithmLibraryError as exc:
                 warnings.append(f"algolib_call_failed:{algorithm_id}:{exc}")
                 continue
-            duration_ms = round((time.perf_counter() - start) * 1000.0, 3)
+            client_duration_ms = round((time.perf_counter() - start) * 1000.0, 3)
+            duration_ms = (
+                round(float(reported_latency), 3)
+                if reported_latency is not None
+                else client_duration_ms
+            )
             outputs_by_algorithm[algorithm_id] = outputs
             model_profile = meta.get("model_profile") if isinstance(meta.get("model_profile"), dict) else {}
-            calls.append({
+            invocation = {
                 "algorithm_id": algorithm_id,
                 "algorithm_name": algorithm_id,
                 "model_id": meta.get("model_id") or model_profile.get("model_id"),
-                "version": meta.get("version"),
-                "backend_type": meta.get("backend_type"),
+                "version": envelope.get("version") or meta.get("version"),
+                "backend_type": envelope.get("backend_type") or meta.get("backend_type"),
                 "status": "completed",
                 "execution_mode": "algolib_runtime",
+                "request_id": envelope.get("request_id"),
+                "trace_id": envelope.get("trace_id"),
+                "input": inputs,
+                "output": outputs,
+                "usage": usage,
                 "duration_ms": duration_ms,
+                "latency_ms": duration_ms,
+                "duration_source": duration_source,
                 "input_summary": {
                     "frames": len(inputs.get("frames") or []),
                     "detections": len(inputs.get("detections") or inputs.get("verified_detections") or []),
                     "tracks": len(inputs.get("tracks") or inputs.get("prior_tracks") or []),
                 },
                 "result_summary": cls._result_summary(outputs),
+            }
+            invocations.append(invocation)
+            calls.append({
+                key: value
+                for key, value in invocation.items()
+                if key not in {"input", "output", "usage"}
             })
-        return calls, outputs_by_algorithm, warnings
+        return calls, outputs_by_algorithm, invocations, warnings
 
     @classmethod
     def _attach_algolib_evidence(cls, role: str, payload: dict, value: dict) -> dict:
         if not isinstance(value, dict):
             return value
-        calls, outputs, warnings = cls._run_algolib_pipeline(role, payload, value)
+        calls, outputs, invocations, warnings = cls._run_algolib_pipeline(role, payload, value)
         if calls:
             selected = list(value.get("selected_algorithms") or [])
             for call in calls:
@@ -584,6 +635,7 @@ class LocalAgentRuntime:
                     selected.append(algorithm_id)
             value["selected_algorithms"] = selected
             value["algorithm_calls"] = list(value.get("algorithm_calls") or []) + calls
+            value["algorithm_invocations"] = list(value.get("algorithm_invocations") or []) + invocations
             value["algolib_outputs"] = outputs
             value["execution_mode"] = "local_agent_with_algolib_runtime"
         else:

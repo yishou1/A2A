@@ -705,6 +705,15 @@ class GatewayService:
             return {}
 
         result = copy.deepcopy(raw_result)
+        input_names = (
+            "mission_input",
+            "planning_input",
+        )
+        result["inputs"] = {
+            name: copy.deepcopy(context[name])
+            for name in input_names
+            if name in context
+        }
         output_names = (
             "tracking_result",
             "threat_assessment_result",

@@ -295,6 +295,15 @@ class TrackThreatAlgorithmRuntime:
             True,
             started,
             remote_latency_ms=float(usage.get("latency_ms", 0.0) or 0.0),
+            request_id=result.get("request_id"),
+            trace_id=result.get("trace_id"),
+            version=result.get("version") or call.version,
+            backend_type=call.backend_type,
+            params=params,
+            reason=call.reason,
+            inputs=inputs,
+            outputs=outputs,
+            usage=usage,
         )
         return outputs
 
@@ -448,12 +457,38 @@ class TrackThreatAlgorithmRuntime:
         *,
         error_message: str = "",
         remote_latency_ms: float = 0.0,
+        request_id: Any = None,
+        trace_id: Any = None,
+        version: Any = None,
+        backend_type: Any = None,
+        params: dict[str, Any] | None = None,
+        reason: str = "",
+        inputs: dict[str, Any] | None = None,
+        outputs: dict[str, Any] | None = None,
+        usage: dict[str, Any] | None = None,
     ) -> None:
+        client_duration_ms = round((time.perf_counter() - started) * 1000.0, 3)
+        duration_ms = round(remote_latency_ms, 3) if remote_latency_ms > 0 else client_duration_ms
         self._trace.setdefault("executions", []).append(
             {
                 "algorithm_id": algorithm_id,
+                "algorithm_name": algorithm_id,
                 "ok": ok,
-                "client_duration_ms": round((time.perf_counter() - started) * 1000.0, 3),
+                "status": "completed" if ok else "failed",
+                "version": version,
+                "backend_type": backend_type or "python_http_service",
+                "execution_mode": "algorithm_library",
+                "request_id": request_id or self._trace.get("request_id"),
+                "trace_id": trace_id or self._trace.get("request_id"),
+                "params": params or {},
+                "reason": reason,
+                "input": inputs,
+                "output": outputs,
+                "usage": usage or {},
+                "duration_ms": duration_ms,
+                "latency_ms": duration_ms,
+                "duration_source": "algorithm_usage" if remote_latency_ms > 0 else "client_measured",
+                "client_duration_ms": client_duration_ms,
                 "remote_latency_ms": round(remote_latency_ms, 3),
                 "error": error_message,
             }

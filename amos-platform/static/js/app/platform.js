@@ -1130,9 +1130,8 @@ window.Platform = (function () {
   }
 
   function reflectWorkflowEvidence(view) {
-    var hasView = Boolean(view && view.schema_version === "amos.workflow-view.v2");
     var algorithmEvidence = document.getElementById("workflow-algorithm-evidence");
-    if (algorithmEvidence) algorithmEvidence.hidden = !hasView;
+    if (algorithmEvidence) algorithmEvidence.hidden = true;
   }
 
   function initWorkspaceResize() {

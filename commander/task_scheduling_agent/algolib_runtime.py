@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import os
+import time
 import uuid
 from typing import Any
 
@@ -233,15 +234,65 @@ def run_with_algolib(
     request_id = str(amos_payload.get("request_id") or f"sched-{uuid.uuid4().hex[:12]}")
     trace_id = str(amos_payload.get("trace_id") or os.environ.get("TIA_TRACE_ID") or request_id)
 
-    outputs = client.predict(
-        call.algorithm_id,
-        call.inputs,
-        params=call.params,
-        request_id=request_id,
-        trace_id=trace_id,
-        version=call.version,
-        backend_type=call.backend_type,
+    started = time.perf_counter()
+    if callable(getattr(type(client), "predict_with_metadata", None)):
+        envelope = client.predict_with_metadata(
+            call.algorithm_id,
+            call.inputs,
+            params=call.params,
+            request_id=request_id,
+            trace_id=trace_id,
+            version=call.version,
+            backend_type=call.backend_type,
+        )
+        outputs = envelope["outputs"]
+        usage = envelope.get("usage") if isinstance(envelope.get("usage"), dict) else {}
+        reported_latency = usage.get("latency_ms") or usage.get("duration_ms")
+        duration_source = "algorithm_usage" if reported_latency is not None else "client_measured"
+    else:
+        outputs = client.predict(
+            call.algorithm_id,
+            call.inputs,
+            params=call.params,
+            request_id=request_id,
+            trace_id=trace_id,
+            version=call.version,
+            backend_type=call.backend_type,
+        )
+        envelope = {
+            "request_id": request_id,
+            "trace_id": trace_id,
+            "algorithm_id": call.algorithm_id,
+            "version": call.version,
+            "backend_type": call.backend_type,
+        }
+        usage = {}
+        reported_latency = None
+        duration_source = "client_measured"
+    client_duration_ms = round((time.perf_counter() - started) * 1000.0, 3)
+    duration_ms = (
+        round(float(reported_latency), 3)
+        if reported_latency is not None
+        else client_duration_ms
     )
+    invocation = {
+        "algorithm_id": call.algorithm_id,
+        "algorithm_name": call.algorithm_id,
+        "version": envelope.get("version") or call.version,
+        "backend_type": envelope.get("backend_type") or call.backend_type,
+        "execution_mode": "algorithm_library",
+        "status": "completed",
+        "request_id": envelope.get("request_id") or request_id,
+        "trace_id": envelope.get("trace_id") or trace_id,
+        "params": call.params,
+        "reason": call.reason,
+        "input": call.inputs,
+        "output": outputs,
+        "usage": usage,
+        "duration_ms": duration_ms,
+        "latency_ms": duration_ms,
+        "duration_source": duration_source,
+    }
 
     plan = scheduler_result_to_plan(outputs)
     situation = situation_from_amos(amos_payload)
@@ -259,6 +310,10 @@ def run_with_algolib(
         "algorithm": outputs.get("algorithm") or call.algorithm_id,
         "task_schedule": plan.model_dump(mode="json"),
         "selected_algorithms": [call.algorithm_id],
+        "algorithm_calls": [
+            {key: value for key, value in invocation.items() if key not in {"input", "output", "usage"}}
+        ],
+        "algorithm_invocations": [invocation],
         "llm_plan": {
             **llm_plan,
             "catalog_source": catalog_source,

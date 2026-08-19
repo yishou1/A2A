@@ -101,6 +101,8 @@ class PerceptionOutput(BaseModel):
     verified_ids: list[str] = Field(default_factory=list)
     task_schedule: TaskSchedulePlan | None = None
     algorithm_trace: dict[str, str] = Field(default_factory=dict)
+    algorithm_calls: list[dict[str, Any]] = Field(default_factory=list)
+    algorithm_invocations: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ThreatAssessment(BaseModel):
@@ -117,6 +119,8 @@ class CognitionOutput(BaseModel):
     entities: list[dict[str, Any]] = Field(default_factory=list)
     rag_context: str = ""
     algorithm_trace: dict[str, str] = Field(default_factory=dict)
+    algorithm_calls: list[dict[str, Any]] = Field(default_factory=list)
+    algorithm_invocations: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class SemanticIntelligencePacket(BaseModel):

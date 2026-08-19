@@ -21,6 +21,32 @@ _THREAT_MAP = {
 }
 
 
+def _algorithm_id(backend: Any) -> str:
+    return str(getattr(backend, "algorithm_id", None) or getattr(backend, "name", "algorithm"))
+
+
+def _planned_inputs(base: dict[str, Any], plan: AlgorithmPlan | None, algorithm_id: str) -> dict[str, Any]:
+    if plan is None:
+        return base
+    enriched = dict(base)
+    enriched["params"] = plan.params_for(algorithm_id)
+    for call in plan.algorithm_calls:
+        if call.algorithm_id == algorithm_id:
+            enriched["_algorithm_reason"] = call.reason
+            break
+    return enriched
+
+
+def _run_and_record(backend: Any, inputs: dict[str, Any]) -> tuple[Any, dict[str, Any] | None]:
+    if hasattr(backend, "last_invocation"):
+        backend.last_invocation = None
+    output = backend.run(inputs)
+    invocation = getattr(backend, "last_invocation", None)
+    if isinstance(invocation, dict):
+        return output, dict(invocation)
+    return output, None
+
+
 class CognitionSkill:
     @staticmethod
     def _apply_simulation_force_prior(
@@ -139,9 +165,15 @@ class CognitionSkill:
 
         frame_dicts = [f.model_dump(mode="json") for f in batch.frames]
         trace: dict[str, str] = {}
+        invocations: list[dict[str, Any]] = []
 
         if enabled("imagebind_multimodal_encoder"):
-            embeddings = self.encoder.run({"frames": frame_dicts})
+            embeddings, invocation = _run_and_record(
+                self.encoder,
+                _planned_inputs({"frames": frame_dicts}, plan, _algorithm_id(self.encoder)),
+            )
+            if invocation:
+                invocations.append(invocation)
             if not isinstance(embeddings, dict):
                 embeddings = {}
             trace[self.encoder.name] = f"{len(embeddings)} modality embeddings"
@@ -150,7 +182,16 @@ class CognitionSkill:
             trace[self.encoder.name] = "skipped"
 
         if enabled("multimodal_mamba_fusion"):
-            fusion_out = self.fusion.run({"embeddings": embeddings, "tracks": perception.tracks})
+            fusion_out, invocation = _run_and_record(
+                self.fusion,
+                _planned_inputs(
+                    {"embeddings": embeddings, "tracks": perception.tracks},
+                    plan,
+                    _algorithm_id(self.fusion),
+                ),
+            )
+            if invocation:
+                invocations.append(invocation)
             if not isinstance(fusion_out, dict):
                 fusion_out = {}
             fused = fusion_out.get("fused_embeddings", {})
@@ -161,9 +202,16 @@ class CognitionSkill:
 
         if enabled("supcon_meta_classifier"):
             support_shots = batch.context.get("support_shots") or []
-            classifications = self.classifier.run(
-                {"fused_embeddings": fused, "support_shots": support_shots}
+            classifications, invocation = _run_and_record(
+                self.classifier,
+                _planned_inputs(
+                    {"fused_embeddings": fused, "support_shots": support_shots},
+                    plan,
+                    _algorithm_id(self.classifier),
+                ),
             )
+            if invocation:
+                invocations.append(invocation)
             if isinstance(classifications, dict):
                 classifications = classifications.get("classifications") or []
             if not isinstance(classifications, list):
@@ -191,13 +239,17 @@ class CognitionSkill:
         )
 
         if enabled("synapse_rag_retriever"):
-            rag_out = self.rag.run(
-                {
-                    "classifications": classifications,
-                    "knowledge_base": batch.context.get("knowledge_base", []),
-                    "query": batch.context.get("rag_query", "战场目标实体与威胁关联"),
-                }
+            rag_inputs = {
+                "classifications": classifications,
+                "knowledge_base": batch.context.get("knowledge_base", []),
+                "query": batch.context.get("rag_query", "战场目标实体与威胁关联"),
+            }
+            rag_out, invocation = _run_and_record(
+                self.rag,
+                _planned_inputs(rag_inputs, plan, _algorithm_id(self.rag)),
             )
+            if invocation:
+                invocations.append(invocation)
             if not isinstance(rag_out, dict):
                 rag_out = {}
             trace[self.rag.name] = rag_out.get("agent_notes", "ok")
@@ -230,4 +282,13 @@ class CognitionSkill:
             entities=rag_out.get("entities", []),
             rag_context=rag_out.get("rag_context", ""),
             algorithm_trace=trace,
+            algorithm_calls=[
+                {
+                    key: value
+                    for key, value in invocation.items()
+                    if key not in {"input", "output", "usage"}
+                }
+                for invocation in invocations
+            ],
+            algorithm_invocations=invocations,
         )

@@ -67,6 +67,189 @@ def test_submission_snapshot_freezes_exact_commander_input() -> None:
     assert snapshot["attachments"][0]["id"] == "MEDIA-1"
     assert snapshot["attachments"][0]["captured_at_sim_time"] == 105
     assert snapshot["contacts"][0]["contact_id"] == "TRK-1"
+    assert snapshot["observations"] == [{"observation_id": "OBS-1"}]
+    assert snapshot["perception_frames"] == [{"task_id": "FRAME-1"}]
+    assert snapshot["friendly_platforms"] == [{"id": "BLUE-1"}]
+    assert snapshot["protected_assets"] == [{"asset_id": "SITE-1"}]
+
+
+def test_activity_io_fields_map_labels_to_real_context_values() -> None:
+    observations = [{
+        "observation_id": "OBS-REAL-7",
+        "sensor_id": "RADAR-2",
+        "confidence": 0.91,
+    }]
+    tracks = [{
+        "track_id": "TRK-REAL-3",
+        "source_observation_ids": ["OBS-REAL-7"],
+    }]
+    status = {
+        "workflow_id": "wf-real-io",
+        "status": "completed",
+        "context": {
+            "mission_input": {
+                "objective": "inspect backend fields",
+                "observations": observations,
+            },
+            "tracking_result": [{
+                "activity_id": "A-TRACK",
+                "value": {
+                    "tracks": tracks,
+                    "status": "completed",
+                },
+            }],
+        },
+        "result": {"activity_results": [{
+            "activity_id": "A-TRACK",
+            "work_item": "Tracking",
+            "status": "completed",
+        }]},
+    }
+    work = {"work_list": [{
+        "activity_id": "A-TRACK",
+        "work_item": "Tracking",
+        "status": "completed",
+        "input_variable": "MissionInput",
+        "output_variable": "TrackingResult",
+    }]}
+
+    view = build_workflow_view(status, work_list=work)
+    detail = view["activity_details"]["A-TRACK"]
+    input_fields = {row["key"]: row for row in detail["input_fields"]}
+    output_fields = {row["key"]: row for row in detail["output_fields"]}
+    input_semantics = {row["label"]: row for row in detail["input_semantics"]}
+    output_semantics = {row["label"]: row for row in detail["output_semantics"]}
+
+    assert detail["input_source"] == "context.mission_input"
+    assert input_fields["observations"] == {
+        "key": "observations",
+        "label": "当前传感器观测",
+        "path": "context.mission_input.observations",
+        "variable": "MissionInput",
+        "value_type": "array",
+        "value": observations,
+        "count": 1,
+    }
+    assert detail["input_detail"]["observations"]["value"] == observations
+    assert detail["input_detail"]["observations"]["label"] == "当前传感器观测"
+    assert input_semantics["当前传感器观测"]["path"] == "context.mission_input.observations"
+    assert input_semantics["当前传感器观测"]["value"] == observations
+
+    assert detail["output_source"] == "context.tracking_result[0].value"
+    assert output_fields["tracks"] == {
+        "key": "tracks",
+        "label": "融合航迹",
+        "path": "context.tracking_result[0].value.tracks",
+        "variable": "TrackingResult",
+        "value_type": "array",
+        "value": tracks,
+        "count": 1,
+    }
+    assert detail["output_detail"]["tracks"]["value"] == tracks
+    assert output_semantics["融合航迹"]["path"] == "context.tracking_result[0].value.tracks"
+    assert output_semantics["融合航迹"]["value"] == tracks
+    assert "当前新增传感器观测" not in {
+        row["label"] for row in detail["input_fields"] + detail["output_fields"]
+    }
+    assert "ranked_threats" not in output_fields
+
+
+def test_activity_io_fields_do_not_synthesize_missing_snapshot_keys() -> None:
+    view = build_workflow_view(
+        {"workflow_id": "wf-old-snapshot", "status": "running"},
+        work_list={"work_list": [{
+            "activity_id": "A-RECON",
+            "work_item": "Reconnaissance",
+            "status": "running",
+            "input_variable": "MissionInput",
+        }]},
+        submission={"contacts": [{"contact_id": "CONTACT-1"}]},
+    )
+
+    detail = view["activity_details"]["A-RECON"]
+
+    assert [row["key"] for row in detail["input_fields"]] == ["contacts"]
+    assert [row["label"] for row in detail["input_semantics"]] == ["初步融合航迹"]
+    assert detail["input_fields"][0]["value"] == [{"contact_id": "CONTACT-1"}]
+    assert "observations" not in detail["input_detail"]
+
+
+def test_activity_io_fields_read_real_gateway_checkpoint_inputs() -> None:
+    observations = [{"observation_id": "OBS-GATEWAY-1", "sensor_id": "EO-1"}]
+    view = build_workflow_view(
+        {
+            "workflow_id": "wf-gateway-input",
+            "status": "completed",
+            "result": {
+                "inputs": {"mission_input": {"observations": observations}},
+                "activity_results": [{
+                    "activity_id": "A-COGNITION",
+                    "status": "completed",
+                }],
+            },
+        },
+        work_list={"work_list": [{
+            "activity_id": "A-COGNITION",
+            "role": "tactical_intelligence",
+            "status": "completed",
+            "input_variable": "MissionInput",
+        }]},
+    )
+
+    detail = view["activity_details"]["A-COGNITION"]
+    field = next(row for row in detail["input_fields"] if row["key"] == "observations")
+
+    assert detail["input_source"] == "result.inputs.mission_input"
+    assert field["label"] == "当前传感器观测"
+    assert field["path"] == "result.inputs.mission_input.observations"
+    assert field["value"] == observations
+
+
+def test_activity_detail_prefers_actual_agent_request_input_over_bpel_variable() -> None:
+    actual_input = {
+        "phase": "strike",
+        "results": {"execution_control": {"output_data": {"commands": [{"command_id": "CMD-1"}]}}},
+    }
+    status = {
+        "workflow_id": "wf-actual-request",
+        "status": "completed",
+        "context": {
+            "mission_input": {"observations": [{"observation_id": "OBS-SHOULD-NOT-BE-PRIMARY"}]},
+        },
+        "result": {
+            "activity_results": [{
+                "activity_id": "A-SIM",
+                "work_item": "simulate",
+                "role": "simulation_execution",
+                "status": "completed",
+                "input": actual_input,
+                "input_source": "agent_request.input",
+            }],
+        },
+    }
+    work = {"work_list": [{
+        "activity_id": "A-SIM",
+        "work_item": "simulate",
+        "role": "simulation_execution",
+        "status": "completed",
+        "input_variable": "MissionInput",
+        "output_variable": "ExecutionSimulationResult",
+    }]}
+
+    view = build_workflow_view(status, work_list=work)
+    detail = view["activity_details"]["A-SIM"]
+
+    assert detail["input_source"] == "agent_request.input"
+    assert detail["input_detail"]["phase"]["value"] == "strike"
+    assert detail["input_detail"]["results"]["value"] == actual_input["results"]
+    semantics = {row["key"]: row for row in detail["input_semantics"]}
+    assert semantics["results.execution_control"]["label"] == "上游结果集合 / 执行控制结果"
+    assert semantics["results.execution_control"]["path"] == "agent_request.input.results.execution_control"
+    assert (
+        detail["input_detail"]["results.execution_control"]["value"]
+        == actual_input["results"]["execution_control"]
+    )
+    assert "observations" not in detail["input_detail"]
 
 
 def test_workflow_view_uses_real_work_list_progress_and_structured_results() -> None:
@@ -230,15 +413,16 @@ def test_workflow_view_v2_verifies_only_algorithms_with_success_evidence() -> No
     view = build_workflow_view(status, work_list=work, trace=trace, submission=submission)
     algorithms = {row["algorithm_id"]: row for row in view["algorithms"]["items"]}
 
-    assert algorithms["track-kalman"]["status"] == "verified"
-    assert algorithms["track-kalman"]["duration_ms"] == 31
-    assert algorithms["track-kalman"]["result_summary"] == [{"key": "track_count", "value": 2}]
+    assert algorithms["track-kalman"]["status"] == "declared"
+    assert algorithms["track-kalman"]["duration_ms"] is None
+    assert algorithms["track-kalman"]["duration_source"] is None
+    assert algorithms["track-kalman"]["result_summary"] is None
     assert algorithms["risk-ranker"]["status"] == "declared"
     assert algorithms["risk-ranker"]["execution_status"] == "failed"
     assert algorithms["planned-only"]["status"] == "declared"
     assert algorithms["trace-only"]["status"] == "verified"
     assert algorithms["planned-only"]["version"] is None
-    assert view["algorithms"]["counts"]["verified"] == 2
+    assert view["algorithms"]["counts"]["verified"] == 1
 
 
 def test_workflow_view_joins_safe_activity_input_output_calls_algorithms_and_trace() -> None:
@@ -273,10 +457,10 @@ def test_workflow_view_joins_safe_activity_input_output_calls_algorithms_and_tra
     trace = {"trace": [
         {
             "event": "agent_call_completed",
-            "activity_id": "A-1",
+            "work_item": "track",
             "agent": "TrackThreatAgent",
             "instance_id": "track-01",
-            "timestamp": "2026-08-17T01:02:03Z",
+            "ts": "2026-08-17T01:02:03Z",
         },
         {"event": "workflow_heartbeat", "timestamp": "2026-08-17T01:02:04Z"},
     ]}
@@ -293,6 +477,8 @@ def test_workflow_view_joins_safe_activity_input_output_calls_algorithms_and_tra
     assert detail["algorithms"][0]["algorithm_id"] == "motr-neural-kalman"
     assert detail["trace_refs"] == ["trace:0"]
     assert detail["trace_events"][0]["event"] == "agent_call_completed"
+    assert detail["trace_events"][0]["timestamp"] == "2026-08-17T01:02:03Z"
+    assert detail["trace_events"][0]["work_item"] == "track"
     assert detail["depends_on"] == ["A-0"]
     assert view["activity_details"]["A-2"]["input_summary"] is None
     assert view["activity_details"]["A-2"]["output_summary"] is None
@@ -321,6 +507,88 @@ def test_activity_detail_does_not_show_planned_algorithms_as_runtime_calls() -> 
         submission=submission,
     )
     assert view["activity_details"]["A-2"]["algorithms"] == []
+
+
+def test_activity_detail_ignores_stage_transfer_algorithm_plan() -> None:
+    status = {
+        "workflow_id": "wf-stage-transfer-plan",
+        "status": "completed",
+        "result": {"activity_results": [{
+            "activity_id": "A-SCHED",
+            "work_item": "schedule",
+            "role": "task_scheduling",
+            "status": "completed",
+            "input": {"mission_input": {"stage_transfer": {"algorithm_plan": [
+                {"algorithm_id": "association", "requirement_id": "M02"},
+                {"algorithm_id": "large_language_model", "requirement_id": "M09"},
+            ]}}},
+            "output": {
+                "algorithm_invocations": [{
+                    "algorithm_id": "marl_ppo_task_scheduler",
+                    "backend_type": "python_http_service",
+                    "execution_mode": "algorithm_library",
+                    "status": "completed",
+                    "request_id": "REQ-SCHED",
+                    "input": {"tasks": [{"task_id": "TASK-001"}]},
+                    "output": {"sensor_assignments": [{"sensor_id": "ESCORT-01"}]},
+                    "usage": {"duration_ms": 3.5},
+                }],
+            },
+        }]},
+    }
+
+    view = build_workflow_view(status)
+    algorithms = {
+        row["algorithm_id"]: row
+        for row in view["activity_details"]["A-SCHED"]["algorithms"]
+    }
+
+    assert set(algorithms) == {"marl_ppo_task_scheduler"}
+    assert algorithms["marl_ppo_task_scheduler"]["invocation_count"] == 1
+
+
+def test_activity_detail_does_not_inherit_upstream_algorithm_calls_from_input() -> None:
+    status = {
+        "workflow_id": "wf-upstream-input",
+        "status": "completed",
+        "result": {"activity_results": [
+            {
+                "activity_id": "A-SCHED",
+                "work_item": "schedule",
+                "role": "task_scheduling",
+                "status": "completed",
+                "output": {"algorithm_calls": [{
+                    "algorithm_id": "marl_ppo_task_scheduler",
+                    "backend_type": "python_http_service",
+                    "execution_mode": "algorithm_library",
+                    "status": "completed",
+                    "duration_ms": 2.0,
+                }]},
+            },
+            {
+                "activity_id": "A-PLAN",
+                "work_item": "plan",
+                "role": "decision_planning",
+                "status": "completed",
+                "input": {"task_scheduling_result": {"algorithm_calls": [{
+                    "algorithm_id": "marl_ppo_task_scheduler",
+                    "backend_type": "python_http_service",
+                    "execution_mode": "algorithm_library",
+                    "status": "completed",
+                    "duration_ms": 2.0,
+                }]}},
+                "output": {"candidate_plans": [{"plan_id": "P-1"}]},
+            },
+        ]},
+    }
+
+    view = build_workflow_view(status)
+
+    assert [
+        row["algorithm_id"]
+        for row in view["activity_details"]["A-SCHED"]["algorithms"]
+    ] == ["marl_ppo_task_scheduler"]
+    assert view["activity_details"]["A-PLAN"]["algorithms"] == []
 
 
 def test_workflow_view_infers_local_mode_instances_and_dereferences_outputs() -> None:
@@ -416,6 +684,95 @@ def test_algorithm_call_duration_and_model_id_are_preserved() -> None:
     assert view["activity_details"]["A-TIA"]["agent_call"]["duration_ms"] == 18.75
 
 
+def test_algorithm_duration_does_not_inherit_activity_duration() -> None:
+    status = {
+        "workflow_id": "wf-algorithm-duration-not-agent-duration",
+        "status": "completed",
+        "result": {"activity_results": [{
+            "activity_id": "A-CLOSED",
+            "role": "closed_loop",
+            "status": "completed",
+            "agent": "Closed_Loop_Optimization_Agent",
+            "metrics": {"duration_ms": 13198.283},
+            "output": {
+                "selected_algorithms": [
+                    "mission_feature_adapter",
+                    "mission_completion_scorer",
+                ],
+            },
+        }]},
+    }
+    work = {"work_list": [{
+        "activity_id": "A-CLOSED",
+        "role": "closed_loop",
+        "status": "completed",
+        "metrics": {"duration_ms": 13198.283},
+    }]}
+
+    view = build_workflow_view(status, work_list=work)
+    algorithms = {
+        row["algorithm_id"]: row
+        for row in view["activity_details"]["A-CLOSED"]["algorithms"]
+    }
+
+    assert view["activity_details"]["A-CLOSED"]["agent_call"]["duration_ms"] == 13198.283
+    assert "mission_feature_adapter" not in algorithms
+    assert "mission_completion_scorer" not in algorithms
+
+
+def test_algorithm_duration_uses_algorithm_own_latency_fields() -> None:
+    status = {
+        "workflow_id": "wf-algorithm-own-latency",
+        "status": "completed",
+        "result": {"activity_results": [{
+            "activity_id": "A-PLAN",
+            "role": "decision_planning",
+            "status": "completed",
+            "agent": "Decision_Planning_Agent",
+            "metrics": {"duration_ms": 999.0},
+            "output": {
+                "algorithm_calls": [
+                    {
+                        "algorithm_id": "decision_planning_core",
+                        "version": "1.0.0",
+                        "backend_type": "python_http_service",
+                        "task": "plan_generation",
+                        "request_id": "REQ-PLAN-1",
+                        "input": {"objective": "protect convoy"},
+                        "output": {"candidate_plans": [{"plan_id": "P-1"}]},
+                        "usage": {"latency_ms": 12.5},
+                    },
+                    {
+                        "algorithm_id": "compliance_authorization_core",
+                        "version": "1.0.0",
+                        "latency_ms": 7.25,
+                    },
+                ],
+            },
+        }]},
+    }
+
+    view = build_workflow_view(status)
+    algorithms = {
+        row["algorithm_id"]: row
+        for row in view["activity_details"]["A-PLAN"]["algorithms"]
+    }
+
+    assert algorithms["decision_planning_core"]["duration_ms"] == 12.5
+    assert algorithms["decision_planning_core"]["latency_ms"] == 12.5
+    assert algorithms["decision_planning_core"]["duration_source"] == "algorithm_invocations_sum"
+    assert algorithms["decision_planning_core"]["backend_type"] == "python_http_service"
+    assert algorithms["decision_planning_core"]["task"] == "plan_generation"
+    assert algorithms["decision_planning_core"]["invocation_count"] == 1
+    assert algorithms["decision_planning_core"]["invocations"][0]["request_id"] == "REQ-PLAN-1"
+    assert algorithms["decision_planning_core"]["invocations"][0]["input"] == {"objective": "protect convoy"}
+    assert algorithms["decision_planning_core"]["invocations"][0]["output"] == {
+        "candidate_plans": [{"plan_id": "P-1"}]
+    }
+    assert algorithms["compliance_authorization_core"]["duration_ms"] == 7.25
+    assert view["orchestration"]["activities"][0]["duration_ms"] == 999.0
+
+
 def test_activity_duration_falls_back_to_start_and_finish_times() -> None:
     view = build_workflow_view(
         {
@@ -437,7 +794,11 @@ def test_activity_duration_falls_back_to_start_and_finish_times() -> None:
     )
 
     assert view["orchestration"]["activities"][0]["duration_ms"] == 4521.157
+    assert view["orchestration"]["activities"][0]["dispatch_duration_ms"] == 4521.157
+    assert view["orchestration"]["activities"][0]["agent_duration_ms"] == 0.0
     assert view["activity_details"]["A-SCHED"]["agent_call"]["duration_ms"] == 4521.157
+    assert view["activity_details"]["A-SCHED"]["agent_call"]["dispatch_duration_ms"] == 4521.157
+    assert view["activity_details"]["A-SCHED"]["agent_call"]["agent_duration_ms"] == 0.0
 
 
 def test_activity_detail_does_not_expose_arbitrary_explicit_summary_objects() -> None:

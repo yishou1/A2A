@@ -560,9 +560,14 @@ class GatewayTestCase(unittest.TestCase):
             "tracks": [{"track_id": "TRK-AMOS-01", "lat": 22.1, "lon": 121.6}],
             "summary": {"track_count": 1},
         }
+        mission_input = {
+            "observations": [{"observation_id": "OBS-REAL-1"}],
+            "objective": "read checkpoint inputs",
+        }
         self.commander.checkpoints[workflow_id] = {
             "workflow_id": workflow_id,
             "context": {
+                "mission_input": mission_input,
                 "tracking_result": [{
                     "activity_id": "activity-track",
                     "value": tracking_value,
@@ -586,6 +591,7 @@ class GatewayTestCase(unittest.TestCase):
             current.result["outputs"]["tracking_result"][0]["value"],
             tracking_value,
         )
+        self.assertEqual(current.result["inputs"]["mission_input"], mission_input)
         self.assertEqual(current.result["activity_results"][0]["output"], tracking_value)
         persisted = self.store.read_workflow(workflow_id)
         self.assertEqual(persisted["projection"]["result"], current.result)

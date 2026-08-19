@@ -104,13 +104,38 @@ def run_agent_with_algolib(agent_name: str, request: AgentRequest) -> AgentRespo
         )
 
     outputs = result.get("outputs") if isinstance(result.get("outputs"), dict) else {}
+    usage = result.get("usage") if isinstance(result.get("usage"), dict) else {}
+    reported_latency = usage.get("latency_ms") or usage.get("duration_ms")
+    duration_ms = round(float(reported_latency), 3) if reported_latency is not None else None
+    invocation = {
+        "algorithm_id": call.algorithm_id,
+        "algorithm_name": call.algorithm_id,
+        "version": result.get("version") or call.version,
+        "backend_type": call.backend_type,
+        "execution_mode": "algorithm_library",
+        "status": "completed",
+        "request_id": result.get("request_id") or request.request_id,
+        "trace_id": result.get("trace_id") or request.request_id,
+        "params": call.params,
+        "reason": call.reason,
+        "input": call.inputs,
+        "output": outputs,
+        "usage": usage,
+        "duration_ms": duration_ms,
+        "latency_ms": duration_ms,
+        "duration_source": "algorithm_usage" if duration_ms is not None else None,
+    }
     response_result = {
         **outputs,
+        "algorithm_calls": [
+            {key: value for key, value in invocation.items() if key not in {"input", "output", "usage"}}
+        ],
+        "algorithm_invocations": [invocation],
         "llm_plan": llm_plan,
         "algolib_result": {
             "algorithm_id": result.get("algorithm_id"),
             "version": result.get("version"),
-            "usage": result.get("usage", {}),
+            "usage": usage,
         },
     }
     return AgentResponse(

@@ -334,7 +334,8 @@ echo "[agents] starting independent A2A processes"
 start_service agent-tactical-intelligence "$COMMANDER_DIR" "http://127.0.0.1:10200/health" \
   env TIA_PORT=10200 TIA_NACOS_REGISTER=1 "$A2A_PYTHON" -m tactical_intelligence_agent.main
 start_service agent-track-threat "$COMMANDER_DIR" "http://127.0.0.1:8102/health" \
-  env SERVICE_PORT=8102 SERVICE_IP=127.0.0.1 SERVICE_NAME=A2A-Agent AGENT_ROLE=track_threat \
+  env NACOS_ENABLED=true SERVICE_PORT=8102 SERVICE_IP=127.0.0.1 SERVICE_NAME=A2A-Agent AGENT_ROLE=track_threat \
+  ALGORITHM_LIBRARY_ENABLED=true ALGORITHM_LIBRARY_REQUIRED=true ALGOLIB_BASE_URL="${ALGOLIB_BASE_URL:-http://127.0.0.1:8088}" \
   "$A2A_PYTHON" -m uvicorn track_threat_agent.app.main:app --host 127.0.0.1 --port 8102
 start_service agent-task-scheduling "$COMMANDER_DIR" "http://127.0.0.1:10201/health" \
   env TASK_SCHEDULING_AGENT_PORT=10201 "$A2A_PYTHON" -m task_scheduling_agent.main

@@ -78,7 +78,12 @@ def _mock_run_outputs(algorithm_id: str, inputs: dict, **kwargs):
 def _mock_run_algorithm(*, request_id: str, trace_id: str, call):
     return {
         "ok": True,
+        "request_id": request_id,
+        "trace_id": trace_id,
+        "algorithm_id": call.algorithm_id,
+        "version": call.version,
         "outputs": _mock_run_outputs(call.algorithm_id, call.inputs),
+        "usage": {"latency_ms": 4.5},
     }
 
 
@@ -189,6 +194,13 @@ class ClosedLoopAlgolibOrchestrationTest(unittest.TestCase):
         ])
         self.assertEqual(len(output["llm_algorithm_plans"]), 1)
         self.assertEqual(output["llm_algorithm_plans"][0]["mode"], "llm")
+        self.assertGreaterEqual(len(output["algorithm_invocations"]), 8)
+        first_invocation = output["algorithm_invocations"][0]
+        self.assertEqual(first_invocation["algorithm_id"], "mission_feature_adapter")
+        self.assertEqual(first_invocation["duration_ms"], 4.5)
+        self.assertIn("input", first_invocation)
+        self.assertIn("output", first_invocation)
+        self.assertIn("algorithm_calls", output)
 
     def test_live_targets_accept_null_optional_numeric_fields(self):
         null_numeric_target = {
@@ -288,13 +300,19 @@ class ExecutionControlContractTest(unittest.TestCase):
         self.assertTrue(any("missing_executor_role" in item for item in problems))
 
     def test_algolib_success_wrap(self):
-        with mock.patch(
-            "execution_control_agent.algolib_runtime.AlgorithmLibraryClient.run_outputs",
-            side_effect=_mock_run_outputs,
-        ):
-            result = run_execution_control_via_algolib({"phase": "strike", "results": {}})
+        with mock.patch.dict(os.environ, {"ALGOLIB_ENABLE_LLM": "false"}, clear=False):
+            with mock.patch(
+                "execution_control_agent.algolib_runtime.AlgorithmLibraryClient.run_outputs",
+                side_effect=_mock_run_outputs,
+            ):
+                result = run_execution_control_via_algolib({"phase": "strike", "results": {}})
         self.assertEqual(result["output_data"]["backend"], "algolib")
         self.assertEqual(result["output_data"]["commands"][0]["executor_role"], "artillery")
+        invocation = result["output_data"]["algorithm_invocations"][0]
+        self.assertEqual(invocation["algorithm_id"], "execution_control_planner")
+        self.assertEqual(invocation["duration_ms"], 12.0)
+        self.assertEqual(invocation["input"]["phase"], "strike")
+        self.assertIn("commands", invocation["output"])
 
     def test_algolib_llm_planning_success_wrap(self):
         def planned_outputs(**kwargs):
@@ -325,6 +343,7 @@ class ExecutionControlContractTest(unittest.TestCase):
             {
                 "EXECUTION_CONTROL_BACKEND": "algolib",
                 "ALGOLIB_FALLBACK_LOCAL": "true",
+                "ALGOLIB_ENABLE_LLM": "false",
             },
             clear=False,
         ):
@@ -336,6 +355,11 @@ class ExecutionControlContractTest(unittest.TestCase):
 
                 result = run_execution_control_with_backend({"phase": "strike", "results": {}})
         self.assertEqual(result["output_data"]["backend"], "local_fallback")
+        self.assertEqual(
+            result["output_data"]["algorithm_invocations"][0]["backend_type"],
+            "local_fallback",
+        )
+        self.assertIn("commands", result["output_data"]["algorithm_invocations"][0]["output"])
         self.assertTrue(
             any("contract failed" in str(item) or "algolib_fallback" in str(item) for item in result["output_data"]["warnings"])
         )

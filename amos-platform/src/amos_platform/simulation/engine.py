@@ -1648,7 +1648,7 @@ class SimEngine:
         if not truth_target_id:
             return {"eligible": False, "reason": "航迹无法与当前目标稳定关联"}
         if truth_target_id in set(policy.get("protected_truth_ids") or []):
-            return {"eligible": False, "reason": "目标命中剧本禁射保护规则"}
+            return {"eligible": False, "reason": "目标命中任务禁射保护规则"}
         return {
             "eligible": True,
             "track_id": track_id,
@@ -1744,7 +1744,7 @@ class SimEngine:
             asset_ids = list(policy.get("authorized_asset_ids") or [])
             weapon_names = list(policy.get("authorized_weapons") or [])
             if not asset_ids or not weapon_names:
-                return {"error": "当前剧本未配置警告目标校验规则"}
+                return {"error": "当前任务未配置警告目标校验规则"}
             eligibility = self.engagement_eligibility(
                 track_id,
                 asset_id=str(asset_ids[0]),

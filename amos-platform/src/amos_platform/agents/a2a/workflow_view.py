@@ -27,6 +27,140 @@ DETAIL_MAX_DEPTH = 5
 DETAIL_MAX_LIST = 25
 DETAIL_MAX_DICT = 50
 DETAIL_MAX_STRING = 2000
+SEMANTIC_FIELD_LIMIT = 80
+TRANSPARENT_IO_FIELD_KEYS = {
+    "mission_input",
+    "agent_request",
+    "input_data",
+    "output_data",
+    "results",
+}
+
+IO_FIELD_LABELS = {
+    "scenario_id": "任务标识",
+    "scenario_name": "任务名称",
+    "mission_id": "任务标识",
+    "mission_type": "任务类型",
+    "objective": "任务目标",
+    "intelligence_text": "情报文本",
+    "observations": "当前传感器观测",
+    "perception_frames": "感知历史帧",
+    "attachments": "雷达/AIS/图像/遥测证据",
+    "evidence": "已释放证据引用",
+    "contacts": "初步融合航迹",
+    "friendly_platforms": "友方平台状态",
+    "protected_assets": "受保护资产",
+    "environment": "环境与通信状态",
+    "constraints": "任务与处置约束",
+    "stage_transfer": "阶段移交信息",
+    "counts": "输入数量统计",
+    "phase": "执行阶段",
+    "results": "上游结果集合",
+    "context": "调用上下文",
+    "context_keys": "上下文字段列表",
+    "perception_detection": "感知检测结果",
+    "recognition": "识别分类结果",
+    "data_fusion": "数据融合结果",
+    "threat_evaluation": "威胁评估结果",
+    "execution_control": "执行控制结果",
+    "communication": "通信状态结果",
+    "resource_allocation": "资源分配结果",
+    "plan_decision": "方案决策结果",
+    "recon": "侦察结果",
+    "artillery": "火力执行结果",
+    "evaluator": "评估结果",
+    "assault": "突击执行结果",
+    "compliance_authorization": "合规授权结果",
+    "scene": "任务场景",
+    "tracks": "融合航迹",
+    "targets": "目标识别结果",
+    "detections": "检测结果",
+    "classification_candidates": "目标分类候选",
+    "contact_associations": "接触关联结果",
+    "location_confidence": "定位置信度",
+    "groups": "航迹分组",
+    "threats": "威胁目标",
+    "ranked_threats": "威胁排序",
+    "unified_threat_ranking": "综合威胁排序",
+    "decision_risk_assessments": "决策风险评估",
+    "risk_assessments": "风险评估",
+    "asset_impacts": "资产影响评估",
+    "target_histories": "目标历史轨迹",
+    "planning_objectives": "规划目标",
+    "scheduled_tasks": "任务调度结果",
+    "resources": "资源分配结果",
+    "sensor_assignments": "传感器分配结果",
+    "reattack_plan": "再攻击计划",
+    "covered_targets": "已覆盖目标",
+    "reattack_targets": "需再攻击目标",
+    "planning_input": "决策规划输入",
+    "candidate_plans": "候选处置方案",
+    "recommended_plan_id": "推荐方案编号",
+    "handoff_notes": "移交说明",
+    "rag_evidence": "知识检索证据",
+    "rag_answer": "知识检索回答",
+    "commands": "执行指令",
+    "authorization": "授权状态",
+    "plan_status": "方案状态",
+    "decision": "授权决策",
+    "approved_for_demo_handoff": "演示移交批准",
+    "requires_human_approval": "是否需要人工授权",
+    "violations": "违规项",
+    "blocked_items": "阻断项",
+    "selected_plan_id": "选定方案编号",
+    "authorization_status": "授权状态",
+    "per_plan_results": "分方案审查结果",
+    "compliance": "合规审查结果",
+    "execution_result": "执行仿真结果",
+    "strike_results": "打击执行结果",
+    "engagements": "交战记录",
+    "assessment": "效果评估",
+    "effect_assessment": "效果评估",
+    "completion_ratio": "任务完成度",
+    "remaining_risk": "剩余风险",
+    "replan_required": "是否需要重规划",
+    "recommendations": "闭环建议",
+    "summary": "结果摘要",
+    "events": "事件序列",
+    "provenance": "输出来源",
+    "routing": "分发建议",
+    "semantic_vector": "语义向量",
+    "knowledge_graph": "知识图谱",
+    "task_schedule": "任务计划",
+    "output_attachments": "输出附件",
+    "consumer_guide": "下游使用说明",
+    "algorithm": "算法标识",
+    "algorithms": "算法列表",
+    "assessments": "评估明细",
+    "llm_plan": "大模型选算法记录",
+    "algolib_result": "算法库原始结果",
+    "evidence_refs": "证据引用",
+    "algorithm_calls": "算法调用记录",
+    "selected_algorithms": "实际选用算法",
+    "schema_version": "数据结构版本",
+    "task_id": "任务标识",
+    "packet_id": "情报包编号",
+    "created_at": "生成时间",
+    "algorithm_level": "算法级别",
+    "task_type": "任务类型",
+    "input_data": "算法输入数据",
+    "output_data": "算法输出数据",
+    "accuracy": "算法置信/准确度",
+    "latency": "算法耗时",
+    "latency_ms": "算法耗时毫秒",
+    "backend": "执行后端",
+    "method": "处理方法",
+    "scoring_weights": "方案评分权重",
+    "weight_source": "权重来源",
+    "adjustment_suggestions": "调整建议",
+    "damage_assessment": "毁伤评估",
+    "damage_probability": "毁伤概率",
+    "mission_completion": "任务完成度",
+    "requirement_report": "需求满足报告",
+    "meets_requirements": "是否满足需求",
+    "status": "执行状态",
+    "safety_boundary": "安全边界",
+}
 
 
 def _utc_now_iso() -> str:
@@ -186,6 +320,10 @@ def build_submission_snapshot(
             "evidence": len(mission.get("evidence") or []),
         },
         "environment": deepcopy(mission.get("environment") or {}),
+        "observations": deepcopy(exchange_observations or mission.get("observations") or []),
+        "perception_frames": deepcopy(mission.get("perception_frames") or []),
+        "friendly_platforms": deepcopy(exchange_assets or mission.get("friendly_platforms") or []),
+        "protected_assets": deepcopy(mission.get("protected_assets") or []),
         "contacts": ([
             {
                 "contact_id": item.get("track_id"),
@@ -346,9 +484,11 @@ def _normalize_activities(status: dict[str, Any], work_payload: Any) -> list[dic
         instance_id = merged.get("instance_id") or merged.get("agent_instance_id")
         started_at = merged.get("started_at") or metrics.get("started_at")
         finished_at = merged.get("finished_at") or metrics.get("finished_at")
-        duration_ms = metrics.get("duration_ms")
+        dispatch_duration_ms = _duration_between_ms(started_at, finished_at)
+        agent_duration_ms = metrics.get("duration_ms")
+        duration_ms = agent_duration_ms
         if _positive_duration_ms(duration_ms) is None:
-            duration_ms = _duration_between_ms(started_at, finished_at)
+            duration_ms = dispatch_duration_ms
         normalized.append({
             "index": len(normalized) + 1,
             "activity_id": merged.get("activity_id") or merged.get("activatity_id"),
@@ -362,6 +502,8 @@ def _normalize_activities(status: dict[str, Any], work_payload: Any) -> list[dic
             "function_ids": _explicit_function_points(merged),
             "error": merged.get("error"),
             "duration_ms": duration_ms,
+            "agent_duration_ms": agent_duration_ms,
+            "dispatch_duration_ms": dispatch_duration_ms,
             "started_at": started_at,
             "finished_at": finished_at,
             "execution_mode": _execution_mode(merged),
@@ -487,22 +629,34 @@ def _result_outputs(status: dict[str, Any]) -> dict[str, Any]:
     return result.get("outputs") if isinstance(result.get("outputs"), dict) else {}
 
 
+def _result_inputs(status: dict[str, Any]) -> dict[str, Any]:
+    result = status.get("result") if isinstance(status.get("result"), dict) else {}
+    return result.get("inputs") if isinstance(result.get("inputs"), dict) else {}
+
+
 def _unwrap_context_value(value: Any) -> Any:
+    return _unwrap_context_value_with_path(value, "")[0]
+
+
+def _unwrap_context_value_with_path(value: Any, path: str) -> tuple[Any, str]:
     if isinstance(value, list):
-        for item in reversed(value):
-            found = _unwrap_context_value(item)
+        for index in range(len(value) - 1, -1, -1):
+            found, found_path = _unwrap_context_value_with_path(
+                value[index],
+                f"{path}[{index}]",
+            )
             if found not in (None, {}, []):
-                return found
-        return None
+                return found, found_path
+        return None, path
     if not isinstance(value, dict):
-        return value
+        return value, path
     if "value" in value:
-        return _unwrap_context_value(value["value"])
+        return _unwrap_context_value_with_path(value["value"], f"{path}.value")
     if "output" in value:
-        return _unwrap_context_value(value["output"])
+        return _unwrap_context_value_with_path(value["output"], f"{path}.output")
     if "artifact" in value:
-        return _unwrap_context_value(value["artifact"])
-    return value
+        return _unwrap_context_value_with_path(value["artifact"], f"{path}.artifact")
+    return value, path
 
 
 def _safe_detail_value(value: Any, *, depth: int = 0) -> Any:
@@ -571,24 +725,97 @@ def _detail_map(summary: Any, value: Any, *, variable: str | None = None, source
                     selected = value[key[:-6]]
             if selected is None:
                 selected = item.get("value")
+                summary_only = True
+                path = f"{source}._summary.{key}" if source else f"_summary.{key}"
+            else:
+                summary_only = False
+                path = f"{source}.{key}" if source else key
             detail[key] = {
                 "variable": variable,
                 "source": source,
                 "key": key,
+                "label": IO_FIELD_LABELS.get(key, key),
+                "path": path,
+                "summary_only": summary_only,
                 "value": _safe_detail_value(selected),
             }
+    if isinstance(value, dict):
+        for key, selected in value.items():
+            key = str(key)
+            detail.setdefault(key, {
+                "variable": variable,
+                "source": source,
+                "key": key,
+                "label": IO_FIELD_LABELS.get(key, key),
+                "path": f"{source}.{key}" if source else key,
+                "value": _safe_detail_value(selected),
+            })
+        for row in _semantic_field_rows(value, variable=variable, source=source or ""):
+            detail.setdefault(str(row["key"]), {
+                "variable": variable,
+                "source": source,
+                "key": row["key"],
+                "label": row["label"],
+                "path": row["path"],
+                "value": deepcopy(row["value"]),
+            })
     return detail
 
 
-def _submission_input_detail(submission: dict[str, Any], summary: Any) -> dict[str, Any]:
-    value = {
-        "counts": deepcopy(submission.get("counts") or {}),
-        "stage_transfer": deepcopy(submission.get("stage_transfer") or {}),
-        "contacts": deepcopy(submission.get("contacts") or []),
-        "attachments": deepcopy(submission.get("attachments") or []),
-        "environment": deepcopy(submission.get("environment") or {}),
+def _submission_input_value(submission: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "counts", "stage_transfer", "contacts", "observations",
+        "perception_frames", "attachments", "friendly_platforms",
+        "protected_assets", "environment", "objective",
+    )
+    return {
+        key: deepcopy(submission[key])
+        for key in keys
+        if key in submission
     }
-    return _detail_map(summary, value, variable="MissionInput", source="mission_input")
+
+
+def _status_context(status: dict[str, Any]) -> dict[str, Any]:
+    return status.get("context") if isinstance(status.get("context"), dict) else {}
+
+
+def _variable_value(
+    variable_name: Any,
+    *,
+    status: dict[str, Any],
+    submission: dict[str, Any],
+) -> tuple[Any, str]:
+    variable = str(variable_name or "")
+    key = _context_key_for_variable(variable)
+    context = _status_context(status)
+    if key and key in context:
+        value, source = _unwrap_context_value_with_path(
+            context.get(key),
+            f"context.{key}",
+        )
+        if value is not None:
+            return value, source
+    inputs = _result_inputs(status)
+    if key and key in inputs:
+        value, source = _unwrap_context_value_with_path(
+            inputs.get(key),
+            f"result.inputs.{key}",
+        )
+        if value is not None:
+            return value, source
+    outputs = _result_outputs(status)
+    if key and key in outputs:
+        value, source = _unwrap_context_value_with_path(
+            outputs.get(key),
+            f"result.outputs.{key}",
+        )
+        if isinstance(value, dict) and set(value) == {"$ref"}:
+            value = None
+        if value is not None:
+            return value, source
+    if key == "mission_input":
+        return _submission_input_value(submission), "submission.mission_input"
+    return {}, key or "activity"
 
 
 def _variable_detail(
@@ -599,13 +826,97 @@ def _variable_detail(
     submission: dict[str, Any],
 ) -> dict[str, Any]:
     variable = str(variable_name or "")
-    key = _context_key_for_variable(variable)
-    if key == "mission_input":
-        return _submission_input_detail(submission, summary)
-    value = _unwrap_context_value(_result_outputs(status).get(key))
+    value, source = _variable_value(
+        variable,
+        status=status,
+        submission=submission,
+    )
+    return _detail_map(summary, value, variable=variable or None, source=source)
+
+
+def _io_value_type(value: Any) -> str:
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
     if value is None:
-        value = {}
-    return _detail_map(summary, value, variable=variable or None, source=key)
+        return "null"
+    return "string"
+
+
+def _io_fields(value: Any, *, variable: Any, source: str) -> list[dict[str, Any]]:
+    """Expose only fields that exist in the backend value, with traceable labels."""
+    if not isinstance(value, dict):
+        return []
+    fields = []
+    for key, item in value.items():
+        key = str(key)
+        row = {
+            "key": key,
+            "label": IO_FIELD_LABELS.get(key, key),
+            "path": f"{source}.{key}" if source else key,
+            "variable": str(variable or "") or None,
+            "value_type": _io_value_type(item),
+            "value": _safe_detail_value(item),
+        }
+        if isinstance(item, (list, dict)):
+            row["count"] = len(item)
+        fields.append(row)
+    return fields
+
+
+def _semantic_field_rows(value: Any, *, variable: Any, source: str) -> list[dict[str, Any]]:
+    """Expose top-level fields plus useful wrapper children, all backed by real values."""
+    if not isinstance(value, dict):
+        return []
+    fields: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def append_field(key: str, item: Any, path: str, *, parent_label: str | None = None) -> None:
+        if len(fields) >= SEMANTIC_FIELD_LIMIT or key in seen:
+            return
+        seen.add(key)
+        label_key = key.split(".")[-1]
+        label = IO_FIELD_LABELS.get(label_key, label_key)
+        if parent_label and "." in key:
+            label = f"{parent_label} / {label}"
+        row = {
+            "key": key,
+            "label": label,
+            "path": path,
+            "variable": str(variable or "") or None,
+            "value_type": _io_value_type(item),
+            "value": _safe_detail_value(item),
+        }
+        if isinstance(item, (list, dict)):
+            row["count"] = len(item)
+        fields.append(row)
+
+    for key, item in value.items():
+        key_text = str(key)
+        path = f"{source}.{key_text}" if source else key_text
+        append_field(key_text, item, path)
+        if key_text not in TRANSPARENT_IO_FIELD_KEYS or not isinstance(item, dict):
+            continue
+        parent_label = IO_FIELD_LABELS.get(key_text, key_text)
+        for child_key, child in item.items():
+            child_key_text = str(child_key)
+            append_field(
+                f"{key_text}.{child_key_text}",
+                child,
+                f"{path}.{child_key_text}",
+                parent_label=parent_label,
+            )
+    return fields
+
+
+def _semantic_io_items(value: Any, *, variable: Any, source: str) -> list[dict[str, Any]]:
+    """Business-readable IO items backed one-to-one by real backend JSON fields."""
+    return _semantic_field_rows(value, variable=variable, source=source)
 
 
 def _submission_input_summary(submission: dict[str, Any]) -> list[dict[str, Any]]:
@@ -681,9 +992,10 @@ def _normalize_trace(payload: Any) -> list[dict[str, Any]]:
     for row in rows:
         event = row.get("event") or row.get("event_type") or row.get("type") or "trace"
         normalized.append({
-            "timestamp": row.get("timestamp") or row.get("time"),
+            "timestamp": row.get("timestamp") or row.get("time") or row.get("ts"),
             "event": event,
             "activity_id": row.get("activity_id") or row.get("activatity_id"),
+            "work_item": row.get("work_item"),
             "role": row.get("role"),
             "agent": row.get("agent") or row.get("target"),
             "instance_id": row.get("instance_id") or row.get("agent_instance_id"),
@@ -773,21 +1085,119 @@ def _coverage_rows(value: Any, *, kind: str) -> list[dict[str, Any]]:
     return rows
 
 
-def _algorithm_evidence(value: Any, *, depth: int = 0, category: str | None = None) -> list[dict[str, Any]]:
+def _as_positive_float(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _algorithm_own_latency_ms(value: dict[str, Any]) -> float | None:
+    """Return only latency/duration explicitly attached to one algorithm record."""
+    for key in ("duration_ms", "latency_ms"):
+        number = _as_positive_float(value.get(key))
+        if number is not None:
+            return number
+
+    for wrapper_key in ("usage", "metrics"):
+        wrapper = value.get(wrapper_key)
+        if not isinstance(wrapper, dict):
+            continue
+        for key in ("duration_ms", "latency_ms"):
+            number = _as_positive_float(wrapper.get(key))
+            if number is not None:
+                return number
+
+    output_data = value.get("output_data")
+    if isinstance(output_data, dict):
+        number = _as_positive_float(output_data.get("latency_ms"))
+        if number is not None:
+            return number
+    return None
+
+
+RUNTIME_ALGORITHM_COLLECTION_KEYS = {
+    "algorithm_calls",
+    "algorithm_invocations",
+    "model_calls",
+    "model_invocations",
+}
+
+NON_RUNTIME_ALGORITHM_KEYS = {
+    "actual_algorithms",
+    "algorithm_catalog",
+    "algorithm_library",
+    "algorithm_plan",
+    "candidate_algorithms",
+    "llm_plan",
+    "raw_llm_plan",
+    "selected_algorithms",
+}
+
+
+def _has_runtime_algorithm_marker(value: dict[str, Any]) -> bool:
+    """Return True when an algorithm-shaped dict is execution evidence.
+
+    Scenario payloads also contain planning rows such as
+    ``stage_transfer.algorithm_plan``.  Those rows have an ``algorithm_id`` but
+    are not calls.  Runtime evidence must either appear under a known runtime
+    collection or carry call-specific fields itself.
+    """
+    if value.get("used") is True:
+        return True
+    event_name = str(value.get("event") or value.get("event_type") or "")
+    if event_name.startswith(("algorithm_", "model_inference_")):
+        return True
+    if value.get("backend_type") or value.get("execution_mode"):
+        return True
+    if value.get("request_id") or value.get("trace_id"):
+        return True
+    if any(key in value for key in ("input", "inputs", "output", "outputs", "usage")):
+        return True
+    if _algorithm_own_latency_ms(value) is not None:
+        return True
+    return False
+
+
+def _algorithm_evidence(
+    value: Any,
+    *,
+    depth: int = 0,
+    category: str | None = None,
+    runtime_context: bool = False,
+) -> list[dict[str, Any]]:
     """Extract only algorithm/model identifiers explicitly returned by Commander."""
     if depth > 7:
         return []
     records: list[dict[str, Any]] = []
     if isinstance(value, list):
         for item in value:
-            records.extend(_algorithm_evidence(item, depth=depth + 1, category=category))
+            records.extend(
+                _algorithm_evidence(
+                    item,
+                    depth=depth + 1,
+                    category=category,
+                    runtime_context=runtime_context,
+                )
+            )
         return records
     if not isinstance(value, dict):
         return records
 
     algorithm_id = value.get("algorithm_id")
     model_id = value.get("model_id")
-    if algorithm_id or model_id:
+    if (algorithm_id or model_id) and (
+        runtime_context or _has_runtime_algorithm_marker(value)
+    ):
+        execution_mode = str(value.get("execution_mode") or "")
+        backend_type = str(value.get("backend_type") or "")
+        if execution_mode == "agent_process" or backend_type == "agent_process":
+            return records
+        own_latency_ms = _algorithm_own_latency_ms(value)
+        input_value = value.get("input") if "input" in value else value.get("inputs")
+        output_value = value.get("output") if "output" in value else value.get("outputs")
+        usage_value = value.get("usage") if isinstance(value.get("usage"), dict) else None
         records.append({
             "id": str(algorithm_id or model_id),
             "name": value.get("algorithm_name") or value.get("name") or str(algorithm_id or model_id),
@@ -797,22 +1207,35 @@ def _algorithm_evidence(value: Any, *, depth: int = 0, category: str | None = No
             "params": value.get("params") or value.get("parameter_count"),
             "flops": value.get("flops"),
             "execution_mode": value.get("execution_mode"),
-            "duration_ms": value.get("duration_ms"),
+            "duration_ms": own_latency_ms,
+            "latency_ms": own_latency_ms,
             "input_summary": value.get("input_summary"),
             "result_summary": value.get("result_summary") or value.get("summary"),
             "backend_type": value.get("backend_type"),
+            "task": value.get("task"),
+            "reason": value.get("reason"),
+            "inputs": input_value,
+            "input": input_value,
+            "output": output_value,
+            "usage": usage_value,
+            "request_id": value.get("request_id"),
+            "trace_id": value.get("trace_id"),
         })
-
-    selected = value.get("selected_algorithms")
-    if isinstance(selected, list):
-        for item in selected:
-            if isinstance(item, str):
-                records.append({"id": item, "name": item, "category": category})
-            elif isinstance(item, dict):
-                records.extend(_algorithm_evidence(item, depth=depth + 1, category=category))
 
     algorithm_library = value.get("algorithm_library")
     if isinstance(algorithm_library, dict):
+        executions = algorithm_library.get("executions")
+        if isinstance(executions, list):
+            for item in executions:
+                if isinstance(item, dict):
+                    records.extend(
+                        _algorithm_evidence(
+                            item,
+                            depth=depth + 1,
+                            category="algorithm_library",
+                            runtime_context=True,
+                        )
+                    )
         for library_id, library_evidence in algorithm_library.items():
             if not isinstance(library_evidence, dict) or library_evidence.get("used") is not True:
                 continue
@@ -821,31 +1244,77 @@ def _algorithm_evidence(value: Any, *, depth: int = 0, category: str | None = No
                 "name": str(library_id),
                 "category": "algorithm_library",
                 "version": library_evidence.get("version"),
+                "duration_ms": _algorithm_own_latency_ms(library_evidence),
+                "latency_ms": _algorithm_own_latency_ms(library_evidence),
+                "backend_type": library_evidence.get("backend_type"),
             })
 
-    catalog = value.get("algorithm_catalog")
-    if isinstance(catalog, dict):
-        for catalog_category, items in catalog.items():
-            if not isinstance(items, list):
-                continue
-            for item in items:
-                if isinstance(item, str):
-                    records.append({
-                        "id": item,
-                        "name": item,
-                        "category": str(catalog_category),
-                    })
-                elif isinstance(item, dict):
-                    records.extend(
-                        _algorithm_evidence(item, depth=depth + 1, category=str(catalog_category))
-                    )
-
-    skipped = {"selected_algorithms", "algorithm_catalog", "algorithm_library"}
     for key, item in value.items():
-        if key in skipped:
+        if key in NON_RUNTIME_ALGORITHM_KEYS:
             continue
         if isinstance(item, (dict, list)):
-            records.extend(_algorithm_evidence(item, depth=depth + 1, category=category))
+            records.extend(
+                _algorithm_evidence(
+                    item,
+                    depth=depth + 1,
+                    category=category,
+                    runtime_context=runtime_context
+                    or key in RUNTIME_ALGORITHM_COLLECTION_KEYS,
+                )
+            )
+    return records
+
+
+def _activity_algorithm_evidence(activity: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extract algorithms executed by this activity, not algorithms in inputs.
+
+    Activity inputs often contain upstream results.  Scanning those inputs makes
+    the previous activity's algorithm calls appear under the current activity.
+    Runtime algorithm evidence for an activity is expected in its own output
+    payload or explicit row-level runtime collections.
+    """
+    records: list[dict[str, Any]] = []
+    row_level: dict[str, Any] = {}
+    for key in RUNTIME_ALGORITHM_COLLECTION_KEYS:
+        if key in activity:
+            row_level[key] = activity[key]
+    if activity.get("algorithm_id") or activity.get("model_id"):
+        row_level.update({
+            key: activity.get(key)
+            for key in (
+                "algorithm_id", "algorithm_name", "model_id", "model_version",
+                "version", "backend_type", "execution_mode", "status",
+                "request_id", "trace_id", "params", "reason", "duration_ms",
+                "latency_ms", "usage", "input", "inputs", "output", "outputs",
+                "task",
+            )
+            if key in activity
+        })
+    if row_level:
+        records.extend(_algorithm_evidence(row_level))
+    for key in ("output", "value", "result"):
+        payload = activity.get(key)
+        if isinstance(payload, (dict, list)):
+            if isinstance(payload, dict) and (
+                payload.get("algorithm_id") or payload.get("model_id")
+            ):
+                records.extend(
+                    _algorithm_evidence(
+                        {
+                            field: payload.get(field)
+                            for field in (
+                                "algorithm_id", "algorithm_name", "model_id",
+                                "model_version", "version", "backend_type",
+                                "execution_mode", "status", "request_id",
+                                "trace_id", "params", "reason", "duration_ms",
+                                "latency_ms", "usage", "task",
+                            )
+                            if field in payload
+                        },
+                        runtime_context=True,
+                    )
+                )
+            records.extend(_algorithm_evidence(payload))
     return records
 
 
@@ -1108,9 +1577,22 @@ def _build_algorithm_view(
             "status": "declared",
             "execution_status": None,
             "duration_ms": None,
+            "latency_ms": None,
+            "duration_source": None,
             "execution_mode": None,
+            "backend_type": None,
+            "task": None,
+            "reason": None,
             "params": None,
             "flops": None,
+            "inputs": None,
+            "input": None,
+            "output": None,
+            "usage": None,
+            "request_id": None,
+            "trace_id": None,
+            "invocations": [],
+            "invocation_count": 0,
             "input_summary": None,
             "result_summary": None,
             "evidence_refs": [],
@@ -1140,16 +1622,32 @@ def _build_algorithm_view(
             "status": "declared",
             "execution_status": None,
             "duration_ms": None,
+            "latency_ms": None,
+            "duration_source": None,
             "execution_mode": None,
+            "backend_type": None,
+            "task": None,
+            "reason": None,
             "params": None,
             "flops": None,
+            "inputs": None,
+            "input": None,
+            "output": None,
+            "usage": None,
+            "request_id": None,
+            "trace_id": None,
+            "invocations": [],
+            "invocation_count": 0,
             "input_summary": None,
             "result_summary": None,
             "evidence_refs": [],
             "declared_by_scenario": False,
         })
         row["name"] = evidence.get("name") or row["name"]
-        for field in ("category", "model_id", "version", "params", "flops"):
+        for field in (
+            "category", "model_id", "version", "params", "flops", "backend_type",
+            "task", "reason", "inputs", "input", "output", "usage", "request_id", "trace_id",
+        ):
             if evidence.get(field) is not None:
                 row[field] = evidence[field]
         if source.get("agent"):
@@ -1161,17 +1659,67 @@ def _build_algorithm_view(
             row["status"] = "executing"
         elif state in FAILED_STATES and row["status"] != "verified":
             row["status"] = "declared"
-        metrics = source.get("metrics") if isinstance(source.get("metrics"), dict) else {}
         evidence_duration = evidence.get("duration_ms")
-        metric_duration = metrics.get("duration_ms")
         if evidence_duration is not None:
             duration_value = float(evidence_duration)
             if duration_value > 0 or row.get("duration_ms") is None:
                 row["duration_ms"] = evidence_duration
-        elif metric_duration is not None:
-            duration_value = float(metric_duration)
-            if duration_value > 0 or row.get("duration_ms") is None:
-                row["duration_ms"] = metric_duration
+                row["latency_ms"] = evidence.get("latency_ms", evidence_duration)
+                row["duration_source"] = "algorithm_evidence"
+        has_invocation_detail = any(
+            evidence.get(field) is not None
+            for field in ("inputs", "input", "output", "usage")
+        )
+        if has_invocation_detail:
+            invocation = {
+                "algorithm_id": item_id,
+                "name": evidence.get("name") or item_id,
+                "task": evidence.get("task"),
+                "version": evidence.get("version"),
+                "backend_type": evidence.get("backend_type"),
+                "execution_mode": evidence.get("execution_mode") or _execution_mode(source),
+                "status": state or None,
+                "request_id": evidence.get("request_id"),
+                "trace_id": evidence.get("trace_id"),
+                "params": deepcopy(evidence.get("params")),
+                "reason": evidence.get("reason"),
+                "input": _safe_detail_value(evidence.get("input")),
+                "output": _safe_detail_value(evidence.get("output")),
+                "usage": _safe_detail_value(evidence.get("usage")),
+                "duration_ms": evidence_duration,
+                "latency_ms": evidence.get("latency_ms", evidence_duration),
+                "input_summary": _safe_detail_value(evidence.get("input_summary")),
+                "result_summary": _safe_detail_value(evidence.get("result_summary")),
+            }
+            fingerprint = (
+                str(invocation.get("request_id") or ""),
+                str(invocation.get("task") or ""),
+                str(invocation.get("algorithm_id") or ""),
+                str(invocation.get("duration_ms") or ""),
+            )
+            existing_fingerprints = {
+                (
+                    str(item.get("request_id") or ""),
+                    str(item.get("task") or ""),
+                    str(item.get("algorithm_id") or ""),
+                    str(item.get("duration_ms") or ""),
+                )
+                for item in row.get("invocations") or []
+                if isinstance(item, dict)
+            }
+            if fingerprint not in existing_fingerprints:
+                row.setdefault("invocations", []).append(invocation)
+                row["invocation_count"] = len(row["invocations"])
+                durations = [
+                    _positive_duration_ms(item.get("duration_ms"))
+                    for item in row["invocations"]
+                    if isinstance(item, dict)
+                ]
+                observed_total = sum(item for item in durations if item is not None)
+                if observed_total > 0:
+                    row["duration_ms"] = round(observed_total, 3)
+                    row["latency_ms"] = round(observed_total, 3)
+                    row["duration_source"] = "algorithm_invocations_sum"
         row["execution_mode"] = evidence.get("execution_mode") or _execution_mode(source)
         explicit_input_summary = evidence.get("input_summary")
         if explicit_input_summary in (None, ""):
@@ -1196,7 +1744,7 @@ def _build_algorithm_view(
 
     for row in _merged_activity_rows(status, work_payload):
         activity_ref = str(row.get("activity_id") or row.get("activatity_id") or row.get("work_item") or "unknown")
-        for evidence in _algorithm_evidence(row):
+        for evidence in _activity_algorithm_evidence(row):
             merge_evidence(evidence, row, f"activity:{activity_ref}")
 
     for index, event in enumerate(_trace_items(trace_payload)):
@@ -1364,7 +1912,7 @@ def _build_function_point_view(
                 activity_ids.add(str(declared["function_point_id"]))
         if not activity_ids:
             continue
-        for evidence in _algorithm_evidence(activity):
+        for evidence in _activity_algorithm_evidence(activity):
             for point_id in activity_ids:
                 row = rows.get(str(point_id).casefold())
                 if row:
@@ -1545,6 +2093,24 @@ def _build_activity_details(
         metrics = merged.get("metrics") if isinstance(merged.get("metrics"), dict) else {}
         input_value = merged.get("input") if isinstance(merged.get("input"), dict) else {}
         output_value = merged.get("output") if isinstance(merged.get("output"), dict) else {}
+        input_source = str(merged.get("input_source") or "activity.input")
+        output_source = "activity.output"
+        if merged.get("input_variable") and not input_value:
+            variable_input, variable_input_source = _variable_value(
+                merged.get("input_variable"),
+                status=status,
+                submission=submission,
+            )
+            if variable_input not in ({}, None):
+                input_value, input_source = variable_input, variable_input_source
+        if merged.get("output_variable"):
+            variable_output, variable_output_source = _variable_value(
+                merged.get("output_variable"),
+                status=status,
+                submission=submission,
+            )
+            if variable_output not in ({}, None):
+                output_value, output_source = variable_output, variable_output_source
         provenance_row = next((
             row for row in provenance_rows
             if aliases.intersection({
@@ -1555,8 +2121,17 @@ def _build_activity_details(
         trace_events = []
         trace_refs = []
         for trace_index, row in enumerate(raw_trace):
-            trace_activity_id = row.get("activity_id") or row.get("activatity_id")
-            if not trace_activity_id or str(trace_activity_id) not in aliases:
+            trace_aliases = {
+                str(value)
+                for value in (
+                    row.get("activity_id"),
+                    row.get("activatity_id"),
+                    row.get("work_item"),
+                    row.get("child_activity_id"),
+                )
+                if value
+            }
+            if not trace_aliases.intersection(aliases):
                 continue
             normalized = _normalize_trace({"trace": [row]})
             if normalized:
@@ -1602,7 +2177,12 @@ def _build_activity_details(
             or deepcopy(provenance_row.get("output_facts") or [])
         )
         input_detail = (
-            _detail_map(input_summary, input_value, source="activity_input")
+            _detail_map(
+                input_summary,
+                input_value,
+                variable=merged.get("input_variable"),
+                source=input_source,
+            )
             if input_value else _variable_detail(
                 merged.get("input_variable"),
                 input_summary,
@@ -1611,7 +2191,12 @@ def _build_activity_details(
             )
         )
         output_detail = (
-            _detail_map(output_summary, output_value, source="activity_output")
+            _detail_map(
+                output_summary,
+                output_value,
+                variable=merged.get("output_variable"),
+                source=output_source,
+            )
             if output_value else _variable_detail(
                 merged.get("output_variable"),
                 output_summary,
@@ -1631,8 +2216,34 @@ def _build_activity_details(
             "depends_on": deepcopy(activity.get("depends_on") or []),
             "started_at": merged.get("started_at") or metrics.get("started_at"),
             "finished_at": merged.get("finished_at") or metrics.get("finished_at"),
+            "dispatch_duration_ms": activity.get("dispatch_duration_ms"),
+            "agent_duration_ms": activity.get("agent_duration_ms"),
             "input_summary": input_summary or None,
             "output_summary": output_summary or None,
+            "input_variable": merged.get("input_variable"),
+            "output_variable": merged.get("output_variable"),
+            "input_source": input_source,
+            "output_source": output_source,
+            "input_semantics": _semantic_io_items(
+                input_value,
+                variable=merged.get("input_variable"),
+                source=input_source,
+            ),
+            "output_semantics": _semantic_io_items(
+                output_value,
+                variable=merged.get("output_variable"),
+                source=output_source,
+            ),
+            "input_fields": _io_fields(
+                input_value,
+                variable=merged.get("input_variable"),
+                source=input_source,
+            ),
+            "output_fields": _io_fields(
+                output_value,
+                variable=merged.get("output_variable"),
+                source=output_source,
+            ),
             "input_detail": input_detail,
             "output_detail": output_detail,
             "agent_call": {
@@ -1641,6 +2252,8 @@ def _build_activity_details(
                 "instance_id": instance_id,
                 "execution_mode": activity.get("execution_mode"),
                 "duration_ms": activity.get("duration_ms"),
+                "agent_duration_ms": activity.get("agent_duration_ms"),
+                "dispatch_duration_ms": activity.get("dispatch_duration_ms"),
                 "retry_count": activity.get("retry_count"),
                 "last_heartbeat": activity.get("last_heartbeat"),
                 "instances": matching_instances,

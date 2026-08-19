@@ -487,17 +487,14 @@ window.PlatformPanels = (function () {
       var params = profile.parameter_count_text || (profile.parameter_count == null ? "未上报" : String(profile.parameter_count));
       var ready = item.runtime_status === "ready";
       var stateText = ready ? "运行就绪" : "不可用";
-      var endpoint = item.predict_endpoint || profile.predict_endpoint || "未上报";
       var localized = localizedAlgorithm(item);
       return '<article class="backend-function-card ' + (ready ? "runtime-ready" : "runtime-unavailable") + '">' +
         '<header><div><b>' + escapeHtml(localized.name) + '</b></div><span>' + escapeHtml(stateText) + '</span></header>' +
         '<p>' + escapeHtml(localized.summary) + '</p>' +
         '<div class="backend-runtime-meta"><span>任务族 <b>' + escapeHtml(taskFamilyLabel(item.task_family || "未上报")) + '</b></span>' +
-        '<span>模型 <b>' + escapeHtml(profile.model_id || "未上报") + '</b></span>' +
         '<span>版本 <b>' + escapeHtml(item.version || "未上报") + '</b></span>' +
         '<span>后端 <b>' + escapeHtml(item.backend_type || "未上报") + '</b></span>' +
-        '<span>模型规模 <b>' + escapeHtml(params) + '</b></span>' +
-        '<span>预测端点 <b>' + escapeHtml(endpoint) + '</b></span></div></article>';
+        '<span>模型规模 <b>' + escapeHtml(params) + '</b></span></div></article>';
     }
     function renderGroup(title, rows) {
       if (!rows.length) return "";

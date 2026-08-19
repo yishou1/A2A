@@ -361,6 +361,8 @@ def normalize_task_scheduling_result(
         "reattack_plan": deepcopy(result.get("reattack_plan") or []),
         "algorithm": result.get("algorithm"),
         "selected_algorithms": deepcopy(result.get("selected_algorithms") or []),
+        "algorithm_calls": deepcopy(result.get("algorithm_calls") or []),
+        "algorithm_invocations": deepcopy(result.get("algorithm_invocations") or []),
         "llm_plan": deepcopy(result.get("llm_plan") or {}),
         "algolib_result": deepcopy(result.get("algolib_result") or {}),
         "summary": {

@@ -108,6 +108,28 @@ class AlgorithmLibraryClient:
         - call_mode=run → POST /run（推荐，对齐 lzh）
         - call_mode=predict → 直连各算法 /predict
         """
+        return self.predict_with_metadata(
+            algorithm_id,
+            inputs,
+            params=params,
+            request_id=request_id,
+            trace_id=trace_id,
+            version=version,
+            backend_type=backend_type,
+        )["outputs"]
+
+    def predict_with_metadata(
+        self,
+        algorithm_id: str,
+        inputs: dict[str, Any],
+        *,
+        params: dict[str, Any] | None = None,
+        request_id: str | None = None,
+        trace_id: str | None = None,
+        version: str | None = None,
+        backend_type: str = "python_http_service",
+    ) -> dict[str, Any]:
+        """Execute an algorithm and keep the response envelope for tracing."""
         req_id = request_id or f"req-{uuid.uuid4().hex[:12]}"
         tr_id = trace_id or os.environ.get("TIA_TRACE_ID", "")
         ver = str(
@@ -135,7 +157,18 @@ class AlgorithmLibraryClient:
             outputs = result.get("outputs")
             if not isinstance(outputs, dict):
                 raise AlgorithmLibraryError(f"{algorithm_id}: invalid outputs payload")
-            return outputs
+            usage = result.get("usage") if isinstance(result.get("usage"), dict) else {}
+            return {
+                "request_id": result.get("request_id") or req_id,
+                "trace_id": result.get("trace_id") or tr_id,
+                "algorithm_id": result.get("algorithm_id") or algorithm_id,
+                "version": result.get("version") or ver,
+                "backend_type": backend_type,
+                "outputs": outputs,
+                "usage": usage,
+                "raw_result": result,
+                "call_mode": "run",
+            }
 
         endpoint = resolve_endpoint(algorithm_id, self._cfg)
         payload = {
@@ -155,7 +188,19 @@ class AlgorithmLibraryClient:
         outputs = body.get("outputs")
         if not isinstance(outputs, dict):
             raise AlgorithmLibraryError(f"{algorithm_id}: invalid outputs payload")
-        return outputs
+        usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
+        return {
+            "request_id": body.get("request_id") or req_id,
+            "trace_id": body.get("trace_id") or tr_id,
+            "algorithm_id": body.get("algorithm_id") or algorithm_id,
+            "version": body.get("version") or ver,
+            "backend_type": backend_type,
+            "outputs": outputs,
+            "usage": usage,
+            "raw_result": body,
+            "call_mode": "predict",
+            "endpoint": endpoint,
+        }
 
     def health(self, algorithm_id: str | None = None) -> dict[str, Any]:
         if self.call_mode == "run" or algorithm_id is None:

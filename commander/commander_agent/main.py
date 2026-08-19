@@ -265,6 +265,7 @@ class CommanderAgent:
             work_item = item.get("work_item")
             response = deepcopy(agent_results.get(work_item, {}))
             response_output = response.get("output", {})
+            request = response.get("request") if isinstance(response.get("request"), dict) else {}
             output_keys_for_activity = (
                 sorted(str(key) for key in response_output)
                 if isinstance(response_output, dict)
@@ -299,6 +300,13 @@ class CommanderAgent:
                         response.get("execution_mode")
                         or ("local_agent" if response.get("mode") == "local" else response.get("mode"))
                     ),
+                    "input": deepcopy(request.get("input") or {}),
+                    "input_source": request.get("input_source") or "agent_request.input",
+                    "request": {
+                        key: deepcopy(value)
+                        for key, value in request.items()
+                        if key != "input"
+                    },
                     "output_ref": output_ref,
                     "output_keys": output_keys_for_activity,
                     "metrics": response.get("metrics", {}),
@@ -332,7 +340,49 @@ class CommanderAgent:
             "trace_id": self.workflow_id,
         }
 
-    def _remember_task_response(self, work_item: str, response: dict, *, role: str = None, target: str = None):
+    @staticmethod
+    def _task_request_snapshot(task_payload: dict | None) -> dict:
+        """Persist the actual activity request input without duplicating large context blobs."""
+        payload = deepcopy(task_payload or {})
+        snapshot = {
+            "input": deepcopy(payload.get("input") or {}),
+            "input_source": "agent_request.input",
+            "command": payload.get("command"),
+            "required_skill": payload.get("required_skill"),
+            "required_skills": list(payload.get("required_skills") or []),
+            "output_hint": payload.get("output_hint"),
+        }
+        if payload.get("workflow_id"):
+            snapshot["workflow_id"] = payload.get("workflow_id")
+        if payload.get("work_item"):
+            snapshot["work_item"] = payload.get("work_item")
+        context = payload.get("context")
+        if isinstance(context, dict):
+            snapshot["context_keys"] = sorted(str(key) for key in context)
+        attachments = payload.get("attachments")
+        if isinstance(attachments, list):
+            snapshot["attachments"] = [
+                {
+                    "id": item.get("id"),
+                    "name": item.get("name"),
+                    "kind": item.get("kind"),
+                    "uri": item.get("uri"),
+                }
+                for item in attachments[:25]
+                if isinstance(item, dict)
+            ]
+            snapshot["attachment_count"] = len(attachments)
+        return snapshot
+
+    def _remember_task_response(
+        self,
+        work_item: str,
+        response: dict,
+        *,
+        role: str = None,
+        target: str = None,
+        request_payload: dict | None = None,
+    ):
         if not work_item:
             return
         response_snapshot = deepcopy(response or {})
@@ -340,6 +390,11 @@ class CommanderAgent:
             response_snapshot.setdefault("role", role)
         if target is not None:
             response_snapshot.setdefault("target", target)
+        if request_payload is not None:
+            response_snapshot.setdefault(
+                "request",
+                self._task_request_snapshot(request_payload),
+            )
         with self._checkpoint_lock:
             self._last_task_responses[work_item] = response_snapshot
             agent_results = self.workflow_context.setdefault("agent_results", {})
@@ -960,7 +1015,13 @@ class CommanderAgent:
                     )
                     if not self._lease_allows_response(lease, label, work_item, role_needed):
                         return False, RuntimeError(f"late response ignored after failover: {label}")
-                    self._remember_task_response(work_item, response, role=role_needed, target=label)
+                    self._remember_task_response(
+                        work_item,
+                        response,
+                        role=role_needed,
+                        target=label,
+                        request_payload=task_payload,
+                    )
                     self._trace("agent_call_completed", role=role_needed, work_item=work_item, target=label, attempt=attempt)
                     return True, None
 
@@ -975,7 +1036,13 @@ class CommanderAgent:
                     return False, RuntimeError(f"late response ignored after failover: {label}")
                 metrics = res.setdefault("metrics", {})
                 metrics.setdefault("duration_ms", round((time.perf_counter() - call_started) * 1000, 3))
-                self._remember_task_response(work_item, res, role=role_needed, target=label)
+                self._remember_task_response(
+                    work_item,
+                    res,
+                    role=role_needed,
+                    target=label,
+                    request_payload=task_payload,
+                )
                 if self.details:
                     print(f"[SEND] {label} Task Response: {res}")
                 else:
@@ -1006,7 +1073,13 @@ class CommanderAgent:
             response, events = self.local_runtime.execute(runtime_role, task_payload, stream=stream)
             metrics = response.setdefault("metrics", {})
             metrics.setdefault("duration_ms", round((time.perf_counter() - call_started) * 1000, 3))
-            self._remember_task_response(task_payload.get("work_item"), response, role=runtime_role, target="local")
+            self._remember_task_response(
+                task_payload.get("work_item"),
+                response,
+                role=runtime_role,
+                target="local",
+                request_payload=task_payload,
+            )
             card = response.get("agent_card", {})
             print(f"[LOCAL DISCOVERY] Using local Agent Card from '{card.get('name')}'")
             print(f"[LOCAL AUTH] Obtained local token: {response.get('token')}")

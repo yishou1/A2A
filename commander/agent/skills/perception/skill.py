@@ -28,6 +28,33 @@ def _as_list(value: Any, *keys: str) -> list:
     return []
 
 
+def _algorithm_id(backend: Any) -> str:
+    return str(getattr(backend, "algorithm_id", None) or getattr(backend, "name", "algorithm"))
+
+
+def _planned_inputs(base: dict[str, Any], plan: AlgorithmPlan | None, algorithm_id: str) -> dict[str, Any]:
+    if plan is None:
+        return base
+    enriched = dict(base)
+    params = plan.params_for(algorithm_id)
+    enriched["params"] = params
+    for call in plan.algorithm_calls:
+        if call.algorithm_id == algorithm_id:
+            enriched["_algorithm_reason"] = call.reason
+            break
+    return enriched
+
+
+def _run_and_record(backend: Any, inputs: dict[str, Any]) -> tuple[Any, dict[str, Any] | None]:
+    if hasattr(backend, "last_invocation"):
+        backend.last_invocation = None
+    output = backend.run(inputs)
+    invocation = getattr(backend, "last_invocation", None)
+    if isinstance(invocation, dict):
+        return output, dict(invocation)
+    return output, None
+
+
 class PerceptionSkill:
     def __init__(self, *, use_mock: bool = True, config: dict[str, Any] | None = None):
         cfg = config or {}
@@ -49,7 +76,15 @@ class PerceptionSkill:
         def enabled(aid: str) -> bool:
             return plan is None or plan.is_enabled(aid)
 
-        raw_dets = _as_list(self.detector.run({"frames": visual_frames}), "detections")
+        invocations: list[dict[str, Any]] = []
+        detector_id = _algorithm_id(self.detector)
+        detector_output, invocation = _run_and_record(
+            self.detector,
+            _planned_inputs({"frames": visual_frames}, plan, detector_id),
+        )
+        if invocation:
+            invocations.append(invocation)
+        raw_dets = _as_list(detector_output, "detections")
         for frame in frame_dicts:
             payload = frame.get("payload") if isinstance(frame.get("payload"), dict) else {}
             raw_dets.extend(
@@ -64,8 +99,14 @@ class PerceptionSkill:
             damage_inputs: dict[str, Any] = {"frames": visual_frames}
             if isinstance(ref, dict):
                 damage_inputs["reference_frame"] = ref
+            damage_output, invocation = _run_and_record(
+                self.damage,
+                _planned_inputs(damage_inputs, plan, _algorithm_id(self.damage)),
+            )
+            if invocation:
+                invocations.append(invocation)
             damage_reports = _as_list(
-                self.damage.run(damage_inputs),
+                damage_output,
                 "damage_reports",
             )
             trace[self.damage.name] = f"{len(damage_reports)} damage masks"
@@ -83,8 +124,14 @@ class PerceptionSkill:
                 det["damage_score"] = damage_by_sensor[sid].get("damage_score")
 
         if enabled("edl_evidential_verifier"):
+            edl_output, invocation = _run_and_record(
+                self.edl,
+                _planned_inputs({"detections": raw_dets}, plan, _algorithm_id(self.edl)),
+            )
+            if invocation:
+                invocations.append(invocation)
             verified = _as_list(
-                self.edl.run({"detections": raw_dets}),
+                edl_output,
                 "verified_detections",
                 "detections",
             )
@@ -102,7 +149,12 @@ class PerceptionSkill:
         }
         if visual_frames:
             tracker_inputs["visual_frame"] = visual_frames[0]
-        track_result = self.tracker.run(tracker_inputs)
+        track_result, invocation = _run_and_record(
+            self.tracker,
+            _planned_inputs(tracker_inputs, plan, _algorithm_id(self.tracker)),
+        )
+        if invocation:
+            invocations.append(invocation)
         if not isinstance(track_result, dict):
             track_result = {"tracks": []}
         tracks = track_result.get("tracks", []) or []
@@ -148,4 +200,13 @@ class PerceptionSkill:
             verified_ids=[t["track_id"] for t in tracks if "track_id" in t],
             task_schedule=None,
             algorithm_trace=trace,
+            algorithm_calls=[
+                {
+                    key: value
+                    for key, value in invocation.items()
+                    if key not in {"input", "output", "usage"}
+                }
+                for invocation in invocations
+            ],
+            algorithm_invocations=invocations,
         )

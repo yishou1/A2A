@@ -1070,6 +1070,33 @@ def _build_artifact_from_tracks(
     decision_risk_assessments = _decision_risk_assessments(unified_ranking)
     timings["unified_ranking"] = round((time.perf_counter() - stage_started) * 1000, 3)
     events = build_integration_events(tracks, threats, groups, unified_ranking, protected_assets, asset_impacts)
+    track_payloads = [track.model_dump() for track in tracks]
+    threat_payloads = [threat.model_dump() for threat in threats]
+    asset_payloads = [asset.model_dump() for asset in protected_assets]
+    impact_payloads = [impact.model_dump() for impact in asset_impacts]
+    group_payloads = [group.model_dump() for group in groups]
+    algorithm_library_trace = algorithm_provider.algorithm_execution_trace()
+    remote_invocations = [
+        {
+            **item,
+            "algorithm_name": item.get("algorithm_name") or item.get("algorithm_id"),
+            "execution_mode": item.get("execution_mode") or "algorithm_library",
+        }
+        for item in algorithm_library_trace.get("executions", [])
+        if isinstance(item, dict) and item.get("algorithm_id")
+    ]
+    algorithm_invocations = [
+        item for item in remote_invocations
+        if item.get("duration_ms") is not None
+    ]
+    algorithm_calls = [
+        {
+            key: value
+            for key, value in invocation.items()
+            if key not in {"input", "output", "usage"}
+        }
+        for invocation in algorithm_invocations
+    ]
     artifact = {
         "task_id": task_id,
         "artifact_schema_version": ARTIFACT_SCHEMA_VERSION,
@@ -1088,13 +1115,15 @@ def _build_artifact_from_tracks(
             "algorithm_duration_ms": timings,
             "agent": runtime.agent_name,
             "role": runtime.role,
-            "algorithm_library": algorithm_provider.algorithm_execution_trace(),
+            "algorithm_library": algorithm_library_trace,
         },
-        "protected_assets": [asset.model_dump() for asset in protected_assets],
-        "tracks": [track.model_dump() for track in tracks],
-        "threats": [threat.model_dump() for threat in threats],
-        "asset_impacts": [impact.model_dump() for impact in asset_impacts],
-        "groups": [group.model_dump() for group in groups],
+        "algorithm_calls": algorithm_calls,
+        "algorithm_invocations": algorithm_invocations,
+        "protected_assets": asset_payloads,
+        "tracks": track_payloads,
+        "threats": threat_payloads,
+        "asset_impacts": impact_payloads,
+        "groups": group_payloads,
         "unified_threat_ranking": unified_ranking,
         "decision_risk_assessments": decision_risk_assessments,
         # Stable downstream alias matching lzh AgentRequest.risk_assessments.
@@ -1292,6 +1321,8 @@ def _build_a2a_output(
         "task_id": result["task_id"],
         "message_type": result["message_type"],
         "artifact": artifact,
+        "algorithm_calls": artifact.get("algorithm_calls", []),
+        "algorithm_invocations": artifact.get("algorithm_invocations", []),
         "safety_boundary": "simulation-only situation-awareness priority; no weapon control",
     }
     output_hint = task_payload.get("output_hint")

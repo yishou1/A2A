@@ -135,12 +135,6 @@
             <div class="empty-state">当前场景未声明 Agent 部署关系</div>
           </div>
         </div>
-        <div class="card">
-          <div class="card-heading"><div><span class="section-eyebrow">运行证据</span><h2>Agent 调度拓扑</h2></div></div>
-          <div id="wf-agent-topology" data-contract="amos.workflow-view.v2.agents">
-            <div class="empty-state">尚无 Agent 调度记录</div>
-          </div>
-        </div>
       </section>
 
       <section class="workspace-panel" data-workspace-panel="algorithms" role="tabpanel" hidden>
@@ -170,9 +164,9 @@
             <div class="phase-track" data-phase-model="F2T2EA"><b>F2T2EA</b><span data-phase-key="FIND">发现（Find）</span><span data-phase-key="FIX">定位（Fix）</span><span data-phase-key="TRACK">跟踪（Track）</span><span data-phase-key="TARGET">目标选择（Target）</span><span data-phase-key="ENGAGE">交战（Engage）</span><span data-phase-key="ASSESS">评估（Assess）</span></div>
           </div>
         </div>
-        <div class="card" id="kill-chain-runtime-card">
-          <div class="card-heading"><div><span class="section-eyebrow">仿真推进</span><h2>28 项杀伤链功能点</h2><small class="kill-chain-progress-note">状态表示剧本推进；实际算法调用以本页底部“运行证据”为准</small></div></div>
-          <div id="kill-chain-runtime-view" class="kill-chain-runtime-view"><div class="empty-state">等待加载剧本</div></div>
+        <div class="card" id="kill-chain-runtime-card" hidden>
+          <div class="card-heading"><div><span class="section-eyebrow">仿真推进</span><h2>28 项杀伤链功能点</h2><small class="kill-chain-progress-note">状态表示任务推进；实际算法调用以本页底部“运行证据”为准</small></div></div>
+          <div id="kill-chain-runtime-view" class="kill-chain-runtime-view"><div class="empty-state">等待加载任务</div></div>
         </div>
 
         <div class="card agent-card workflow-console workflow-inspector" id="a2a-workflow-card">
@@ -182,7 +176,7 @@
             <span id="backend-health-badge" class="status-chip danger">离线</span>
             <span id="wf-status-badge" class="status-chip neutral">尚未开始</span>
           </div>
-          <nav id="wf-task-history" class="workflow-task-history" aria-label="本轮阶段检查点">
+          <nav id="wf-task-history" class="workflow-task-history" aria-label="本轮 OODA 阶段">
             <button type="button" disabled><small>Observe · Find/Fix</small><b>观察与识别</b><span>未生成阶段分析</span></button>
             <button type="button" disabled><small>Orient · Track</small><b>航迹评估</b><span>未生成阶段分析</span></button>
             <button type="button" disabled><small>Decide · Target</small><b>方案决策</b><span>未生成阶段分析</span></button>

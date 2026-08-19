@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import time
 import uuid
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, List, Optional, Sequence, Tuple
 
@@ -87,6 +88,111 @@ class ClosedLoopStagePlan:
 
 def use_closed_loop_algolib() -> bool:
     return AlgolibSettings.load(agent_backend_env=AGENT_BACKEND_ENV).backend == "algolib"
+
+
+def _positive_latency_ms(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return round(number, 3) if number > 0 else None
+
+
+def _algorithm_result_latency_ms(result: dict[str, Any], outputs: dict[str, Any] | None = None) -> float | None:
+    usage = result.get("usage") if isinstance(result.get("usage"), dict) else {}
+    for key in ("duration_ms", "latency_ms"):
+        latency = _positive_latency_ms(usage.get(key))
+        if latency is not None:
+            return latency
+    outputs = outputs if isinstance(outputs, dict) else result.get("outputs")
+    if isinstance(outputs, dict):
+        return _positive_latency_ms(outputs.get("latency_ms"))
+    return None
+
+
+def _io_summary(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    summary: dict[str, Any] = {}
+    for key, item in value.items():
+        if isinstance(item, list):
+            summary[str(key)] = len(item)
+        elif isinstance(item, dict):
+            summary[str(key)] = len(item)
+        elif item not in (None, ""):
+            summary[str(key)] = item
+    return summary
+
+
+def _algorithm_invocation_record(
+    *,
+    call: AlgorithmRunCall,
+    result: dict[str, Any],
+    request_id: str,
+    trace_id: str,
+    task: str,
+    status: str,
+) -> dict[str, Any]:
+    outputs = result.get("outputs") if isinstance(result.get("outputs"), dict) else {}
+    usage = result.get("usage") if isinstance(result.get("usage"), dict) else {}
+    latency_ms = _algorithm_result_latency_ms(result, outputs)
+    record = {
+        "algorithm_id": call.algorithm_id,
+        "algorithm_name": call.algorithm_id,
+        "task": task,
+        "version": call.version,
+        "backend_type": call.backend_type,
+        "status": status,
+        "execution_mode": "algolib_runtime",
+        "request_id": request_id,
+        "trace_id": trace_id,
+        "params": deepcopy(call.params),
+        "reason": call.reason,
+        "input": deepcopy(call.inputs),
+        "inputs": deepcopy(call.inputs),
+        "output": deepcopy(outputs),
+        "outputs": deepcopy(outputs),
+        "usage": deepcopy(usage),
+        "duration_ms": latency_ms,
+        "latency_ms": latency_ms,
+        "input_summary": _io_summary(call.inputs),
+        "result_summary": _io_summary(outputs),
+    }
+    if result.get("error"):
+        record["error"] = deepcopy(result.get("error"))
+    return record
+
+
+def _algorithm_call_summaries(invocations: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    summaries = []
+    seen: set[tuple[str, str, str]] = set()
+    for invocation in invocations:
+        key = (
+            str(invocation.get("request_id") or ""),
+            str(invocation.get("task") or ""),
+            str(invocation.get("algorithm_id") or ""),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        summaries.append({
+            "algorithm_id": invocation.get("algorithm_id"),
+            "algorithm_name": invocation.get("algorithm_name") or invocation.get("algorithm_id"),
+            "task": invocation.get("task"),
+            "version": invocation.get("version"),
+            "backend_type": invocation.get("backend_type"),
+            "status": invocation.get("status"),
+            "execution_mode": invocation.get("execution_mode"),
+            "request_id": invocation.get("request_id"),
+            "trace_id": invocation.get("trace_id"),
+            "params": deepcopy(invocation.get("params") or {}),
+            "reason": invocation.get("reason"),
+            "duration_ms": invocation.get("duration_ms"),
+            "latency_ms": invocation.get("latency_ms"),
+            "input_summary": deepcopy(invocation.get("input_summary") or {}),
+            "result_summary": deepcopy(invocation.get("result_summary") or {}),
+        })
+    return summaries
 
 
 def _safe_dict(value: Any) -> dict:
@@ -459,6 +565,7 @@ def _run_outputs_from_stage_plan(
     params: Optional[dict[str, Any]] = None,
     request_id: str,
     trace_id: str,
+    invocation_log: Optional[List[dict[str, Any]]] = None,
 ) -> dict:
     planned_call = stage_plan.call_for(task)
     if planned_call is None:
@@ -478,6 +585,17 @@ def _run_outputs_from_stage_plan(
         reason=planned_call.reason,
     )
     result = client.run_algorithm(request_id=request_id, trace_id=trace_id, call=call)
+    if invocation_log is not None:
+        invocation_log.append(
+            _algorithm_invocation_record(
+                call=call,
+                result=result,
+                request_id=request_id,
+                trace_id=trace_id,
+                task=task,
+                status="completed" if result.get("ok", False) else "failed",
+            )
+        )
     if not result.get("ok", False):
         error = result.get("error") if isinstance(result.get("error"), dict) else {}
         raise AlgorithmLibraryError(
@@ -498,6 +616,7 @@ def assess_target_damage_via_algolib(
     device: Optional[str] = None,
     stage_plan: Optional[ClosedLoopStagePlan] = None,
     llm_plans: Optional[List[dict]] = None,
+    invocation_log: Optional[List[dict[str, Any]]] = None,
 ) -> Tuple[float, str, dict, List[str]]:
     """Call xbd_damage_assessor for one target; returns prob, mode, raw_out, warnings."""
     sample_id = str(target.get("sample_id") or target.get("target_id") or request_id)
@@ -524,6 +643,7 @@ def assess_target_damage_via_algolib(
             params=params,
             request_id=request_id,
             trace_id=request_id,
+            invocation_log=invocation_log,
         )
     else:
         damage_out = _run_outputs_maybe_planned(
@@ -536,6 +656,7 @@ def assess_target_damage_via_algolib(
             trace_id=request_id,
             task="xbd_damage_assessment",
             llm_plans=llm_plans,
+            invocation_log=invocation_log,
         )
     if damage_out.get("assessment_status") == "insufficient_data":
         warnings.append(f"xbd_damage_assessor:insufficient_data:{sample_id}:{mode}")
@@ -558,6 +679,7 @@ def assess_target_damage_via_algolib(
                         params=params,
                         request_id=f"{request_id}-features",
                         trace_id=request_id,
+                        invocation_log=invocation_log,
                     )
                 else:
                     damage_out = _run_outputs_maybe_planned(
@@ -570,6 +692,7 @@ def assess_target_damage_via_algolib(
                         trace_id=request_id,
                         task="xbd_damage_assessment_features_fallback",
                         llm_plans=llm_plans,
+                        invocation_log=invocation_log,
                     )
                 mode = feature_mode
                 if damage_out.get("assessment_status") != "insufficient_data":
@@ -587,6 +710,7 @@ def _score_mission_via_algolib(
     request_id: str,
     stage_plan: Optional[ClosedLoopStagePlan] = None,
     llm_plans: Optional[List[dict]] = None,
+    invocation_log: Optional[List[dict[str, Any]]] = None,
 ) -> Tuple[dict, dict, List[str]]:
     warnings: List[str] = []
     adapter_inputs = {
@@ -603,6 +727,7 @@ def _score_mission_via_algolib(
             inputs=adapter_inputs,
             request_id=request_id,
             trace_id=request_id,
+            invocation_log=invocation_log,
         )
     else:
         adapter_out = _run_outputs_maybe_planned(
@@ -614,6 +739,7 @@ def _score_mission_via_algolib(
             trace_id=request_id,
             task="mission_feature_adaptation",
             llm_plans=llm_plans,
+            invocation_log=invocation_log,
         )
     if adapter_out.get("assessment_status") == "insufficient_data":
         warnings.append("mission_feature_adapter:insufficient_data")
@@ -635,6 +761,7 @@ def _score_mission_via_algolib(
                 inputs={"features": feature_values},
                 request_id=request_id,
                 trace_id=request_id,
+                invocation_log=invocation_log,
             )
         else:
             mission_out = _run_outputs_maybe_planned(
@@ -646,6 +773,7 @@ def _score_mission_via_algolib(
                 trace_id=request_id,
                 task="mission_completion_scoring",
                 llm_plans=llm_plans,
+                invocation_log=invocation_log,
             )
     else:
         warnings.append("mission_completion_scorer:skipped_missing_features")
@@ -663,15 +791,38 @@ def _run_outputs_maybe_planned(
     trace_id: str,
     task: str,
     llm_plans: Optional[List[dict]] = None,
+    invocation_log: Optional[List[dict[str, Any]]] = None,
 ) -> dict:
     if not settings.enable_llm:
-        return client.run_outputs(
+        call = AlgorithmRunCall(
             algorithm_id=algorithm_id,
+            version=client.settings.default_version,
+            backend_type=client.settings.default_backend_type,
             inputs=inputs,
-            params=params,
-            request_id=request_id,
-            trace_id=trace_id,
+            params=dict(params or {}),
+            reason="LLM disabled; using default algorithm.",
         )
+        result = client.run_algorithm(request_id=request_id, trace_id=trace_id, call=call)
+        if invocation_log is not None:
+            invocation_log.append(
+                _algorithm_invocation_record(
+                    call=call,
+                    result=result,
+                    request_id=request_id,
+                    trace_id=trace_id,
+                    task=task,
+                    status="completed" if result.get("ok", False) else "failed",
+                )
+            )
+        if not result.get("ok", False):
+            error = result.get("error") if isinstance(result.get("error"), dict) else {}
+            raise AlgorithmLibraryError(
+                f"{call.algorithm_id} failed: {error.get('code', 'UNKNOWN')}: {error.get('message', '')}"
+            )
+        outputs = result.get("outputs")
+        if not isinstance(outputs, dict):
+            raise AlgorithmLibraryError(f"{call.algorithm_id} response missing outputs object.")
+        return outputs
     outputs, plan = client.run_outputs_with_planning(
         default_algorithm_id=algorithm_id,
         allowed_algorithm_ids=ALLOWED_CLOSED_LOOP_ALGORITHMS,
@@ -728,6 +879,7 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
     damage_mode_counts = {"images": 0, "features": 0}
     probs: List[float] = []
     llm_plans: List[dict] = []
+    algorithm_invocations: List[dict] = []
     stage_plan = _build_closed_loop_stage_plan(
         client,
         request_id=request_id,
@@ -750,6 +902,7 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
                 request_id=f"{request_id}-m{cycle}",
                 stage_plan=stage_plan,
                 llm_plans=llm_plans,
+                invocation_log=algorithm_invocations,
             )
             warnings.extend(mission_warnings)
         except AlgorithmLibraryError as exc:
@@ -782,6 +935,7 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
                     device=device,
                     stage_plan=stage_plan,
                     llm_plans=llm_plans,
+                    invocation_log=algorithm_invocations,
                 )
             except AlgorithmLibraryError as exc:
                 damage_prob = float(target.get("damage_probability") or target.get("threat_score") or 0.5)
@@ -810,6 +964,7 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
                         inputs=advice_inputs,
                         request_id=f"{request_id}-c{cycle}-adv-{index}",
                         trace_id=request_id,
+                        invocation_log=algorithm_invocations,
                     )
                 else:
                     advice = _run_outputs_maybe_planned(
@@ -821,6 +976,7 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
                         trace_id=request_id,
                         task="closed_loop_decision_advice",
                         llm_plans=llm_plans,
+                        invocation_log=algorithm_invocations,
                     )
             except AlgorithmLibraryError as exc:
                 advice = {"action": "continue_tracking", "effect_delta": 0.04}
@@ -991,6 +1147,8 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
             "closed_loop_decision_advisor",
         ],
         "selected_algorithms": list(stage_plan.selected_algorithms),
+        "algorithm_calls": _algorithm_call_summaries(algorithm_invocations),
+        "algorithm_invocations": algorithm_invocations,
         "llm_algorithm_plans": llm_plans,
         "warnings": unique_warnings,
         "warning_counts": warning_counts,

@@ -129,6 +129,11 @@ class TacticalIntelligenceCommanderAgent(A2ABaseAgent):
             "output_attachments": packet.output_attachments,
             "consumer_guide": packet.consumer_guide,
         }
+        provenance = packet.provenance if isinstance(packet.provenance, dict) else {}
+        if isinstance(provenance.get("algorithm_calls"), list):
+            output["algorithm_calls"] = provenance["algorithm_calls"]
+        if isinstance(provenance.get("algorithm_invocations"), list):
+            output["algorithm_invocations"] = provenance["algorithm_invocations"]
         if output_hint != DEFAULT_OUTPUT_HINT:
             output[DEFAULT_OUTPUT_HINT] = packet_json
         if packet.task_schedule is not None:

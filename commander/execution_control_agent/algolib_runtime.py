@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from copy import deepcopy
 from typing import Any
 
 from algolib_bridge import AlgorithmLibraryClient, AlgorithmLibraryError, AlgolibSettings
@@ -44,9 +45,70 @@ def validate_planner_outputs(outputs: dict, *, phase: str) -> list[str]:
     return problems
 
 
-def _wrap_planner_outputs(arguments: dict, outputs: dict, *, warnings: list[str] | None = None) -> dict:
+def _io_summary(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    summary: dict[str, Any] = {}
+    for key, item in value.items():
+        if isinstance(item, list):
+            summary[str(key)] = len(item)
+        elif isinstance(item, dict):
+            summary[str(key)] = len(item)
+        elif item not in (None, ""):
+            summary[str(key)] = item
+    return summary
+
+
+def _planner_invocation(
+    *,
+    inputs: dict[str, Any],
+    outputs: dict[str, Any],
+    request_id: str,
+    trace_id: str,
+    backend_type: str,
+    version: str,
+    llm_plan: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    latency_ms = float(outputs.get("latency_ms") or 0.0)
+    plan_call = {}
+    plan = llm_plan if isinstance(llm_plan, dict) else {}
+    calls = plan.get("algorithm_calls") if isinstance(plan.get("algorithm_calls"), list) else []
+    if calls and isinstance(calls[0], dict):
+        plan_call = calls[0]
+    return {
+        "algorithm_id": ALGORITHM_ID,
+        "algorithm_name": ALGORITHM_ID,
+        "task": "execution_control",
+        "version": plan_call.get("version") or version,
+        "backend_type": plan_call.get("backend_type") or backend_type,
+        "status": "completed",
+        "execution_mode": "algolib_runtime",
+        "request_id": request_id,
+        "trace_id": trace_id,
+        "params": deepcopy(plan_call.get("params") or {}),
+        "reason": plan_call.get("reason"),
+        "input": deepcopy(inputs),
+        "inputs": deepcopy(inputs),
+        "output": deepcopy(outputs),
+        "outputs": deepcopy(outputs),
+        "usage": {"latency_ms": latency_ms},
+        "duration_ms": latency_ms if latency_ms > 0 else None,
+        "latency_ms": latency_ms if latency_ms > 0 else None,
+        "input_summary": _io_summary(inputs),
+        "result_summary": _io_summary(outputs),
+    }
+
+
+def _wrap_planner_outputs(
+    arguments: dict,
+    outputs: dict,
+    *,
+    warnings: list[str] | None = None,
+    invocation: dict[str, Any] | None = None,
+) -> dict:
     matched_rules = list(outputs.get("matched_rules") or [])
     latency_ms = float(outputs.get("latency_ms") or 0.0)
+    algorithm_invocations = [invocation] if isinstance(invocation, dict) else []
     output_data = {
         "phase": outputs.get("phase") or arguments.get("phase") or "strike",
         "situation": outputs.get("situation") or {},
@@ -59,6 +121,28 @@ def _wrap_planner_outputs(arguments: dict, outputs: dict, *, warnings: list[str]
         "prediction_details": list(outputs.get("prediction_details") or []),
         "backend": "algolib",
         "algorithm_id": ALGORITHM_ID,
+        "selected_algorithms": [ALGORITHM_ID],
+        "algorithm_calls": [
+            {
+                "algorithm_id": item.get("algorithm_id"),
+                "algorithm_name": item.get("algorithm_name") or item.get("algorithm_id"),
+                "task": item.get("task"),
+                "version": item.get("version"),
+                "backend_type": item.get("backend_type"),
+                "status": item.get("status"),
+                "execution_mode": item.get("execution_mode"),
+                "request_id": item.get("request_id"),
+                "trace_id": item.get("trace_id"),
+                "params": deepcopy(item.get("params") or {}),
+                "reason": item.get("reason"),
+                "duration_ms": item.get("duration_ms"),
+                "latency_ms": item.get("latency_ms"),
+                "input_summary": deepcopy(item.get("input_summary") or {}),
+                "result_summary": deepcopy(item.get("result_summary") or {}),
+            }
+            for item in algorithm_invocations
+        ],
+        "algorithm_invocations": algorithm_invocations,
         "llm_plan": outputs.get("_llm_plan") or {},
         "warnings": list(warnings or []),
     }
@@ -107,6 +191,15 @@ def run_execution_control_via_algolib(arguments: dict) -> dict:
     if "latency_ms" not in outputs:
         outputs = dict(outputs)
         outputs["latency_ms"] = round((time.perf_counter() - start) * 1000.0, 3)
+    invocation = _planner_invocation(
+        inputs=inputs,
+        outputs=outputs,
+        request_id=request_id,
+        trace_id=request_id,
+        backend_type=settings.default_backend_type,
+        version=settings.default_version,
+        llm_plan=outputs.get("_llm_plan"),
+    )
 
     contract_problems = validate_planner_outputs(outputs, phase=phase)
     hard_failures = [
@@ -118,7 +211,7 @@ def run_execution_control_via_algolib(arguments: dict) -> dict:
         raise AlgorithmLibraryError(
             f"execution_control_planner contract failed: {','.join(hard_failures)}"
         )
-    return _wrap_planner_outputs(arguments, outputs, warnings=contract_problems)
+    return _wrap_planner_outputs(arguments, outputs, warnings=contract_problems, invocation=invocation)
 
 
 def run_execution_control_with_backend(arguments: dict) -> dict:
@@ -142,4 +235,41 @@ def run_execution_control_with_backend(arguments: dict) -> dict:
             warnings.append(f"algolib_fallback:{exc}")
             output_data["warnings"] = warnings
             output_data["backend"] = "local_fallback"
+            phase = str(arguments.get("phase") or arguments.get("control_phase") or "strike").strip().lower()
+            if phase not in {"strike", "assault"}:
+                phase = "strike"
+            context = arguments.get("context") if isinstance(arguments.get("context"), dict) else {}
+            inputs = {
+                "phase": phase,
+                "results": extract_upstream_results(arguments),
+                "context": context,
+            }
+            request_id = str(arguments.get("request_id") or f"ec-local-{uuid.uuid4().hex[:10]}")
+            invocation = _planner_invocation(
+                inputs=inputs,
+                outputs=output_data,
+                request_id=request_id,
+                trace_id=request_id,
+                backend_type="local_fallback",
+                version="local",
+            )
+            output_data.setdefault("selected_algorithms", [ALGORITHM_ID])
+            output_data.setdefault("algorithm_invocations", [invocation])
+            output_data.setdefault("algorithm_calls", [{
+                "algorithm_id": invocation.get("algorithm_id"),
+                "algorithm_name": invocation.get("algorithm_name"),
+                "task": invocation.get("task"),
+                "version": invocation.get("version"),
+                "backend_type": invocation.get("backend_type"),
+                "status": invocation.get("status"),
+                "execution_mode": invocation.get("execution_mode"),
+                "request_id": invocation.get("request_id"),
+                "trace_id": invocation.get("trace_id"),
+                "params": deepcopy(invocation.get("params") or {}),
+                "reason": invocation.get("reason"),
+                "duration_ms": invocation.get("duration_ms"),
+                "latency_ms": invocation.get("latency_ms"),
+                "input_summary": deepcopy(invocation.get("input_summary") or {}),
+                "result_summary": deepcopy(invocation.get("result_summary") or {}),
+            }])
         return result

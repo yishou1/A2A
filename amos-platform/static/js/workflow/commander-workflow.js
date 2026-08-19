@@ -26,10 +26,10 @@ window.PlatformWorkflow = (function () {
   var submitting = false;
   var notifiedTerminalKey = null;
   var workflowTasks = [
-    {checkpoint:"MAR-CP-PERCEPTION", label:"观察与识别", phase:"Observe · Find/Fix"},
-    {checkpoint:"MAR-CP-ASSESS", label:"航迹评估", phase:"Orient · Track"},
-    {checkpoint:"MAR-CP-PLAN", label:"方案决策", phase:"Decide · Target"},
-    {checkpoint:"MAR-CP-CLOSE", label:"执行与复核", phase:"Act · Engage/Assess"},
+    {phase:"OBSERVE", label:"观察与识别", subtitle:"Observe · Find/Fix", checkpoints:["MAR-CP-PERCEPTION"]},
+    {phase:"ORIENT", label:"航迹评估", subtitle:"Orient · Track", checkpoints:["MAR-CP-ASSESS"]},
+    {phase:"DECIDE", label:"方案决策", subtitle:"Decide · Target", checkpoints:["MAR-CP-PLAN"]},
+    {phase:"ACT", label:"执行与复核", subtitle:"Act · Engage/Assess", checkpoints:["MAR-CP-CLOSE"]},
   ];
 
   function escapeHtml(value) {
@@ -39,7 +39,7 @@ window.PlatformWorkflow = (function () {
   }
 
   function statusLabel(state) {
-    return ({queued:"等待执行",pending:"待执行",running:"执行中",executing:"执行中",completed:"已完成",verified:"已验证",declared:"待推进",conditional:"条件触发",not_applicable:"本剧本不适用",failed:"失败",error:"错误",cancelled:"已取消",unknown:"未上报",unavailable:"不可用",checkpoint_only:"可恢复",connected:"在线",degraded:"依赖降级",diagnostic:"直连诊断",offline:"离线",submitting:"提交中",stale_run:"上一轮结果"})[state] || state || "尚未开始";
+    return ({queued:"等待执行",pending:"待执行",running:"执行中",executing:"执行中",completed:"已完成",verified:"已验证",declared:"待推进",conditional:"条件触发",not_applicable:"本任务不适用",failed:"失败",error:"错误",cancelled:"已取消",unknown:"未上报",unavailable:"不可用",checkpoint_only:"可恢复",connected:"在线",degraded:"依赖降级",diagnostic:"直连诊断",offline:"离线",submitting:"提交中",stale_run:"上一轮结果"})[state] || state || "尚未开始";
   }
 
   function errorMessage(value) {
@@ -62,6 +62,9 @@ window.PlatformWorkflow = (function () {
       local_agent: "本地 Agent",
       algolib_runtime: "算法库运行",
       local_agent_with_algolib_runtime: "本地 Agent + 算法库",
+      python_http_service: "Python HTTP 算法服务",
+      onnx_runtime: "ONNX Runtime",
+      local_fallback: "本地回退算法",
       builtin: "内置执行",
       demo_adapter: "演示适配器",
       simulated_adapter: "模拟适配器",
@@ -72,8 +75,8 @@ window.PlatformWorkflow = (function () {
       branch_pipeline_mock_driven: "Mock 驱动",
       stub: "Stub",
       mock: "Mock",
-      unspecified: "未上报执行模式",
-    })[mode] || mode || "未上报执行模式";
+      unspecified: "",
+    })[mode] || mode || "";
   }
 
   function setBadge(element, state) {
@@ -107,6 +110,53 @@ window.PlatformWorkflow = (function () {
     return stage.checkpoint_id || submission && submission.checkpoint_id || null;
   }
 
+  function workflowPhaseKey(submission) {
+    var stage = submission && submission.stage_transfer || {};
+    var phase = String(stage.phase || submission && submission.phase || "").toUpperCase();
+    var checkpoint = String(stage.checkpoint_id || submission && submission.checkpoint_id || "").toUpperCase();
+    if (phase === "FIND" || phase === "FIX") return "OBSERVE";
+    if (phase === "TRACK") return "ORIENT";
+    if (phase === "TARGET") return "DECIDE";
+    if (phase === "ENGAGE" || phase === "ASSESS") return "ACT";
+    if (checkpoint === "MAR-CP-PERCEPTION") return "OBSERVE";
+    if (checkpoint === "MAR-CP-ASSESS") return "ORIENT";
+    if (checkpoint === "MAR-CP-PLAN") return "DECIDE";
+    if (checkpoint === "MAR-CP-CLOSE") return "ACT";
+    return null;
+  }
+
+  function oodaPhaseLabel(phase) {
+    return ({
+      OBSERVE: "Observe · 观察",
+      ORIENT: "Orient · 研判",
+      DECIDE: "Decide · 决策",
+      ACT: "Act · 行动",
+    })[String(phase || "").toUpperCase()] || null;
+  }
+
+  function f2t2eaPhaseLabel(phase) {
+    return ({
+      FIND: "Find · 发现",
+      FIX: "Fix · 定位",
+      TRACK: "Track · 跟踪",
+      TARGET: "Target · 目标选择",
+      ENGAGE: "Engage · 交战",
+      ASSESS: "Assess · 评估",
+    })[String(phase || "").toUpperCase()] || null;
+  }
+
+  function workflowPhaseContext(view) {
+    var submission = view && view.submission || {};
+    var stage = submission.stage_transfer || {};
+    var ooda = workflowPhaseKey(submission);
+    var f2 = String(stage.phase || "").toUpperCase();
+    return {
+      ooda: ooda,
+      f2: f2,
+      label: [oodaPhaseLabel(ooda), f2t2eaPhaseLabel(f2)].filter(Boolean).join(" / "),
+    };
+  }
+
   function formatDuration(value) {
     if (value == null || value === "") return null;
     var duration = Number(value);
@@ -122,14 +172,17 @@ window.PlatformWorkflow = (function () {
   }
 
   function activityTimingLabel(item, detail) {
-    var activityDuration = positiveDuration(item && item.duration_ms);
-    if (activityDuration > 0) return "\u6d3b\u52a8\u8017\u65f6 " + formatDuration(activityDuration);
+    var parts = [];
+    var dispatchDuration = positiveDuration(item && item.dispatch_duration_ms);
+    var agentDuration = positiveDuration(item && (item.agent_duration_ms || item.duration_ms));
+    if (dispatchDuration > 0) parts.push("调度窗口 " + formatDuration(dispatchDuration));
+    if (agentDuration > 0) parts.push("Agent调用 " + formatDuration(agentDuration));
     var algorithms = detail && Array.isArray(detail.algorithms) ? detail.algorithms : [];
     var algorithmDuration = algorithms.reduce(function (total, row) {
       return total + positiveDuration(row.duration_ms);
     }, 0);
-    if (algorithmDuration > 0) return "\u7b97\u6cd5\u8017\u65f6 " + formatDuration(algorithmDuration);
-    return null;
+    if (algorithmDuration > 0) parts.push("算法累计 " + formatDuration(algorithmDuration));
+    return parts.join(" · ") || null;
   }
 
   function renderTaskHistory() {
@@ -150,15 +203,15 @@ window.PlatformWorkflow = (function () {
     var slots = workflowTasks.map(function (task) { return {task:task, id:null}; });
     ids.forEach(function (id) {
       var live = viewCache[id] || {};
-      var checkpoint = workflowCheckpoint(submissions[id] || live.submission || {});
-      var slot = slots.find(function (item) { return item.task.checkpoint === checkpoint; });
+      var slotPhase = workflowPhaseKey(submissions[id] || live.submission || {});
+      var slot = slots.find(function (item) { return item.task.phase === slotPhase; });
       if (!slot) slot = slots.find(function (item) { return !item.id; });
       if (slot && !slot.id) slot.id = id;
     });
     root.innerHTML = slots.map(function (slot) {
       var id = slot.id;
       if (!id) {
-        return '<button type="button" disabled><small>' + escapeHtml(slot.task.phase) + '</small><b>' +
+        return '<button type="button" disabled><small>' + escapeHtml(slot.task.subtitle) + '</small><b>' +
           escapeHtml(slot.task.label) + '</b><span>未生成任务</span></button>';
       }
       var view = viewCache[id] || {};
@@ -169,6 +222,9 @@ window.PlatformWorkflow = (function () {
       if (activityCount == null && record.result && Array.isArray(record.result.cards)) activityCount = record.result.cards.length;
       var duration = formatDuration(view.metrics && view.metrics.workflow_duration_ms || record.metrics && record.metrics.workflow_duration_ms);
       var meta = [statusLabel(state)];
+      var submission = view.submission || submissions[id] || {};
+      var checkpoint = workflowCheckpoint(submission);
+      var phaseKey = workflowPhaseKey(submission);
       if (activityCount != null) meta.push(activityCount + " 项活动");
       if (duration) meta.push(duration);
       var classes = [state];
@@ -176,8 +232,8 @@ window.PlatformWorkflow = (function () {
       if (String(id) === String(activeWorkflowId || "")) classes.push("current");
       return '<button type="button" class="' + escapeHtml(classes.join(" ")) + '" data-workflow-history="' +
         escapeHtml(id) + '" aria-pressed="' + (String(id) === String(workflowId || "")) + '"><small>' +
-        escapeHtml(slot.task.phase) + '</small><b>' + escapeHtml(slot.task.label) + '</b><span>' +
-        escapeHtml(meta.join(" · ")) + '</span></button>';
+        escapeHtml(slot.task.subtitle) + '</small><b>' + escapeHtml(slot.task.label) + '</b><span>' +
+        escapeHtml([checkpoint || "未提供检查点", phaseKey ? "OODA · " + phaseKey : "未提供阶段", meta.join(" · ")].filter(Boolean).join(" · ")) + '</span></button>';
     }).join("");
   }
 
@@ -285,10 +341,10 @@ window.PlatformWorkflow = (function () {
     var key = activityDetailSelection[scope] || "__all__";
     var row = details[key] || details.__all__;
     if (!row) return "";
-    var title = key === "__all__" ? "完整明细" : ("字段明细 · " + key);
+    var title = key === "__all__" ? "完整明细" : ((row.label || "字段明细") + " · " + key);
     var payload = row.value !== undefined ? row.value : row;
     return '<div class="workflow-detail-json"><header><b>' + escapeHtml(title) + '</b><span>' +
-      escapeHtml(row.variable || row.source || "") + '</span></header><pre>' +
+      escapeHtml(row.path || row.source || row.variable || "") + '</span></header><pre>' +
       escapeHtml(JSON.stringify(payload, null, 2)) + '</pre></div>';
   }
 
@@ -302,7 +358,8 @@ window.PlatformWorkflow = (function () {
     return '<dl class="workflow-detail-facts">' + value.map(function (item) {
       if (!item || typeof item !== "object") return '<div><dt>值</dt><dd>' + escapeHtml(item) + '</dd></div>';
       var key = String(item.key || "指标");
-      var clickable = details && (details[key] || details.__all__) && scope;
+      var detailRow = details && details[key];
+      var clickable = detailRow && !detailRow.summary_only && scope;
       var selected = clickable && (activityDetailSelection[scope] || "__all__") === key;
       var inner = '<dt>' + escapeHtml(key) + '</dt><dd>' + escapeHtml(item.value == null ? "后端未上报" : item.value) + '</dd>';
       return clickable
@@ -311,10 +368,124 @@ window.PlatformWorkflow = (function () {
     }).join("") + '</dl>';
   }
 
+  function ioValuePreview(row) {
+    if (row.count != null) return row.value_type + " · " + row.count + " 项";
+    if (row.value == null) return "null";
+    if (typeof row.value === "boolean") return row.value ? "true" : "false";
+    if (typeof row.value === "number") return String(row.value);
+    var text = String(row.value);
+    return text.length > 48 ? text.slice(0, 48) + "…" : text;
+  }
+
+  function semanticIoBlock(detail, scope) {
+    var fields = detail && (detail[scope + "_semantics"] || detail[scope + "_fields"]) || [];
+    var variable = detail && detail[scope + "_variable"];
+    var source = detail && detail[scope + "_source"];
+    if (!fields.length) {
+      return '<div class="workflow-detail-section workflow-semantic-io"><h4>真实' +
+        (scope === "output" ? "输出" : "输入") + '字段</h4>' +
+        '<div class="workflow-detail-empty">后端未返回可展示的 JSON 字段</div></div>';
+    }
+    return '<div class="workflow-detail-section workflow-semantic-io"><header><h4>真实' +
+      (scope === "output" ? "输出" : "输入") + '字段' +
+      (variable ? ' · ' + escapeHtml(variable) : '') + '</h4><code>' + escapeHtml(source || "") + '</code></header>' +
+      '<div class="workflow-semantic-list">' + fields.map(function (row) {
+        var selected = (activityDetailSelection[scope] || "__all__") === String(row.key);
+        return '<button type="button" class="workflow-semantic-field ' + (selected ? "selected" : "") +
+          '" data-detail-scope="' + escapeHtml(scope) + '" data-detail-key="' + escapeHtml(row.key) + '">' +
+          '<b>' + escapeHtml(row.label || row.key) + '</b><small>' + escapeHtml(row.key) + '</small>' +
+          '<span>' + escapeHtml(ioValuePreview(row)) + '</span><code>' + escapeHtml(row.path || "") + '</code></button>';
+      }).join("") + '</div>' +
+      '</div>';
+  }
+
   function detailDefinitionList(rows) {
     return '<dl class="workflow-detail-definition">' + rows.map(function (row) {
       return '<div><dt>' + escapeHtml(row[0]) + '</dt><dd>' + escapeHtml(provided(row[1])) + '</dd></div>';
     }).join("") + '</dl>';
+  }
+
+  function compactValue(value) {
+    if (value == null || value === "") return null;
+    if (typeof value === "object") return JSON.stringify(value);
+    return String(value);
+  }
+
+  function usageWithoutTiming(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+    var timingKeys = {
+      duration_ms: true,
+      latency_ms: true,
+      elapsed_ms: true,
+      inference_ms: true,
+      runtime_ms: true,
+    };
+    var result = {};
+    Object.keys(value).forEach(function (key) {
+      if (!timingKeys[key]) result[key] = value[key];
+    });
+    return Object.keys(result).length ? result : null;
+  }
+
+  function algorithmDefinitionRows(row) {
+    var rows = [["算法 ID", row.algorithm_id]];
+    if (row.version) rows.push(["版本", row.version]);
+    if (row.agent) rows.push(["执行 Agent", row.agent]);
+    if (row.backend_type) rows.push(["后端类型", modeLabel(row.backend_type)]);
+    if (row.execution_mode && row.execution_mode !== "unspecified") rows.push(["执行模式", modeLabel(row.execution_mode)]);
+    if (row.task) rows.push(["算法任务", row.task]);
+    if (row.reason) rows.push(["选择原因", row.reason]);
+    rows.push([
+      "算法耗时",
+      positiveDuration(row.duration_ms || row.latency_ms) > 0
+        ? formatDuration(row.duration_ms || row.latency_ms)
+        : "算法未单独上报耗时",
+    ]);
+    if ((row.evidence_refs || []).length) rows.push(["运行证据", row.evidence_refs.join(", ")]);
+    return rows;
+  }
+
+  function algorithmCoverageDefinitionRows(row) {
+    var rows = algorithmDefinitionRows(row).slice();
+    if ((row.assigned_agents || []).length) rows.push(["负责 Agent", compactSummary(row.assigned_agents)]);
+    if (row.input_summary) rows.push(["输入摘要", compactSummary(row.input_summary)]);
+    if (row.result_summary) rows.push(["结果摘要", compactSummary(row.result_summary)]);
+    if (row.flops != null) rows.push(["FLOPs", compactValue(row.flops)]);
+    if (row.tier) rows.push(["层级", row.tier === "engineering" ? "工程模型" : row.tier]);
+    return rows;
+  }
+
+  function algorithmInvocationBlock(row) {
+    var invocations = Array.isArray(row.invocations) ? row.invocations : [];
+    if (!invocations.length) return "";
+    return '<div class="workflow-algorithm-invocations">' + invocations.map(function (item, index) {
+      var inputPayload = item.input == null ? item.inputs : item.input;
+      var outputPayload = item.output == null ? item.outputs : item.output;
+      if (inputPayload === undefined) inputPayload = null;
+      if (outputPayload === undefined) outputPayload = null;
+      var title = "#" + (index + 1) + " " + (item.task || item.request_id || item.algorithm_id || "调用");
+      var meta = [
+        item.request_id ? "request_id=" + item.request_id : "",
+        item.trace_id ? "trace_id=" + item.trace_id : "",
+        positiveDuration(item.duration_ms || item.latency_ms) > 0
+          ? "耗时 " + formatDuration(item.duration_ms || item.latency_ms)
+          : "耗时未上报",
+      ].filter(Boolean).join(" · ");
+      var invocationRows = [
+        ["后端类型", item.backend_type ? modeLabel(item.backend_type) : null],
+        ["执行模式", item.execution_mode ? modeLabel(item.execution_mode) : null],
+        ["选择原因", item.reason],
+        ["耗时", positiveDuration(item.duration_ms || item.latency_ms) > 0 ? formatDuration(item.duration_ms || item.latency_ms) : null],
+      ];
+      var usageMetrics = usageWithoutTiming(item.usage);
+      if (usageMetrics) invocationRows.push(["服务端指标", compactValue(usageMetrics)]);
+      return '<details><summary><b>' + escapeHtml(title) + '</b><span>' + escapeHtml(meta) + '</span></summary>' +
+        detailDefinitionList(invocationRows) +
+        '<div class="workflow-algorithm-io-grid">' +
+          '<div><h5>算法输入</h5><pre>' + escapeHtml(JSON.stringify(inputPayload, null, 2)) + '</pre></div>' +
+          '<div><h5>算法输出</h5><pre>' + escapeHtml(JSON.stringify(outputPayload, null, 2)) + '</pre></div>' +
+        '</div></details>';
+    }).join("") + '</div>';
   }
 
   function renderActivityDetail(view) {
@@ -347,24 +518,26 @@ window.PlatformWorkflow = (function () {
       return;
     }
     if (activityTab === "input") {
-      root.innerHTML = '<div class="workflow-detail-section"><h4>活动输入摘要</h4>' +
-        factList(detail.input_summary, detail.input_detail, "input") +
+      root.innerHTML = semanticIoBlock(detail, "input") +
+        '<div class="workflow-detail-section">' +
         detailJsonBlock(detail.input_detail, "input") + '</div>';
       return;
     }
     if (activityTab === "output") {
-      root.innerHTML = '<div class="workflow-detail-section"><h4>活动输出摘要</h4>' +
-        factList(detail.output_summary, detail.output_detail, "output") +
+      root.innerHTML = semanticIoBlock(detail, "output") +
+        '<div class="workflow-detail-section">' +
         detailJsonBlock(detail.output_detail, "output") + '</div>';
       return;
     }
     if (activityTab === "call") {
       var call = detail.agent_call || {};
       root.innerHTML = '<div class="workflow-detail-section"><h4>Agent 调用</h4>' + detailDefinitionList([
-        ["角色", call.role], ["Agent", call.agent], ["实例 ID", call.instance_id],
+        ["角色", call.role], ["Agent", call.agent],
         ["执行模式", call.execution_mode ? modeLabel(call.execution_mode) : null],
-        ["耗时", formatDuration(call.duration_ms)], ["重试次数", call.retry_count],
-        ["最近心跳", call.last_heartbeat], ["开始时间", detail.started_at], ["结束时间", detail.finished_at],
+        ["Agent调用耗时", formatDuration(call.agent_duration_ms || call.duration_ms)],
+        ["调度窗口耗时", formatDuration(call.dispatch_duration_ms)],
+        ["兼容耗时字段", formatDuration(call.duration_ms)],
+        ["开始时间", detail.started_at], ["结束时间", detail.finished_at],
       ]) + '</div>';
       return;
     }
@@ -373,9 +546,7 @@ window.PlatformWorkflow = (function () {
       root.innerHTML = algorithms.length ? '<div class="workflow-detail-algorithms">' + algorithms.map(function (row) {
         var runtimeObserved = !!row.runtime_observed;
         return '<article class="' + (runtimeObserved ? "verified" : "declared") + '"><header><b>' + escapeHtml(row.name || row.algorithm_id) + '</b><span>' + escapeHtml(statusLabel(row.status)) + '</span></header>' +
-          detailDefinitionList([["算法 ID", row.algorithm_id], ["模型", row.model_id], ["版本", row.version],
-            ["执行 Agent", row.agent], ["执行模式", row.execution_mode ? modeLabel(row.execution_mode) : null],
-            ["耗时", formatDuration(row.duration_ms)], ["运行证据", "后端已上报"]]) + '</article>';
+          detailDefinitionList(algorithmDefinitionRows(row)) + algorithmInvocationBlock(row) + '</article>';
       }).join("") + '</div>' : '<div class="workflow-detail-empty">后端未上报该活动的算法调用；活动完成只表示流程节点完成</div>';
       return;
     }
@@ -410,7 +581,8 @@ window.PlatformWorkflow = (function () {
     }
     var count = document.getElementById("wf-activity-count");
     if (count) count.textContent = rows.length + " 项";
-    function activityDescription(item, sequenceContainer) {
+    var phaseContext = workflowPhaseContext(view);
+    function activityDescription(item, sequenceContainer, phaseContext) {
       if (sequenceContainer) return "流程容器负责按 BPEL 顺序串联子活动，本身不代表业务 Agent 执行。";
       var key = String(item.role || item.work_item || item.activity_id || "").toLowerCase();
       if (item.description || item.summary) return item.description || item.summary;
@@ -418,6 +590,12 @@ window.PlatformWorkflow = (function () {
         return "汇聚传感器观测与算法输出，完成目标初始发现、识别线索整理和态势信息共享。";
       }
       if (key.indexOf("track_threat") >= 0 || key.indexOf("track") >= 0) {
+        if (phaseContext && phaseContext.ooda === "OBSERVE") {
+          return "观察阶段调用跟踪 Agent，把感知识别结果固定成初始航迹、位置和后续研判输入。";
+        }
+        if (phaseContext && phaseContext.ooda === "ORIENT") {
+          return "研判阶段调用跟踪 Agent，持续维护航迹并评估威胁等级、优先级和后续跟踪需求。";
+        }
         return "生成并维护目标航迹，评估威胁等级、目标优先级和后续跟踪需求。";
       }
       if (key.indexOf("task_scheduling") >= 0 || key.indexOf("resource") >= 0 || key.indexOf("sched") >= 0) {
@@ -442,7 +620,8 @@ window.PlatformWorkflow = (function () {
         ? "Commander 流程控制 · " + (item.activity_id || item.work_item || "内部节点")
         : (item.agent || "Agent 未分配");
       var dependency = (item.depends_on || []).length ? " · 依赖 " + item.depends_on.join(", ") : "";
-      var description = activityDescription(item, sequenceContainer);
+      var description = activityDescription(item, sequenceContainer, phaseContext);
+      var phaseLabel = phaseContext.label || "阶段未上报";
       var detail = view && view.activity_details && view.activity_details[activityKey(item)];
       var timing = activityTimingLabel(item, detail);
       return '<button type="button" class="workflow-activity ' + escapeHtml(state) + (activityKey(item) === selectedActivityId ? " selected" : "") +
@@ -450,18 +629,19 @@ window.PlatformWorkflow = (function () {
         '<span class="workflow-step-index">' + String(item.index || 0).padStart(2, "0") + '</span>' +
         '<span class="workflow-activity-body"><b>' + escapeHtml(title) + '</b>' +
         '<small class="workflow-activity-agent">' + escapeHtml(executor) + escapeHtml(dependency) + '</small>' +
+        '<small class="workflow-activity-phase">' + escapeHtml(phaseLabel) + '</small>' +
         (timing ? '<small class="workflow-activity-timing">' + escapeHtml(timing) + '</small>' : '') +
         '<small class="workflow-activity-desc">' + escapeHtml(description) + '</small>' +
         (item.error ? '<em>' + escapeHtml(item.error) + '</em>' : '') +
-        '<span class="workflow-activity-meta"><span class="workflow-mode-tag">' + escapeHtml(modeLabel(item.execution_mode)) + '</span>' +
-        '<span class="workflow-state-tag">' + escapeHtml(statusLabel(state)) + '</span></span></span>' +
+        '<span class="workflow-activity-meta"><span class="workflow-state-tag">' + escapeHtml(statusLabel(state)) + '</span></span></span>' +
       '</button>';
     }).join("") : '<div class="workflow-empty">未返回执行计划</div>';
 
     var trace = (orchestration || {}).trace || [];
     traceRoot.innerHTML = trace.length ? trace.slice().reverse().map(function (item) {
+      var traceMeta = [item.role, item.agent, item.work_item, item.message].filter(Boolean).join(" · ");
       return '<div class="workflow-trace-row"><span>' + escapeHtml(item.timestamp || "—") + '</span><b>' + escapeHtml(item.event) + '</b><small>' +
-        escapeHtml([item.role, item.agent, item.message].filter(Boolean).join(" · ")) + '</small></div>';
+        escapeHtml(traceMeta) + '</small></div>';
     }).join("") : '<div class="workflow-empty">未返回执行事件</div>';
     renderActivityDetail(view);
   }
@@ -531,40 +711,6 @@ window.PlatformWorkflow = (function () {
     return String(value);
   }
 
-  function renderAgentTopology(agents) {
-    var root = document.getElementById("wf-agent-topology");
-    if (!root) return;
-    agents = agents || {};
-    var counts = agents.counts || {};
-    var roles = agents.roles || [];
-    var instances = agents.instances || [];
-    root.innerHTML =
-      '<div class="workflow-v2-summary">' +
-        '<span><small>工作流活动</small><b>' + escapeHtml(provided(counts.workflow_activity_count)) + '</b></span>' +
-        '<span><small>计划角色</small><b>' + escapeHtml(provided(counts.planned_role_count)) + '</b></span>' +
-        '<span><small>Agent 类型</small><b>' + escapeHtml(provided(counts.role_count)) + '</b></span>' +
-        '<span><small>运行时实例</small><b>' + escapeHtml(provided(counts.instance_count)) + '</b></span>' +
-        '<span><small>非模拟实例</small><b>' + escapeHtml(provided(counts.real_instance_count)) + '</b></span>' +
-      '</div>' +
-      '<div class="workflow-agent-role-list">' + (roles.length ? roles.map(function (row) {
-        return '<div class="workflow-agent-role ' + escapeHtml(row.status || "unknown") + '">' +
-          '<b>' + escapeHtml(row.role) + '</b><small>' + escapeHtml(statusLabel(row.status)) +
-          ' · 活动 ' + escapeHtml(row.activity_count || 0) + ' · 调用事件 ' + escapeHtml(row.call_count || 0) + '</small></div>';
-      }).join("") : '<div class="workflow-empty">后端未返回 Agent 角色</div>') + '</div>' +
-      '<div class="workflow-agent-instance-list">' + (instances.length ? instances.map(function (row) {
-        var nature = row.is_stub ? "Stub" : (row.is_mock ? "Mock" : (row.execution_mode === "local_agent" ? "本地 Agent" : "真实服务"));
-        return '<article class="workflow-agent-instance ' + (row.real_service ? "real" : "non-real") + '">' +
-          '<header><b>' + escapeHtml(row.agent || row.role || row.instance_id) + '</b><span>' + escapeHtml(nature) + '</span></header>' +
-          '<small>实例 ' + escapeHtml(row.instance_id) + ' · ' + escapeHtml(statusLabel(row.status)) + '</small>' +
-          '<dl><dt>执行模式</dt><dd>' + escapeHtml(modeLabel(row.execution_mode)) + '</dd>' +
-          '<dt>活动 / 调用</dt><dd>' + escapeHtml(row.activity_count || 0) + ' / ' + escapeHtml(row.call_count || 0) + '</dd>' +
-          '<dt>累计耗时</dt><dd>' + escapeHtml(provided(row.duration_ms, formatDuration)) + '</dd>' +
-          '<dt>重试</dt><dd>' + escapeHtml(provided(row.retry_count)) + '</dd>' +
-          '<dt>最近心跳</dt><dd>' + escapeHtml(provided(row.last_heartbeat)) + '</dd></dl>' +
-        '</article>';
-      }).join("") : '<div class="workflow-empty">后端未上报 Agent 实例标识</div>') + '</div>';
-  }
-
   function renderAlgorithmCoverage(algorithms) {
     var root = document.getElementById("wf-algorithm-coverage");
     if (!root) return;
@@ -583,17 +729,13 @@ window.PlatformWorkflow = (function () {
         '<span><small>执行成功</small><b>' + escapeHtml(verifiedCount) + '</b></span>' +
       '</div>' +
       '<div class="workflow-algorithm-list">' + (rows.length ? rows.map(function (row) {
+        var subtitle = row.tier === "engineering" ? "工程模型" : "核心算法";
+        if (row.agent) subtitle += " · 执行 Agent " + row.agent;
         return '<article class="workflow-algorithm ' + escapeHtml(row.status || "declared") + '">' +
           '<header><b>' + escapeHtml((row.requirement_id ? row.requirement_id + " · " : "") + (row.name || row.algorithm_id)) + '</b><span>' + escapeHtml(statusLabel(row.status)) + '</span></header>' +
-          '<small>' + escapeHtml(row.tier === "engineering" ? "工程模型" : "核心算法") + ' · 执行 Agent ' + escapeHtml(provided(row.agent)) + '</small>' +
-          '<dl><dt>算法 / 模型</dt><dd>' + escapeHtml(row.algorithm_id) + ' / ' + escapeHtml(provided(row.model_id)) + '</dd>' +
-          '<dt>负责 Agent</dt><dd>' + escapeHtml(compactSummary(row.assigned_agents)) + '</dd>' +
-          '<dt>版本</dt><dd>' + escapeHtml(provided(row.version)) + '</dd>' +
-          '<dt>执行模式</dt><dd>' + escapeHtml(provided(row.execution_mode, modeLabel)) + '</dd>' +
-          '<dt>耗时</dt><dd>' + escapeHtml(provided(row.duration_ms, formatDuration)) + '</dd>' +
-          '<dt>输入摘要</dt><dd>' + escapeHtml(compactSummary(row.input_summary)) + '</dd>' +
-          '<dt>结果摘要</dt><dd>' + escapeHtml(compactSummary(row.result_summary)) + '</dd>' +
-          '<dt>Params / FLOPs</dt><dd>' + escapeHtml(provided(row.params)) + ' / ' + escapeHtml(provided(row.flops)) + '</dd></dl>' +
+          '<small>' + escapeHtml(subtitle) + '</small>' +
+          detailDefinitionList(algorithmCoverageDefinitionRows(row)) +
+          algorithmInvocationBlock(row) +
           (row.evidence_refs && row.evidence_refs.length ? '<footer>证据 ' + escapeHtml(row.evidence_refs.join(", ")) + '</footer>' : '') +
         '</article>';
       }).join("") : '<div class="workflow-empty">本次后端工作流未上报实际算法调用；场景声明不会被当作已执行算法显示</div>') + '</div>';
@@ -691,7 +833,6 @@ window.PlatformWorkflow = (function () {
 
   function renderEvidenceViews(view) {
     view = view || {};
-    renderAgentTopology(view.agents);
     renderAlgorithmCoverage(view.algorithms);
     renderFunctionPoints(view.function_points);
     renderExecutionGraph(view.execution_graph);

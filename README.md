@@ -233,6 +233,24 @@ git switch -c <姓名>/<功能名>
 `.env`、`.runtime/`、数据库、日志、PID、构建目录和本地模型权重已被忽略。提交前仍应运行
 `git status --ignored`，确认没有使用 `git add -f` 把密钥或运行产物加入暂存区。
 
+## 离线交付包
+
+如果要把整套系统搬到没有网络的甲方机器上，推荐在有网的开发机上生成离线包：
+
+```bash
+python scripts/package_release_bundle.py
+```
+
+它会生成：
+
+- 仓库源码快照
+- 本地 Qwen 模型 `local_models/qwen3-1.7b`
+- `a2a` Conda 环境的离线包
+- Nacos / httpbin 的 Docker 镜像包
+- 目标机可直接执行的 `install/` 脚本
+
+目标机上按 `release_bundle/install/README.md` 操作即可。若只想跑本地大模型，不需要 Azure key。
+
 ## 常见问题
 
 - `docker info` 失败：在 Docker Desktop 的 Resources > WSL Integration 中启用当前发行版。

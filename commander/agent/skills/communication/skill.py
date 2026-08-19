@@ -10,6 +10,32 @@ from agent.models.schemas import CognitionOutput, PerceptionOutput, SemanticInte
 from agent.track_packet import CONSUMER_GUIDE, PACKET_SCHEMA_VERSION
 
 
+def _algorithm_id(backend: Any) -> str:
+    return str(getattr(backend, "algorithm_id", None) or getattr(backend, "name", "algorithm"))
+
+
+def _planned_inputs(base: dict[str, Any], plan: AlgorithmPlan | None, algorithm_id: str) -> dict[str, Any]:
+    if plan is None:
+        return base
+    enriched = dict(base)
+    enriched["params"] = plan.params_for(algorithm_id)
+    for call in plan.algorithm_calls:
+        if call.algorithm_id == algorithm_id:
+            enriched["_algorithm_reason"] = call.reason
+            break
+    return enriched
+
+
+def _run_and_record(backend: Any, inputs: dict[str, Any]) -> tuple[Any, dict[str, Any] | None]:
+    if hasattr(backend, "last_invocation"):
+        backend.last_invocation = None
+    output = backend.run(inputs)
+    invocation = getattr(backend, "last_invocation", None)
+    if isinstance(invocation, dict):
+        return output, dict(invocation)
+    return output, None
+
+
 class CommunicationSkill:
     def __init__(self, *, use_mock: bool = False, config: dict[str, Any] | None = None):
         cfg = config or {}
@@ -72,12 +98,25 @@ class CommunicationSkill:
         def enabled(aid: str) -> bool:
             return plan is None or plan.is_enabled(aid)
 
-        p_dump = perception.model_dump()
-        c_dump = cognition.model_dump()
+        p_dump = perception.model_dump(exclude={"algorithm_calls", "algorithm_invocations"})
+        c_dump = cognition.model_dump(exclude={"algorithm_calls", "algorithm_invocations"})
         trace: dict[str, str] = {}
+        invocations: list[dict[str, Any]] = [
+            *list(perception.algorithm_invocations or []),
+            *list(cognition.algorithm_invocations or []),
+        ]
 
         if enabled("knowledge_semantic_comm"):
-            compressed = self.compression.run({"perception": p_dump, "cognition": c_dump})
+            compressed, invocation = _run_and_record(
+                self.compression,
+                _planned_inputs(
+                    {"perception": p_dump, "cognition": c_dump},
+                    plan,
+                    _algorithm_id(self.compression),
+                ),
+            )
+            if invocation:
+                invocations.append(invocation)
             if not isinstance(compressed, dict):
                 compressed = {}
             compressed.setdefault("targets", self._targets_from_perception(perception))
@@ -105,13 +144,20 @@ class CommunicationSkill:
         )
 
         if enabled("marl_dynamic_router"):
-            routing = self.router.run(
-                {
-                    "packet": compressed,
-                    "subscriber_agents": subscriber_agents or [],
-                    "jamming_level": jamming_level,
-                }
+            routing, invocation = _run_and_record(
+                self.router,
+                _planned_inputs(
+                    {
+                        "packet": compressed,
+                        "subscriber_agents": subscriber_agents or [],
+                        "jamming_level": jamming_level,
+                    },
+                    plan,
+                    _algorithm_id(self.router),
+                ),
             )
+            if invocation:
+                invocations.append(invocation)
             if not isinstance(routing, dict):
                 routing = {}
             trace[self.router.name] = f"{len(routing.get('routes', []))} routes"
@@ -132,6 +178,15 @@ class CommunicationSkill:
                 "perception": perception.algorithm_trace,
                 "cognition": cognition.algorithm_trace,
                 "communication": trace,
+                "algorithm_calls": [
+                    {
+                        key: value
+                        for key, value in invocation.items()
+                        if key not in {"input", "output", "usage"}
+                    }
+                    for invocation in invocations
+                ],
+                "algorithm_invocations": invocations,
                 "targets": {
                     "source": compressed.get("target_source"),
                     "source_label": compressed.get("target_source_label"),
