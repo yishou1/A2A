@@ -519,7 +519,7 @@ def test_workflow_view_v2_uses_explicit_function_mapping_and_dag_dependencies() 
     view = build_workflow_view(status, work_list=work, trace=trace, submission=submission)
     points = {row["function_point_id"]: row for row in view["function_points"]["items"]}
 
-    assert set(points) == {"FP-01", "FP-02", "FP-03", "FP-04"}
+    assert {"KC-01", "KC-28", "FP-01", "FP-02", "FP-03", "FP-04"}.issubset(points)
     assert points["FP-01"]["status"] == "verified"
     assert points["FP-02"]["status"] == "failed"
     assert points["FP-03"]["status"] == "declared"
@@ -565,7 +565,8 @@ def test_submission_snapshot_carries_declared_coverage_without_promoting_it() ->
     assert view["algorithms"]["items"][0]["requirement_id"] == "M13"
     assert view["algorithms"]["items"][0]["tier"] == "core"
     assert view["algorithms"]["counts"]["verified"] == 0
-    assert view["function_points"]["items"][0]["status"] == "declared"
+    declared = {row["function_point_id"]: row for row in view["function_points"]["items"]}
+    assert declared["FP-01"]["status"] == "declared"
 
 
 def test_workflow_view_route_joins_commander_endpoints(monkeypatch) -> None:

@@ -259,7 +259,7 @@ def test_frontend_uses_dynamic_scenarios_without_future_route_renderer() -> None
     assert 'id="backend-active-count"' in html
     assert 'id="backend-runnable-count"' in html
     assert 'id="backend-unavailable-count"' in html
-    assert 'id="wf-function-points"' in html
+    assert 'id="kill-chain-runtime-view"' in html
     assert 'data-report-format="json"' in html
     assert 'data-report-format="markdown"' in html
     assert 'data-report-format="html"' in html
@@ -432,7 +432,7 @@ def test_algorithm_coverage_uses_runtime_backend_catalog() -> None:
     assert "loadRuntimeAlgorithms" in api_script
     assert "runtime_status" in panels
     assert "A2ACapabilityCatalog" not in panels
-    assert "后端可运行算法" in html
+    assert "算法与功能" in html
     assert "静态展示" not in html
 
 

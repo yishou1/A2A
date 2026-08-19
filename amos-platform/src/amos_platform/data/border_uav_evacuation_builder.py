@@ -203,7 +203,7 @@ def build_border_uav_evacuation_scenario() -> dict[str, Any]:
         "default_seed": 44041, "supported_modes": ["integration", "demonstration"],
         "functional_agents": scenario_agents(), "required_agents": required_backend_roles(),
         "algorithm_coverage": planned_algorithms("clustering", "association", "linear_regression", "logistic_regression", "random_forest", "neural_network", "naive_bayes_network", "generative_adversarial_network", "large_language_model", "retrieval_augmented_generation", "agent_collaboration", "federated_learning", "reinforcement_learning", "explainable_ai", "multimodal_fusion", "time_series_prediction", "real_time_object_detection", "change_detection", "multi_target_tracking", "graph_neural_network"),
-        "function_point_coverage": planned_function_points(*[f"FP-{i:02d}" for i in range(1, 30)]),
+        "function_point_coverage": planned_function_points(*[f"KC-{i:02d}" for i in range(1, 29)]),
         "demo_checkpoints": [
             {"checkpoint_id": "BOR-CP-DETECT", "title": "人员和车辆观测就绪", "min_elapsed_sec": 810, "conditions": {"stable_track_count_at_least": 2, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["BOR-MEDIA-01", "BOR-MEDIA-02"]}, "pause": True, "submit_analysis": True},
             {"checkpoint_id": "BOR-CP-TRACK", "title": "多源航迹输入就绪", "min_elapsed_sec": 1110, "conditions": {"stable_track_count_at_least": 2, "minimum_track_confidence": 0.6, "minimum_track_samples": 3, "media_ids_released": ["BOR-MEDIA-03"]}, "pause": True, "submit_analysis": True},
@@ -222,7 +222,7 @@ def build_border_uav_evacuation_scenario() -> dict[str, Any]:
             {"branch_id": "low_confidence", "name": "低置信度观测", "description": "维持未知状态并追加观测；困难样本仅进入事后训练闭环。"},
         ],
         "default_branch": "standard",
-        "acceptance_profile": {"functional_agents": 6, "core_algorithms": 16, "engineering_models": 4, "function_points": 29, "evidence_policy": "backend_trace_only"},
+        "acceptance_profile": {"functional_agents": 6, "core_algorithms": 16, "engineering_models": 4, "function_points": 28, "evidence_policy": "backend_trace_only"},
         "agent_plan": {"mode": "commander_workflow", "steps": ["submit_current_snapshot", "execute_a1_a6_workflow", "project_run_scoped_evidence"]},
         "events": [row["title"] for row in _timeline()],
     }

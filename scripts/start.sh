@@ -154,6 +154,7 @@ export A2A_COMMANDER_URL="${A2A_COMMANDER_URL:-http://127.0.0.1:8021}"
 export AMOS_BASE_URL="${AMOS_BASE_URL:-http://127.0.0.1:5000}"
 export COMMANDER_BASE_URL="${COMMANDER_BASE_URL:-http://127.0.0.1:8021}"
 export GATEWAY_PUBLIC_BASE_URL="${GATEWAY_PUBLIC_BASE_URL:-http://127.0.0.1:8030}"
+PUBLIC_BIND_HOST="${PUBLIC_BIND_HOST:-127.0.0.1}"
 
 algorithm_card_rows() {
   "$A2A_PYTHON" - "$COMMANDER_DIR/examples" <<'PY'
@@ -352,9 +353,9 @@ start_service commander-manager "$COMMANDER_DIR" "http://127.0.0.1:8021/health" 
   --serve-workflow-manager --manager-host 127.0.0.1 --manager-port 8021 \
   --state-dir "$RUNTIME_DIR/workflows"
 start_service amos-platform "$AMOS_DIR" "http://127.0.0.1:5000/api/v1/scenarios" \
-  "$A2A_PYTHON" -m amos_platform.api.app_factory --host 127.0.0.1 --port 5000
+  "$A2A_PYTHON" -m amos_platform.api.app_factory --host "$PUBLIC_BIND_HOST" --port 5000
 start_service commander-gateway "$COMMANDER_DIR" "http://127.0.0.1:8030/gateway/v1/health" \
-  "$A2A_PYTHON" -m commander_gateway --host 127.0.0.1 --port 8030
+  "$A2A_PYTHON" -m commander_gateway --host "$PUBLIC_BIND_HOST" --port 8030
 
 echo
 echo "System is running:"

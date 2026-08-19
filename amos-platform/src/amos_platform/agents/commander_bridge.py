@@ -16,6 +16,12 @@ import urllib.request
 from amos_platform.agents.a2a.commander_client import CommanderClient
 from amos_platform.agents.a2a.gateway_client import GatewayClient
 from amos_platform.agents.a2a.mapper import build_commander_workflow_payload
+from amos_platform.data.operational_catalog import (
+    SKILL_ALGORITHM_BINDINGS,
+    algorithm_classes,
+    class_for_package,
+    operational_functions,
+)
 from amos_platform.frontend_state.agent_state import build_agent_visible_state
 from amos_platform.simulation.exchange_contract import chain_id_for
 
@@ -199,6 +205,13 @@ class CommanderBridge:
                     "runnable_count": 0,
                     "unavailable_count": 0,
                     "algorithms": [],
+                    "algorithm_class_count": 20,
+                    "algorithm_package_count": 0,
+                    "algorithm_classes": algorithm_classes(onnx_runtime_available=False),
+                    "operational_functions": operational_functions(),
+                    "skill_bindings": SKILL_ALGORITHM_BINDINGS,
+                    "onnx_runtime_available": False,
+                    "onnx_runtime_note": "AlgoLib 不可达，无法验证 ONNX Runtime。",
                     "error": str(exc),
                 }
                 self._algorithm_catalog_cache = result
@@ -212,6 +225,7 @@ class CommanderBridge:
                 runtime_status = "unavailable"
                 health_payload: dict[str, Any] = {}
                 model_loaded = None
+                detail: dict[str, Any] = {}
                 try:
                     detail_url = "/".join([
                         f"{base_url}/algorithms",
@@ -227,6 +241,10 @@ class CommanderBridge:
                         model_loaded = health_payload.get("model_loaded")
                 except Exception as exc:
                     health_payload = {"detail": str(exc)}
+                entry = detail.get("entry") if isinstance(detail.get("entry"), dict) else {}
+                card = entry.get("card") if isinstance(entry.get("card"), dict) else {}
+                package_class = class_for_package(algorithm_id)
+                onnx_package = algorithm_id.endswith("_onnx")
                 return {
                     "algorithm_id": algorithm_id,
                     "display_name": item.get("display_name") or algorithm_id,
@@ -241,21 +259,40 @@ class CommanderBridge:
                     "runtime_status": runtime_status,
                     "model_loaded": model_loaded,
                     "health_status": health_payload.get("status"),
+                    "operational_functions": list(card.get("operational_functions") or entry.get("operational_functions") or []),
+                    "algorithm_class_id": package_class.get("algorithm_class_id") if package_class else None,
+                    "algorithm_class_name": package_class.get("name") if package_class else None,
+                    "onnx_model_provided": onnx_package,
+                    "onnx_runtime_available": False,
                 }
 
             worker_count = max(1, min(8, len(active)))
             with ThreadPoolExecutor(max_workers=worker_count) as executor:
                 algorithms = list(executor.map(inspect_runtime, active))
 
-            runnable_count = sum(1 for item in algorithms if item["runtime_status"] == "ready")
+            # ``onnx_text_classifier`` is a deterministic contract fixture,
+            # not one of M01–M20.  It is intentionally retained in AlgoLib
+            # registration but must not make the operator-facing business
+            # runtime appear degraded when ONNX Runtime is disabled.
+            business_algorithms = [item for item in algorithms if item["algorithm_id"] != "onnx_text_classifier"]
+            runnable_count = sum(1 for item in business_algorithms if item["runtime_status"] == "ready")
             result = {
-                "status": "ready" if self._runtime_is_ready(library_health) and runnable_count == len(algorithms) else "degraded",
+                "status": "ready" if self._runtime_is_ready(library_health) and runnable_count == len(business_algorithms) else "degraded",
                 "source": "algolib-runtime",
                 "checked_at": checked_at,
                 "active_count": len(active),
                 "runnable_count": runnable_count,
-                "unavailable_count": len(algorithms) - runnable_count,
+                "unavailable_count": len(business_algorithms) - runnable_count,
                 "algorithms": algorithms,
+                "algorithm_class_count": 20,
+                "algorithm_package_count": len(business_algorithms),
+                "registered_package_count": len(algorithms),
+                "contract_fixture_package_count": len(algorithms) - len(business_algorithms),
+                "algorithm_classes": algorithm_classes(onnx_runtime_available=False),
+                "operational_functions": operational_functions(),
+                "skill_bindings": SKILL_ALGORITHM_BINDINGS,
+                "onnx_runtime_available": False,
+                "onnx_runtime_note": "当前 AlgoLib 构建未启用 ONNX Runtime；ONNX 标识仅表示模型包已提供。",
             }
             self._algorithm_catalog_cache = result
             self._algorithm_catalog_expires_at = now + 10.0

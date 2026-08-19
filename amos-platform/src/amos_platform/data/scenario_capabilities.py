@@ -10,6 +10,12 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from amos_platform.data.operational_catalog import (
+    ALGORITHM_CLASS_CATALOG,
+    FUNCTION_POINT_CATALOG as CANONICAL_FUNCTION_POINT_CATALOG,
+    SKILL_ALGORITHM_BINDINGS,
+)
+
 
 FUNCTIONAL_AGENT_CATALOG: tuple[dict[str, Any], ...] = (
     {
@@ -18,6 +24,7 @@ FUNCTIONAL_AGENT_CATALOG: tuple[dict[str, Any], ...] = (
         "responsibilities": ["探测", "识别", "分类", "定位", "验证", "信息发布"],
         "backend_roles": ["recon", "tactical_intelligence"],
         "activity_ids": ["multi_source_perception", "tactical_intelligence_fusion"],
+        "skill_ids": ["tactical_intelligence_analysis"],
     },
     {
         "agent_id": "A2",
@@ -25,6 +32,7 @@ FUNCTIONAL_AGENT_CATALOG: tuple[dict[str, Any], ...] = (
         "responsibilities": ["航迹生成", "航迹维护", "威胁评估", "威胁排序"],
         "backend_roles": ["track_threat"],
         "activity_ids": ["track_and_assess", "retrack_after_execution"],
+        "skill_ids": ["track_threat_situation_analysis"],
     },
     {
         "agent_id": "A3",
@@ -32,6 +40,7 @@ FUNCTIONAL_AGENT_CATALOG: tuple[dict[str, Any], ...] = (
         "responsibilities": ["任务拆解", "资源匹配", "任务重分配"],
         "backend_roles": ["task_scheduling", "resource_allocation"],
         "activity_ids": ["schedule_and_allocate", "reschedule_resources"],
+        "skill_ids": ["task_scheduling_resource_allocation"],
     },
     {
         "agent_id": "A4",
@@ -39,6 +48,7 @@ FUNCTIONAL_AGENT_CATALOG: tuple[dict[str, Any], ...] = (
         "responsibilities": ["方案生成", "方案比较", "决策", "优先级确定"],
         "backend_roles": ["decision_planning"],
         "activity_ids": ["plan_and_decide", "replan"],
+        "skill_ids": ["decision_planning_analysis"],
     },
     {
         "agent_id": "A5",
@@ -46,13 +56,15 @@ FUNCTIONAL_AGENT_CATALOG: tuple[dict[str, Any], ...] = (
         "responsibilities": ["交战规则", "授权条件", "附带损伤", "合规审查"],
         "backend_roles": ["compliance_authorization"],
         "activity_ids": ["review_constraints", "review_replan"],
+        "skill_ids": ["compliance_authorization_analysis"],
     },
     {
         "agent_id": "A6",
         "name": "执行控制与闭环评估 Agent",
         "responsibilities": ["指令下发", "执行监控", "效果评估", "重规划"],
-        "backend_roles": ["closed_loop"],
+        "backend_roles": ["simulation_execution", "closed_loop"],
         "activity_ids": ["execute_and_assess", "close_loop"],
+        "skill_ids": ["execution_control", "closed_loop_optimization"],
     },
 )
 
@@ -86,26 +98,8 @@ ENGINEERING_MODEL_CATALOG: tuple[dict[str, Any], ...] = (
 
 
 MODEL_FUNCTION_POINTS: dict[str, list[str]] = {
-    "M01": ["FP-01", "FP-04", "FP-11"],
-    "M02": ["FP-15", "FP-17", "FP-20", "FP-26"],
-    "M03": ["FP-13", "FP-15", "FP-19", "FP-25", "FP-27"],
-    "M04": ["FP-20", "FP-25", "FP-28", "FP-29"],
-    "M05": ["FP-12", "FP-13", "FP-18", "FP-27"],
-    "M06": ["FP-01", "FP-05", "FP-06", "FP-07"],
-    "M07": ["FP-06", "FP-07", "FP-13", "FP-16"],
-    "M08": ["FP-02", "FP-03"],
-    "M09": ["FP-17", "FP-20", "FP-22"],
-    "M10": ["FP-16", "FP-17", "FP-21"],
-    "M11": ["FP-15", "FP-17", "FP-20", "FP-22", "FP-26"],
-    "M12": ["FP-10", "FP-14", "FP-24", "FP-26"],
-    "M13": ["FP-15", "FP-20", "FP-26"],
-    "M14": ["FP-09", "FP-16", "FP-21", "FP-25", "FP-28", "FP-29"],
-    "M15": ["FP-04", "FP-05", "FP-06", "FP-07", "FP-08", "FP-09", "FP-10"],
-    "M16": ["FP-11", "FP-14", "FP-19", "FP-24", "FP-27"],
-    "M17": ["FP-01", "FP-02", "FP-03"],
-    "M18": ["FP-02", "FP-25", "FP-27"],
-    "M19": ["FP-08", "FP-11", "FP-14", "FP-24"],
-    "M20": ["FP-10", "FP-11", "FP-14", "FP-18"],
+    str(item["requirement_id"]): list(item["function_points"])
+    for item in ALGORITHM_CLASS_CATALOG
 }
 
 _ACTIVITY_IDS_BY_AGENT = {
@@ -134,42 +128,15 @@ MODEL_CATALOG: tuple[dict[str, Any], ...] = tuple(
 )
 
 
-FUNCTION_POINT_CATALOG: tuple[dict[str, Any], ...] = (
-    {"function_id": "FP-01", "name": "初始检测", "phase": "FIND"},
-    {"function_id": "FP-02", "name": "战损评估检测", "phase": "FIND"},
-    {"function_id": "FP-03", "name": "再次任务检测", "phase": "FIND"},
-    {"function_id": "FP-04", "name": "定义目标", "phase": "FIX"},
-    {"function_id": "FP-05", "name": "特征描述", "phase": "FIX"},
-    {"function_id": "FP-06", "name": "分类", "phase": "FIX"},
-    {"function_id": "FP-07", "name": "识别", "phase": "FIX"},
-    {"function_id": "FP-08", "name": "定位", "phase": "FIX"},
-    {"function_id": "FP-09", "name": "验证检测", "phase": "FIX"},
-    {"function_id": "FP-10", "name": "分发目标或威胁信息", "phase": "TRACK"},
-    {"function_id": "FP-11", "name": "生成或更新航迹", "phase": "TRACK"},
-    {"function_id": "FP-12", "name": "威胁排序", "phase": "TRACK"},
-    {"function_id": "FP-13", "name": "确定目标或威胁紧急度", "phase": "TRACK"},
-    {"function_id": "FP-14", "name": "维持航迹", "phase": "TRACK"},
-    {"function_id": "FP-15", "name": "评估兵力", "phase": "TARGET"},
-    {"function_id": "FP-16", "name": "验证目标或威胁", "phase": "TARGET"},
-    {"function_id": "FP-17", "name": "提名行动选项", "phase": "TARGET"},
-    {"function_id": "FP-18", "name": "目标或威胁优先级排序", "phase": "TARGET"},
-    {"function_id": "FP-19", "name": "确定可用时间", "phase": "TARGET"},
-    {"function_id": "FP-20", "name": "挑选行动选项", "phase": "TARGET"},
-    {"function_id": "FP-21", "name": "验证规则与授权", "phase": "ENGAGE"},
-    {"function_id": "FP-22", "name": "下达指令", "phase": "ENGAGE"},
-    {"function_id": "FP-23", "name": "执行任务", "phase": "ENGAGE"},
-    {"function_id": "FP-24", "name": "跟踪执行状态", "phase": "ENGAGE"},
-    {"function_id": "FP-25", "name": "确认效果", "phase": "ASSESS"},
-    {"function_id": "FP-26", "name": "任务重分配", "phase": "ASSESS"},
-    {"function_id": "FP-27", "name": "动态态势评估", "phase": "ASSESS"},
-    {"function_id": "FP-28", "name": "任务结果判定", "phase": "ASSESS"},
-    {"function_id": "FP-29", "name": "全局任务完成度评估", "phase": "ASSESS"},
-)
+FUNCTION_POINT_CATALOG: tuple[dict[str, Any], ...] = CANONICAL_FUNCTION_POINT_CATALOG
 
 
 def functional_agents() -> list[dict[str, Any]]:
     """Return the six document-defined Agent responsibilities in A1-A6 order."""
-    return [{**deepcopy(item), "planned": True} for item in FUNCTIONAL_AGENT_CATALOG]
+    return [{**deepcopy(item), "skills": [
+        {"skill_id": skill_id, **deepcopy(SKILL_ALGORITHM_BINDINGS.get(skill_id, {}))}
+        for skill_id in item.get("skill_ids", [])
+    ], "planned": True} for item in FUNCTIONAL_AGENT_CATALOG]
 
 
 def planned_algorithms(*algorithm_ids: str) -> list[dict[str, Any]]:
@@ -185,8 +152,15 @@ def planned_algorithms(*algorithm_ids: str) -> list[dict[str, Any]]:
 def planned_function_points(*function_ids: str) -> list[dict[str, Any]]:
     """Return planned function-point records in catalog order."""
     selected = set(function_ids)
+    activity_map = {
+        "KC-01": ["multi_source_perception"], "KC-02": ["close_loop"], "KC-03": ["multi_source_perception", "reschedule_resources"],
+        "KC-04": ["tactical_intelligence_fusion"], "KC-05": ["tactical_intelligence_fusion"], "KC-06": ["tactical_intelligence_fusion"], "KC-07": ["tactical_intelligence_fusion"], "KC-08": ["tactical_intelligence_fusion"], "KC-09": ["tactical_intelligence_fusion"], "KC-10": ["tactical_intelligence_fusion"],
+        "KC-11": ["track_and_assess"], "KC-12": ["track_and_assess"], "KC-13": ["track_and_assess"], "KC-14": ["track_and_assess"], "KC-15": ["track_and_assess"],
+        "KC-16": ["schedule_and_allocate", "plan_and_decide"], "KC-17": ["plan_and_decide"], "KC-18": ["plan_and_decide"], "KC-19": ["plan_and_decide"], "KC-20": ["plan_and_decide"], "KC-21": ["review_constraints"],
+        "KC-22": ["execute_and_assess"], "KC-23": ["execute_and_assess"], "KC-24": ["execute_and_assess"], "KC-25": ["execute_and_assess"], "KC-26": ["reschedule_resources", "replan"], "KC-27": ["close_loop"], "KC-28": ["close_loop"],
+    }
     return [
-        {**deepcopy(item), "planned": True}
+        {**deepcopy(item), "activity_ids": activity_map.get(str(item["function_id"]), []), "planned": True}
         for item in FUNCTION_POINT_CATALOG
         if item["function_id"] in selected
     ]

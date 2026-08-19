@@ -118,7 +118,7 @@ def test_commander_payload_contains_only_released_media_and_scenario_plan(scenar
         assert [row["agent_id"] for row in payload["functional_agents"]] == [
             "A1", "A2", "A3", "A4", "A5", "A6"
         ]
-        assert len(payload["function_point_coverage"]) == 29
+        assert len(payload["function_point_coverage"]) == 28
 
 
 @pytest.mark.parametrize("scenario_id", SCENARIO_IDS)

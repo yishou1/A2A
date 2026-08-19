@@ -12,6 +12,11 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
+from amos_platform.data.operational_catalog import (
+    SKILL_ALGORITHM_BINDINGS,
+    operational_functions,
+)
+
 
 VIEW_SCHEMA_VERSION = "amos.workflow-view.v2"
 TERMINAL_STATES = {"completed", "failed", "error", "cancelled", "aborted"}
@@ -235,6 +240,12 @@ def build_submission_snapshot(
             or payload.get("function_point_coverage")
             or []
         ),
+        "conditional_function_points": deepcopy(
+            mission.get("conditional_function_points")
+            or (mission.get("metadata") or {}).get("conditional_function_points")
+            or payload.get("conditional_function_points")
+            or []
+        ),
     }
 
 
@@ -348,6 +359,7 @@ def _normalize_activities(status: dict[str, Any], work_payload: Any) -> list[dic
             "instance_id": instance_id,
             "status": str(merged.get("status") or "pending").lower(),
             "required_skills": list(merged.get("required_skills") or []),
+            "function_ids": _explicit_function_points(merged),
             "error": merged.get("error"),
             "duration_ms": duration_ms,
             "started_at": started_at,
@@ -1221,19 +1233,49 @@ def _build_function_point_view(
     work_payload: Any,
     trace_payload: Any,
     submission: dict[str, Any],
+    algorithm_catalog: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    rows: dict[str, dict[str, Any]] = {}
-    for declared in _coverage_rows(submission.get("function_point_coverage"), kind="function"):
-        rows[declared["id"].casefold()] = {
-            "function_point_id": declared["id"],
-            "name": declared["name"],
-            "category": declared["category"],
-            "status": "declared",
-            "execution_status": None,
-            "activity_ids": declared["activity_ids"],
-            "evidence_refs": [],
-            "declared_by_scenario": True,
+    algorithm_catalog = algorithm_catalog if isinstance(algorithm_catalog, dict) else {}
+    rows: dict[str, dict[str, Any]] = {
+        str(item["function_id"]).casefold(): {
+            "function_point_id": item["function_id"], "name": item["name"],
+            "category": item.get("f2t2ea_stage", "").upper(),
+            "ooda_phase": item.get("ooda_phase"), "f2t2ea_stage": item.get("f2t2ea_stage"),
+            "status": "not_applicable", "execution_status": None, "activity_ids": [],
+            "evidence_refs": [], "declared_by_scenario": False, "scope": "not_applicable",
+            "candidate_algorithms": [], "actual_algorithms": [], "skills": [], "agents": [],
         }
+        for item in operational_functions()
+    }
+    for declared in _coverage_rows(submission.get("function_point_coverage"), kind="function"):
+        row = rows.setdefault(declared["id"].casefold(), {"function_point_id": declared["id"], "name": declared["name"], "category": declared["category"], "ooda_phase": None, "f2t2ea_stage": None, "candidate_algorithms": [], "actual_algorithms": [], "skills": [], "agents": []})
+        row.update({"name": declared["name"] or row.get("name"), "category": declared["category"] or row.get("category"), "status": "declared", "execution_status": None, "activity_ids": declared["activity_ids"], "evidence_refs": [], "declared_by_scenario": True, "scope": "planned"})
+
+    conditional = {str(item).casefold() for item in submission.get("conditional_function_points") or []}
+    for key in conditional:
+        if key in rows:
+            rows[key]["scope"] = "conditional"
+            if rows[key]["status"] == "declared":
+                rows[key]["status"] = "conditional"
+
+    for package in algorithm_catalog.get("algorithms") or []:
+        if not isinstance(package, dict):
+            continue
+        for coverage in package.get("operational_functions") or []:
+            point_id = str(coverage.get("function_id") if isinstance(coverage, dict) else coverage)
+            row = rows.get(point_id.casefold())
+            if not row:
+                continue
+            candidate = {"algorithm_id": package.get("algorithm_id"), "name": package.get("display_name") or package.get("algorithm_id"), "role": coverage.get("role") if isinstance(coverage, dict) else None, "runtime_status": package.get("runtime_status"), "onnx_model_provided": package.get("onnx_model_provided", False), "onnx_runtime_available": package.get("onnx_runtime_available", False)}
+            if candidate not in row["candidate_algorithms"]:
+                row["candidate_algorithms"].append(candidate)
+
+    for skill_id, binding in SKILL_ALGORITHM_BINDINGS.items():
+        for point_id in binding.get("function_points") or []:
+            row = rows.get(str(point_id).casefold())
+            if row:
+                row["skills"].append({"skill_id": skill_id, "name": binding.get("name")})
+                row["agents"] = list(dict.fromkeys([*row["agents"], *binding.get("agents", [])]))
 
     for activity in _merged_activity_rows(status, work_payload):
         activity_id = str(
@@ -1312,11 +1354,31 @@ def _build_function_point_view(
             if reference not in row["evidence_refs"]:
                 row["evidence_refs"].append(reference)
 
+    # Actual selections are evidence only.  They never complete a function by
+    # themselves: completion remains gated by the associated activity/event.
+    for activity in _merged_activity_rows(status, work_payload):
+        activity_id = str(activity.get("activity_id") or activity.get("activatity_id") or activity.get("work_item") or "")
+        activity_ids = set(_explicit_function_points(activity))
+        for declared in rows.values():
+            if activity_id and activity_id in declared.get("activity_ids", []):
+                activity_ids.add(str(declared["function_point_id"]))
+        if not activity_ids:
+            continue
+        for evidence in _algorithm_evidence(activity):
+            for point_id in activity_ids:
+                row = rows.get(str(point_id).casefold())
+                if row:
+                    actual = {"algorithm_id": evidence.get("id"), "name": evidence.get("name") or evidence.get("id"), "activity_id": activity.get("activity_id") or activity.get("work_item"), "status": activity.get("status")}
+                    if actual not in row["actual_algorithms"]:
+                        row["actual_algorithms"].append(actual)
+
     items = list(rows.values())
     return {
         "counts": {
             "total": len(items),
-            "planned": sum(1 for row in items if row["declared_by_scenario"]),
+            "planned": sum(1 for row in items if row.get("scope") == "planned"),
+            "conditional": sum(1 for row in items if row.get("scope") == "conditional"),
+            "not_applicable": sum(1 for row in items if row.get("scope") == "not_applicable"),
             "declared": sum(1 for row in items if row["status"] == "declared"),
             "executing": sum(1 for row in items if row["status"] == "executing"),
             "verified": sum(1 for row in items if row["status"] == "verified"),
@@ -1600,6 +1662,7 @@ def build_workflow_view(
     projection: dict[str, Any] | None = None,
     backend_transport: str = "commander",
     current_run_id: str = "",
+    algorithm_catalog: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the stable workflow view returned to the browser."""
     status = status if isinstance(status, dict) else {}
@@ -1636,7 +1699,7 @@ def build_workflow_view(
     agents = _build_agent_view(activities, trace_rows, submission_view)
     algorithms = _build_algorithm_view(status, work_list, trace, submission_view)
     _apply_observed_activity_durations(activities, algorithms)
-    function_points = _build_function_point_view(status, work_list, trace, submission_view)
+    function_points = _build_function_point_view(status, work_list, trace, submission_view, algorithm_catalog)
     execution_graph = _build_execution_graph(activities, trace)
     metrics = _build_metrics(status, activities, trace)
     provenance = _build_provenance(status, submission_view, algorithms, projection)

@@ -63,7 +63,7 @@
     <nav class="workspace-tabs" role="tablist" aria-label="任务工作区视图">
       <button type="button" class="active" role="tab" aria-selected="true" data-workspace-tab="situation">场景态势</button>
       <button type="button" role="tab" aria-selected="false" data-workspace-tab="agents">Agent 拓扑</button>
-      <button type="button" role="tab" aria-selected="false" data-workspace-tab="algorithms">算法覆盖</button>
+      <button type="button" role="tab" aria-selected="false" data-workspace-tab="algorithms">算法与功能</button>
       <button type="button" role="tab" aria-selected="false" data-workspace-tab="execution">流程执行</button>
       <button type="button" role="tab" aria-selected="false" data-workspace-tab="evidence">证据与结果</button>
     </nav>
@@ -145,25 +145,20 @@
 
       <section class="workspace-panel" data-workspace-panel="algorithms" role="tabpanel" hidden>
         <div class="metric-strip four" id="backend-capability-summary">
-          <span><small>已发现算法</small><b id="backend-active-count">0</b></span>
-          <span><small>可运行算法</small><b id="backend-runnable-count">0</b></span>
+          <span><small>算法类别（M01–M20）</small><b id="backend-active-count">0</b></span>
+          <span><small>运行包</small><b id="backend-runnable-count">0</b></span>
           <span><small>运行时不可用</small><b id="backend-unavailable-count">0</b></span>
           <span><small>任务族</small><b id="backend-family-count">0</b></span>
         </div>
         <div class="card" id="backend-capability-plan">
-          <div class="card-heading"><div><span class="section-eyebrow">AlgoLib 运行时发现</span><h2>后端可运行算法</h2></div><span id="algorithm-runtime-status" class="status-chip neutral">检查中</span></div>
+          <div class="card-heading"><div><span class="section-eyebrow">AlgoLib 运行时发现</span><h2>算法与功能</h2></div><span id="algorithm-runtime-status" class="status-chip neutral">检查中</span></div>
           <div id="algorithm-runtime-meta" class="algorithm-runtime-meta"></div>
           <div id="backend-capability-map" class="backend-capability-map">
             <div class="empty-state">正在检查算法服务</div>
           </div>
-        </div>
-        <div class="card" id="workflow-algorithm-evidence" hidden>
-          <div class="card-heading"><div><span class="section-eyebrow">本次运行证据</span><h2>算法执行覆盖</h2></div></div>
-          <div id="wf-algorithm-coverage" data-contract="amos.workflow-view.v2.algorithms"></div>
-        </div>
-        <div class="card" id="workflow-function-evidence" hidden>
-          <div class="card-heading"><div><span class="section-eyebrow">本次运行证据</span><h2>功能点执行覆盖</h2></div></div>
-          <div id="wf-function-points" data-contract="amos.workflow-view.v2.function_points"></div>
+          <div id="backend-function-map" class="backend-function-map">
+            <div class="empty-state">正在加载功能点—算法关系</div>
+          </div>
         </div>
       </section>
 
@@ -171,9 +166,13 @@
         <div class="card">
           <div class="card-heading"><div><span class="section-eyebrow">任务闭环</span><h2>阶段视图</h2></div></div>
           <div id="mission-phase-view" class="phase-view" data-contract="amos.workflow-view.v2.phases">
-            <div class="phase-track" data-phase-model="OODA"><b>OODA</b><span>Observe</span><span>Orient</span><span>Decide</span><span>Act</span></div>
-            <div class="phase-track" data-phase-model="F2T2EA"><b>F2T2EA</b><span>Find</span><span>Fix</span><span>Track</span><span>Target</span><span>Engage</span><span>Assess</span></div>
+            <div class="phase-track" data-phase-model="OODA"><b>OODA</b><span data-phase-key="OBSERVE">观察（Observe）</span><span data-phase-key="ORIENT">研判（Orient）</span><span data-phase-key="DECIDE">决策（Decide）</span><span data-phase-key="ACT">行动（Act）</span></div>
+            <div class="phase-track" data-phase-model="F2T2EA"><b>F2T2EA</b><span data-phase-key="FIND">发现（Find）</span><span data-phase-key="FIX">定位（Fix）</span><span data-phase-key="TRACK">跟踪（Track）</span><span data-phase-key="TARGET">目标选择（Target）</span><span data-phase-key="ENGAGE">交战（Engage）</span><span data-phase-key="ASSESS">评估（Assess）</span></div>
           </div>
+        </div>
+        <div class="card" id="kill-chain-runtime-card">
+          <div class="card-heading"><div><span class="section-eyebrow">仿真推进</span><h2>28 项杀伤链功能点</h2><small class="kill-chain-progress-note">状态表示剧本推进；实际算法调用以本页底部“运行证据”为准</small></div></div>
+          <div id="kill-chain-runtime-view" class="kill-chain-runtime-view"><div class="empty-state">等待加载剧本</div></div>
         </div>
 
         <div class="card agent-card workflow-console workflow-inspector" id="a2a-workflow-card">
@@ -222,6 +221,10 @@
               </div>
             </section>
           </div>
+        </div>
+        <div class="card" id="workflow-algorithm-evidence" hidden>
+          <div class="card-heading"><div><span class="section-eyebrow">本次运行证据</span><h2>实际算法调用</h2></div></div>
+          <div id="wf-algorithm-coverage" data-contract="amos.workflow-view.v2.algorithms"></div>
         </div>
       </section>
 

@@ -1708,6 +1708,7 @@ class SimEngine:
                 "asset_id": asset_id,
                 "target_track_id": track_id,
                 "weapon_id": result.get("weapon_id"),
+                "sim_time": round(float(self.clock.get("elapsed_sec", 0) or 0), 2),
                 "timestamp": time.time(),
             })
             # In the maritime demo the operator confirms one engagement

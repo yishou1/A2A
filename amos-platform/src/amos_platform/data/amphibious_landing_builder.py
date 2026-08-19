@@ -230,7 +230,7 @@ def build_amphibious_landing_scenario() -> dict[str, Any]:
         "default_seed": 55051, "supported_modes": ["integration", "demonstration"],
         "functional_agents": scenario_agents(), "required_agents": required_backend_roles(),
         "algorithm_coverage": planned_algorithms("clustering", "association", "linear_regression", "logistic_regression", "random_forest", "neural_network", "naive_bayes_network", "large_language_model", "retrieval_augmented_generation", "agent_collaboration", "reinforcement_learning", "explainable_ai", "multimodal_fusion", "time_series_prediction", "real_time_object_detection", "change_detection", "multi_target_tracking", "graph_neural_network"),
-        "function_point_coverage": planned_function_points(*[f"FP-{i:02d}" for i in range(1, 30)]),
+        "function_point_coverage": planned_function_points(*[f"KC-{i:02d}" for i in range(1, 29)]),
         "demo_checkpoints": [
             {"checkpoint_id": "AMP-CP-PERCEPTION", "title": "多域感知输入就绪", "min_elapsed_sec": 810, "conditions": {"stable_track_count_at_least": 2, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["AMP-MEDIA-01", "AMP-MEDIA-02"]}, "pause": True, "submit_analysis": True},
             {"checkpoint_id": "AMP-CP-ASSESS", "title": "威胁评估输入就绪", "min_elapsed_sec": 1470, "conditions": {"stable_track_count_at_least": 3, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["AMP-MEDIA-03", "AMP-MEDIA-04"]}, "pause": True, "submit_analysis": True},
@@ -251,7 +251,7 @@ def build_amphibious_landing_scenario() -> dict[str, Any]:
             {"branch_id": "evidence_insufficient", "name": "证据不足", "description": "保持目标状态未知并追加侦察。"},
         ],
         "default_branch": "standard",
-        "acceptance_profile": {"functional_agents": 6, "core_algorithms": 14, "engineering_models": 4, "function_points": 29, "evidence_policy": "backend_trace_only", "required_loop_event": "re_attack_required"},
+        "acceptance_profile": {"functional_agents": 6, "core_algorithms": 14, "engineering_models": 4, "function_points": 28, "evidence_policy": "backend_trace_only", "required_loop_event": "re_attack_required"},
         "agent_plan": {"mode": "commander_workflow", "steps": ["submit_current_snapshot", "execute_a1_a6_workflow", "project_run_scoped_evidence"]},
         "events": [row["title"] for row in _timeline()],
     }

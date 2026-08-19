@@ -92,7 +92,9 @@ def test_document_requirement_ids_and_coverage_tiers_are_not_conflated() -> None
         "M17", "M18", "M19", "M20"
     }
     assert all(row["assigned_agents"] for row in models.values())
-    assert all(row["function_points"] for row in models.values())
+    assert {key for key, row in models.items() if not row["function_points"]} == {
+        "M08", "M09", "M12"
+    }
     assert all(row["model_id"] is None and row["version"] is None for row in models.values())
 
 
@@ -112,7 +114,7 @@ def test_each_formal_scenario_has_the_documented_model_coverage() -> None:
         assert declared_core == {f"M{index:02d}" for index in range(1, 17)} - missing
         assert len(declared_core) == expected_count
         assert {"M17", "M18", "M19", "M20"}.issubset(requirement_ids)
-        assert len(scenario["function_point_coverage"]) == 29
+        assert len(scenario["function_point_coverage"]) == 28
 
 
 def test_planned_agents_do_not_publish_static_runtime_status() -> None:

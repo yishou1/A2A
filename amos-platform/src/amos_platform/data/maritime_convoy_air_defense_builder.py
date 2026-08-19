@@ -137,15 +137,15 @@ def _capture_contract() -> tuple[list[dict[str, Any]], list[dict[str, Any]], lis
 
 def _timeline() -> list[dict[str, Any]]:
     return [
-        {"cue_id": "MAR-CUE-01", "at_sec": 0, "phase": "FIND", "level": "INFO", "title": "海上编队进入责任区", "description": "编队、护航舰和民用航道交通进入当前态势。", "media_ids": ["MAR-MEDIA-00"], "functional_agent_ids": ["A1"], "model_requirement_ids": ["M17"]},
-        {"cue_id": "MAR-CUE-02", "at_sec": 720, "phase": "FIND", "level": "INFO", "title": "发现首个高速海面接触", "description": "侦察无人机首先形成一个连续高速雷达航迹，其身份与威胁等级保持未知。", "media_ids": ["MAR-MEDIA-01"], "functional_agent_ids": ["A1"], "model_requirement_ids": ["M01", "M15", "M17"]},
-        {"cue_id": "MAR-CUE-02B", "at_sec": 1080, "phase": "FIND", "level": "INFO", "title": "发现第二个慢速海面接触", "description": "首个高速航迹稳定后，岸基雷达在南侧民用航道形成第二个慢速航迹，并收到可关联的 AIS 信息。", "media_ids": ["MAR-MEDIA-02"], "functional_agent_ids": ["A1"], "model_requirement_ids": ["M01", "M06", "M17"]},
-        {"cue_id": "MAR-CUE-03", "at_sec": 1440, "phase": "FIX", "level": "INFO", "title": "双目标跨源关联完成", "description": "AIS 与多部雷达记录已到达，可由后端分别固定目标位置并保持身份未知。", "media_ids": [], "functional_agent_ids": ["A1"], "model_requirement_ids": ["M06", "M07", "M19"]},
-        {"cue_id": "MAR-CUE-04", "at_sec": 2160, "phase": "TRACK", "level": "WARNING", "title": "高速目标持续接近编队", "description": "高速海面目标形成连续航迹与光电证据，但前端不预设其敌我属性。", "media_ids": ["MAR-MEDIA-03"], "functional_agent_ids": ["A2"], "model_requirement_ids": ["M05", "M16", "M19", "M20"]},
-        {"cue_id": "MAR-CUE-05", "at_sec": 2880, "phase": "TRACK", "level": "INFO", "title": "慢速目标渔船特征形成", "description": "第二目标形成渔船外形、低速航行和 AIS 关联证据，等待后端给出民用识别结论。", "media_ids": ["MAR-MEDIA-04"], "functional_agent_ids": ["A2"], "model_requirement_ids": ["M03", "M05", "M16"]},
-        {"cue_id": "MAR-CUE-06", "at_sec": 3600, "phase": "TARGET", "level": "WARNING", "title": "敌方目标与禁射目标完成区分", "description": "后端应把高速目标识别为敌方资源并生成攻击候选，同时把渔船列入禁射清单，完成规则和武器方案审查。", "media_ids": ["MAR-MEDIA-05"], "functional_agent_ids": ["A3", "A4", "A5"], "model_requirement_ids": ["M02", "M09", "M10", "M11", "M13", "M14"]},
-        {"cue_id": "MAR-CUE-07", "at_sec": 4560, "phase": "ENGAGE", "level": "WARNING", "title": "等待并执行明确攻击命令", "description": "仅在识别、禁射校验和操作员授权全部满足后，AMOS 才执行舰载反舰导弹模拟发射。", "media_ids": ["MAR-MEDIA-06"], "functional_agent_ids": ["A6"], "model_requirement_ids": ["M04", "M16"]},
-        {"cue_id": "MAR-CUE-08", "at_sec": 5580, "phase": "ASSESS", "level": "INFO", "title": "完成攻击效果与附带风险复核", "description": "核验无人机形成攻击后证据，检查敌方目标毁伤状态与渔船安全，再决定结束或重新攻击。", "media_ids": ["MAR-MEDIA-07"], "functional_agent_ids": ["A6"], "model_requirement_ids": ["M14", "M18"]},
+        {"cue_id": "MAR-CUE-01", "at_sec": 0, "phase": "FIND", "level": "INFO", "title": "海上编队进入责任区", "description": "编队、护航舰和民用航道交通进入当前态势。", "media_ids": ["MAR-MEDIA-00"], "functional_agent_ids": ["A1"], "model_requirement_ids": ["M17"], "function_ids": []},
+        {"cue_id": "MAR-CUE-02", "at_sec": 720, "phase": "FIND", "level": "INFO", "title": "发现首个高速海面接触", "description": "侦察无人机首先形成一个连续高速雷达航迹，其身份与威胁等级保持未知。", "media_ids": ["MAR-MEDIA-01"], "functional_agent_ids": ["A1"], "model_requirement_ids": ["M01", "M15", "M17"], "function_ids": ["KC-01", "KC-08"]},
+        {"cue_id": "MAR-CUE-02B", "at_sec": 1080, "phase": "FIND", "level": "INFO", "title": "发现第二个慢速海面接触", "description": "首个高速航迹稳定后，岸基雷达在南侧民用航道形成第二个慢速航迹，并收到可关联的 AIS 信息。", "media_ids": ["MAR-MEDIA-02"], "functional_agent_ids": ["A1"], "model_requirement_ids": ["M01", "M06", "M17"], "function_ids": ["KC-01", "KC-04", "KC-08"]},
+        {"cue_id": "MAR-CUE-03", "at_sec": 1440, "phase": "FIX", "level": "INFO", "title": "双目标跨源关联完成", "description": "AIS 与多部雷达记录已到达，可由后端分别固定目标位置并保持身份未知。", "media_ids": [], "functional_agent_ids": ["A1"], "model_requirement_ids": ["M06", "M07", "M19"], "function_ids": ["KC-05", "KC-06", "KC-07", "KC-09", "KC-10", "KC-11"]},
+        {"cue_id": "MAR-CUE-04", "at_sec": 2160, "phase": "TRACK", "level": "WARNING", "title": "高速目标规避机动中的光电复核", "description": "高速海面目标形成连续航迹与光电证据，正在向南规避机动，前端不预设其敌我属性。", "media_ids": ["MAR-MEDIA-03"], "functional_agent_ids": ["A2"], "model_requirement_ids": ["M05", "M16", "M19", "M20"], "function_ids": ["KC-11", "KC-12", "KC-13", "KC-14", "KC-15", "KC-19"]},
+        {"cue_id": "MAR-CUE-05", "at_sec": 2880, "phase": "TRACK", "level": "INFO", "title": "慢速目标渔船特征形成", "description": "第二目标形成渔船外形、低速航行和 AIS 关联证据，等待后端给出民用识别结论。", "media_ids": ["MAR-MEDIA-04"], "functional_agent_ids": ["A2"], "model_requirement_ids": ["M03", "M05", "M16"], "function_ids": ["KC-05", "KC-06", "KC-07", "KC-15"]},
+        {"cue_id": "MAR-CUE-06", "at_sec": 3600, "phase": "TARGET", "level": "WARNING", "title": "敌方目标与禁射目标完成区分", "description": "后端应把高速目标识别为敌方资源并生成攻击候选，同时把渔船列入禁射清单，完成规则和武器方案审查。", "media_ids": ["MAR-MEDIA-05"], "functional_agent_ids": ["A3", "A4", "A5"], "model_requirement_ids": ["M02", "M09", "M10", "M11", "M13", "M14"], "function_ids": ["KC-16", "KC-17", "KC-18", "KC-20", "KC-21"]},
+        {"cue_id": "MAR-CUE-07", "at_sec": 4560, "phase": "ENGAGE", "level": "WARNING", "title": "等待并执行明确攻击命令", "description": "仅在识别、禁射校验和操作员授权全部满足后，AMOS 才执行舰载反舰导弹模拟发射。", "media_ids": ["MAR-MEDIA-06"], "functional_agent_ids": ["A6"], "model_requirement_ids": ["M04", "M16"], "function_ids": ["KC-22", "KC-23", "KC-24"]},
+        {"cue_id": "MAR-CUE-08", "at_sec": 5580, "phase": "ASSESS", "level": "INFO", "title": "完成攻击效果与附带风险复核", "description": "核验无人机形成攻击后证据，检查敌方目标毁伤状态与渔船安全，再决定结束或重新攻击。", "media_ids": ["MAR-MEDIA-07"], "functional_agent_ids": ["A6"], "model_requirement_ids": ["M14", "M18"], "function_ids": ["KC-02", "KC-25", "KC-27", "KC-28"]},
     ]
 
 
@@ -271,7 +271,20 @@ def build_maritime_convoy_air_defense_scenario() -> dict[str, Any]:
         "default_seed": 33031, "supported_modes": ["integration", "demonstration"],
         "functional_agents": scenario_agents(), "required_agents": required_backend_roles(),
         "algorithm_coverage": planned_algorithms("clustering", "association", "linear_regression", "logistic_regression", "random_forest", "neural_network", "naive_bayes_network", "large_language_model", "retrieval_augmented_generation", "agent_collaboration", "federated_learning", "reinforcement_learning", "explainable_ai", "multimodal_fusion", "time_series_prediction", "real_time_object_detection", "change_detection", "multi_target_tracking", "graph_neural_network"),
-        "function_point_coverage": planned_function_points(*[f"FP-{i:02d}" for i in range(1, 30)]),
+        "function_point_coverage": planned_function_points(*[f"KC-{i:02d}" for i in range(1, 29)]),
+        "conditional_function_points": ["KC-03", "KC-26"],
+        # The terminal chain must follow real operator/weapon evidence rather
+        # than elapsed time alone.  Offsets keep closely related functions
+        # visually ordered while preserving the causal event as their source.
+        "function_runtime_triggers": {
+            "KC-22": {"event": "authorized_fire_command", "offset_sec": 0},
+            "KC-23": {"event": "authorized_fire_command", "offset_sec": 5},
+            "KC-24": {"event": "authorized_fire_command", "offset_sec": 15},
+            "KC-25": {"event": "weapon_hit", "offset_sec": 0},
+            "KC-02": {"event": "weapon_hit", "offset_sec": 15},
+            "KC-27": {"event": "weapon_hit", "offset_sec": 30},
+            "KC-28": {"event": "damage_assessment_confirmed", "offset_sec": 0},
+        },
         "demo_checkpoints": [
             {"checkpoint_id": "MAR-CP-PERCEPTION", "title": "海空观测融合输入就绪", "min_elapsed_sec": 1470, "conditions": {"stable_track_count_at_least": 2, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["MAR-MEDIA-01", "MAR-MEDIA-02"]}, "pause": True, "submit_analysis": True},
             {"checkpoint_id": "MAR-CP-ASSESS", "title": "敌方与渔船识别输入就绪", "min_elapsed_sec": 2910, "conditions": {"stable_track_count_at_least": 2, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["MAR-MEDIA-03", "MAR-MEDIA-04"]}, "pause": True, "submit_analysis": True},
@@ -290,7 +303,7 @@ def build_maritime_convoy_air_defense_scenario() -> dict[str, Any]:
             {"branch_id": "civilian_misidentification", "name": "民用目标误识别", "description": "检验渔船身份置信不足时是否禁止攻击并请求补充侦察。"},
         ],
         "default_branch": "standard",
-        "acceptance_profile": {"functional_agents": 6, "core_algorithms": 15, "engineering_models": 4, "function_points": 29, "evidence_policy": "backend_trace_only", "required_target_count": 2, "requires_civilian_no_strike": True, "requires_explicit_fire_authorization": True},
+        "acceptance_profile": {"functional_agents": 6, "core_algorithms": 15, "engineering_models": 4, "function_points": 28, "evidence_policy": "backend_trace_only", "required_target_count": 2, "requires_civilian_no_strike": True, "requires_explicit_fire_authorization": True},
         "engagement_policy": {"decision_authority": "operator", "requires_backend_identification": True, "requires_explicit_authorization": True, "requires_prior_warning": True, "warning_delay_sec": 300, "minimum_threat_levels": ["HIGH", "CRITICAL"], "eligible_kill_chain_phases": ["TARGET", "ENGAGE"], "authorized_asset_ids": ["ESCORT-01"], "authorized_weapons": ["舰载反舰导弹"], "protected_classifications": ["FISHING_VESSEL", "FISHING BOAT", "FISHING", "CIVILIAN", "MERCHANT"], "protected_truth_ids": ["CONTACT-FISHING-01"]},
         "agent_plan": {"mode": "commander_workflow", "steps": ["submit_current_snapshot", "execute_a1_a6_workflow", "project_run_scoped_evidence", "request_operator_fire_authorization", "execute_authorized_fire_command", "assess_effects"]},
         "events": [row["title"] for row in _timeline()],

@@ -320,6 +320,7 @@ def build_commander_workflow_payload(
         "functional_agents": deepcopy(scenario.get("functional_agents") or []),
         "algorithm_coverage": deepcopy(scenario.get("algorithm_coverage") or []),
         "function_point_coverage": deepcopy(scenario.get("function_point_coverage") or []),
+        "conditional_function_points": deepcopy(scenario.get("conditional_function_points") or []),
     }
     if attachments:
         first_meta = attachments[0].setdefault("meta", {})
@@ -366,6 +367,7 @@ def build_commander_workflow_payload(
     payload["functional_agents"] = deepcopy(mission_input["functional_agents"])
     payload["algorithm_coverage"] = deepcopy(mission_input["algorithm_coverage"])
     payload["function_point_coverage"] = deepcopy(mission_input["function_point_coverage"])
+    payload["conditional_function_points"] = deepcopy(mission_input["conditional_function_points"])
     return payload
 
 

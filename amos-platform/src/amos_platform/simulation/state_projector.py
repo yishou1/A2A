@@ -107,11 +107,13 @@ def build_internal_state(engine: Any) -> dict:
             "source_asset_id": weapon.get("source_asset_id"),
             "target_threat_id": weapon.get("target_threat_id"),
             "target_track_id": weapon.get("target_track_id"),
+            "launch_sim_time": weapon.get("launch_time"),
             "eta_sec": weapon.get("eta_sec"),
             "p_kill": weapon.get("p_kill"),
             "status": weapon.get("status", "unknown"),
             "damage_state": weapon.get("damage_state"),
             "impact_sim_time": weapon.get("impact_sim_time"),
+            "assessed_sim_time": weapon.get("assessed_sim_time"),
         })
 
     return {

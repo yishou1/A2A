@@ -310,7 +310,9 @@ def validate_scenario_definition(scenario: dict[str, Any]) -> list[str]:
             )
         model_function_ids = {str(value) for value in model.get("function_points") or []}
         known_function_ids = {str(item["function_id"]) for item in FUNCTION_POINT_CATALOG}
-        if not model_function_ids or model_function_ids - known_function_ids:
+        # Foundation/external classes may be intentionally available as
+        # supporting capabilities without claiming a direct kill-chain point.
+        if model_function_ids - known_function_ids:
             issues.append(
                 f"{scenario_id}: model {model.get('requirement_id')} requires valid function_points"
             )

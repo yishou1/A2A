@@ -18,6 +18,7 @@ window.PlatformWorkflow = (function () {
   var historyLoadingRunId = null;
   var viewCache = {};
   var selectedActivityId = null;
+  var selectedFunctionPointId = null;
   var activityTab = "input";
   var activityDetailSelection = {input: "__all__", output: "__all__"};
   var followCurrentActivity = true;
@@ -38,7 +39,7 @@ window.PlatformWorkflow = (function () {
   }
 
   function statusLabel(state) {
-    return ({queued:"等待执行",pending:"待执行",running:"执行中",executing:"执行中",completed:"已完成",verified:"已验证",declared:"已声明",failed:"失败",error:"错误",cancelled:"已取消",unknown:"未上报",unavailable:"不可用",checkpoint_only:"可恢复",connected:"在线",degraded:"依赖降级",diagnostic:"直连诊断",offline:"离线",submitting:"提交中",stale_run:"上一轮结果"})[state] || state || "尚未开始";
+    return ({queued:"等待执行",pending:"待执行",running:"执行中",executing:"执行中",completed:"已完成",verified:"已验证",declared:"待推进",conditional:"条件触发",not_applicable:"本剧本不适用",failed:"失败",error:"错误",cancelled:"已取消",unknown:"未上报",unavailable:"不可用",checkpoint_only:"可恢复",connected:"在线",degraded:"依赖降级",diagnostic:"直连诊断",offline:"离线",submitting:"提交中",stale_run:"上一轮结果"})[state] || state || "尚未开始";
   }
 
   function errorMessage(value) {
@@ -604,18 +605,33 @@ window.PlatformWorkflow = (function () {
     functionPoints = functionPoints || {};
     var counts = functionPoints.counts || {};
     var rows = functionPoints.items || [];
+    if (!selectedFunctionPointId && rows.length) selectedFunctionPointId = rows[0].function_point_id;
+    var selected = rows.filter(function (row) { return row.function_point_id === selectedFunctionPointId; })[0] || rows[0];
+    function algorithmText(items) { return (items || []).map(function (item) { return item.algorithm_id + (item.onnx_model_provided ? "（ONNX 已提供" + (item.onnx_runtime_available ? "，可执行" : "，当前不可执行") + "）" : ""); }).join("；") || "未映射"; }
     root.innerHTML =
       '<div class="workflow-v2-summary">' +
-        '<span><small>场景计划</small><b>' + escapeHtml(provided(counts.declared)) + '</b></span>' +
+        '<span><small>全部功能点</small><b>' + escapeHtml(provided(counts.total)) + '</b></span>' +
+        '<span><small>场景计划</small><b>' + escapeHtml(provided(counts.planned)) + '</b></span>' +
         '<span><small>执行中</small><b>' + escapeHtml(provided(counts.executing)) + '</b></span>' +
         '<span><small>已验证</small><b>' + escapeHtml(provided(counts.verified)) + '</b></span>' +
-        '<span><small>失败</small><b>' + escapeHtml(provided(counts.failed)) + '</b></span>' +
+        '<span><small>条件分支</small><b>' + escapeHtml(provided(counts.conditional)) + '</b></span>' +
       '</div>' +
       '<div class="workflow-function-grid">' + (rows.length ? rows.map(function (row) {
-        return '<div class="workflow-function-point ' + escapeHtml(row.status || "declared") + '">' +
+        return '<button type="button" data-function-point-id="' + escapeHtml(row.function_point_id) + '" class="workflow-function-point ' + escapeHtml(row.status || "declared") + (row.function_point_id === selectedFunctionPointId ? ' selected' : '') + '">' +
           '<span>' + escapeHtml(row.function_point_id) + '</span><b>' + escapeHtml(row.name || row.function_point_id) + '</b>' +
-          '<small>' + escapeHtml(statusLabel(row.status)) + (row.category ? ' · ' + escapeHtml(row.category) : '') + '</small></div>';
-      }).join("") : '<div class="workflow-empty">当前场景未声明功能点</div>') + '</div>';
+          '<small>' + escapeHtml(statusLabel(row.status)) + (row.category ? ' · ' + escapeHtml(row.category) : '') + '</small></button>';
+      }).join("") : '<div class="workflow-empty">当前场景未声明功能点</div>') + '</div>' +
+      (selected ? '<article class="workflow-algorithm declared"><header><b>' + escapeHtml(selected.function_point_id + ' · ' + selected.name) + '</b><span>' + escapeHtml(statusLabel(selected.status)) + '</span></header><dl>' +
+        '<dt>阶段</dt><dd>' + escapeHtml((selected.ooda_phase || "—") + ' / ' + (selected.f2t2ea_stage || selected.category || "—")) + '</dd>' +
+        '<dt>关联技能 / Agent</dt><dd>' + escapeHtml((selected.skills || []).map(function (s) { return s.name || s.skill_id; }).join("；") || "未映射") + ' / ' + escapeHtml((selected.agents || []).join("、") || "未映射") + '</dd>' +
+        '<dt>候选算法</dt><dd>' + escapeHtml(algorithmText(selected.candidate_algorithms)) + '</dd>' +
+        '<dt>本次实际选用</dt><dd>' + escapeHtml((selected.actual_algorithms || []).map(function (a) { return a.algorithm_id + ' · ' + statusLabel(a.status); }).join("；") || "本次尚无可关联调用") + '</dd></dl></article>' : '');
+    root.onclick = function (event) {
+      var button = event.target.closest("[data-function-point-id]");
+      if (!button) return;
+      selectedFunctionPointId = button.dataset.functionPointId;
+      renderFunctionPoints(functionPoints);
+    };
   }
 
   function renderExecutionGraph(graph) {

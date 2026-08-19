@@ -128,6 +128,7 @@ def test_weapon_impact_is_detected_when_director_uses_large_steps() -> None:
     public_state = engine.get_operator_state()
     public_weapon = next(row for row in public_state["weapons"] if row["id"] == launched["weapon_id"])
     public_track = next(row for row in public_state["fused_tracks"] if row["id"] == hostile.id)
+    assert public_weapon["launch_sim_time"] == weapon["launch_time"]
     assert public_weapon["impact_sim_time"] == weapon["impact_sim_time"]
     assert public_weapon["damage_state"] == "impact_pending"
     assert public_track["agent_assessment"]["damage_state"] == "impact_pending"
@@ -145,6 +146,7 @@ def test_weapon_impact_is_detected_when_director_uses_large_steps() -> None:
     public_weapon = next(row for row in public_state["weapons"] if row["id"] == launched["weapon_id"])
     public_track = next(row for row in public_state["fused_tracks"] if row["id"] == hostile.id)
     assert public_weapon["damage_state"] == "destroyed"
+    assert public_weapon["assessed_sim_time"] == weapon["assessed_sim_time"]
     assert public_track["agent_assessment"]["damage_state"] == "destroyed"
     assert public_track["agent_assessment"]["behavior_label"] == "已击毁，威胁解除"
     assert any(
@@ -587,3 +589,13 @@ def test_public_scenario_does_not_reveal_private_no_strike_truth_ids() -> None:
     assert "engagement_policy" not in payload
     assert "protected_truth_ids" not in str(payload)
     assert "CONTACT-FISHING-01" not in str(payload)
+    schedule = payload["function_point_schedule"]
+    cue_03 = [row for row in schedule if row["cue_id"] == "MAR-CUE-03"]
+    cue_08 = [row for row in schedule if row["cue_id"] == "MAR-CUE-08"]
+    assert [row["function_ids"][0] for row in cue_03] == [
+        "KC-05", "KC-06", "KC-07", "KC-09", "KC-10", "KC-11",
+    ]
+    assert cue_03[-1]["at_sec"] < 1470
+    assert cue_08[-1]["at_sec"] < 5610
+    assert payload["function_runtime_triggers"]["KC-22"]["event"] == "authorized_fire_command"
+    assert payload["function_runtime_triggers"]["KC-28"]["event"] == "damage_assessment_confirmed"

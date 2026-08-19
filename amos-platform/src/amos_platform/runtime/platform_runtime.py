@@ -119,6 +119,7 @@ class PlatformRuntime:
             projection=projection,
             backend_transport=bridge.mode,
             current_run_id=str(self.get_engine().clock.get("run_id") or ""),
+            algorithm_catalog=bridge.algorithm_catalog() if hasattr(bridge, "algorithm_catalog") else None,
         )
         self.record_workflow_view(view)
         return view
