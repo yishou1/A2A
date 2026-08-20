@@ -1,0 +1,24 @@
+{
+  "title": "TIA Algorithm Output",
+  "type": "object",
+  "properties": {
+    "classifications": {
+      "type": "array"
+    },
+    "count": {
+      "type": "number"
+    },
+    "model": {
+      "type": "object",
+      "properties": {
+        "model_id": {"const": "supcon_meta_classifier"},
+        "model_version": {"type": "string"},
+        "model_family": {"const": "supervised_contrastive_prototypical_mlp"},
+        "compute_profile": {"const": "small"},
+        "artifact_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": true
+}

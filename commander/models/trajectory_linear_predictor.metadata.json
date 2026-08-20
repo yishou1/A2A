@@ -1,0 +1,44 @@
+{
+  "model_id": "trajectory_linear_predictor",
+  "model_version": "1.0.0",
+  "model_family": "per_request_ordinary_least_squares_2d",
+  "training_required": false,
+  "fitted_parameters_per_request": [
+    "x_slope",
+    "x_intercept",
+    "y_slope",
+    "y_intercept"
+  ],
+  "implementation_path": "services/a2a_algorithms_common/motion_prediction.py",
+  "implementation_sha256": "a26a756eeb3f5abe2718ccdcd3ab166c3ac6e31191fcec82f44cbbf7be2b0d33",
+  "evaluation_script": "scripts/evaluate_trajectory_linear_predictor.py",
+  "evaluation_script_sha256": "ac7e3e594be074cf6d453b4eb61d6803eeb232984e19ed9aa5a10bf144d61fad",
+  "evaluation_dataset": {
+    "path": "data/trajectory_linear/reference_evaluation_data.json",
+    "sha256": "0e77722d5a0858a47ed5a675818f49b80bc9f6d3362e180dfcc0180bc63f9f48",
+    "source": "deterministic_synthetic_motion_generator",
+    "seed": 20260816,
+    "row_count": 160,
+    "constant_velocity_count": 120,
+    "mild_acceleration_count": 40,
+    "limitation": "Synthetic kinematics only; not an operational sensor-track benchmark."
+  },
+  "evaluation": {
+    "method": "deterministic_synthetic_trajectory_holdout",
+    "test_count": 160,
+    "position_mae": 0.519819,
+    "position_rmse": 0.964136,
+    "position_p95": 2.170402,
+    "x_mae": 0.338247,
+    "y_mae": 0.339271,
+    "velocity_vector_mae": 0.143697,
+    "position_mae_by_motion_type": {
+      "constant_velocity": 0.169626,
+      "mild_acceleration": 1.570399
+    }
+  },
+  "runtime": {
+    "language": "python",
+    "external_ml_dependencies": []
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "title": "Siamese Mask2Former Damage Input",
+  "type": "object",
+  "required": [
+    "frames"
+  ],
+  "properties": {
+    "frames": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "reference_frame": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": true
+}

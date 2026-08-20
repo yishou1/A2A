@@ -1,0 +1,89 @@
+algorithm_id: marl_ppo_task_scheduler
+version: 1.0.0
+display_name: MARL-PPO Task Scheduler
+backend_type: python_http_service
+status: validated
+
+task_family: planning
+modalities:
+  input:
+    - structured_json
+  output:
+    - structured_json
+
+capabilities:
+  - sensor_task_scheduling
+  - reattack_planning
+  - marl_ppo
+
+operational_functions:
+  - {function_id: KC-26, function_code: task_re_attack, function_name: Task Re-Attack, role: primary, coverage_level: full}
+  - {function_id: KC-22, function_code: issue_order, function_name: Issue Order, role: supporting, coverage_level: partial}
+
+agent_card:
+  summary: >
+    Trained parameter-shared MARL-PPO Actor-Critic scheduler with valid-action
+    masking for sensor coverage and strike/reattack allocation.
+  when_to_use:
+    - Tracks and battlefield context are available for sensor coverage and reattack allocation.
+    - TIA perception pipeline has produced tracks and verified detections.
+  when_not_to_use:
+    - No targets or sensors in the operational picture.
+    - Trajectory prediction, fire-control commands, or communication routing is requested.
+  input_description: >
+    Tracks, verified detections, sensor frames, and batch_context (phase, jamming_level, battlefield_situation).
+  output_description: >
+    Sensor task assignments and reattack plans. resource_allocation mapping is produced by the TIA Agent layer, not this standalone package.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  runtime:
+    backend_type: python_http_service
+    endpoint: http://127.0.0.1:9024/predict
+    health_endpoint: http://127.0.0.1:9024/health
+    metadata_endpoint: http://127.0.0.1:9024/metadata
+    timeout_ms: 5000
+
+constraints:
+  max_input_chars: 20000000
+  max_request_bytes: 33554432
+  batch_supported: false
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 50
+  latency_ms_p95: 500
+  primary_metric: synthetic_holdout_high_threat_coverage
+  primary_score: 0.70651
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 2
+  min_memory_mb: 256
+  recommended_memory_mb: 512
+  min_gpu_count: 0
+  gpu_type: optional
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 10
+
+model_profile:
+  # Small profile: obs_dim=104, n_actions=9, hidden=128.
+  parameter_count: 39434
+  parameter_count_text: 39.4K_small_profile
+  flops: 78208
+  flops_text: ~78.2 KFLOPs per agent observation (encoder+actor+critic)
+  flops_input_shape: [1, 104]
+  model_size_mb: 1
+  precision: fp32
+
+provenance:
+  model_artifact_ref: ../../../models/checkpoints/marl_ppo_scheduler_s.safetensors
+  model_metadata_ref: ../../../models/checkpoints/marl_ppo_scheduler_s.metadata.json
+  training_script_ref: ../../../scripts/train_marl_ppo_scheduler.py
+  dataset_ref: ../../../data/marl_ppo/reference_holdout.json
+
+safety:
+  risk_level: medium
+  requires_human_review: true

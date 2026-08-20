@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Threat Priority Random Forest ONNX Input",
+  "type": "object",
+  "required": ["features"],
+  "properties": {
+    "features": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10000,
+      "items": {
+        "type": "array",
+        "minItems": 5,
+        "maxItems": 5,
+        "items": {"type": "number"}
+      },
+      "description": "Rows ordered as threat_score, distance_km, speed_mps, asset_value, intel_confidence."
+    }
+  },
+  "additionalProperties": false
+}

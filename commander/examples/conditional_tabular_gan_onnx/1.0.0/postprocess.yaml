@@ -1,0 +1,4 @@
+type: raw_tensor_to_json
+outputs:
+  - tensor_name: generated_features
+    json_path: $.generated_features

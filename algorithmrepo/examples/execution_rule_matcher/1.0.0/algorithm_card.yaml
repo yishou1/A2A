@@ -1,0 +1,85 @@
+algorithm_id: execution_rule_matcher
+version: 1.0.0
+display_name: Execution Rule Matcher
+backend_type: python_http_service
+status: validated
+
+task_family: decision
+modalities:
+  input:
+    - structured_json
+  output:
+    - structured_json
+
+capabilities:
+  - apriori_association_rule_mining
+  - execution_rule_matching
+  - reference_policy_action_selection
+
+agent_card:
+  summary: >
+    Deterministic Apriori-style association-rule matcher backed by a persisted,
+    hash-verified rule artifact mined from repository reference-policy records.
+  when_to_use:
+    - Strike or assault situations have already been converted to structured scores.
+    - A traceable rule, support, confidence, and recommended action are required.
+  when_not_to_use:
+    - Raw media or unstructured text has not been converted to structured inputs.
+    - Reference-policy evaluation is being treated as operational performance.
+  input_description: >
+    Phase plus normalized threat, intelligence-confidence, resource-readiness,
+    and optional commander-decision fields.
+  output_description: >
+    Ranked matching rules, selected primary rule, discretized items, and the
+    verified rule-artifact identity.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  runtime:
+    backend_type: python_http_service
+    endpoint: http://127.0.0.1:9010/predict
+    health_endpoint: http://127.0.0.1:9010/health
+    metadata_endpoint: http://127.0.0.1:9010/metadata
+    timeout_ms: 3000
+
+constraints:
+  max_input_chars: 10000
+  max_request_bytes: 1048576
+  batch_supported: false
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 20
+  latency_ms_p95: 100
+  primary_metric: reference_holdout_action_accuracy
+  primary_score: 1.0
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 1
+  min_memory_mb: 64
+  recommended_memory_mb: 128
+  min_gpu_count: 0
+  gpu_type: none
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 5
+
+model_profile:
+  parameter_count: 28
+  parameter_count_text: 28_mined_rules
+  flops: 0
+  flops_text: rule_subset_matching
+  precision: deterministic_rules
+
+provenance:
+  model_artifact_ref: ../../../data/execution_control/processed/mined_rules.json
+  model_metadata_ref: ../../../models/execution_rule_matcher.metadata.json
+  training_script_ref: ../../../scripts/train_execution_rule_matcher.py
+  dataset_ref: ../../../data/execution_control/fixtures/rule_training_records.json
+  evaluation_dataset_ref: ../../../data/execution_control/fixtures/rule_evaluation_records.json
+
+safety:
+  risk_level: medium
+  requires_human_review: true

@@ -1,0 +1,330 @@
+import json
+import asyncio
+import contextlib
+import io
+import tempfile
+import unittest
+from pathlib import Path
+
+from bpel_workflow import BPELWorkflowCatalog
+from commander_agent.main import CommanderAgent
+from decision_agents.common.a2a_adapter import DecisionAlgorithmA2AAgent
+from decision_agents.common.a2a_service import build_agent_card
+from decision_agents.common.definitions import AGENT_DEFINITIONS
+from decision_agents.common.a2a_payloads import build_agent_request_payload
+from decision_agents.common.base_agent import AlgorithmAgent
+from decision_agents.common.schemas import AgentResponse
+from decision_agents.compliance_authorization.agent import ComplianceAuthorizationAgent
+from decision_agents.decision_planning.agent import DecisionPlanningAgent
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def route_endpoint(app, path: str):
+    return next(route.endpoint for route in app.routes if getattr(route, "path", None) == path)
+
+
+def sample_payload(name: str) -> dict:
+    return json.loads((PROJECT_ROOT / "data" / "samples" / name).read_text())
+
+
+class DecisionAgentsA2ATest(unittest.TestCase):
+    def test_empty_authorization_is_normalized_to_pending_operator_review(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            commander = CommanderAgent(
+                mode="local",
+                workflow="bpel",
+                workflow_file="DecisionSupportWorkflow",
+                workflow_id="wf-pending-authorization",
+                state_dir=temp_dir,
+                initial_context={"authorization": {}},
+            )
+
+        authorization = commander.workflow_context["authorization"]
+        self.assertEqual(authorization["status"], "pending_review")
+        self.assertEqual(authorization["approved_plan_ids"], [])
+        self.assertIn("operator authorization required", authorization["notes"])
+
+    def test_pending_operator_review_reaches_compliance_without_approval(self):
+        planning = sample_payload("compliance_authorization_input.json")
+        pending_authorization = {
+            "status": "pending_review",
+            "approver": None,
+            "scope": [],
+            "approved_plan_ids": [],
+            "notes": ["operator authorization required"],
+        }
+        request = build_agent_request_payload(
+            "compliance_authorization_agent",
+            {
+                "context": {"authorization": pending_authorization},
+                "input": {
+                    "decision_planning_result": {
+                        "candidate_plans": planning["candidate_plans"],
+                    }
+                },
+            },
+        )
+
+        response = ComplianceAuthorizationAgent().handle_query(
+            json.dumps(request, ensure_ascii=False)
+        )
+
+        self.assertEqual(request["authorization"], pending_authorization)
+        self.assertEqual(response.status, "completed")
+        self.assertEqual(response.result["decision"], "review_required")
+        self.assertTrue(response.result["requires_human_approval"])
+        self.assertFalse(response.result["approved_for_demo_handoff"])
+
+    def test_bpel_result_collection_is_unwrapped_for_compliance(self):
+        planning = sample_payload("compliance_authorization_input.json")
+        request = build_agent_request_payload(
+            "compliance_authorization_agent",
+            {
+                "input": {
+                    "decision_planning_result": [
+                        {
+                            "value": {
+                                "candidate_plans": planning["candidate_plans"],
+                                "authorization": planning["authorization"],
+                            },
+                            "status": "completed",
+                        }
+                    ]
+                }
+            },
+        )
+        self.assertEqual(request["candidate_plans"], planning["candidate_plans"])
+        self.assertEqual(request["authorization"], planning["authorization"])
+
+    def test_constraints_are_preserved_as_structured_items(self):
+        request = build_agent_request_payload(
+            "decision_planning_agent",
+            {
+                "input": {
+                    "agent_request": {
+                        "request_id": "wf-constraints",
+                        "constraints": [
+                            {"name": "no_real_execution", "value": True},
+                            {"name": "keep_collateral_risk_low", "value": True},
+                        ],
+                    }
+                }
+            },
+        )
+        self.assertEqual(
+            request["constraints"],
+            [
+                {"name": "no_real_execution", "value": True},
+                {"name": "keep_collateral_risk_low", "value": True},
+            ],
+        )
+
+    def test_agent_cards_and_bpel_use_shared_skill_ids(self):
+        definition = BPELWorkflowCatalog(PROJECT_ROOT).load("DecisionSupportWorkflow")
+        invokes = [
+            item
+            for item in definition.initial_work_list("wf-skills")
+            if item["type"] == "invoke"
+        ]
+
+        self.assertEqual(
+            [item["required_skill"] for item in invokes],
+            [
+                AGENT_DEFINITIONS["decision_planning"]["skill_id"],
+                AGENT_DEFINITIONS["compliance_authorization"]["skill_id"],
+            ],
+        )
+        for key, item in zip(AGENT_DEFINITIONS, invokes):
+            card = build_agent_card(key, "127.0.0.1", 10202)
+            self.assertEqual(card["skills"][0]["id"], item["required_skill"])
+
+    def test_decision_planning_generates_candidate_plans_from_external_input(self):
+        response = DecisionPlanningAgent().handle_query(
+            json.dumps(sample_payload("decision_planning_input.json"), ensure_ascii=False)
+        )
+
+        self.assertEqual(response.status, "completed")
+        self.assertGreaterEqual(len(response.result["candidate_plans"]), 3)
+        self.assertTrue(response.result["recommended_plan_id"])
+        self.assertEqual(response.result["method"], "template_generation_logistic_lstm_scoring")
+        self.assertGreaterEqual(len(response.result["plan_scores"]), 3)
+        self.assertTrue(response.result["target_trends"])
+        self.assertTrue(response.result["rag_evidence"])
+        self.assertTrue(response.result["rag_answer"])
+        self.assertIn("decision_planning_logistic", response.selected_algorithms)
+        self.assertIn("decision_planning_lstm", response.selected_algorithms)
+
+    def test_compliance_authorization_returns_structured_decision(self):
+        response = ComplianceAuthorizationAgent().handle_query(
+            json.dumps(sample_payload("compliance_authorization_input.json"), ensure_ascii=False)
+        )
+
+        self.assertEqual(response.status, "completed")
+        self.assertIn(response.result["decision"], {"approved", "blocked", "review_required"})
+        self.assertIn("per_plan_results", response.result)
+        self.assertEqual(response.result["method"], "rule_table_rag_logistic_calibration")
+        self.assertIn("risk_probability", response.result)
+        self.assertIn("compliance_probability", response.result)
+        self.assertIn("logistic_features", response.result)
+        self.assertTrue(response.result["rag_evidence"])
+        self.assertTrue(response.result["rag_answer"])
+        self.assertTrue(
+            any(
+                violation.get("evidence_rule_ids")
+                for plan in response.result["per_plan_results"]
+                for violation in plan.get("violations", [])
+            )
+        )
+        self.assertIn("compliance_authorization_logistic", response.selected_algorithms)
+
+    def test_a2a_send_message_returns_standard_output(self):
+        agent = DecisionAlgorithmA2AAgent(
+            algorithm_agent=DecisionPlanningAgent(),
+            name="Decision_Planning_Agent",
+            description="Test planning agent.",
+            role="decision_planning",
+            port=10202,
+        )
+        payload = {
+            "schema_version": "1.0",
+            "workflow_id": "wf-decision-agent",
+            "work_item": "wf-decision-agent:decision-planning",
+            "command": "decision_planning",
+            "required_skill": "decision_planning_analysis",
+            "input": {"agent_request": sample_payload("decision_planning_input.json")},
+            "output_hint": "decision_planning_result",
+            "work_list": [
+                {
+                    "activatity_id": "activatity-001-decision-planning",
+                    "work_item": "wf-decision-agent:decision-planning",
+                    "status": "running",
+                }
+            ],
+        }
+
+        send_message = route_endpoint(agent.app, "/sendMessage")
+        work_list = route_endpoint(agent.app, "/workflows/{workflow_id}/work-list")
+        body = asyncio.run(send_message(payload, token="test-token"))
+        work_list_body = asyncio.run(work_list("wf-decision-agent"))
+
+        self.assertEqual(body["status"], "completed")
+        self.assertIn("output", body)
+        self.assertIn("agent_response", body["output"])
+        self.assertIn("decision_planning_result", body["output"])
+        self.assertTrue(body["output"]["rag_evidence"])
+        self.assertTrue(body["output"]["decision_planning_result"]["candidate_plans"])
+        self.assertEqual(body["agent_response"]["agent"], "decision_planning_agent")
+
+        self.assertEqual(work_list_body["work_list"], payload["work_list"])
+
+    def test_a2a_send_message_reports_missing_planning_input(self):
+        agent = DecisionAlgorithmA2AAgent(
+            algorithm_agent=DecisionPlanningAgent(),
+            name="Decision_Planning_Agent",
+            description="Test planning agent.",
+            role="decision_planning",
+            port=10202,
+        )
+        payload = {
+            "schema_version": "1.0",
+            "workflow_id": "wf-missing-input",
+            "work_item": "wf-missing-input:decision-planning",
+            "command": "decision_planning",
+            "required_skill": "decision_planning_analysis",
+            "input": {"agent_request": {"request_id": "missing-input"}},
+            "output_hint": "decision_planning_result",
+            "work_list": [],
+        }
+
+        send_message = route_endpoint(agent.app, "/sendMessage")
+        body = asyncio.run(send_message(payload, token="test-token"))
+
+        self.assertEqual(body["status"], "failed")
+        self.assertEqual(body["error_code"], "ALGORITHM_INPUT_ERROR")
+        self.assertIn("missing:scheduled_tasks", body["agent_response"]["warnings"])
+        self.assertIn("missing:resources", body["agent_response"]["warnings"])
+
+    def test_decision_support_bpel_runs_two_agents_in_local_mode(self):
+        definition = BPELWorkflowCatalog(PROJECT_ROOT).load("DecisionSupportWorkflow")
+        invoked_roles = [
+            item["role"]
+            for item in definition.initial_work_list("wf-decision-support")
+            if item["type"] == "invoke"
+        ]
+        self.assertEqual(invoked_roles, ["decision_planning", "compliance_authorization"])
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with contextlib.redirect_stdout(io.StringIO()):
+                commander = CommanderAgent(
+                    mode="local",
+                    workflow="bpel",
+                    workflow_file="DecisionSupportWorkflow",
+                    workflow_id="wf-decision-support",
+                    state_dir=temp_dir,
+                    initial_context=sample_payload("decision_planning_input.json"),
+                )
+                context = commander.run_bpel_workflow()
+
+        self.assertEqual(context["workflow_status"], "completed")
+        self.assertTrue(context["candidate_plans"])
+        self.assertTrue(context["decision_planning_result"])
+        self.assertTrue(context["compliance_authorization_result"])
+        self.assertIn(context["compliance_decision"], {"approved", "blocked", "review_required"})
+        self.assertTrue(context["agent_results"])
+
+    def test_failed_work_item_is_reexecuted_instead_of_cached(self):
+        class FlakyPlanningAgent(AlgorithmAgent):
+            agent_name = "decision_planning_agent"
+
+            def __init__(self):
+                self.calls = 0
+
+            def run(self, request):
+                self.calls += 1
+                if self.calls == 1:
+                    return AgentResponse(
+                        status="error",
+                        agent=self.agent_name,
+                        error_code="ALGORITHM_RUNTIME_ERROR",
+                        summary="temporary failure",
+                    )
+                return AgentResponse(
+                    agent=self.agent_name,
+                    result={"candidate_plans": [], "recommended_plan_id": None},
+                    summary="recovered",
+                )
+
+        algorithm_agent = FlakyPlanningAgent()
+        payload = {
+            "schema_version": "1.0",
+            "workflow_id": "wf-retry",
+            "work_item": "wf-retry:planning",
+            "command": "decision_planning",
+            "required_skill": "decision_planning_analysis",
+            "input": {"agent_request": sample_payload("decision_planning_input.json")},
+            "output_hint": "decision_planning_result",
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            agent = DecisionAlgorithmA2AAgent(
+                algorithm_agent=algorithm_agent,
+                name="Decision_Planning_Agent",
+                description="Test planning agent.",
+                role="decision_planning",
+                port=10212,
+                idempotency_db_path=str(Path(temp_dir) / "idempotency.db"),
+            )
+            send_message = route_endpoint(agent.app, "/sendMessage")
+
+            first = asyncio.run(send_message(payload, token="test-token"))
+            second = asyncio.run(send_message(payload, token="test-token"))
+
+        self.assertEqual(first["status"], "failed")
+        self.assertEqual(second["status"], "completed")
+        self.assertFalse(second["cached"])
+        self.assertEqual(algorithm_agent.calls, 2)
+
+
+if __name__ == "__main__":
+    unittest.main()

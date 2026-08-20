@@ -1,0 +1,19 @@
+{
+  "ok": true,
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "edl_evidential_verifier",
+  "version": "1.0.0",
+  "outputs": {
+    "assessments": [],
+    "verified_detections": [],
+    "rejected_detections": [],
+    "review_queue": [],
+    "summary": {},
+    "count": 1
+  },
+  "usage": {
+    "latency_ms": 1
+  },
+  "error": null
+}

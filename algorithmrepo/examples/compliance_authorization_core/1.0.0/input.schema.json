@@ -1,0 +1,30 @@
+{
+  "title": "Compliance Authorization Core Input",
+  "type": "object",
+  "required": [
+    "candidate_plans",
+    "authorization"
+  ],
+  "properties": {
+    "request_id": {
+      "type": "string"
+    },
+    "agent_profile": {
+      "type": "object"
+    },
+    "algorithm_params": {
+      "type": "object"
+    },
+    "candidate_plans": {
+      "type": "array",
+      "minItems": 1
+    },
+    "constraints": {
+      "type": "array"
+    },
+    "authorization": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": true
+}

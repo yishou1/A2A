@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.cache/
+.data/
+platform_runs/
+static/assets/media/generated/
+offline_dist/*.tar.gz
+# Local design notes, screenshots, and other project-external documentation.
+docs/
+*.log
+*.egg-info/
+.amos.pid
+*.db
+*.sqlite
+*.sqlite3
+/instance/amos_runs.sqlite3
+/instance/amos_runs.sqlite3-shm
+/instance/amos_runs.sqlite3-wal

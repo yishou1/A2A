@@ -1,0 +1,15 @@
+{
+  "title": "Decision Plan Recommender ONNX Output",
+  "type": "object",
+  "required": ["recommendation_probability"],
+  "properties": {
+    "recommendation_probability": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
+      }
+    }
+  },
+  "additionalProperties": false
+}

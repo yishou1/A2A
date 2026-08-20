@@ -1,0 +1,14 @@
+type: json_to_tensor_map
+mappings:
+  - json_path: $.node_features
+    tensor_name: node_features
+    dtype: float32
+    shape: [-1, 10, 7]
+  - json_path: $.edge_features
+    tensor_name: edge_features
+    dtype: float32
+    shape: [-1, 10, 10, 6]
+  - json_path: $.node_mask
+    tensor_name: node_mask
+    dtype: float32
+    shape: [-1, 10]

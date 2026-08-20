@@ -1,520 +1,259 @@
-# Algorithm Library
+# A2A + AMOS 一体化演示
 
-这是一个面向 Agent 调用的本地算法库原型系统。项目用 C++17 实现，核心目标是把不同后端形式的算法统一注册到算法库中，再通过 CLI 或 HTTP Server 对外提供查询、管理和执行能力。
+本目录以尽量少的架构改动联通了 AMOS 仿真平台与 A2A Commander。当前可实际运行
+“海上编队护航与要地防空”剧本：AMOS 产生因果仿真快照，Gateway 传给 Commander，
+Commander 通过 Nacos 发现并协调 7 个独立 HTTP Agent，Agent 经 AlgoLib 加载并调用算法，
+结果再投影回 AMOS 前端。模拟攻击必须由操作员明确授权。
 
-当前支持两类算法后端：
+源仓库、分支和提交版本见 [config/SOURCES.md](config/SOURCES.md)。
 
-- `onnx`：本地 ONNX 模型文件。
-- `python_http_service`：外部 Python HTTP 推理服务。
+## 运行结构
 
-系统不负责训练模型，也不做自动后端选择、自动 fallback、Pipeline 动态编排、gRPC、嵌入式 Python、TensorRT、OpenVINO、Triton 或 LibTorch 集成。
+| 组件 | 运行方式 | 地址 |
+| --- | --- | --- |
+| AMOS 仿真与前端 | WSL 原生 Python 进程 | <http://127.0.0.1:5000/> |
+| Commander | WSL 原生 Python 进程 | <http://127.0.0.1:8021/supervisor> |
+| AMOS/Commander Gateway | WSL 原生 Python 进程 | <http://127.0.0.1:8030/gateway/v1/health> |
+| AlgoLib | WSL 原生 C++ HTTP 进程 | <http://127.0.0.1:8088/health> |
+| 7 个 Agent | 7 个独立 WSL HTTP 进程 | 8102、10200–10205 |
+| Nacos | Docker Desktop 容器 | <http://127.0.0.1:8848/nacos/> |
+| 认证 mock | Docker Desktop 容器 | <http://127.0.0.1:8080/get> |
 
-## A2A 执行控制与闭环评估算法包
+Docker 只用于固定 Nacos/Java 环境和认证 mock 的状态边界，Agent 本身不在容器中。
+Windows Docker Desktop 开启 WSL Integration 后，WSL 中的客户端会连接 Windows 上的
+Docker Engine，不需要在 WSL 中再运行一套 daemon。可用 `docker info` 验证连接。
 
-本分支已接入来自 A2A `zh` 分支的 6 个 `python_http_service` 算法包（执行控制规则匹配、轨迹线性预测、执行控制规划、任务七维特征适配、任务完成度评估、闭环策略建议）。
+## 首次安装
 
-详见：[docs/A2A_ALGORITHMS_INTEGRATION.md](docs/A2A_ALGORITHMS_INTEGRATION.md)
+推荐在 Windows 11 + WSL2 环境中运行。新电脑需要预先安装：
 
-## 系统在做什么
+- Git 和 Miniforge/Anaconda；
+- Docker Desktop，并为当前 WSL 发行版启用 WSL Integration；
+- 可访问 PyPI、Conda Forge、Docker Hub 和 Azure OpenAI 的网络。
 
-这个项目把一个算法接入过程拆成三件事：
+Nacos 自带 Java 运行时的 Docker 镜像，因此宿主机不需要单独安装 Java。克隆整合分支：
 
-1. **用 Algorithm Card 描述算法**
-
-   每个算法包需要提供 `algorithm_card.yaml`，里面描述算法身份、版本、后端类型、输入输出 schema、运行时配置、预处理配置、后处理配置、Agent 可读说明、性能信息和安全约束。
-
-2. **把算法注册到 Algorithm Registry**
-
-   注册表用唯一键管理算法：
-
-   ```text
-   algorithm_id + version + backend_type
-   ```
-
-   注册后可以执行：
-
-   ```text
-   validate
-   activate
-   disable
-   delete
-   list
-   show-card
-   ```
-
-3. **通过统一入口执行算法**
-
-   执行请求统一使用 `AlgorithmRequest`，执行结果统一使用 `AlgorithmResult`。底层根据 `backend_type` 调用不同 runner：
-
-   ```text
-   onnx -> OnnxRunner
-   python_http_service -> PythonHttpRunner
-   ```
-
-## 目录结构
-
-```text
-include/
-  algolib/
-    core/        核心数据模型，例如 AlgorithmCard、AlgorithmKey、Status、ErrorCode
-    registry/    算法注册表接口
-    runtime/     统一执行请求、执行结果、runner 接口和运行时协调器
-    validation/  算法卡片、ONNX 包、Python Service 包校验接口
-    io/          JSON、YAML、文件、HTTP Client、SHA256 等工具接口
-    server/      HTTP Server 公共接口
-
-src/
-  cli/          CLI 程序入口，生成 algolib.exe
-  server/       HTTP Server 程序入口，生成 algolib_server.exe
-  core/         核心模型实现
-  registry/     注册表持久化和生命周期管理实现
-  runtime/      ONNX、Python HTTP Service 和统一执行逻辑
-  validation/   算法包校验逻辑
-  io/           基础 IO 工具实现
-
-examples/
-  onnx_text_classifier/                  ONNX 示例算法包
-  python_http_service_llm_explainer/     Python HTTP Service 示例算法包
-
-tests/
-  注册表、schema、ONNX、Python Service、HTTP Server 测试
-
-tools/
-  辅助脚本，例如生成示例 ONNX 文件、VS Code MSVC shell 启动脚本
+```bash
+git clone --branch wangyu/a2a-amos-integrated --single-branch \
+  https://github.com/yishou1/A2A.git a2a-amos-integrated
+cd a2a-amos-integrated
 ```
 
-## 构建要求
+运行统一初始化脚本。脚本会创建或更新 Python 3.11 Conda 环境 `a2a`、安装完整的
+Commander/算法服务/AMOS 依赖、安装 PyTorch，并编译 AlgoLib。默认安装 CPU 版 PyTorch；
+需要本地 GPU 跑 Qwen 时，先指定 CUDA wheel 源：
 
-需要：
-
-- CMake 3.20+
-- C++17 编译器
-- Windows 下推荐 Visual Studio 2022 Build Tools
-
-默认构建不启用真实 ONNX Runtime，而是使用项目内的 stub 路径，便于开发和测试。
-
-## 构建方式
-
-在项目根目录执行：
-
-```powershell
-cmake -S . -B build
-cmake --build build
+```bash
+./scripts/bootstrap.sh
+# 或：
+A2A_TORCH_INDEX_URL=https://download.pytorch.org/whl/cu121 ./scripts/bootstrap.sh
 ```
 
-如果修改了头文件中的结构体字段，建议做一次干净构建：
+环境入口文件分别是：
 
-```powershell
-cmake --build build --clean-first
+- `environment.yml`：Python、CMake、Ninja 和 C++ 编译器；
+- `requirements.txt`：Commander、算法 HTTP 服务和 AMOS 的完整 Python 依赖；
+- `scripts/bootstrap.sh`：按正确顺序安装依赖并编译 AlgoLib。
+
+需要手动安装时，执行与脚本等价的命令：
+
+```bash
+conda env create -f environment.yml
+conda run -n a2a python -m pip install torch torchvision \
+  --index-url https://download.pytorch.org/whl/cu121
+conda run -n a2a python -m pip install -r requirements.txt
+conda run -n a2a cmake -S commander -B commander/build -G Ninja \
+  -DALGOLIB_BUILD_TESTS=ON -DALGOLIB_WITH_ONNXRUNTIME=OFF
+conda run -n a2a cmake --build commander/build -j2
 ```
 
-构建后会生成：
+`ALGOLIB_WITH_ONNXRUNTIME=OFF` 只关闭 C++ 进程内 ONNX Runtime；本演示的 Python 算法服务
+仍使用 `onnxruntime`，足以完成实际演示，并减少额外 C++ SDK 依赖。
 
-```text
-build/algolib.exe
-build/algolib_server.exe
-build/algolib_tests.exe
+复制环境模板并只在本机填写密钥：
+
+```bash
+cp .env.example .env
 ```
 
-## 运行测试
+关键配置如下。`.env` 已被 `.gitignore` 排除，脚本不会打印密钥。
 
-```powershell
-ctest --test-dir build --output-on-failure
+```dotenv
+LLM_PROFILE=azure
+ENABLE_LLM=true
+AZURE_OPENAI_ENDPOINT=https://wysengine.openai.azure.com/
+AZURE_OPENAI_DEPLOYMENT=4o-mini
+AZURE_OPENAI_API_VERSION=2024-12-01-preview
+AZURE_OPENAI_API_KEY=<在本机填写>
 ```
 
-如果测试通过，会看到：
+`text-embedding-3-small` 配置仅为后续接入预留，当前代码不会调用 Azure embedding。
+Decision/Compliance RAG 默认使用 SQLite 索引和关键词排序；ONNX RAG 开关默认关闭，仓库也
+没有提供 `models/rag/embedding.onnx`。TIA 的 SynapseRAG 在收到知识文档时使用
+Sentence Transformers 的 `paraphrase-MiniLM-L6-v2`，首次使用可能需要下载模型。
 
-```text
-100% tests passed
+## 启停
+
+不调用 Azure、使用确定性算法规划启动：
+
+```bash
+./scripts/start.sh --offline
 ```
 
-## CLI 使用方式
+推荐给大多数开发者：使用 Azure/API-hosted GPT-4o-mini 动态选择算法，不需要本地部署大模型。
+密钥缺失时启动会直接失败：
 
-CLI 程序是：
-
-```powershell
-.\build\algolib.exe
+```bash
+./scripts/start.sh --llm-profile azure --require-llm
 ```
 
-它是短生命周期工具：执行一次命令，输出 JSON，然后退出。
+可选：使用本地 Qwen3-1.7B 动态选择算法，并优先使用 CUDA/GPU；如果 `127.0.0.1:11435`
+没有现成 OpenAI-compatible 服务，启动脚本会自动拉起 `scripts/local_qwen_openai_server.py`：
 
-### 查看算法列表
-
-```powershell
-.\build\algolib.exe list
+```bash
+./scripts/start.sh --llm-profile local-qwen-gpu --require-llm
 ```
 
-如果注册表为空，会输出：
+快速切换方式：
 
-```json
-[]
+- `./scripts/start.sh --llm-profile azure --require-llm`：Azure OpenAI，使用 `.env` 中的 `AZURE_OPENAI_*`；
+- `./scripts/start.sh --llm-profile local-qwen-gpu --require-llm`：本地 OpenAI-compatible Qwen，默认 `http://127.0.0.1:11435/v1`；
+- `./scripts/start.sh --llm-profile offline` 或 `./scripts/start.sh --offline`：不调用 LLM，使用固定/确定性算法规划。
+
+也可以继续使用环境变量 `LLM_PROFILE=azure|local-qwen-gpu|offline`；命令行
+`--llm-profile` 优先级更高。切换 profile 时先执行 `./scripts/stop.sh`，再重新
+`./scripts/start.sh`，否则已经运行的 Agent 进程不会重新加载新环境。
+
+Act 阶段是否也使用 LLM 选算法由 `A2A_ACT_AGENT_LLM` 控制。默认跟随全局 LLM 开关；
+如需演示速度优先，可在 `.env` 中设为 `false`。
+
+查看状态、停止应用但保留 Nacos，或全部停止：
+
+```bash
+./scripts/status.sh
+./scripts/stop.sh --keep-nacos
+./scripts/stop.sh
 ```
 
-### 注册 ONNX 示例算法
+日志位于 `.runtime/logs/`。启动脚本会先验证并激活算法包，再启动各个独立 Agent。
+LLM 模式默认允许单个 Agent 请求执行 180 秒，以覆盖 Azure 调用和首次模型冷启动；可用
+`A2A_REQUEST_TIMEOUT` 自行覆盖。
 
-```powershell
-.\build\algolib.exe register .\examples\onnx_text_classifier\1.0.0
+## OODA / F2T2EA 与四检查点
+
+界面中的两套阶段不是两条独立流程，而是同一个任务闭环的两种视图：
+
+| OODA | F2T2EA | 本系统中的工作 |
+| --- | --- | --- |
+| Observe | FIND + FIX | 汇集当前传感器资料、检测接触、关联身份并固定目标位置 |
+| Orient | TRACK | 维持航迹、融合新观测、评估和排序威胁 |
+| Decide | TARGET | 分配任务与资源、生成方案、检查交战规则并请求人工授权 |
+| Act | ENGAGE + ASSESS | 执行已授权的模拟攻击、监控执行状态并评估效果 |
+
+`FIND` 与 `FIX` 的边界是“发现接触”与“形成可持续引用的目标实体”：只有观测到接触属于
+FIND；完成多源关联、定位和身份候选固定后才进入 FIX。OODA 的 Observe 必须等 FIND 和 FIX
+都完成才显示完成。
+
+仿真与分析由 Director 同步推进。到达检查点后，Director 冻结一份因果快照并启动当前
+OODA 阶段的 BPEL；在后端分析期间，仿真可以继续播放当前阶段的剩余过程，但最多推进到
+下一 F2T2EA 阶段边界前。工作流没有真实完成或活动校验失败时绝不会进入下一阶段，等待过久
+则在边界前暂停。前端在等待期间保持状态流连接并平滑插值地图标记，不提供独立的“提交分析”
+动作，也不会在后端没有结果时显示完成。
+
+打开 AMOS，选择“海上编队护航与要地防空”。正式链路按以下因果检查点运行：
+
+1. `MAR-CP-PERCEPTION`：海空观测融合输入就绪。
+2. `MAR-CP-ASSESS`：敌方高速艇与民用渔船识别输入就绪。
+3. `MAR-CP-PLAN`：攻击方案、禁射规则和人工复核请求就绪。
+4. `MAR-CP-CLOSE`：模拟攻击后的毁伤评估与渔船安全复核就绪。
+
+前三个检查点不会自动开火。前三阶段工作流分别包含 3、3、4 个 BPEL 活动（含外层
+`sequence`），最后的 Act 工作流包含 3 个活动。后端返回 `pending_review/review_required`
+后，Director 会在 ENGAGE 入口暂停并等待操作员授权。AMOS 服务端仍会
+执行三层校验：目标必须被后端确认为敌方、不得属于民用禁射类别、请求必须携带操作员的
+明确批准。即使请求标记为批准，渔船仍会被拒绝。
+
+## 一键验收
+
+只检查服务、7 个不同 PID 和 Nacos 注册：
+
+```bash
+conda run -n a2a python scripts/verify.py
 ```
 
-### 激活算法
+创建一个全新 run，执行四个工作流，并由当前命令的操作员显式批准一次模拟发射：
 
-```powershell
-.\build\algolib.exe activate onnx_text_classifier 1.0.0 onnx
+```bash
+conda run -n a2a python scripts/verify.py \
+  --run-scenario --authorize-fire --workflow-timeout 240
 ```
 
-只有 `active` 状态的算法可以被执行。
+验收默认使用因果检查点快进：仿真引擎仍真实计算并生成各检查点的数据，但不等待检查点之间
+的墙钟时间；每到一个检查点仍会等待 Commander、独立 Agent、AlgoLib 和 Azure 的真实调用
+完成后才进入下一阶段。它检查四个阶段各自的 3/3/4/3 个 BPEL 活动、两类目标识别、
+ENGAGE 人工授权门、武器终态和第四检查点。报告写入 `.runtime/verification-last.json`。
+省略 `--authorize-fire` 时，验收会停在授权门并确认系统不会自行进入 ENGAGE；带该参数才会
+完成整个剧本。
 
-### 查看算法卡片
+需要按界面演示相同的 32 倍速逐秒播放时，增加 `--wall-clock`：
 
-```powershell
-.\build\algolib.exe show-card onnx_text_classifier 1.0.0 onnx
+```bash
+conda run -n a2a python scripts/verify.py \
+  --run-scenario --authorize-fire --workflow-timeout 240 --wall-clock
 ```
 
-输出中包含：
+默认快速验收的耗时主要取决于真实 Agent 和 Azure 请求，不再包含约 175 秒的检查点间等待。
+在 `--require-llm` 模式启动后，可额外传入 `--require-llm-evidence`，强制检查 TIA 的原始
+LLM 规划、AlgoLib 活跃目录来源、Track Threat 的 Azure planner 模式以及零 fallback。
 
-- `entry`：完整注册表条目。
-- `agent_view`：面向 Agent 的简化可读视图。
+## 开发与提交
 
-### 执行算法
+运行当前整合链路相关测试：
 
-先准备一个请求文件，例如 `request.json`：
-
-```json
-{
-  "request_id": "req_001",
-  "trace_id": "trace_001",
-  "algorithm_id": "onnx_text_classifier",
-  "version": "1.0.0",
-  "backend_type": "onnx",
-  "inputs": {
-    "text": "Classify this task text."
-  }
-}
+```bash
+conda run -n a2a python -m pytest -q amos-platform/tests
+conda run -n a2a --cwd commander python -m pytest -q \
+  tests/test_commander_gateway.py \
+  tests/test_bpel_workflow.py \
+  -k 'not test_demo_script_runs_both_workflows'
+conda run -n a2a ctest --test-dir commander/build --output-on-failure
 ```
 
-然后执行：
+上述 Commander 命令排除了原仓库的旧沙滩突击 Demo；该用例依赖当前分支未包含的
+`artillery_agent`，与海上编队整合链路无关。
 
-```powershell
-.\build\algolib.exe run request.json
+日常开发从整合分支创建个人分支，避免直接向共享分支强推：
+
+```bash
+git switch wangyu/a2a-amos-integrated
+git pull --ff-only
+git switch -c <姓名>/<功能名>
 ```
 
-## HTTP Server 使用方式
+`.env`、`.runtime/`、数据库、日志、PID、构建目录和本地模型权重已被忽略。提交前仍应运行
+`git status --ignored`，确认没有使用 `git add -f` 把密钥或运行产物加入暂存区。
 
-HTTP Server 程序是：
+## 离线交付包
 
-```powershell
-.\build\algolib_server.exe
+如果要把整套系统搬到没有网络的甲方机器上，推荐在有网的开发机上生成离线包：
+
+```bash
+python scripts/package_release_bundle.py
 ```
 
-它是常驻服务：启动后会一直监听端口，等待 Agent、curl 或外部系统通过 HTTP 调用。
-
-HTTP Server 会缓存已加载的 ONNX runner/session。第一次 `/run` 会加载模型，后续同一个 `algorithm_id + version + backend_type` 的请求会复用缓存，避免每次请求都重复加载 ONNX 模型。
-
-缓存会在 `/reload`、注册、校验、激活、禁用或删除算法后清理或失效。可以通过 `/health` 查看当前缓存数量：
-
-```json
-{
-  "ok": true,
-  "runner_cache_size": 1
-}
-```
-
-### 启动服务
-
-默认启动：
-
-```powershell
-.\build\algolib_server.exe
-```
-
-等价于：
-
-```powershell
-.\build\algolib_server.exe --host 127.0.0.1 --port 8088
-```
-
-指定注册表路径：
-
-```powershell
-.\build\algolib_server.exe --host 127.0.0.1 --port 8088 --registry .\.algolib\registry.json
-```
-
-如果需要局域网访问，可以使用：
-
-```powershell
-.\build\algolib_server.exe --host 0.0.0.0 --port 8088
-```
-
-注意：局域网或公网暴露前应增加鉴权、访问控制和限流。
-
-### 健康检查
-
-新开一个终端执行：
-
-```powershell
-curl http://127.0.0.1:8088/health
-```
-
-正常响应示例：
-
-```json
-{
-  "ok": true,
-  "status": "ready",
-  "registry_path": ".algolib/registry.json",
-  "execution_log_path": ""
-}
-```
-
-### 查询算法列表
-
-```powershell
-curl http://127.0.0.1:8088/algorithms
-```
-
-默认只返回 `active` 算法。查看非 deleted 的所有算法：
-
-```powershell
-curl "http://127.0.0.1:8088/algorithms?active_only=false"
-```
-
-### HTTP 注册算法
-
-```powershell
-curl -X POST http://127.0.0.1:8088/algorithms/register `
-  -H "Content-Type: application/json" `
-  -d "{\"package_or_card_path\":\"examples/onnx_text_classifier/1.0.0\"}"
-```
-
-### HTTP 激活算法
-
-```powershell
-curl -X POST http://127.0.0.1:8088/algorithms/onnx_text_classifier/1.0.0/onnx/activate
-```
-
-### HTTP 执行算法
-
-```powershell
-curl -X POST http://127.0.0.1:8088/run `
-  -H "Content-Type: application/json" `
-  -d "@request.json"
-```
-
-## HTTP API 列表
-
-```text
-GET    /health
-POST   /reload
-GET    /algorithms
-GET    /algorithms?active_only=false
-GET    /algorithms/<algorithm_id>/<version>/<backend_type>
-POST   /algorithms/register
-POST   /algorithms/<algorithm_id>/<version>/<backend_type>/validate
-POST   /algorithms/<algorithm_id>/<version>/<backend_type>/activate
-POST   /algorithms/<algorithm_id>/<version>/<backend_type>/disable
-DELETE /algorithms/<algorithm_id>/<version>/<backend_type>
-POST   /run
-```
-
-## 接入 ONNX 算法
-
-ONNX 算法包至少需要包含：
-
-```text
-algorithm_card.yaml
-model.onnx
-input.schema.json
-output.schema.json
-preprocess.yaml
-postprocess.yaml
-```
-
-可选文件：
-
-```text
-tensor_contract.yaml
-tokenizer.json
-label_map.json
-golden_cases/
-```
-
-当前 ONNX 路径不是“任意 model.onnx 零改动接入”。模型输入输出 tensor 名称、类型、形状需要和 `preprocess.yaml` / `postprocess.yaml` 中声明的适配器契约匹配。
-
-当前支持的 preprocess 类型：
-
-```text
-no_op
-tensor_from_json
-text_tokenization
-json_to_tensor_map
-```
-
-当前支持的 postprocess 类型：
-
-```text
-no_op
-classification_postprocess
-raw_tensor_to_json
-```
-
-### tensor_contract.yaml
-
-`tensor_contract.yaml` 用来显式声明 ONNX 模型真实的 tensor 输入输出签名：
-
-```yaml
-inputs:
-  - name: features
-    dtype: float32
-    shape: [1, 3]
-outputs:
-  - name: scores
-    dtype: float32
-    shape: [1, 3]
-```
-
-在 `algorithm_card.yaml` 中引用：
-
-```yaml
-machine_spec:
-  input_schema_ref: input.schema.json
-  output_schema_ref: output.schema.json
-  tensor_contract_ref: tensor_contract.yaml
-```
-
-### json_to_tensor_map
-
-`json_to_tensor_map` 是通用预处理适配器，用来把业务 JSON 字段映射成一个或多个 ONNX tensor：
-
-```yaml
-type: json_to_tensor_map
-mappings:
-  - json_path: $.features
-    tensor_name: features
-```
-
-如果 `tensor_contract.yaml` 中已经声明了 `features` 的 dtype 和 shape，这里可以不用重复写。也可以在 mapping 中显式覆盖：
-
-```yaml
-type: json_to_tensor_map
-mappings:
-  - json_path: $.features
-    tensor_name: features
-    dtype: float32
-    shape: [1, 3]
-```
-
-### raw_tensor_to_json
-
-`raw_tensor_to_json` 是通用后处理适配器，用来把 ONNX 输出 tensor 原样放到 JSON 输出中：
-
-```yaml
-type: raw_tensor_to_json
-outputs:
-  - tensor_name: scores
-    json_path: $.scores
-```
-
-如果模型输出 tensor 是 `[0.1, 0.7, 0.2]`，最终输出就是：
-
-```json
-{
-  "scores": [0.1, 0.7, 0.2]
-}
-```
-
-## 接入 Python HTTP Service 算法
-
-Python HTTP Service 算法包至少需要：
-
-```text
-algorithm_card.yaml
-input.schema.json
-output.schema.json
-```
-
-`algorithm_card.yaml` 中需要配置：
-
-```yaml
-machine_spec:
-  runtime:
-    backend_type: python_http_service
-    endpoint: http://127.0.0.1:9000/predict
-    health_endpoint: http://127.0.0.1:9000/health
-    metadata_endpoint: http://127.0.0.1:9000/metadata
-    timeout_ms: 3000
-```
-
-调用时，算法库会先通过 `PythonHttpRunner` 请求外部 Python 服务，再把结果统一转换成 `AlgorithmResult`。
-
-## Agent 调用方式
-
-当前系统已经提供两种对外入口：
-
-```text
-CLI:
-  algolib.exe list
-  algolib.exe show-card
-  algolib.exe run
-
-HTTP Server:
-  GET  /algorithms
-  GET  /algorithms/<id>/<version>/<backend>
-  POST /run
-```
-
-后续如果要接入 Agent 框架，推荐在 HTTP Server 之上再封装 MCP Server，把 HTTP API 转成标准工具：
-
-```text
-algolib.list_algorithms
-algolib.show_card
-algolib.run_algorithm
-```
+它会生成：
+
+- 仓库源码快照
+- 本地 Qwen 模型 `local_models/qwen3-1.7b`
+- `a2a` Conda 环境的离线包
+- Nacos / httpbin 的 Docker 镜像包
+- 目标机可直接执行的 `install/` 脚本
+
+目标机上按 `release_bundle/install/README.md` 操作即可。若只想跑本地大模型，不需要 Azure key。
 
 ## 常见问题
 
-### curl 无法连接到 127.0.0.1:8088
-
-说明 HTTP Server 没有启动，先运行：
-
-```powershell
-.\build\algolib_server.exe --host 127.0.0.1 --port 8088
-```
-
-### /algorithms 返回空数组
-
-可能是当前没有 `active` 状态算法。先注册并激活：
-
-```powershell
-.\build\algolib.exe register .\examples\onnx_text_classifier\1.0.0
-.\build\algolib.exe activate onnx_text_classifier 1.0.0 onnx
-```
-
-### Windows 阻止运行 exe
-
-如果看到 “Application Control policy has blocked this file”，说明 Windows Code Integrity、WDAC 或 Smart App Control 拦截了未签名的本地编译产物。可以选择：
-
-- 让管理员放行构建目录。
-- 使用受信任证书签名 exe。
-- 调整本机应用控制策略。
-- 在 WSL/Linux 环境中构建运行。
-
-## GitHub 提交建议
-
-提交源码前建议确认：
-
-```powershell
-git status
-```
-
-不要提交：
-
-```text
-build/
-build-*/
-.algolib/
-*.exe
-*.pdb
-weekly_report_*.md
-```
-
-这些已经在 `.gitignore` 中忽略。
+- `docker info` 失败：在 Docker Desktop 的 Resources > WSL Integration 中启用当前发行版。
+- Nacos 已启动但发现不到 Agent：查看 `.runtime/logs/agent-*.log`，然后运行验收脚本检查角色集合。
+- `--require-llm` 报密钥为空：确认 `.env` 中 `AZURE_OPENAI_API_KEY` 非空，且没有给值加错误的空格。
+- 端口被占用：先运行 `./scripts/stop.sh --keep-nacos`，再检查占用进程后重启。

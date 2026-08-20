@@ -1,0 +1,24 @@
+{
+  "tile_pack_id": "taiwan-southeast-protomaps-dark-v1",
+  "available": true,
+  "path": "/static/tiles/taiwan-southeast-tactical.pmtiles",
+  "format": "pmtiles-mvt",
+  "style": "dark",
+  "min_zoom": 0,
+  "max_zoom": 12,
+  "bounds": {
+    "south": 21.3,
+    "west": 120.3,
+    "north": 23.3,
+    "east": 122.4
+  },
+  "tile_count": 487,
+  "source": {
+    "name": "Protomaps Basemap v4.15.2 / OpenStreetMap",
+    "build": "20260815.pmtiles",
+    "license": "ODbL Produced Work",
+    "attribution": "© OpenStreetMap contributors"
+  },
+  "renderer": "protomaps-leaflet 5.0.0",
+  "fallback": "static/assets/maps/south-china-sea-basemap.geojson"
+}

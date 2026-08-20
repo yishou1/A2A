@@ -1,0 +1,37 @@
+{
+  "title": "Graph Relation Reasoner Output",
+  "type": "object",
+  "required": ["schema_version", "relations", "groups", "graph_summary", "model"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "relations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source_track_id", "target_track_id", "relation_score", "relation_type"],
+        "properties": {
+          "source_track_id": { "type": "string" },
+          "target_track_id": { "type": "string" },
+          "relation_score": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+          "relation_type": { "const": "formation_membership" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "groups": { "type": "array" },
+    "graph_summary": { "type": "object" },
+    "model": {
+      "type": "object",
+      "required": ["model_id", "model_version", "model_family", "compute_profile", "artifact_sha256"],
+      "properties": {
+        "model_id": { "const": "graph_relation_reasoner" },
+        "model_version": { "type": "string" },
+        "model_family": { "const": "dense_message_passing_graph_neural_network" },
+        "compute_profile": { "type": "string" },
+        "artifact_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": true
+}

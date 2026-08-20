@@ -1,0 +1,19 @@
+{
+  "ok": true,
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "multimodal_mamba_fusion",
+  "version": "1.0.0",
+  "outputs": {
+    "fused_embeddings": {},
+    "modality_count": 2,
+    "input_embedding_dimensions": {
+      "eo_ir": 3,
+      "text_report": 3
+    }
+  },
+  "usage": {
+    "latency_ms": 1
+  },
+  "error": null
+}

@@ -1,0 +1,82 @@
+algorithm_id: intent_gaussian_naive_bayes
+version: 1.0.0
+display_name: Intent Gaussian Naive Bayes
+backend_type: python_http_service
+status: validated
+
+task_family: classification
+modalities:
+  input:
+    - structured_json
+    - numeric_features
+  output:
+    - structured_json
+
+capabilities:
+  - gaussian_naive_bayes
+  - probabilistic_intent_classification
+  - posterior_probability_estimation
+
+agent_card:
+  summary: >
+    Frozen Gaussian Naive Bayes model that estimates benign, surveillance, and
+    hostile posterior probabilities from structured observations.
+  when_to_use:
+    - A lightweight probabilistic classifier with explicit posteriors is needed.
+    - Structured observation features are normalized to the 0 to 1 range.
+  when_not_to_use:
+    - Features are strongly dependent and a conditional-independence model is unsuitable.
+    - Operational calibration is assumed without evaluation on domain observations.
+  input_description: >
+    One or more observations containing normalized radar, communications,
+    movement, weapon-signature, and proximity features.
+  output_description: >
+    Predicted intent, confidence, all posterior probabilities, and verified model identity.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  runtime:
+    backend_type: python_http_service
+    endpoint: http://127.0.0.1:9033/predict
+    health_endpoint: http://127.0.0.1:9033/health
+    metadata_endpoint: http://127.0.0.1:9033/metadata
+    timeout_ms: 5000
+
+constraints:
+  max_input_chars: 2000000
+  max_request_bytes: 4194304
+  batch_supported: true
+  streaming_supported: false
+
+performance:
+  primary_metric: synthetic_reference_holdout_macro_f1
+  primary_score: 0.97037
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 1
+  min_memory_mb: 128
+  recommended_memory_mb: 256
+  min_gpu_count: 0
+  gpu_type: none
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 5
+
+model_profile:
+  parameter_count: 33
+  parameter_count_text: class_priors_means_and_variances
+  flops: 0
+  flops_text: linear_in_classes_features_and_batch
+  precision: fp64
+
+provenance:
+  model_artifact_ref: ../../../models/intent_gaussian_naive_bayes.joblib
+  model_metadata_ref: ../../../models/intent_gaussian_naive_bayes.metadata.json
+  training_script_ref: ../../../scripts/train_intent_gaussian_naive_bayes.py
+  dataset_ref: ../../../data/intent_naive_bayes/reference_observations.csv
+
+safety:
+  risk_level: medium
+  requires_human_review: true

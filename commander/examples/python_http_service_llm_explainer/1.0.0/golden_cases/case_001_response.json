@@ -1,0 +1,15 @@
+{
+  "ok": true,
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "llm_rule_explainer",
+  "version": "1.0.0",
+  "outputs": {
+    "explanation": "Required fields are missing and manual review is recommended.",
+    "confidence": 0.82
+  },
+  "usage": {
+    "latency_ms": 1200
+  },
+  "error": null
+}

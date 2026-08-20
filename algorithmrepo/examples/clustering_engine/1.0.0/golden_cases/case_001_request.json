@@ -1,0 +1,21 @@
+{
+  "request_id": "cluster-kmeans-001",
+  "trace_id": "trace-m01-kmeans",
+  "algorithm_id": "clustering_engine",
+  "version": "1.0.0",
+  "backend_type": "python_http_service",
+  "inputs": {
+    "points": [
+      [0.0, 0.0],
+      [0.0, 2.0],
+      [10.0, 10.0],
+      [10.0, 12.0]
+    ]
+  },
+  "params": {
+    "algorithm": "kmeans",
+    "k": 2,
+    "max_iterations": 100,
+    "tolerance": 0.000001
+  }
+}

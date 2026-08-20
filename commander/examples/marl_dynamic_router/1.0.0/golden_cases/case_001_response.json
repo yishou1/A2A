@@ -1,0 +1,31 @@
+{
+  "ok": true,
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "marl_dynamic_router",
+  "version": "1.0.0",
+  "outputs": {
+    "routes": [
+      {
+        "destination": "command_agent",
+        "channel": "fhss_backup",
+        "reliability": 0.577,
+        "priority": "high",
+        "marl_policy": "mock"
+      },
+      {
+        "destination": "fire_control_agent",
+        "channel": "fhss_backup",
+        "reliability": 0.527,
+        "priority": "high",
+        "marl_policy": "mock"
+      }
+    ],
+    "anti_jam_mode": true,
+    "broadcast_summary": "2 high-threat targets"
+  },
+  "usage": {
+    "latency_ms": 1
+  },
+  "error": null
+}

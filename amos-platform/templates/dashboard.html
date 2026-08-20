@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Simulation 场景仿真平台</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="/static/css/platform.css?v=20260818b">
+<script src="/static/vendor/leaflet/leaflet.js"></script>
+<script src="/static/vendor/protomaps/protomaps-leaflet.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-brand-group">
+    <span class="brand">Simulation</span>
+    <span class="product-name">场景仿真平台</span>
+    <span class="mode-tag" id="mode-tag">就绪</span>
+  </div>
+  <div class="scenario-selector-wrap">
+    <label for="scenario-select">当前场景</label>
+    <select id="scenario-select" aria-label="当前场景">
+      <option value="">正在加载场景…</option>
+    </select>
+  </div>
+  <div class="controls" aria-label="仿真控制">
+    <button class="btn btn-primary" id="btn-start">启动</button>
+    <button class="btn" id="btn-pause">暂停</button>
+    <button class="btn btn-danger" id="btn-stop">停止</button>
+    <button class="btn" id="btn-reset">重置</button>
+    <div class="speed-group" aria-label="仿真倍率">
+      <button class="btn btn-sm speed-btn" data-speed="0.5">0.5×</button>
+      <button class="btn btn-sm speed-btn speed-active" data-speed="1">1×</button>
+      <button class="btn btn-sm speed-btn" data-speed="2">2×</button>
+      <button class="btn btn-sm speed-btn" data-speed="4">4×</button>
+      <button class="btn btn-sm speed-btn" data-speed="8">8×</button>
+      <button class="btn btn-sm speed-btn" data-speed="16">16×</button>
+      <button class="btn btn-sm speed-btn" data-speed="32">32×</button>
+    </div>
+    <button class="btn btn-sm" id="btn-focus-map">任务区</button>
+    <button class="btn btn-sm" id="btn-toggle-sensors">传感器</button>
+    <button class="btn btn-sm" id="btn-toggle-ao">边界</button>
+  </div>
+</header>
+
+<main class="main" id="main-layout">
+  <section id="map-panel" aria-label="场景地图">
+    <div id="map"></div>
+  </section>
+
+  <div id="workspace-resizer" class="workspace-resizer" role="separator" aria-orientation="vertical" aria-label="调整任务工作区宽度" tabindex="0"></div>
+
+  <aside id="dash-panel" aria-label="任务工作区">
+    <div class="workspace-header">
+      <div>
+        <span class="workspace-kicker">任务工作区</span>
+        <h1 id="scenario-context">未选择场景</h1>
+      </div>
+      <span id="workspace-run-id" class="run-id">RUN —</span>
+    </div>
+
+    <nav class="workspace-tabs" role="tablist" aria-label="任务工作区视图">
+      <button type="button" class="active" role="tab" aria-selected="true" data-workspace-tab="situation">场景态势</button>
+      <button type="button" role="tab" aria-selected="false" data-workspace-tab="agents">Agent 拓扑</button>
+      <button type="button" role="tab" aria-selected="false" data-workspace-tab="algorithms">算法与功能</button>
+      <button type="button" role="tab" aria-selected="false" data-workspace-tab="execution">流程执行</button>
+      <button type="button" role="tab" aria-selected="false" data-workspace-tab="evidence">证据与结果</button>
+    </nav>
+
+    <div class="workspace-body">
+      <section class="workspace-panel active" data-workspace-panel="situation" role="tabpanel">
+        <div id="scenario-story-card" class="card scenario-story-card" hidden>
+          <div class="card-heading story-heading">
+            <div><span class="section-eyebrow">当前态势</span><h2 id="story-title">场景态势</h2></div>
+            <span id="story-phase-badge" class="status-chip info">READY</span>
+          </div>
+          <div class="story-hero" id="story-hero-wrap">
+            <img id="story-hero-image" alt="当前观测资料">
+            <div class="story-hero-overlay">
+              <b id="story-current-title">等待观测数据</b>
+              <small id="story-current-prompt">尚无可用传感器资料</small>
+            </div>
+          </div>
+          <div class="story-metrics">
+            <span><small>仿真时刻</small><b id="story-elapsed">T+00:00:00</b></span>
+            <span><small>可用资料</small><b id="story-media-count">0</b></span>
+            <span><small>融合航迹</small><b id="story-track-count">0</b></span>
+            <span><small>分析结果</small><b id="story-agent-status">尚未开始</b></span>
+          </div>
+          <div class="story-section-label">最新观测资料</div>
+          <div id="story-media-strip" class="story-media-strip"></div>
+          <div class="story-section-label">已发生事件</div>
+          <div id="story-timeline" class="story-timeline"></div>
+        </div>
+
+        <div class="two-column-cards">
+          <div class="card compact-card">
+            <div class="card-heading"><h2>融合航迹</h2><span id="track-count-badge" class="status-chip info">0</span></div>
+            <div id="track-list" class="track-list"><div class="empty-state">暂无融合航迹</div></div>
+          </div>
+          <div class="card compact-card">
+            <div class="card-heading"><h2>平台状态</h2><span id="asset-count-badge" class="status-chip info">0</span></div>
+            <div id="asset-health-list" class="track-list"><div class="empty-state">暂无平台状态</div></div>
+          </div>
+        </div>
+
+        <div class="two-column-cards">
+          <div class="card compact-card">
+            <div class="card-heading"><h2>事件与告警</h2><span id="alert-count-badge" class="status-chip info">0</span></div>
+            <div id="alert-list" class="alert-list"><div class="empty-state">暂无事件或告警</div></div>
+          </div>
+          <div class="card compact-card">
+            <div class="card-heading"><h2>通信网络</h2></div>
+            <div class="network-stats">
+              <div class="net-stat"><span class="net-label">节点</span><span class="net-value" id="net-nodes">0</span></div>
+              <div class="net-stat"><span class="net-label">链路</span><span class="net-value" id="net-links">0</span></div>
+              <div class="net-stat"><span class="net-label">韧性</span><span class="net-value net-good" id="net-resilience">0%</span></div>
+              <div class="net-stat"><span class="net-label">降级</span><span class="net-value net-warn" id="net-degraded">0</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace-panel" data-workspace-panel="agents" role="tabpanel" hidden>
+        <div class="card">
+          <div class="card-heading"><div><span class="section-eyebrow">场景职责</span><h2>六个功能 Agent</h2></div><span id="functional-agent-count" class="status-chip neutral">0/6</span></div>
+          <div id="scenario-functional-agents" class="agent-topology">
+            <div class="empty-state">当前场景未声明功能 Agent</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-heading"><div><span class="section-eyebrow">部署关系</span><h2>Agent—设备算力映射</h2></div><span id="agent-deployment-count" class="status-chip neutral">0</span></div>
+          <div id="agent-deployment-topology" class="agent-deployment-topology">
+            <div class="empty-state">当前场景未声明 Agent 部署关系</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace-panel" data-workspace-panel="algorithms" role="tabpanel" hidden>
+        <div class="metric-strip four" id="backend-capability-summary">
+          <span><small>算法类别（M01–M20）</small><b id="backend-active-count">0</b></span>
+          <span><small>运行包</small><b id="backend-runnable-count">0</b></span>
+          <span><small>运行时不可用</small><b id="backend-unavailable-count">0</b></span>
+          <span><small>任务族</small><b id="backend-family-count">0</b></span>
+        </div>
+        <div class="card" id="backend-capability-plan">
+          <div class="card-heading"><div><span class="section-eyebrow">AlgoLib 运行时发现</span><h2>算法与功能</h2></div><span id="algorithm-runtime-status" class="status-chip neutral">检查中</span></div>
+          <div id="algorithm-runtime-meta" class="algorithm-runtime-meta"></div>
+          <div id="backend-capability-map" class="backend-capability-map">
+            <div class="empty-state">正在检查算法服务</div>
+          </div>
+          <div id="backend-function-map" class="backend-function-map">
+            <div class="empty-state">正在加载功能点—算法关系</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace-panel" data-workspace-panel="execution" role="tabpanel" hidden>
+        <div class="card">
+          <div class="card-heading"><div><span class="section-eyebrow">任务闭环</span><h2>阶段视图</h2></div></div>
+          <div id="mission-phase-view" class="phase-view" data-contract="amos.workflow-view.v2.phases">
+            <div class="phase-track" data-phase-model="OODA"><b>OODA</b><span data-phase-key="OBSERVE">观察（Observe）</span><span data-phase-key="ORIENT">研判（Orient）</span><span data-phase-key="DECIDE">决策（Decide）</span><span data-phase-key="ACT">行动（Act）</span></div>
+            <div class="phase-track" data-phase-model="F2T2EA"><b>F2T2EA</b><span data-phase-key="FIND">发现（Find）</span><span data-phase-key="FIX">定位（Fix）</span><span data-phase-key="TRACK">跟踪（Track）</span><span data-phase-key="TARGET">目标选择（Target）</span><span data-phase-key="ENGAGE">交战（Engage）</span><span data-phase-key="ASSESS">评估（Assess）</span></div>
+          </div>
+        </div>
+        <div class="card" id="kill-chain-runtime-card" hidden>
+          <div class="card-heading"><div><span class="section-eyebrow">仿真推进</span><h2>28 项杀伤链功能点</h2><small class="kill-chain-progress-note">状态表示任务推进；实际算法调用以本页底部“运行证据”为准</small></div></div>
+          <div id="kill-chain-runtime-view" class="kill-chain-runtime-view"><div class="empty-state">等待加载任务</div></div>
+        </div>
+
+        <div class="card agent-card workflow-console workflow-inspector" id="a2a-workflow-card">
+          <div class="workflow-heading">
+            <div><h2>任务执行检查器</h2></div>
+            <span id="backend-transport-badge" class="status-chip neutral">Gateway</span>
+            <span id="backend-health-badge" class="status-chip danger">离线</span>
+            <span id="wf-status-badge" class="status-chip neutral">尚未开始</span>
+          </div>
+          <nav id="wf-task-history" class="workflow-task-history" aria-label="本轮 OODA 阶段">
+            <button type="button" disabled><small>Observe · Find/Fix</small><b>观察与识别</b><span>未生成阶段分析</span></button>
+            <button type="button" disabled><small>Orient · Track</small><b>航迹评估</b><span>未生成阶段分析</span></button>
+            <button type="button" disabled><small>Decide · Target</small><b>方案决策</b><span>未生成阶段分析</span></button>
+            <button type="button" disabled><small>Act · Engage/Assess</small><b>执行与复核</b><span>未生成阶段分析</span></button>
+          </nav>
+          <div class="agent-progress"><div class="agent-progress-bar" id="wf-progress-bar"></div></div>
+          <div class="agent-meta">
+            <span>任务状态 <b id="wf-state">—</b></span>
+            <span>分析任务 ID <b id="wf-id">—</b></span>
+          </div>
+          <div id="wf-summary" class="agent-summary">当前仿真尚未进入后端分析检查点</div>
+          <div class="workflow-actions">
+            <label class="workflow-follow"><input id="wf-follow-current" type="checkbox" checked><span>跟随当前活动</span></label>
+            <button id="btn-workflow-resume" class="btn btn-sm" type="button" hidden>恢复工作流</button>
+          </div>
+          <div class="workflow-inspector-grid">
+            <section class="workflow-timeline-pane" aria-labelledby="wf-timeline-title">
+              <header><div><span class="section-eyebrow">BPEL / DAG</span><h3 id="wf-timeline-title">活动时间线</h3></div><span id="wf-activity-count">0 项</span></header>
+              <div id="wf-activity-list" class="workflow-activity-list"></div>
+              <div id="wf-execution-graph" data-contract="amos.workflow-view.v2.execution_graph">
+                <div class="empty-state">尚无结构化执行图</div>
+              </div>
+              <div id="wf-trace-list" hidden></div>
+            </section>
+            <section class="workflow-detail-pane" aria-labelledby="wf-detail-title">
+              <header><div><span class="section-eyebrow">活动真实记录</span><h3 id="wf-detail-title">请选择活动</h3></div><span id="wf-detail-status" class="status-chip neutral">未选择</span></header>
+              <div class="workflow-detail-tabs" role="tablist" aria-label="活动详情">
+                <button type="button" data-activity-tab="input" class="active" role="tab">输入</button>
+                <button type="button" data-activity-tab="output" role="tab">输出</button>
+                <button type="button" data-activity-tab="call" role="tab">调用</button>
+                <button type="button" data-activity-tab="algorithm" role="tab">算法</button>
+                <button type="button" data-activity-tab="evidence" role="tab">证据</button>
+              </div>
+              <div id="wf-activity-detail" class="workflow-activity-detail" data-contract="amos.workflow-view.v2.activity_details">
+                <div class="empty-state">尚无活动详情</div>
+              </div>
+            </section>
+          </div>
+        </div>
+        <div class="card" id="workflow-algorithm-evidence" hidden>
+          <div class="card-heading"><div><span class="section-eyebrow">本次运行证据</span><h2>实际算法调用</h2></div></div>
+          <div id="wf-algorithm-coverage" data-contract="amos.workflow-view.v2.algorithms"></div>
+        </div>
+      </section>
+
+      <section class="workspace-panel" data-workspace-panel="evidence" role="tabpanel" hidden>
+        <div class="card report-card">
+          <div class="card-heading">
+            <div><span class="section-eyebrow">运行档案</span><h2>验收报告</h2></div>
+            <span id="run-report-status" class="status-chip neutral">尚无运行记录</span>
+          </div>
+          <div class="report-actions" aria-label="验收报告导出格式">
+            <button class="btn btn-sm" type="button" data-report-format="json" disabled>导出 JSON</button>
+            <button class="btn btn-sm" type="button" data-report-format="markdown" disabled>导出 Markdown</button>
+            <button class="btn btn-sm btn-primary" type="button" data-report-format="html" disabled>导出 HTML</button>
+          </div>
+          <p class="report-note">报告包含本次运行配置、提交快照、工作流记录、覆盖证据、指标和最终状态。</p>
+        </div>
+        <div class="card knowledge-graph-entry">
+          <div class="knowledge-graph-copy">
+            <span class="section-eyebrow">规则知识</span>
+            <h2>交战规则知识图谱</h2>
+            <p>查看规则实体与语料分块的主题关系</p>
+          </div>
+          <div class="knowledge-graph-actions">
+            <div class="knowledge-graph-stats" aria-label="图谱规模">
+              <span><b>1522</b> 节点</span>
+              <span><b>1408</b> 实体</span>
+              <span><b>114</b> 语料</span>
+            </div>
+            <button id="btn-open-knowledge-graph" class="btn btn-sm btn-primary" type="button">打开图谱</button>
+          </div>
+        </div>
+        <div class="card" hidden>
+          <div class="card-heading"><div><span class="section-eyebrow">提交记录</span><h2>输入快照</h2></div></div>
+          <div id="wf-input-snapshot"><div class="empty-state">流程尚未产生后端输入快照</div></div>
+        </div>
+        <div class="card" hidden>
+          <div class="card-heading"><div><span class="section-eyebrow">输入 → 证据 → 输出</span><h2>可追溯关系</h2></div></div>
+          <div id="wf-provenance" data-contract="amos.workflow-view.v2.provenance">
+            <div class="empty-state">尚无结构化可追溯关系</div>
+          </div>
+        </div>
+        <div class="card" hidden>
+          <div class="card-heading"><h2>分析结果</h2></div>
+          <div id="wf-warning-list" class="workflow-warning-list" hidden></div>
+          <div class="workflow-panel-label">结果摘要</div>
+          <div id="wf-analysis-summary"></div>
+          <div class="workflow-panel-label">分项结果与来源</div>
+          <div id="wf-result-cards" class="workflow-result-cards"></div>
+          <div class="workflow-panel-label">航迹关联结果</div>
+          <div id="wf-association-list" class="workflow-association-list"></div>
+        </div>
+        <div class="card" hidden>
+          <div class="card-heading"><h2>运行指标</h2></div>
+          <div id="wf-performance-metrics" data-contract="amos.workflow-view.v2.metrics">
+            <span><small>端到端时延</small><b>未上报</b></span><span><small>吞吐</small><b>未上报</b></span>
+            <span><small>恢复时间</small><b>未上报</b></span><span><small>告警数量</small><b>未上报</b></span>
+          </div>
+        </div>
+      </section>
+    </div>
+  </aside>
+</main>
+
+<div id="authorization-dialog" class="authorization-dialog" aria-hidden="true" hidden>
+  <section class="authorization-panel" role="dialog" aria-modal="true" aria-labelledby="authorization-title" aria-describedby="authorization-message">
+    <header class="authorization-header">
+      <div><span class="section-eyebrow">人工授权检查点</span><h2 id="authorization-title">武器攻击授权</h2></div>
+      <span id="authorization-phase" class="status-chip warning">ENGAGE</span>
+    </header>
+    <p id="authorization-message" class="authorization-question">是否授权对该目标实施打击？</p>
+    <dl class="authorization-details">
+      <div><dt>目标</dt><dd id="authorization-target-name">—</dd></div>
+      <div><dt>航迹编号</dt><dd id="authorization-track-id">—</dd></div>
+      <div><dt>后端评估</dt><dd id="authorization-assessment">—</dd></div>
+      <div><dt id="authorization-action-label">拟用武器</dt><dd id="authorization-action-value">舰载反舰导弹</dd></div>
+    </dl>
+    <p id="authorization-error" class="authorization-error" role="alert" hidden></p>
+    <footer class="authorization-actions">
+      <button id="authorization-cancel" class="btn" type="button">暂不打击</button>
+      <button id="authorization-confirm" class="btn btn-danger" type="button">确认打击</button>
+    </footer>
+  </section>
+</div>
+
+<div id="knowledge-graph-dialog" class="knowledge-graph-dialog" aria-hidden="true">
+  <section class="knowledge-graph-panel" role="dialog" aria-modal="true" aria-labelledby="knowledge-graph-title">
+    <header class="knowledge-graph-header">
+      <h2 id="knowledge-graph-title">交战规则知识图谱</h2>
+      <button id="knowledge-graph-close" class="btn btn-sm" type="button">关闭</button>
+    </header>
+    <iframe id="knowledge-graph-frame" title="交战规则知识图谱" data-src="/static/knowledge-graph/roe-knowledge-graph.html"></iframe>
+  </section>
+</div>
+
+<div id="media-lightbox" class="media-lightbox" aria-hidden="true">
+  <div class="media-lightbox-panel">
+    <div class="media-lightbox-header"><span id="media-lightbox-title">观测资料</span><button class="btn btn-sm" id="media-lightbox-close">关闭</button></div>
+    <img id="media-lightbox-image" alt="观测资料预览">
+    <div id="media-lightbox-meta" class="media-lightbox-meta"></div>
+  </div>
+</div>
+
+<footer class="bottombar">
+  <div class="status"><span class="live-dot" id="live-dot"></span><span id="status-text">就绪</span></div>
+  <div class="status status-summary">
+    <span>仿真时刻 <b id="status-clock">00:00</b></span>
+    <span>平台 <b id="status-assets">0</b></span>
+    <span>航迹 <b id="status-tracks">0</b></span>
+    <span>分析服务 <b id="backend-status">—</b></span>
+  </div>
+</footer>
+
+<script src="/static/js/api/platform-api.js?v=20260817d"></script>
+<script src="/static/js/map/platform-map.js?v=20260818b"></script>
+<script src="/static/js/panels/platform-panels.js?v=20260818a"></script>
+<script src="/static/js/workflow/commander-workflow.js?v=20260818a"></script>
+<script src="/static/js/app/platform.js?v=20260818f"></script>
+</body>
+</html>

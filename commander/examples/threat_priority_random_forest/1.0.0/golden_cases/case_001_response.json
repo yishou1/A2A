@@ -1,0 +1,51 @@
+{
+  "ok": true,
+  "request_id": "rf-priority-001",
+  "trace_id": "trace-m05-rf",
+  "algorithm_id": "threat_priority_random_forest",
+  "version": "1.0.0",
+  "outputs": {
+    "priorities": [
+      {
+        "target_id": "TGT-HIGH",
+        "priority": "high",
+        "confidence": 0.926812,
+        "class_probabilities": {
+          "low": 0.004415,
+          "medium": 0.068773,
+          "high": 0.926812
+        }
+      },
+      {
+        "target_id": "TGT-MEDIUM",
+        "priority": "medium",
+        "confidence": 0.924015,
+        "class_probabilities": {
+          "low": 0.063824,
+          "medium": 0.924015,
+          "high": 0.012161
+        }
+      },
+      {
+        "target_id": "TGT-LOW",
+        "priority": "low",
+        "confidence": 0.974743,
+        "class_probabilities": {
+          "low": 0.974743,
+          "medium": 0.025257,
+          "high": 0.0
+        }
+      }
+    ],
+    "target_count": 3,
+    "model_version": "1.0.0",
+    "assessment_scope": "repository_reference_model",
+    "model_runtime": {
+      "backend": "sklearn_random_forest",
+      "used": true,
+      "artifact_sha256": "2c9219eec2fd48cbd9cd95258069280f60723d9595fb09f423789fee73ec4ea1"
+    }
+  },
+  "usage": {"latency_ms": 0},
+  "error": null
+}

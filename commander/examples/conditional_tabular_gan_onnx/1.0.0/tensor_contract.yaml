@@ -1,0 +1,11 @@
+inputs:
+  - name: noise
+    dtype: float32
+    shape: [-1, 8]
+  - name: conditions
+    dtype: float32
+    shape: [-1, 3]
+outputs:
+  - name: generated_features
+    dtype: float32
+    shape: [-1, 5]

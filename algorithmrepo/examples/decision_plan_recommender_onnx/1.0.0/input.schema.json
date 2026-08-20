@@ -1,0 +1,20 @@
+{
+  "title": "Decision Plan Recommender ONNX Input",
+  "type": "object",
+  "required": ["features"],
+  "properties": {
+    "features": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {
+        "type": "array",
+        "minItems": 8,
+        "maxItems": 8,
+        "items": { "type": "number" }
+      },
+      "description": "One normalized feature row in the documented eight-feature order."
+    }
+  },
+  "additionalProperties": false
+}

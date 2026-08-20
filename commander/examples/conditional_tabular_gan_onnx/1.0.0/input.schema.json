@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Conditional Tabular GAN ONNX Input",
+  "type": "object",
+  "required": ["noise", "conditions"],
+  "properties": {
+    "noise": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10000,
+      "items": {
+        "type": "array",
+        "minItems": 8,
+        "maxItems": 8,
+        "items": {"type": "number"}
+      }
+    },
+    "conditions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10000,
+      "items": {
+        "type": "array",
+        "minItems": 3,
+        "maxItems": 3,
+        "items": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+      },
+      "description": "One-hot rows in benign, surveillance, hostile order."
+    }
+  },
+  "additionalProperties": false
+}

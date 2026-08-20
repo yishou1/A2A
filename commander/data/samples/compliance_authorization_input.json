@@ -1,0 +1,53 @@
+{
+  "request_id": "compliance-demo-001",
+  "agent_profile": {
+    "compute_budget": "medium",
+    "risk_policy": "conservative"
+  },
+  "candidate_plans": [
+    {
+      "id": "PLAN-BROAD-SURVEILLANCE",
+      "name": "Broad surveillance coverage",
+      "status": "recommended",
+      "target_ids": [
+        "TGT-B",
+        "TGT-A"
+      ],
+      "assigned_resources": [
+        "RES-001",
+        "RES-002"
+      ],
+      "actions": [
+        "spread available resources across all scheduled targets",
+        "maintain broad-area monitoring continuity",
+        "prepare simulation-only decision-support handoff"
+      ],
+      "expected_effects": [
+        "maximizes target coverage",
+        "keeps the plan in decision-support mode"
+      ],
+      "score": 90.25,
+      "rationale": "coverage=100.0, risk_alignment=100.0",
+      "risk_notes": [
+        "TGT-B: high risk, score=71.09, priority=1"
+      ]
+    }
+  ],
+  "constraints": [
+    "simulation-only",
+    "decision-support outputs only"
+  ],
+  "authorization": {
+    "status": "pending_review",
+    "approver": null,
+    "approval_level": "demo-review",
+    "scope": [
+      "simulation-only",
+      "decision-support"
+    ],
+    "approved_plan_ids": [],
+    "notes": [
+      "operator review has not been completed"
+    ]
+  }
+}

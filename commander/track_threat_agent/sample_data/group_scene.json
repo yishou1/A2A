@@ -1,0 +1,233 @@
+{
+  "task_id": "auto-demo-frame-50",
+  "message_type": "perception_result",
+  "algorithm_level": "medium",
+  "scene": {
+    "protected_zone_lat": 31.2304,
+    "protected_zone_lon": 121.4737,
+    "protected_radius_m": 30000.0,
+    "operation_name": "fictional_littoral_protection_exercise",
+    "operation_phase": "phase_4_anomaly_escalation",
+    "protected_assets": [
+      {
+        "asset_id": "blue-c2-node",
+        "asset_name": "Blue C2 Node",
+        "asset_type": "command_post",
+        "lat": 31.2304,
+        "lon": 121.4737,
+        "alt": 30,
+        "protection_radius_m": 9000,
+        "criticality": 0.95,
+        "status": "protected",
+        "metadata": {
+          "role": "primary command and coordination node",
+          "side": "blue"
+        }
+      },
+      {
+        "asset_id": "blue-coastal-radar",
+        "asset_name": "Blue Coastal Radar Site",
+        "asset_type": "radar_site",
+        "lat": 31.285,
+        "lon": 121.438,
+        "alt": 45,
+        "protection_radius_m": 7500,
+        "criticality": 0.88,
+        "status": "protected",
+        "metadata": {
+          "role": "early warning and tracking sensor",
+          "side": "blue"
+        }
+      },
+      {
+        "asset_id": "blue-logistics-pier",
+        "asset_name": "Blue Logistics Pier",
+        "asset_type": "logistics_node",
+        "lat": 31.244,
+        "lon": 121.535,
+        "alt": 8,
+        "protection_radius_m": 6500,
+        "criticality": 0.82,
+        "status": "protected",
+        "metadata": {
+          "role": "supply staging and sustainment node",
+          "side": "blue"
+        }
+      },
+      {
+        "asset_id": "blue-medical-area",
+        "asset_name": "Blue Medical Assembly Area",
+        "asset_type": "medical_node",
+        "lat": 31.205,
+        "lon": 121.445,
+        "alt": 20,
+        "protection_radius_m": 5500,
+        "criticality": 0.74,
+        "status": "protected",
+        "metadata": {
+          "role": "casualty collection and evacuation support",
+          "side": "blue"
+        }
+      }
+    ],
+    "frame_index": 50
+  },
+  "detections": [
+    {
+      "detection_id": "auto-air-patrol-1-f50",
+      "object_type": "aircraft",
+      "timestamp": 3050.0,
+      "lat": 31.321981887908706,
+      "lon": 121.40251098265742,
+      "alt": 7799.005171539732,
+      "speed": 218.0,
+      "heading": 134.0,
+      "confidence": 0.94,
+      "source_agent": "coastal-air-radar",
+      "metadata": {
+        "simulated": true,
+        "auto_frame": 50,
+        "exercise_name": "fictional_littoral_joint_awareness_demo",
+        "safety_note": "simulation-only situation awareness; no engagement advice",
+        "scenario_role": "air_patrol_lead",
+        "sensor_mode": "track-while-scan",
+        "exercise_area": "fictional_littoral_security_zone",
+        "operation_phase": "phase_4_anomaly_escalation"
+      }
+    },
+    {
+      "detection_id": "auto-air-patrol-2-f50",
+      "object_type": "aircraft",
+      "timestamp": 3050.0,
+      "lat": 31.32821137402392,
+      "lon": 121.41195564860394,
+      "alt": 7719.005171539732,
+      "speed": 216.0,
+      "heading": 136.0,
+      "confidence": 0.91,
+      "source_agent": "coastal-air-radar",
+      "metadata": {
+        "simulated": true,
+        "auto_frame": 50,
+        "exercise_name": "fictional_littoral_joint_awareness_demo",
+        "safety_note": "simulation-only situation awareness; no engagement advice",
+        "scenario_role": "air_patrol_wing",
+        "sensor_mode": "track-while-scan",
+        "formation_hint": "loose_wedge",
+        "operation_phase": "phase_4_anomaly_escalation"
+      }
+    },
+    {
+      "detection_id": "auto-air-patrol-3-f50",
+      "object_type": "aircraft",
+      "timestamp": 3050.0,
+      "lat": 31.31430253432725,
+      "lon": 121.392036214624,
+      "alt": 7879.005171539732,
+      "speed": 221.0,
+      "heading": 133.0,
+      "confidence": 0.9,
+      "source_agent": "coastal-air-radar",
+      "metadata": {
+        "simulated": true,
+        "auto_frame": 50,
+        "exercise_name": "fictional_littoral_joint_awareness_demo",
+        "safety_note": "simulation-only situation awareness; no engagement advice",
+        "scenario_role": "air_patrol_wing",
+        "sensor_mode": "track-while-scan",
+        "formation_hint": "loose_wedge",
+        "operation_phase": "phase_4_anomaly_escalation"
+      }
+    },
+    {
+      "detection_id": "auto-surface-1-f50",
+      "object_type": "ship",
+      "timestamp": 3050.0,
+      "lat": 31.071249170386892,
+      "lon": 121.71551151995267,
+      "alt": -0.9948284602680103,
+      "speed": 9.0,
+      "heading": 288.0,
+      "confidence": 0.87,
+      "source_agent": "coastal-surface-radar",
+      "metadata": {
+        "simulated": true,
+        "auto_frame": 50,
+        "exercise_name": "fictional_littoral_joint_awareness_demo",
+        "safety_note": "simulation-only situation awareness; no engagement advice",
+        "scenario_role": "surface_group_lead",
+        "ais_status": "intermittent",
+        "sea_state": 3,
+        "operation_phase": "phase_4_anomaly_escalation"
+      }
+    },
+    {
+      "detection_id": "auto-surface-2-f50",
+      "object_type": "ship",
+      "timestamp": 3050.0,
+      "lat": 31.0819904324679,
+      "lon": 121.73296696179104,
+      "alt": -0.9948284602680103,
+      "speed": 8.0,
+      "heading": 286.0,
+      "confidence": 0.85,
+      "source_agent": "coastal-surface-radar",
+      "metadata": {
+        "simulated": true,
+        "auto_frame": 50,
+        "exercise_name": "fictional_littoral_joint_awareness_demo",
+        "safety_note": "simulation-only situation awareness; no engagement advice",
+        "scenario_role": "surface_group_trail",
+        "ais_status": "intermittent",
+        "sea_state": 3,
+        "operation_phase": "phase_4_anomaly_escalation"
+      }
+    },
+    {
+      "detection_id": "auto-low-uav-1-f50",
+      "object_type": "uav",
+      "timestamp": 3050.0,
+      "lat": 31.248533419559696,
+      "lon": 121.52281545547729,
+      "alt": 949.005171539732,
+      "speed": 54.0,
+      "heading": 235.0,
+      "confidence": 0.82,
+      "source_agent": "passive-rf-fusion",
+      "metadata": {
+        "simulated": true,
+        "auto_frame": 50,
+        "exercise_name": "fictional_littoral_joint_awareness_demo",
+        "safety_note": "simulation-only situation awareness; no engagement advice",
+        "scenario_role": "low_altitude_uav_track",
+        "sensor_note": "passive RF bearing plus short radar hits",
+        "track_stability": "medium",
+        "operation_phase": "phase_4_anomaly_escalation",
+        "simulated_behavior_change": "low-altitude UAV turns toward logistics pier during monitoring phase"
+      }
+    },
+    {
+      "detection_id": "auto-unknown-intermittent-1-f50",
+      "object_type": "unknown",
+      "timestamp": 3050.0,
+      "lat": 31.209106384426132,
+      "lon": 121.43292486744005,
+      "alt": 2699.005171539732,
+      "speed": 128.0,
+      "heading": 122.0,
+      "confidence": 0.39,
+      "source_agent": "multi-sensor-fusion",
+      "metadata": {
+        "simulated": true,
+        "auto_frame": 50,
+        "exercise_name": "fictional_littoral_joint_awareness_demo",
+        "safety_note": "simulation-only situation awareness; no engagement advice",
+        "scenario_role": "unknown_intermittent_track",
+        "identification": "unresolved",
+        "sensor_note": "short radar dwell, no cooperative ID",
+        "operation_phase": "phase_4_anomaly_escalation",
+        "simulated_anomaly": "unknown track changed heading and speed during anomaly escalation phase"
+      }
+    }
+  ]
+}

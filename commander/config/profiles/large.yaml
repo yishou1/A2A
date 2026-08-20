@@ -1,0 +1,20 @@
+# 大档 (L)：高精度；更大检测输入与嵌入维度
+description: 工作站级 GPU，优先精度
+target_device: "24GB+ GPU"
+
+inference:
+  detection_model: models/checkpoints/battlefield_rtdetr.pt
+  # 训练完成后可改为: models/checkpoints/battlefield_rtdetr_x.pt 或 rtdetr-x.pt
+  detection_imgsz: 1280
+  embed_dim: 1536
+  mask2former_model: facebook/mask2former-swin-base-ade-semantic
+  semantic_comm_model: google/flan-t5-base
+  page_index_model: sentence-transformers/all-MiniLM-L12-v2
+  odconv_crop_size: 160
+  odconv_checkpoint: models/checkpoints/odconv_refiner.pt
+  edl_checkpoint: models/checkpoints/edl_head.pt
+  motr_checkpoint: models/checkpoints/motr_tracker_battlefield.pt
+  mamba_checkpoint: models/checkpoints/mamba_fusion_l.pt
+  supcon_checkpoint: models/checkpoints/supcon_meta_l.pt
+  marl_checkpoint: models/checkpoints/marl_policy.pt
+  confidence_threshold: 0.30

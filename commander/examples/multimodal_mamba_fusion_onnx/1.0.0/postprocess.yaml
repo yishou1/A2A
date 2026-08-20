@@ -1,0 +1,4 @@
+type: raw_tensor_to_json
+outputs:
+  - tensor_name: fused_embeddings
+    json_path: $.fused_embeddings

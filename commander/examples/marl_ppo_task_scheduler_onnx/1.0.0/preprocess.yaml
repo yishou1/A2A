@@ -1,0 +1,10 @@
+type: json_to_tensor_map
+mappings:
+  - json_path: $.observations
+    tensor_name: observations
+    dtype: float32
+    shape: [-1, 104]
+  - json_path: $.action_mask
+    tensor_name: action_mask
+    dtype: float32
+    shape: [-1, 9]

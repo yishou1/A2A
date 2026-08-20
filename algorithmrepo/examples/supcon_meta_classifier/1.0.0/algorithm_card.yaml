@@ -1,0 +1,83 @@
+algorithm_id: supcon_meta_classifier
+version: 1.0.0
+display_name: SupCon Meta Classifier
+backend_type: python_http_service
+status: validated
+
+task_family: classification
+modalities:
+  input:
+    - structured_json
+  output:
+    - structured_json
+
+capabilities:
+  - few_shot_classification
+  - affiliation_labeling
+
+agent_card:
+  summary: >
+    Trained small-profile neural classifier combining a two-layer projection
+    MLP, supervised contrastive loss, and learnable class prototypes.
+  when_to_use:
+    - Fused target embeddings need friendly, neutral, hostile, or unknown labels.
+    - CPU-compatible inference with traceable similarity probabilities is required.
+  when_not_to_use:
+    - No fused embeddings are available.
+    - Synthetic embedding metrics are being treated as operational identification accuracy.
+  input_description: >
+    Target-id to embedding-vector mapping with optional labeled support shots.
+  output_description: >
+    Per-target class, confidence, class probabilities, support-shot count, and
+    verified checkpoint identity in real mode.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  runtime:
+    backend_type: python_http_service
+    endpoint: http://127.0.0.1:9027/predict
+    health_endpoint: http://127.0.0.1:9027/health
+    metadata_endpoint: http://127.0.0.1:9027/metadata
+    timeout_ms: 3000
+
+constraints:
+  max_input_chars: 20000000
+  max_request_bytes: 33554432
+  batch_supported: false
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 50
+  latency_ms_p95: 500
+  primary_metric: synthetic_holdout_macro_f1
+  primary_score: 1.0
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 2
+  min_memory_mb: 256
+  recommended_memory_mb: 512
+  min_gpu_count: 0
+  gpu_type: optional
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 10
+
+model_profile:
+  parameter_count: 99200
+  parameter_count_text: 99.2K_small_profile
+  flops: 0
+  flops_text: embedding_dimension_dependent
+  precision: fp32
+
+provenance:
+  model_artifact_ref: ../../../models/checkpoints/supcon_meta_s.safetensors
+  model_metadata_ref: ../../../models/checkpoints/supcon_meta_s.metadata.json
+  training_script_ref: ../../../scripts/train_supcon_meta_classifier.py
+  dataset_ref: ../../../data/supcon_meta/reference_embeddings.npy
+  label_dataset_ref: ../../../data/supcon_meta/reference_labels.npy
+
+safety:
+  risk_level: medium
+  requires_human_review: true

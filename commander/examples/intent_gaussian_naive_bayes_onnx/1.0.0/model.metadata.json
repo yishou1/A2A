@@ -1,0 +1,79 @@
+{
+  "model_id": "intent_gaussian_naive_bayes_onnx",
+  "model_version": "1.0.0",
+  "model_family": "onnx_gaussian_naive_bayes_classifier",
+  "format": "onnx",
+  "artifact_path": "examples/intent_gaussian_naive_bayes_onnx/1.0.0/model.onnx",
+  "artifact_sha256": "ac950cfe057a74f53aa98070f40ecd44ff1fad1eb2aad1c5899af026b98127db",
+  "export_script": "scripts/export_sklearn_onnx_models.py",
+  "export_script_sha256": "709caa97c257555a486ef3469952fb783a874f20a17e19bd776d0fac33dbb3e9",
+  "source_model": "models/intent_gaussian_naive_bayes.joblib",
+  "source_model_sha256": "29594ff6886d52a13d055dd453aa5cb129e4397babc149b628cf2e2127f00369",
+  "source_metadata": "models/intent_gaussian_naive_bayes.metadata.json",
+  "source_metadata_sha256": "35728bc79e1d97bc5985e27a77cf26caa182de3683a5742cee3be774799e4917",
+  "feature_order": [
+    "radar_activity",
+    "communication_intensity",
+    "movement_consistency",
+    "weapon_signature",
+    "proximity_score"
+  ],
+  "class_order": [
+    "benign",
+    "surveillance",
+    "hostile"
+  ],
+  "precision": "float32",
+  "equivalence": {
+    "reference": "source sklearn predict_proba",
+    "maximum_absolute_probability_difference": 5.10267385012142e-08
+  },
+  "runtime_versions": {
+    "joblib": "1.5.3",
+    "numpy": "2.2.6",
+    "onnx": "1.21.0",
+    "onnxruntime": "1.23.2"
+  },
+  "source_class_order": [
+    "benign",
+    "hostile",
+    "surveillance"
+  ],
+  "output_class_order": [
+    "benign",
+    "surveillance",
+    "hostile"
+  ],
+  "parameter_count": 33,
+  "source_evaluation": {
+    "method": "stratified_holdout",
+    "test_ratio": 0.25,
+    "train_count": 405,
+    "test_count": 135,
+    "accuracy": 0.97037,
+    "macro_f1": 0.97037,
+    "log_loss": 0.106398,
+    "confusion_matrix_labels": [
+      "benign",
+      "surveillance",
+      "hostile"
+    ],
+    "confusion_matrix": [
+      [
+        44,
+        1,
+        0
+      ],
+      [
+        1,
+        43,
+        1
+      ],
+      [
+        0,
+        1,
+        44
+      ]
+    ]
+  }
+}

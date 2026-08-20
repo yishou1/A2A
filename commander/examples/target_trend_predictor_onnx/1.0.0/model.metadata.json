@@ -1,0 +1,86 @@
+{
+  "architecture": {
+    "hidden_size": 16,
+    "input_size": 4,
+    "parameter_count": 1425,
+    "type": "single_layer_lstm_with_sigmoid_regression_head"
+  },
+  "artifact_path": "examples/target_trend_predictor_onnx/1.0.0/model.onnx",
+  "artifact_sha256": "f4bc61a7489a2b459ac0c268575d0bdfdee5fb7c771f192a2d0ebb4149b8f39e",
+  "dataset": {
+    "artifacts": {
+      "holdout_inputs": {
+        "path": "data/target_trend/reference_holdout_inputs.npy",
+        "sha256": "5eb7086dc35ff64742bc07b39a892878c954a6b7286328f6e3e3fb45b90191ab"
+      },
+      "holdout_targets": {
+        "path": "data/target_trend/reference_holdout_targets.npy",
+        "sha256": "be0d391fc2123ef1d21254379bbaa4ab59004346cc9ff682d3f0d03c7a9e9040"
+      },
+      "train_inputs": {
+        "path": "data/target_trend/reference_train_inputs.npy",
+        "sha256": "88ae981790737c337c7657464ee65f4627c4bd6d59767b1bd0198dbdc546c66f"
+      },
+      "train_targets": {
+        "path": "data/target_trend/reference_train_targets.npy",
+        "sha256": "8991811b8c35ef7b13a84b36f9ace05b93a3875683108727803929ac8fdce98c"
+      }
+    },
+    "holdout_count": 800,
+    "holdout_seed": 20260829,
+    "limitation": "Synthetic normalized trajectories only; not an operational forecasting benchmark.",
+    "source": "deterministic_synthetic_target_risk_trajectory_generator",
+    "train_count": 3200,
+    "training_seed": 20260828
+  },
+  "evaluation": {
+    "historical_mean_baseline": {
+      "mae": 0.174567,
+      "r2": 0.669181,
+      "rmse": 0.209907
+    },
+    "last_observation_baseline": {
+      "mae": 0.071554,
+      "r2": 0.931635,
+      "rmse": 0.095422
+    },
+    "method": "independent_deterministic_holdout",
+    "trained_lstm": {
+      "mae": 0.036445,
+      "r2": 0.98041,
+      "rmse": 0.05108
+    }
+  },
+  "forecast_horizon_steps": 4,
+  "format": "onnx",
+  "input_name": "sequence",
+  "model_family": "trained_lstm_time_series_regressor",
+  "model_id": "target_trend_predictor_onnx",
+  "model_version": "1.0.0",
+  "output_name": "trend_score",
+  "runtime_versions": {
+    "numpy": "2.2.6",
+    "onnx": "1.21.0",
+    "onnxruntime": "1.23.2",
+    "scikit_learn": "1.7.2",
+    "torch": "2.12.0+cpu"
+  },
+  "step_feature_order": [
+    "risk_score",
+    "probability",
+    "inverse_priority",
+    "resource_pressure"
+  ],
+  "training": {
+    "batch_size": 128,
+    "epochs": 140,
+    "learning_rate": 0.002,
+    "objective": "mean_squared_error",
+    "optimizer": "AdamW",
+    "random_state": 20260830,
+    "weight_decay": 0.0001
+  },
+  "training_script": "scripts/train_target_trend_predictor.py",
+  "training_script_sha256": "961ce9096b29a318b83319678e65261baccbc956a6b99c952eaab83b321c4217",
+  "window_steps": 12
+}

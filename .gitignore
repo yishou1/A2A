@@ -70,3 +70,25 @@ desktop.ini
 
 # Keep the small example .onnx files in this repository.
 # Large production models should use Git LFS or external object storage.
+
+# Python packaging, coverage, and editor outputs.
+*.egg-info/
+.coverage
+.coverage.*
+htmlcov/
+.idea/
+.tmp*
+
+# Integrated demo runtime state and local models.
+.runtime/
+.a2a_state/
+*.pid
+local_models/
+tools/ollama-runtime/
+
+commander/build/
+commander/build-*/
+commander/.algolib/
+commander/runs/
+commander/track_threat_agent/artifacts/
+amos-platform/.playwright/

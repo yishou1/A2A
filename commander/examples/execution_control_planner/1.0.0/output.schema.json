@@ -1,0 +1,34 @@
+{
+  "title": "Execution Control Planner Output",
+  "type": "object",
+  "required": [
+    "commands",
+    "tracks",
+    "coordination",
+    "matched_rules",
+    "prediction_details"
+  ],
+  "properties": {
+    "commands": {
+      "type": "array"
+    },
+    "tracks": {
+      "type": "array"
+    },
+    "coordination": {
+      "type": "object"
+    },
+    "matched_rules": {
+      "type": "array"
+    },
+    "prediction_details": {
+      "type": "array"
+    },
+    "latency_ms": {
+      "type": "number"
+    },
+    "phase": {
+      "type": "string"
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "workspace": "/home/dministrator/work/jzz-integrated/amos-platform",
+  "checkedAt": "2026-08-17T16:02:48Z",
+  "artifacts": {
+    "figureFinal": {
+      "path": "/home/dministrator/work/jzz-integrated/amos-platform/figures/ai_generated/figure_final.png",
+      "exists": true
+    },
+    "latexInclude": {
+      "path": "/home/dministrator/work/jzz-integrated/amos-platform/figures/ai_generated/latex_include.tex",
+      "exists": true
+    },
+    "reviewLog": {
+      "path": "/home/dministrator/work/jzz-integrated/amos-platform/figures/ai_generated/review_log.json",
+      "exists": true
+    }
+  },
+  "errors": []
+}

@@ -1,0 +1,87 @@
+{
+  "algorithm_id": "federated_fedavg_aggregator",
+  "version": "1.0.0",
+  "implementation": "services/a2a_algorithms_common/federated_fedavg.py",
+  "implementation_sha256": "25a035ce5c40f7186085713ea16327263e8d7566b53307c211180bc2b5377fe9",
+  "experiment_script": "scripts/run_federated_fedavg_reference.py",
+  "experiment_script_sha256": "7d0597715ccd6a6904723a97d8ae9b2c4ff2ce8dac6aca861cba548fb35fe225",
+  "dataset": {
+    "path": "data/federated_fedavg/reference_client_data.csv",
+    "sha256": "7187bc42791e1f342aa8ea75ff7cf8f1f0b413d06a73b9bd1d1db639d65d5063",
+    "source": "deterministic_non_iid_logistic_reference_generator",
+    "seed": 20260820,
+    "train_clients": 3,
+    "train_samples": 360,
+    "test_samples": 360,
+    "limitation": "Synthetic non-IID reference experiment; privacy and production network transport are out of scope."
+  },
+  "protocol": {
+    "aggregation": "FedAvg weighted by client sample_count",
+    "rounds": 8,
+    "clients_per_round": 3,
+    "local_epochs": 3,
+    "local_learning_rate": 0.025,
+    "secure_aggregation": false,
+    "differential_privacy": false
+  },
+  "round_metrics": [
+    {
+      "round": 1,
+      "accuracy": 0.811111,
+      "log_loss": 0.449937,
+      "sample_count": 360
+    },
+    {
+      "round": 2,
+      "accuracy": 0.808333,
+      "log_loss": 0.431776,
+      "sample_count": 360
+    },
+    {
+      "round": 3,
+      "accuracy": 0.808333,
+      "log_loss": 0.42849,
+      "sample_count": 360
+    },
+    {
+      "round": 4,
+      "accuracy": 0.808333,
+      "log_loss": 0.427908,
+      "sample_count": 360
+    },
+    {
+      "round": 5,
+      "accuracy": 0.811111,
+      "log_loss": 0.427917,
+      "sample_count": 360
+    },
+    {
+      "round": 6,
+      "accuracy": 0.811111,
+      "log_loss": 0.428033,
+      "sample_count": 360
+    },
+    {
+      "round": 7,
+      "accuracy": 0.811111,
+      "log_loss": 0.428139,
+      "sample_count": 360
+    },
+    {
+      "round": 8,
+      "accuracy": 0.811111,
+      "log_loss": 0.428216,
+      "sample_count": 360
+    }
+  ],
+  "final_evaluation": {
+    "round": 8,
+    "accuracy": 0.811111,
+    "log_loss": 0.428216,
+    "sample_count": 360
+  },
+  "final_global_weights": {
+    "path": "models/federated_fedavg_reference_weights.json",
+    "sha256": "4681182a9ef443d8dd1aa07296a9832db61ce01434b0d09a70714969fe701dd1"
+  }
+}

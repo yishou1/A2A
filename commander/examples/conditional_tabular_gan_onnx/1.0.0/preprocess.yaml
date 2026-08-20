@@ -1,0 +1,10 @@
+type: json_to_tensor_map
+mappings:
+  - json_path: $.noise
+    tensor_name: noise
+    dtype: float32
+    shape: [-1, 8]
+  - json_path: $.conditions
+    tensor_name: conditions
+    dtype: float32
+    shape: [-1, 3]

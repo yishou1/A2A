@@ -1,0 +1,18 @@
+{
+  "title": "LLM Rule Explainer Output",
+  "type": "object",
+  "required": [
+    "explanation",
+    "confidence"
+  ],
+  "properties": {
+    "explanation": {
+      "type": "string",
+      "description": "Generated explanation."
+    },
+    "confidence": {
+      "type": "number",
+      "description": "Confidence score."
+    }
+  }
+}

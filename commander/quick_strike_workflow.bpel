@@ -1,0 +1,34 @@
+<process name="QuickStrikeWorkflow" targetNamespace="http://a2a.military.simulation/workflow">
+
+    <!-- 简化突击方案：省略战果评估与条件分支，适合快速演示 -->
+    <variables>
+        <variable name="ReconReport" type="String"/>
+        <variable name="StrikeCoordinates" type="String"/>
+        <variable name="StrikeResult" type="String"/>
+        <variable name="AssaultResult" type="String"/>
+    </variables>
+
+    <sequence>
+
+        <invoke partnerLink="ReconAgent" operation="scanBeachDefenses"
+                requiredSkill="scan_beach_defenses"
+                inputVariable="Sector_A" outputVariable="ReconReport"/>
+
+        <assign>
+            <copy>
+                <from>120.5E, 35.1N</from>
+                <to variable="StrikeCoordinates"/>
+            </copy>
+        </assign>
+
+        <invoke partnerLink="ArtilleryAgent" operation="suppressBeachSector"
+                requiredSkill="suppress_beach_sector_A"
+                dispatchMode="parallel"
+                inputVariable="StrikeCoordinates" outputVariable="StrikeResult"/>
+
+        <invoke partnerLink="AssaultAgent" operation="captureBeachhead"
+                requiredSkill="capture_beachhead"
+                inputVariable="StrikeCoordinates" outputVariable="AssaultResult"/>
+
+    </sequence>
+</process>

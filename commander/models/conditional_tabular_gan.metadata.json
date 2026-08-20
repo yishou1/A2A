@@ -1,0 +1,107 @@
+{
+  "model_id": "conditional_tabular_gan_generator",
+  "model_version": "1.0.0",
+  "model_family": "pytorch_conditional_gan",
+  "artifact_path": "models/conditional_tabular_gan_generator.pt",
+  "artifact_sha256": "d512ed46885a8d56fcbd682b8a997556d31994711b258cfc6c64208190f9eb47",
+  "generator_source": "services/a2a_algorithms_common/conditional_tabular_gan.py",
+  "generator_source_sha256": "9f7d2291737bfa477eaa4eaaa3ebc82556b5aa653215c1e5cefa2c3537fbad16",
+  "training_script": "scripts/train_conditional_tabular_gan.py",
+  "training_script_sha256": "94f938ec5b81b7b8d8ccb01e6c1b6fa6e6a0e55e7f03f2d290e9245126887afc",
+  "dataset": {
+    "path": "data/intent_naive_bayes/reference_observations.csv",
+    "sha256": "15e39fa34279ba29aed8ae8315f8bdd81725941ef592d927e06f5ea027e4788d",
+    "source": "M07 deterministic class-conditional reference observations",
+    "row_count": 540,
+    "limitation": "Synthetic reference observations only; generated output must not be represented as real sensor data."
+  },
+  "classes": [
+    "benign",
+    "surveillance",
+    "hostile"
+  ],
+  "features": [
+    "radar_activity",
+    "communication_intensity",
+    "movement_consistency",
+    "weapon_signature",
+    "proximity_score"
+  ],
+  "architecture": {
+    "type": "conditional_mlp_gan",
+    "noise_dim": 8,
+    "hidden_dim": 32,
+    "output_activation": "sigmoid",
+    "generator_parameter_count": 1605
+  },
+  "training": {
+    "seed": 20260822,
+    "epochs": 180,
+    "batch_size": 64,
+    "optimizer": "Adam",
+    "learning_rate": 0.0015,
+    "final_generator_loss": 0.718535,
+    "final_discriminator_loss": 1.340267
+  },
+  "evaluation": {
+    "metric": "class_conditional_feature_mean_absolute_error",
+    "generated_samples_per_class": 512,
+    "overall_mean_absolute_error": 0.056212,
+    "per_class": {
+      "benign": {
+        "real_feature_means": [
+          0.222797,
+          0.30433,
+          0.760019,
+          0.164759,
+          0.286352
+        ],
+        "generated_feature_means": [
+          0.221883,
+          0.432367,
+          0.90555,
+          0.145826,
+          0.335449
+        ],
+        "mean_absolute_error": 0.068502
+      },
+      "surveillance": {
+        "real_feature_means": [
+          0.653204,
+          0.555592,
+          0.650454,
+          0.322966,
+          0.55259
+        ],
+        "generated_feature_means": [
+          0.631655,
+          0.576843,
+          0.82063,
+          0.319633,
+          0.565814
+        ],
+        "mean_absolute_error": 0.045906
+      },
+      "hostile": {
+        "real_feature_means": [
+          0.787774,
+          0.724991,
+          0.453953,
+          0.800586,
+          0.754553
+        ],
+        "generated_feature_means": [
+          0.715811,
+          0.706447,
+          0.54228,
+          0.842419,
+          0.805025
+        ],
+        "mean_absolute_error": 0.054228
+      }
+    }
+  },
+  "runtime_versions": {
+    "torch": "2.12.0+cpu"
+  }
+}

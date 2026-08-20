@@ -1,0 +1,85 @@
+algorithm_id: federated_fedavg_aggregator
+version: 1.0.0
+display_name: Federated FedAvg Aggregator
+backend_type: python_http_service
+status: validated
+
+task_family: federated_learning
+modalities:
+  input:
+    - structured_json
+    - model_weights
+  output:
+    - structured_json
+    - aggregated_model_weights
+
+capabilities:
+  - federated_averaging
+  - sample_weighted_model_aggregation
+  - nested_tensor_shape_validation
+  - multi_client_update_protocol
+
+agent_card:
+  summary: >
+    Real FedAvg server-side aggregation for multiple client model updates,
+    weighted by local sample count and validated for identical tensor structure.
+  when_to_use:
+    - Federated clients have completed compatible local training rounds.
+    - Model weights can be exchanged as finite JSON numeric tensors.
+  when_not_to_use:
+    - Secure aggregation, differential privacy, or Byzantine robustness is mandatory.
+    - Clients use different model architectures or tensor shapes.
+  input_description: >
+    A round identifier and client updates containing client ID, positive sample
+    count, and identically named and shaped model-weight tensors.
+  output_description: >
+    Sample-weighted global tensors, participant contributions, tensor shapes,
+    and a deterministic global-weight fingerprint.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  runtime:
+    backend_type: python_http_service
+    endpoint: http://127.0.0.1:9034/predict
+    health_endpoint: http://127.0.0.1:9034/health
+    metadata_endpoint: http://127.0.0.1:9034/metadata
+    timeout_ms: 10000
+
+constraints:
+  max_input_chars: 10000000
+  max_request_bytes: 16777216
+  batch_supported: true
+  streaming_supported: false
+
+performance:
+  primary_metric: synthetic_reference_global_accuracy
+  primary_score: 0.811111
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 2
+  min_memory_mb: 256
+  recommended_memory_mb: 1024
+  min_gpu_count: 0
+  gpu_type: none
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 20
+
+model_profile:
+  parameter_count: 0
+  parameter_count_text: depends_on_submitted_client_model
+  flops: 0
+  flops_text: linear_in_clients_and_submitted_parameters
+  precision: fp64
+
+provenance:
+  experiment_metadata_ref: ../../../models/federated_fedavg_reference.metadata.json
+  reference_weights_ref: ../../../models/federated_fedavg_reference_weights.json
+  experiment_script_ref: ../../../scripts/run_federated_fedavg_reference.py
+  dataset_ref: ../../../data/federated_fedavg/reference_client_data.csv
+
+safety:
+  risk_level: medium
+  requires_human_review: true

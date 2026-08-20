@@ -1,0 +1,7 @@
+# Unified Python dependencies for the integrated runtime and its tests.
+# scripts/bootstrap.sh installs CPU PyTorch first, then consumes this file.
+-r commander/requirements.txt
+-r commander/services/requirements.txt
+
+-e ./commander
+-e ./amos-platform[dev]

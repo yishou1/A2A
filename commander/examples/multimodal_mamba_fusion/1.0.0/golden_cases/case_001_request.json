@@ -1,0 +1,28 @@
+{
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "multimodal_mamba_fusion",
+  "version": "1.0.0",
+  "backend_type": "python_http_service",
+  "inputs": {
+    "embeddings": {
+      "eo_ir": [
+        0.1,
+        0.2,
+        0.3
+      ],
+      "text_report": [
+        0.4,
+        0.5,
+        0.6
+      ]
+    },
+    "tracks": [
+      {
+        "track_id": "T-1",
+        "class_name": "tank"
+      }
+    ]
+  },
+  "params": {}
+}

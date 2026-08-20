@@ -1,0 +1,10 @@
+name: a2a
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip>=24
+  - setuptools>=68
+  - cmake>=3.20
+  - ninja
+  - cxx-compiler

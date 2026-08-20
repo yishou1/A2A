@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "request_id": "mff-001",
+  "trace_id": "trace-track-threat-001",
+  "algorithm_id": "multimodal_feature_fuser",
+  "version": "1.0.0",
+  "outputs": {
+    "schema_version": "multimodal_feature_fuser/v1",
+    "feature_version": "track_threat_features_v1",
+    "feature_vectors": [],
+    "counts": {},
+    "warnings": []
+  },
+  "usage": { "latency_ms": 1 },
+  "error": null
+}

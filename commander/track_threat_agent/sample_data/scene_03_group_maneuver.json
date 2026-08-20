@@ -1,0 +1,128 @@
+{
+  "task_id": "scene-03-group-maneuver",
+  "message_type": "perception_result",
+  "algorithm_level": "medium",
+  "scene": {
+    "operation_name": "standard_integration_group_maneuver",
+    "operation_phase": "formation_and_anomaly_monitoring",
+    "protected_zone_lat": 31.2304,
+    "protected_zone_lon": 121.4737,
+    "protected_radius_m": 30000,
+    "protected_assets": [
+      {
+        "asset_id": "blue-command-post",
+        "asset_name": "蓝方指挥节点",
+        "asset_type": "command_post",
+        "lat": 31.2304,
+        "lon": 121.4737,
+        "alt": 35,
+        "protection_radius_m": 9000,
+        "criticality": 0.94,
+        "priority": 0.96,
+        "vulnerability": 0.45,
+        "status": "protected",
+        "metadata": {"side": "blue", "role": "command_and_coordination"}
+      },
+      {
+        "asset_id": "blue-mobile-convoy",
+        "asset_name": "蓝方机动保障车队",
+        "asset_type": "convoy",
+        "lat": 31.205,
+        "lon": 121.445,
+        "alt": 20,
+        "protection_radius_m": 5500,
+        "criticality": 0.76,
+        "priority": 0.8,
+        "vulnerability": 0.7,
+        "status": "protected",
+        "metadata": {"side": "blue", "role": "mobile_support"}
+      }
+    ]
+  },
+  "detections": [
+    {
+      "detection_id": "scene03-air-lead",
+      "object_type": "aircraft",
+      "timestamp": 4300,
+      "lat": 31.322,
+      "lon": 121.403,
+      "alt": 7800,
+      "speed": 218,
+      "heading": 134,
+      "confidence": 0.94,
+      "source_agent": "air-radar-agent",
+      "metadata": {"affiliation": "unknown", "label": "formation_lead", "scenario_role": "air_formation_lead"}
+    },
+    {
+      "detection_id": "scene03-air-wing-1",
+      "object_type": "aircraft",
+      "timestamp": 4300,
+      "lat": 31.328,
+      "lon": 121.412,
+      "alt": 7720,
+      "speed": 216,
+      "heading": 136,
+      "confidence": 0.91,
+      "source_agent": "air-radar-agent",
+      "metadata": {"affiliation": "unknown", "label": "formation_wing", "formation_hint": "loose_wedge"}
+    },
+    {
+      "detection_id": "scene03-air-wing-2",
+      "object_type": "aircraft",
+      "timestamp": 4300,
+      "lat": 31.314,
+      "lon": 121.392,
+      "alt": 7880,
+      "speed": 221,
+      "heading": 133,
+      "confidence": 0.9,
+      "source_agent": "air-radar-agent",
+      "metadata": {"affiliation": "unknown", "label": "formation_wing", "formation_hint": "loose_wedge"}
+    },
+    {
+      "detection_id": "scene03-surface-lead",
+      "object_type": "ship",
+      "timestamp": 4300,
+      "lat": 31.071,
+      "lon": 121.716,
+      "alt": 0,
+      "speed": 9,
+      "heading": 288,
+      "confidence": 0.87,
+      "source_agent": "surface-radar-agent",
+      "metadata": {"affiliation": "unknown", "label": "surface_group_lead", "ais_status": "intermittent"}
+    },
+    {
+      "detection_id": "scene03-surface-trail",
+      "object_type": "ship",
+      "timestamp": 4300,
+      "lat": 31.082,
+      "lon": 121.733,
+      "alt": 0,
+      "speed": 8,
+      "heading": 286,
+      "confidence": 0.85,
+      "source_agent": "surface-radar-agent",
+      "metadata": {"affiliation": "unknown", "label": "surface_group_trail", "ais_status": "intermittent"}
+    },
+    {
+      "detection_id": "scene03-unknown-anomaly",
+      "object_type": "unknown",
+      "timestamp": 4300,
+      "lat": 31.209,
+      "lon": 121.433,
+      "alt": 2700,
+      "speed": 128,
+      "heading": 122,
+      "confidence": 0.39,
+      "source_agent": "multi-sensor-fusion",
+      "metadata": {
+        "affiliation": "unknown",
+        "label": "unknown",
+        "threat_level": "high",
+        "scenario_role": "anomaly_track",
+        "knowledge_relations": [{"predicate": "threat_of", "object": "mission_area"}]
+      }
+    }
+  ]
+}

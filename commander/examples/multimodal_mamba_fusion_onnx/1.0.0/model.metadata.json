@@ -1,0 +1,65 @@
+{
+  "model_id": "multimodal_mamba_fusion_onnx",
+  "model_version": "1.0.0",
+  "model_family": "onnx_mamba_style_state_space_fusion",
+  "format": "onnx",
+  "artifact_path": "examples/multimodal_mamba_fusion_onnx/1.0.0/model.onnx",
+  "artifact_sha256": "502ba6384226941781e26ab4e4ab9e6cc8389cf60d67284e55c77d94df6794fc",
+  "export_script": "scripts/export_structured_neural_onnx_models.py",
+  "export_script_sha256": "877fec7a6444a11bbe9174089ee0c486c17ef1984e82e5d9a605abb2484c696e",
+  "source_model": "models/checkpoints/mamba_fusion_s.safetensors",
+  "source_model_sha256": "250aada18113b9e353a69d725eb5310911f26177e84c47c4f0371c9c6ecb9fcc",
+  "source_metadata": "models/checkpoints/mamba_fusion_s.metadata.json",
+  "source_metadata_sha256": "d62c43c58a37f4dd48552fc2b6116e1589d07fc35ea52edbcc6ef82d4278740c",
+  "precision": "float32",
+  "opset": 17,
+  "equivalence": {
+    "reference": "source PyTorch checkpoint in evaluation mode",
+    "compared_outputs": [
+      "fused_embeddings"
+    ],
+    "maximum_absolute_difference": 5.960464477539063e-08
+  },
+  "runtime_versions": {
+    "numpy": "2.2.6",
+    "onnx": "1.21.0",
+    "onnxruntime": "1.23.2",
+    "torch": "2.12.0+cpu"
+  },
+  "input_contract": {
+    "sequence": [
+      "batch",
+      4,
+      256
+    ],
+    "mask": [
+      "batch",
+      4
+    ],
+    "modality_order": [
+      "eo_ir",
+      "sar",
+      "radar",
+      "text_report"
+    ]
+  },
+  "parameter_count": 412688,
+  "source_evaluation": {
+    "method": "independent_deterministic_synthetic_holdout",
+    "normalized_mean_baseline": {
+      "mean_cosine_similarity": 0.679153,
+      "p05_cosine_similarity": 0.491344,
+      "rmse": 0.050066
+    },
+    "trained_fusion": {
+      "mean_cosine_similarity": 0.771683,
+      "p05_cosine_similarity": 0.648176,
+      "rmse": 0.042234
+    }
+  },
+  "limitations": [
+    "Accepts already-encoded embeddings and does not encode raw image, SAR, radar, or text data.",
+    "Returns one global fused embedding per batch row; track-specific association remains in the full Python service.",
+    "Synthetic latent vectors only; not a benchmark of raw sensor encoders."
+  ]
+}

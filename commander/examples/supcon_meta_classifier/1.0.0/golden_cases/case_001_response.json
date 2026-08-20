@@ -1,0 +1,15 @@
+{
+  "ok": true,
+  "request_id": "req_001",
+  "trace_id": "trace_001",
+  "algorithm_id": "supcon_meta_classifier",
+  "version": "1.0.0",
+  "outputs": {
+    "classifications": [],
+    "count": 2
+  },
+  "usage": {
+    "latency_ms": 1
+  },
+  "error": null
+}

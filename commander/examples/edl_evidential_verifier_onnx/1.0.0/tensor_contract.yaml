@@ -1,0 +1,20 @@
+inputs:
+  - name: features
+    dtype: float32
+    shape: [-1, 6]
+outputs:
+  - name: predicted_class_indices
+    dtype: int64
+    shape: [-1]
+  - name: evidence
+    dtype: float32
+    shape: [-1, 2]
+  - name: dirichlet_alpha
+    dtype: float32
+    shape: [-1, 2]
+  - name: class_probabilities
+    dtype: float32
+    shape: [-1, 2]
+  - name: epistemic_uncertainty
+    dtype: float32
+    shape: [-1]

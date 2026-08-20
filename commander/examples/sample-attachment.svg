@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180">
+  <rect width="320" height="180" rx="18" fill="#0f172a"/>
+  <circle cx="88" cy="76" r="28" fill="#38bdf8"/>
+  <path d="M52 138 L124 92 L166 122 L214 76 L268 138 Z" fill="#22c55e" opacity="0.9"/>
+  <text x="24" y="36" fill="#e2e8f0" font-family="Arial, sans-serif" font-size="22">A2A attachment demo</text>
+  <text x="24" y="62" fill="#94a3b8" font-family="Arial, sans-serif" font-size="14">sample-attachment.svg</text>
+</svg>

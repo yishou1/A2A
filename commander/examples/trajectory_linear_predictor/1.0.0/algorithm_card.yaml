@@ -1,0 +1,90 @@
+algorithm_id: trajectory_linear_predictor
+version: 1.0.0
+display_name: Trajectory Linear Predictor
+backend_type: python_http_service
+status: validated
+
+task_family: forecasting
+modalities:
+  input:
+    - structured_json
+  output:
+    - structured_json
+
+capabilities:
+  - ordinary_least_squares_2d
+  - trajectory_extrapolation
+  - velocity_estimation
+
+operational_functions:
+  - {function_id: KC-19, function_code: maintain_track, function_name: Maintain Track, role: primary, coverage_level: partial}
+  - {function_id: KC-18, function_code: determine_time_available, function_name: Determine Time Available, role: supporting, coverage_level: partial}
+  - {function_id: KC-24, function_code: track_weapon, function_name: Track Weapon, role: supporting, coverage_level: partial}
+
+agent_card:
+  summary: >
+    Deterministic per-request ordinary least-squares regression for estimating
+    two-dimensional velocity and extrapolating a future aim point on CPU.
+  when_to_use:
+    - At least two timestamped two-dimensional track observations are available.
+    - Motion is approximately constant velocity over the prediction horizon.
+  when_not_to_use:
+    - Tracks contain maneuvering, abrupt acceleration, or long prediction horizons.
+    - Synthetic reference metrics are being treated as operational sensor accuracy.
+  input_description: >
+    A track identifier, timestamped x/y history, weapon preparation time, and
+    flight time.
+  output_description: >
+    Fitted velocity and intercepts, per-axis R-squared, future aim point, and
+    hash-verified implementation identity.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  runtime:
+    backend_type: python_http_service
+    endpoint: http://127.0.0.1:9011/predict
+    health_endpoint: http://127.0.0.1:9011/health
+    metadata_endpoint: http://127.0.0.1:9011/metadata
+    timeout_ms: 3000
+
+constraints:
+  max_input_chars: 10000
+  max_request_bytes: 1048576
+  batch_supported: false
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 20
+  latency_ms_p95: 100
+  primary_metric: synthetic_holdout_position_mae
+  primary_score: 0.519819
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 1
+  min_memory_mb: 32
+  recommended_memory_mb: 64
+  min_gpu_count: 0
+  gpu_type: none
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 5
+
+model_profile:
+  parameter_count: 4
+  parameter_count_text: four_ols_coefficients_fitted_per_request
+  flops: 0
+  flops_text: linear_in_history_points
+  precision: fp64
+
+provenance:
+  model_metadata_ref: ../../../models/trajectory_linear_predictor.metadata.json
+  implementation_ref: ../../../services/a2a_algorithms_common/motion_prediction.py
+  evaluation_script_ref: ../../../scripts/evaluate_trajectory_linear_predictor.py
+  dataset_ref: ../../../data/trajectory_linear/reference_evaluation_data.json
+  training_required: false
+
+safety:
+  risk_level: low
+  requires_human_review: true

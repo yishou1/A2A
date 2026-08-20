@@ -1,0 +1,61 @@
+algorithm_id: decision_planning_core
+version: 1.0.0
+display_name: Decision Planning Core
+backend_type: python_http_service
+status: draft
+
+task_family: planning
+modalities:
+  input:
+    - structured_json
+  output:
+    - structured_json
+
+capabilities:
+  - candidate_plan_generation
+  - logistic_plan_scoring
+  - lstm_trend_scoring
+  - structured_rule_matching
+  - synapserag_rule_evidence
+
+operational_functions:
+  - {function_id: KC-16, function_code: nominate_engagement_option, function_name: Nominate Engagement Option, role: primary, coverage_level: full}
+  - {function_id: KC-20, function_code: select_attack_option, function_name: Select Attack Option, role: supporting, coverage_level: full}
+
+agent_card:
+  summary: >
+    Decision planning core with ONNX scoring, structured rules, and optional SynapseRAG evidence.
+  when_to_use:
+    - Candidate plans must be generated or ranked from structured tasks, resources, risks, and constraints.
+  when_not_to_use:
+    - Compliance or final authorization decisions are required.
+  input_description: >
+    A structured AgentRequest-like object containing scheduled_tasks and resources.
+  output_description: >
+    Candidate plans, rule-adjusted scores, recommendation, target trends, evidence, and handoff notes.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  runtime:
+    backend_type: python_http_service
+    endpoint: http://127.0.0.1:9036/predict
+    health_endpoint: http://127.0.0.1:9036/health
+    metadata_endpoint: http://127.0.0.1:9036/metadata
+    timeout_ms: 65000
+
+constraints:
+  max_input_chars: 20000
+  max_request_bytes: 1048576
+  batch_supported: false
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 30
+  latency_ms_p95: 150
+  primary_metric: candidate_plan_generation_success
+  primary_score: 0.9
+
+safety:
+  risk_level: medium
+  requires_human_review: true
