@@ -44,6 +44,13 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(nlohmann_json yaml-cpp cpp_httplib)
 
+# yaml-cpp 0.8.0 relies on transitive integer type declarations. Newer
+# GNU/Clang standard libraries no longer expose them implicitly, so make the
+# required C++ header explicit for the third-party target.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(yaml-cpp PRIVATE -include cstdint)
+endif()
+
 find_package(Threads REQUIRED)
 
 add_library(cpp_httplib_interface INTERFACE)

@@ -15,7 +15,14 @@ std::string StripFileScheme(const std::string& raw_value) {
     if (raw_value.rfind(kFileSchemeLong, 0) == 0) {
         stripped = raw_value.substr(std::char_traits<char>::length(kFileSchemeLong));
     } else if (raw_value.rfind(kFileSchemeShort, 0) == 0) {
+#ifdef _WIN32
         stripped = raw_value.substr(std::char_traits<char>::length(kFileSchemeShort));
+#else
+        // std::filesystem collapses the repeated slashes in a POSIX file URI
+        // such as file:////home/... to file:/home/.... Keep the root slash so
+        // the URI remains an absolute path after removing the scheme.
+        stripped = raw_value.substr(std::char_traits<char>::length("file:"));
+#endif
     } else {
         return raw_value;
     }
