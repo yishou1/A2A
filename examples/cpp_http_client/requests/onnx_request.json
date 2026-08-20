@@ -1,0 +1,11 @@
+{
+  "request_id": "http-cpp-onnx-001",
+  "trace_id": "http-cpp-demo-001",
+  "algorithm_id": "compliance_risk_scorer_onnx",
+  "version": "1.0.0",
+  "backend_type": "onnx",
+  "inputs": {
+    "features": [[0.0, 1.0, 0.2, 0.0, 2.0, 0.0]]
+  },
+  "params": {}
+}

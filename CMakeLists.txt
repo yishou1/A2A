@@ -44,8 +44,11 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(nlohmann_json yaml-cpp cpp_httplib)
 
+find_package(Threads REQUIRED)
+
 add_library(cpp_httplib_interface INTERFACE)
 target_include_directories(cpp_httplib_interface INTERFACE ${cpp_httplib_SOURCE_DIR})
+target_link_libraries(cpp_httplib_interface INTERFACE Threads::Threads)
 if(WIN32)
     target_link_libraries(cpp_httplib_interface INTERFACE ws2_32)
 endif()
@@ -162,6 +165,21 @@ algolib_copy_onnxruntime_dll_if_needed(algolib_cli)
 add_executable(algolib_server src/server/main.cpp)
 target_link_libraries(algolib_server PRIVATE algolib)
 algolib_copy_onnxruntime_dll_if_needed(algolib_server)
+
+# A small, runnable example showing how an application links algolib and
+# invokes either an ONNX package or a Python HTTP service package.
+add_executable(algorithm_call_demo examples/cpp_algorithm_client/main.cpp)
+target_link_libraries(algorithm_call_demo PRIVATE algolib)
+algolib_copy_onnxruntime_dll_if_needed(algorithm_call_demo)
+
+# 跨平台 HTTP 客户端示例：只调用 algolib_server，不直接链接 algolib。
+add_executable(algorithm_http_client examples/cpp_http_client/main.cpp)
+target_link_libraries(
+    algorithm_http_client
+    PRIVATE
+        nlohmann_json::nlohmann_json
+        cpp_httplib_interface
+)
 
 if(ALGOLIB_BUILD_TESTS)
     enable_testing()

@@ -185,22 +185,22 @@ void TestOnnxRunnerSupportsTensorContractAndGenericMappings() {
                     temp_dir / "model.onnx");
     WriteTextFile(temp_dir / "tensor_contract.yaml",
                   "inputs:\n"
-                  "  - name: features\n"
-                  "    dtype: float32\n"
-                  "    shape: [1, 3]\n"
+                  "  - name: input\n"
+                  "    dtype: int64\n"
+                  "    shape: [3]\n"
                   "outputs:\n"
-                  "  - name: echo\n"
-                  "    dtype: float32\n"
-                  "    shape: [1, 3]\n");
+                  "  - name: output\n"
+                  "    dtype: int64\n"
+                  "    shape: [3]\n");
     WriteTextFile(temp_dir / "preprocess.yaml",
                   "type: json_to_tensor_map\n"
                   "mappings:\n"
                   "  - json_path: $.features\n"
-                  "    tensor_name: features\n");
+                  "    tensor_name: input\n");
     WriteTextFile(temp_dir / "postprocess.yaml",
                   "type: raw_tensor_to_json\n"
                   "outputs:\n"
-                  "  - tensor_name: echo\n"
+                  "  - tensor_name: output\n"
                   "    json_path: $.result\n");
 
     AlgorithmEntry entry = BuildTensorRoundTripEntry(temp_dir);
@@ -216,11 +216,11 @@ void TestOnnxRunnerSupportsTensorContractAndGenericMappings() {
     request.algorithm_id = "tensor_round_trip";
     request.version = "1.0.0";
     request.backend_type = BackendType::kOnnx;
-    request.inputs = {{"features", nlohmann::json::array({1.0, 2.0, 3.0})}};
+    request.inputs = {{"features", nlohmann::json::array({1, 2, 3})}};
 
     const auto result = runner.Run(request);
     Expect(result.ok, "Generic tensor mapping run should succeed.");
-    Expect(result.outputs == nlohmann::json({{"result", nlohmann::json::array({1.0, 2.0, 3.0})}}),
+    Expect(result.outputs == nlohmann::json({{"result", nlohmann::json::array({1, 2, 3})}}),
            "raw_tensor_to_json should place the output tensor at the configured JSON path.");
 }
 
