@@ -399,6 +399,54 @@ window.PlatformWorkflow = (function () {
       '</div>';
   }
 
+  function isTacticalIntelligenceActivity(activity, detail) {
+    var text = [
+      activity && activity.activity_id,
+      activity && activity.work_item,
+      activity && activity.role,
+      detail && detail.activity_id,
+      detail && detail.work_item,
+      detail && detail.agent_call && detail.agent_call.role,
+    ].filter(Boolean).join(" ").toLowerCase();
+    return text.indexOf("tactical_intelligence") >= 0 ||
+      text.indexOf("tactical intelligence") >= 0 ||
+      text.indexOf("战术情报") >= 0;
+  }
+
+  function tacticalDetectionPreviewBlock(activity, detail, scope) {
+    if (!isTacticalIntelligenceActivity(activity, detail)) return "";
+    var isOutput = scope === "output";
+    var title = isOutput ? "目标检测输出" : "目标检测输入";
+    var frames = isOutput ? [
+      {
+        image: "/static/ui-previews/attack_boat.png",
+        caption: "T+00:36:00 · 攻击艇检测结果",
+      },
+      {
+        image: "/static/ui-previews/fishing_boat.png",
+        caption: "T+00:48:00 · 渔船检测结果",
+      },
+    ] : [
+      {
+        image: "/static/ui-previews/observe-00-36.png",
+        caption: "T+00:36:00 · 高速海面目标光电帧",
+      },
+      {
+        image: "/static/ui-previews/orient-00-48.png",
+        caption: "T+00:48:00 · 低速海面目标红外帧",
+      },
+    ];
+    return '<div class="workflow-detection-preview">' +
+      '<header><h4>' + escapeHtml(title) + '</h4><span>' + escapeHtml(isOutput ? "检测后" : "检测前") + '</span></header>' +
+      '<div class="workflow-detection-grid">' + frames.map(function (frame) {
+        return '<figure>' +
+          '<img loading="eager" decoding="async" fetchpriority="high" src="' + escapeHtml(frame.image) + '" alt="' + escapeHtml(frame.caption) + '">' +
+          '<figcaption>' + escapeHtml(frame.caption) + '</figcaption>' +
+        '</figure>';
+      }).join("") + '</div>' +
+    '</div>';
+  }
+
   function detailDefinitionList(rows) {
     return '<dl class="workflow-detail-definition">' + rows.map(function (row) {
       return '<div><dt>' + escapeHtml(row[0]) + '</dt><dd>' + escapeHtml(provided(row[1])) + '</dd></div>';
@@ -518,13 +566,15 @@ window.PlatformWorkflow = (function () {
       return;
     }
     if (activityTab === "input") {
-      root.innerHTML = semanticIoBlock(detail, "input") +
+      root.innerHTML = tacticalDetectionPreviewBlock(activity, detail, "input") +
+        semanticIoBlock(detail, "input") +
         '<div class="workflow-detail-section">' +
         detailJsonBlock(detail.input_detail, "input") + '</div>';
       return;
     }
     if (activityTab === "output") {
-      root.innerHTML = semanticIoBlock(detail, "output") +
+      root.innerHTML = tacticalDetectionPreviewBlock(activity, detail, "output") +
+        semanticIoBlock(detail, "output") +
         '<div class="workflow-detail-section">' +
         detailJsonBlock(detail.output_detail, "output") + '</div>';
       return;
