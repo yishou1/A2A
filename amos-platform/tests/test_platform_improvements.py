@@ -287,8 +287,9 @@ def test_evidence_workspace_embeds_the_knowledge_graph_as_one_static_asset() -> 
     assert "closeKnowledgeGraph" in controller
     assert ".knowledge-graph-dialog{position:fixed;inset:0" in styles
     assert "width:100vw;height:100vh" in styles
-    assert "查看规则实体、主题分类与关联关系" in html
-    assert "关系类型" in html
+    assert "查看规则实体与语料分块的主题关系" in html
+    assert "实体" in html
+    assert "语料" in html
     report_position = html.index('class="card report-card"')
     graph_position = html.index('class="card knowledge-graph-entry"')
     snapshot_position = html.index('id="wf-input-snapshot"')
@@ -296,7 +297,13 @@ def test_evidence_workspace_embeds_the_knowledge_graph_as_one_static_asset() -> 
     assert graph_path.is_file()
     graph_html = graph_path.read_text(encoding="utf-8")
     assert "交战规则知识图谱" in graph_html
-    assert '"visible_nodes": 1386' in graph_html
+    assert '"visible_nodes":1522' in graph_html
+    assert '"visible_edges":19459' in graph_html
+    assert "节点类型" in graph_html
+    assert "语料（文档分块）" in graph_html
+    assert '"label":"语料 001"' in graph_html
+    assert '"color":"#4DB68B"' in graph_html
+    assert '"color":"#D67366"' in graph_html
 
 
 def test_frontend_keeps_director_stream_and_interpolates_live_markers() -> None:
