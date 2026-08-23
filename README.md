@@ -34,9 +34,9 @@ Docker Engine，不需要在 WSL 中再运行一套 daemon。可用 `docker info
 Nacos 自带 Java 运行时的 Docker 镜像，因此宿主机不需要单独安装 Java。克隆整合分支：
 
 ```bash
-git clone --branch wangyu/a2a-amos-integrated --single-branch \
-  https://github.com/yishou1/A2A.git a2a-amos-integrated
-cd a2a-amos-integrated
+git clone --branch jzz/integrated --single-branch \
+  https://github.com/yishou1/A2A.git a2a-integrated
+cd a2a-integrated
 ```
 
 运行统一初始化脚本。脚本会创建或更新 Python 3.11 Conda 环境 `a2a`、安装完整的
@@ -225,7 +225,7 @@ conda run -n a2a ctest --test-dir commander/build --output-on-failure
 日常开发从整合分支创建个人分支，避免直接向共享分支强推：
 
 ```bash
-git switch wangyu/a2a-amos-integrated
+git switch jzz/integrated
 git pull --ff-only
 git switch -c <姓名>/<功能名>
 ```
