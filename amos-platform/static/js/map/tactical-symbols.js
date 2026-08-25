@@ -13,6 +13,8 @@ window.TacticalSymbols = (function () {
   function ownKind(asset) {
     var id = String(asset.asset_id || asset.id || "").toUpperCase();
     var role = String(asset.role || asset.type || "");
+    if (/SATELLITE|SPACECRAFT|\bSAT[-_]/.test(id) || /卫星|天基/.test(role) || asset.domain === "space") return "satellite";
+    if (/SWARM/.test(id) || /蜂群|集群无人机/.test(role) || Number(asset.swarm_size || asset.member_count || 0) > 1) return "uavSwarm";
     if (/SHORE-RADAR/.test(id) || /岸基.*雷达|警戒雷达/.test(role)) return "shoreRadar";
     if (/MERCHANT/.test(id) || /运输船|商船/.test(role)) return "merchant";
     if (/ESCORT/.test(id) || /护航舰|驱逐舰|护卫舰/.test(role)) return "escort";
@@ -42,6 +44,16 @@ window.TacticalSymbols = (function () {
     var s = palette.stroke;
     var f = palette.fill;
     var d = palette.detail;
+    if (kind === "satellite") {
+      return '<path d="M22 21h12v14H22Z" fill="' + f + '" stroke="' + s + '" stroke-width="2"/>' +
+        '<path d="M4 18h16v20H4zm32 0h16v20H36zM8 22h8M8 28h8M8 34h8M40 22h8M40 28h8M40 34h8" fill="none" stroke="' + s + '" stroke-width="1.3"/>' +
+        '<path d="M28 21V11m-7-2q7-7 14 0-2 8-7 8t-7-8Zm7 26v9" fill="none" stroke="' + d + '" stroke-width="1.5"/><circle cx="28" cy="28" r="2.4" fill="' + d + '"/>';
+    }
+    if (kind === "uavSwarm") {
+      return '<path d="M28 5 31 17 42 22 41 27 31 25 30 36H26l-1-11-10 2-1-5 11-5Z" fill="' + f + '" stroke="' + s + '" stroke-width="1.8"/>' +
+        '<path d="M14 29 17 39 25 43 24 47 17 45 16 52h-4l-1-7-7 2-1-4 8-4Zm28 0 3 10 8 4-1 4-7-2-1 7h-4l-1-7-7 2-1-4 8-4Z" fill="' + f + '" stroke="' + s + '" stroke-width="1.5"/>' +
+        '<path d="M28 11v18M14 34v13M42 34v13" stroke="' + d + '" stroke-width="1"/>';
+    }
     if (kind === "weapon") {
       return '<path d="M28 3 35 36 28 53 21 36Z" fill="' + f + '" stroke="' + s + '" stroke-width="2.2"/>' +
         '<path d="M21 36 12 45l11-3m12-6 9 9-11-3M28 8v30" fill="none" stroke="' + d + '" stroke-width="1.6"/>';

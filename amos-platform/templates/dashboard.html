@@ -6,7 +6,7 @@
 <title>Simulation 场景仿真平台</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
-<link rel="stylesheet" href="/static/css/platform.css?v=20260825a">
+<link rel="stylesheet" href="/static/css/platform.css?v=20260825b">
 <script src="/static/vendor/leaflet/leaflet.js"></script>
 <script src="/static/vendor/protomaps/protomaps-leaflet.js"></script>
 </head>
@@ -52,6 +52,7 @@
 <main class="main" id="main-layout">
   <section id="map-panel" aria-label="场景地图">
     <div id="map"></div>
+    <button class="btn btn-sm map-expand-button" id="btn-toggle-map-expanded" title="隐藏任务区，展开地图" aria-pressed="false">大地图</button>
   </section>
 
   <div id="workspace-resizer" class="workspace-resizer" role="separator" aria-orientation="vertical" aria-label="调整任务工作区宽度" tabindex="0"></div>
@@ -337,10 +338,10 @@
 </footer>
 
 <script src="/static/js/api/platform-api.js?v=20260817d"></script>
-<script src="/static/js/map/tactical-symbols.js?v=20260825a"></script>
+<script src="/static/js/map/tactical-symbols.js?v=20260825b"></script>
 <script src="/static/js/map/platform-map.js?v=20260825a"></script>
 <script src="/static/js/panels/platform-panels.js?v=20260818a"></script>
 <script src="/static/js/workflow/commander-workflow.js?v=20260820a"></script>
-<script src="/static/js/app/platform.js?v=20260825a"></script>
+<script src="/static/js/app/platform.js?v=20260825b"></script>
 </body>
 </html>

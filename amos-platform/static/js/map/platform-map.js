@@ -108,11 +108,13 @@ window.PlatformMap = (function () {
 
   function assetPopupHtml(asset) {
     var id = asset.asset_id || asset.id;
+    var memberCount = Number(asset.swarm_size || asset.member_count || 0);
     return "<b>" + escapeHtml(id) + "</b><br>" + escapeHtml(asset.role || "") +
       "<br>航向 " + escapeHtml(Math.round(Number(asset.heading || asset.heading_deg || 0))) + "° · " +
       escapeHtml(Math.round(Number(asset.speed_kts || 0))) + " kt" +
-      (asset.domain === "air" ? "<br>高度 " +
-        escapeHtml(Math.round(Number((asset.position || {}).alt_ft || 0))) + " ft" : "") +
+      (/^(air|space)$/.test(String(asset.domain || "")) ? "<br>高度 " +
+        escapeHtml(Math.round(Number((asset.position || {}).alt_ft || asset.alt_ft || 0))) + " ft" : "") +
+      (memberCount > 1 ? "<br>蜂群规模 " + escapeHtml(memberCount) + " 架" : "") +
       sensorCapabilityHtml(asset);
   }
 
@@ -123,15 +125,25 @@ window.PlatformMap = (function () {
 
   function ownLabel(asset) {
     var role = asset.role || asset.type || asset.id || "己方平台";
+    var memberCount = Number(asset.swarm_size || asset.member_count || 0);
+    var formation = memberCount > 1 ? " · " + memberCount + "机" : "";
     var status = String(asset.status || "").toLowerCase();
-    if (status === "staged") return role + " · 待命";
-    if (status === "holding") return role + " · 保持";
-    if (status === "unavailable") return role + " · 不可用";
-    if (status === "degraded") return role + " · 降级";
+    if (status === "staged") return role + formation + " · 待命";
+    if (status === "holding") return role + formation + " · 保持";
+    if (status === "unavailable") return role + formation + " · 不可用";
+    if (status === "degraded") return role + formation + " · 降级";
+    if (asset.domain === "space") return role + formation + " · 星下点";
     var speed = Number(asset.speed_kts || 0);
-    if (speed <= 0) return role + (asset.domain === "ground" ? " · 固定" : " · 静止");
-    if (asset.domain === "ground") return role + " · " + Math.round(speed * 1.852) + " km/h";
-    return role + " · " + Math.round(speed) + " kt";
+    if (speed <= 0) return role + formation + (asset.domain === "ground" ? " · 固定" : " · 静止");
+    if (asset.domain === "ground") return role + formation + " · " + Math.round(speed * 1.852) + " km/h";
+    return role + formation + " · " + Math.round(speed) + " kt";
+  }
+
+  function ownTrailStyle(asset) {
+    var kind = ownKind(asset);
+    if (kind === "satellite") return {color: "#b98cff", points: 360, smooth: true};
+    if (kind === "uavSwarm") return {color: "#81e6ff", points: 180, smooth: true};
+    return {color: "#42d7ff", points: asset.domain === "air" ? 90 : 180, smooth: asset.domain === "air"};
   }
 
   function trackLabel(track) {
@@ -706,11 +718,8 @@ window.PlatformMap = (function () {
         updateMarkerLabel(ownMarkers[id], ownLabel(asset));
       }
       updateMarkerPopup(ownMarkers[id], assetPopupHtml(asset));
-      renderTrail(
-        ownTrails, id, asset.history_path, "#42d7ff",
-        asset.domain === "air" ? 90 : 180,
-        asset.domain === "air"
-      );
+      var trailStyle = ownTrailStyle(asset);
+      renderTrail(ownTrails, id, asset.history_path, trailStyle.color, trailStyle.points, trailStyle.smooth);
       updateSensorFootprints(asset);
     });
     Object.keys(ownMarkers).forEach(function (id) {

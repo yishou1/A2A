@@ -70,5 +70,17 @@ def test_tactical_symbols_keep_affiliation_frames_north_up() -> None:
     assert "unknownSurface" in map_script
     assert "civilianSurface" in map_script
     assert "SymbolLibrary.svg(kind, heading)" in map_script
-    for platform_kind in ("merchant", "escort", "aew", "uav", "shoreRadar"):
+    for platform_kind in ("merchant", "escort", "aew", "uav", "shoreRadar", "satellite", "uavSwarm"):
         assert platform_kind in symbols
+
+
+def test_map_defaults_to_a_larger_view_and_supports_expanded_mode() -> None:
+    css = (ROOT / "static/css/platform.css").read_text(encoding="utf-8")
+    controller = (ROOT / "static/js/app/platform.js").read_text(encoding="utf-8")
+    dashboard = (ROOT / "templates/dashboard.html").read_text(encoding="utf-8")
+
+    assert "--workspace-width:34vw" in css
+    assert ".main.map-expanded #map-panel" in css
+    assert 'id="btn-toggle-map-expanded"' in dashboard
+    assert "function setMapExpanded(expanded)" in controller
+    assert 'sessionStorage.setItem("amos.map.expanded"' in controller

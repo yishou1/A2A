@@ -1114,6 +1114,17 @@ window.Platform = (function () {
     document.getElementById("btn-toggle-" + name).classList.toggle("layer-active", visible);
   }
 
+  function setMapExpanded(expanded) {
+    var layout = document.getElementById("main-layout");
+    var button = document.getElementById("btn-toggle-map-expanded");
+    layout.classList.toggle("map-expanded", Boolean(expanded));
+    button.classList.toggle("layer-active", Boolean(expanded));
+    button.setAttribute("aria-pressed", expanded ? "true" : "false");
+    button.textContent = expanded ? "恢复工作区" : "大地图";
+    sessionStorage.setItem("amos.map.expanded", expanded ? "1" : "0");
+    window.setTimeout(function () { Map.invalidateSize(); }, 0);
+  }
+
   function selectWorkspace(name) {
     if (!document.querySelector('[data-workspace-tab="' + name + '"]')) return;
     document.querySelectorAll("[data-workspace-tab]").forEach(function (button) {
@@ -1285,6 +1296,9 @@ window.Platform = (function () {
       switchScenario(this.value, {reset: true}).catch(function () {});
     });
     document.getElementById("btn-focus-map").addEventListener("click", Map.focusScenarioView);
+    document.getElementById("btn-toggle-map-expanded").addEventListener("click", function () {
+      setMapExpanded(!document.getElementById("main-layout").classList.contains("map-expanded"));
+    });
     ["terrain", "hillshade", "contours", "sensors", "ao"].forEach(function (name) {
       document.getElementById("btn-toggle-" + name).addEventListener("click", function () { toggleLayer(name); });
     });
@@ -1340,6 +1354,7 @@ window.Platform = (function () {
     Panels.updateAll({});
     initWorkspaceResize();
     selectWorkspace(query.get("tab") || sessionStorage.getItem("amos.workspace.tab") || "situation");
+    setMapExpanded(sessionStorage.getItem("amos.map.expanded") === "1");
     var initial = await Promise.all([
       API.loadScenarioSupport().catch(function () { return {}; }),
       API.loadScenarios(),

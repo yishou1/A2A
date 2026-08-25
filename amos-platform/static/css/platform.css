@@ -2,7 +2,7 @@
   color-scheme:dark;
   --topbar-height:66px;
   --footer-height:28px;
-  --workspace-width:40vw;
+  --workspace-width:34vw;
   --bg:#071018;
   --surface:#0b151e;
   --surface-raised:#0f1b25;
@@ -74,10 +74,12 @@ select,input{
 #map-panel{position:relative;flex:1 1 auto;min-width:360px;background:#081a29}
 #map{width:100%;height:100%;background:#081a29}
 #map.leaflet-container{background:#081a29;color:var(--text)}
+.map-expand-button{position:absolute;top:10px;right:10px;z-index:650;min-width:58px;background:rgba(8,24,34,.92);box-shadow:0 2px 8px rgba(0,0,0,.38)}
 .workspace-resizer{flex:0 0 7px;position:relative;background:#08131b;border-inline:1px solid #1e303c;cursor:col-resize;z-index:600}
 .workspace-resizer::after{content:"";position:absolute;inset:calc(50% - 28px) 2px auto;width:1px;height:56px;background:#557184}
 .workspace-resizer.dragging,.workspace-resizer:hover{background:#102330}
 #dash-panel{flex:0 0 var(--workspace-width);width:var(--workspace-width);min-width:420px;max-width:58vw;display:flex;flex-direction:column;overflow:hidden;background:#09131b}
+.main.map-expanded #map-panel{min-width:0}.main.map-expanded .workspace-resizer,.main.map-expanded #dash-panel{display:none}
 .workspace-header{min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 14px;border-bottom:1px solid var(--line)}
 .workspace-kicker,.section-eyebrow{display:block;margin-bottom:2px;color:var(--text-muted);font-size:10px;font-weight:650;letter-spacing:.08em;text-transform:uppercase}
 .workspace-header h1{max-width:32vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;font-weight:600;color:#e2ebf0}
