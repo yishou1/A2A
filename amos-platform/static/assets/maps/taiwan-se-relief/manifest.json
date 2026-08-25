@@ -1,20 +1,20 @@
 {
   "schema_version": "amos.offline-relief.v1",
-  "pack_id": "taiwan-se-etopo2022-v1",
+  "pack_id": "taiwan-western-pacific-etopo2022-v2",
   "bounds": {
-    "south": 21.35,
-    "west": 120.35,
-    "north": 23.35,
-    "east": 122.05
+    "south": 18.0,
+    "west": 120.0,
+    "north": 28.0,
+    "east": 127.0
   },
   "native_resolution_arc_seconds": 15,
   "render_size": {
-    "width": 1632,
-    "height": 2048
+    "width": 3584,
+    "height": 5120
   },
   "elevation_range_m": {
-    "minimum": -5350,
-    "maximum": 3546
+    "minimum": -8804,
+    "maximum": 3783
   },
   "layers": {
     "terrain": {

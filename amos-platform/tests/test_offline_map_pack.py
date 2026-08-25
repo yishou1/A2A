@@ -9,6 +9,7 @@ from amos_platform.data.maritime_convoy_air_defense_builder import build_maritim
 
 ROOT = Path(__file__).resolve().parents[1]
 PACK = ROOT / "static/assets/maps/taiwan-se-relief"
+TILE_MANIFEST = ROOT / "static/tiles/manifest.json"
 
 
 def test_relief_pack_is_complete_and_runtime_offline() -> None:
@@ -45,6 +46,19 @@ def test_relief_pack_covers_active_scenario_and_is_served_locally() -> None:
     client = app.test_client()
     for filename in ("manifest.json", "terrain-bathymetry.png", "hillshade.png", "contours.png"):
         assert client.get(f"/static/assets/maps/taiwan-se-relief/{filename}").status_code == 200
+
+
+def test_expanded_relief_and_vector_packs_share_western_pacific_coverage() -> None:
+    relief = json.loads((PACK / "manifest.json").read_text(encoding="utf-8"))
+    tiles = json.loads(TILE_MANIFEST.read_text(encoding="utf-8"))
+    expected_bounds = {"south": 18.0, "west": 120.0, "north": 28.0, "east": 127.0}
+
+    assert relief["bounds"] == expected_bounds
+    assert tiles["bounds"] == expected_bounds
+    assert tiles["available"] is True
+    assert tiles["format"] == "pmtiles-mvt"
+    assert tiles["max_zoom"] == 11
+    assert (ROOT / tiles["path"].removeprefix("/")).is_file()
 
 
 def test_browser_map_code_has_no_remote_runtime_dependency() -> None:

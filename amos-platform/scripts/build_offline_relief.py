@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the packaged Taiwan southeast relief overlays from NOAA ETOPO 2022.
+"""Build the packaged Taiwan/Western Pacific relief overlays from NOAA ETOPO 2022.
 
 The generated PNG and JSON files are the only artifacts used at runtime.  The
 source GeoTIFF is a build-time input and is intentionally not copied into the
@@ -25,8 +25,8 @@ SOURCE_URL = (
     "15s_surface_elev_gtif/ETOPO_2022_v1_15s_N30E120_surface.tif"
 )
 SOURCE_SHA256 = "5b46d290694fb0b5019b800334c6eb42157fe4fea0bc0b253c54424db924bb70"
-BOUNDS = {"south": 21.35, "west": 120.35, "north": 23.35, "east": 122.05}
-OUTPUT_SIZE = (1632, 2048)
+BOUNDS = {"south": 18.0, "west": 120.0, "north": 28.0, "east": 127.0}
+OUTPUT_SIZE = (3584, 5120)
 
 COLOR_STOPS = (
     (-9000, (3, 11, 27)),
@@ -156,7 +156,7 @@ def build(source: Path, output: Path) -> None:
     _contours(values).save(contours_path, optimize=True)
     manifest = {
         "schema_version": "amos.offline-relief.v1",
-        "pack_id": "taiwan-se-etopo2022-v1",
+        "pack_id": "taiwan-western-pacific-etopo2022-v2",
         "bounds": BOUNDS,
         "native_resolution_arc_seconds": 15,
         "render_size": {"width": OUTPUT_SIZE[0], "height": OUTPUT_SIZE[1]},
