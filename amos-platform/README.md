@@ -11,6 +11,7 @@ AMOS 是一个面向后端联调的因果仿真展示端。它负责剧本编排
 - 诊断入口：可显式切换为 Commander 直连（默认 `http://127.0.0.1:8021`），不作为部署模式
 - 实时通道：HTTP + SSE，状态轮询作为断线降级
 - 数据边界：浏览器和 A2A 后端只能看到当前仿真时刻及以前产生的观测、历史轨迹和媒体
+- 离线地图：本地 Protomaps 参照底图叠加 ETOPO 2022 地形/水深、山体阴影和等高/等深线，运行时零网络请求
 - 持久化：仿真状态保存在进程内，验收运行档案写入本地 SQLite
 
 ## 目录
@@ -19,7 +20,7 @@ AMOS 是一个面向后端联调的因果仿真展示端。它负责剧本编排
 src/amos_platform/
   agents/              Gateway/Commander 客户端、输入映射、结果投影、工作流视图
   api/                 Flask 应用及 sim/scenario/context/a2a/status 路由
-  data/                三场景 builder、能力目录、场景校验和安全摘要
+  data/                当前剧本 builder、能力目录、场景校验和安全摘要
   domain/              观测、资产、目标与可见性规则
   frontend_state/      internal → operator/agent 因果投影
   fusion/              传感器观测关联与融合航迹

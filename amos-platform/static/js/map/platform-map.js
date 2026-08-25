@@ -18,21 +18,14 @@ window.PlatformMap = (function () {
   var gridLayers = [];
   var scenarioView = null;
   var scenarioSurface = "maritime";
-  var layerState = {sensors: false, ao: true};
-
-  var ICONS = {
-    ship: '<svg viewBox="0 0 40 40"><path d="M20 4L29 30L20 35L11 30Z" fill="#0b2730" stroke="#42d7ff" stroke-width="2.4"/><path d="M20 8V29M14 25H26" stroke="#dffaff" stroke-width="2"/></svg>',
-    air: '<svg viewBox="0 0 40 40"><path d="M20 4L24 17L35 23L34 28L23 24L23 34L28 37H12L17 34L17 24L6 28L5 23L16 17Z" fill="#12351d" stroke="#52ff79" stroke-width="2"/></svg>',
-    uav: '<svg viewBox="0 0 40 40"><path d="M20 5L24 17L35 21L34 26L23 24L22 34H18L17 24L6 26L5 21L16 17Z" fill="#0a2e38" stroke="#42d7ff" stroke-width="2.2"/></svg>',
-    facility: '<svg viewBox="0 0 40 40"><rect x="8" y="8" width="24" height="24" rx="3" fill="#092f25" stroke="#52ff79" stroke-width="2.2"/><circle cx="20" cy="20" r="3" fill="#dfffe6"/><path d="M20 17V10M13 15Q20 8 27 15" fill="none" stroke="#52ff79" stroke-width="1.8"/></svg>',
-    ground: '<svg viewBox="0 0 40 40"><path d="M7 13h23l4 9v8H7Z" fill="#12351d" stroke="#52ff79" stroke-width="2.2"/><path d="M12 13l4-6h10l4 6" fill="none" stroke="#dfffe6" stroke-width="2"/><circle cx="13" cy="31" r="4" fill="#07131b" stroke="#52ff79" stroke-width="2"/><circle cx="29" cy="31" r="4" fill="#07131b" stroke="#52ff79" stroke-width="2"/></svg>',
-    unknown: '<svg viewBox="0 0 40 40"><path d="M20 4L36 20L20 36L4 20Z" fill="#3c2b0c" stroke="#ffbf47" stroke-width="2.6"/><text x="20" y="26" text-anchor="middle" font-size="17" font-weight="700" fill="#fff1c9">?</text></svg>',
-    threat: '<svg viewBox="0 0 40 40"><path d="M20 4L36 20L20 36L4 20Z" fill="#3b1010" stroke="#ff5544" stroke-width="2.6"/><text x="20" y="26" text-anchor="middle" font-size="15" font-weight="700" fill="#ffd8d3">!</text></svg>',
-    impact: '<svg viewBox="0 0 40 40"><path d="M6 25h28l-5 8H11Z" fill="#412d17" stroke="#ffb24a" stroke-width="2.2"/><path d="M10 12l20 17M30 12L10 29" stroke="#ffe0a8" stroke-width="2.3"/><circle cx="20" cy="20" r="5" fill="none" stroke="#ff7c50" stroke-width="1.8"/></svg>',
-    civilian: '<svg viewBox="0 0 40 40"><path d="M6 24h28l-5 9H11Z" fill="#0b302c" stroke="#55dfb5" stroke-width="2.2"/><path d="M13 24v-8h12l4 8M18 16v-5h5v5" fill="none" stroke="#d5fff2" stroke-width="2"/><path d="M9 35q5 3 10 0t10 0" fill="none" stroke="#55dfb5" stroke-width="1.7"/></svg>',
-    destroyed: '<svg viewBox="0 0 40 40"><path d="M6 25h28l-6 8H12Z" fill="#242a2e" stroke="#9aa7ad" stroke-width="2.2"/><path d="M11 10L29 28M29 10L11 28" stroke="#ff8a71" stroke-width="3"/><path d="M9 35q5 2 10 0t10 0" fill="none" stroke="#7d8b91" stroke-width="1.7"/></svg>',
-    weapon: '<svg viewBox="0 0 40 40"><path d="M20 3L26 25L20 37L14 25Z" fill="#451515" stroke="#ff705f" stroke-width="2.2"/><path d="M14 25L7 31L15 30M26 25L33 31L25 30" fill="none" stroke="#ffd0c8" stroke-width="2"/></svg>',
+  var layerState = {
+    terrain: true, hillshade: true, contours: true, sensors: false, ao: true,
   };
+  var reliefLayers = {};
+  var reliefManifest = null;
+  var reliefManifestPath = null;
+  var reliefLegend = null;
+  var SymbolLibrary = window.TacticalSymbols;
 
   function escapeHtml(value) {
     return String(value == null ? "" : value)
@@ -43,20 +36,16 @@ window.PlatformMap = (function () {
   function icon(kind, heading, size) {
     var actualSize = size || 34;
     return L.divIcon({
-      className: "rotating-marker marker-" + kind,
-      html: '<div class="marker-rotator" style="transform:rotate(' + Number(heading || 0) + 'deg);width:' + actualSize + 'px;height:' + actualSize + 'px">' + (ICONS[kind] || ICONS.unknown) + "</div>",
+      className: "rotating-marker marker-" + SymbolLibrary.affiliation(kind),
+      html: '<div class="marker-rotator" style="width:' + actualSize + "px;height:" + actualSize + 'px">' +
+        SymbolLibrary.svg(kind, heading) + "</div>",
       iconSize: [actualSize, actualSize],
       iconAnchor: [actualSize / 2, actualSize / 2],
     });
   }
 
   function ownKind(asset) {
-    var role = String(asset.role || asset.type || "");
-    if (/设施|传感器站|指挥|雷达|节点|火力支援/.test(role)) return "facility";
-    if (asset.domain === "ground") return "ground";
-    if (asset.domain === "maritime") return "ship";
-    if (/无人|UAV/.test(role)) return "uav";
-    return "air";
+    return SymbolLibrary.ownKind(asset);
   }
 
   function trackKind(track) {
@@ -68,9 +57,9 @@ window.PlatformMap = (function () {
     if (assessment.damage_state === "impact_pending" || assessment.engagement_status === "pending_assessment") {
       return "impact";
     }
-    if (assessment.source && /FISHING|CIVILIAN|MERCHANT/.test(classification)) return "civilian";
+    if (assessment.source && /FISHING|CIVILIAN|MERCHANT/.test(classification)) return "civilianSurface";
     return assessment.status === "confirmed" && /high|hostile|threat/i.test(String(assessment.level || assessment.label || ""))
-      ? "threat" : "unknown";
+      ? "hostileSurface" : "unknownSurface";
   }
 
   function trackAssessmentLabel(track) {
@@ -89,18 +78,20 @@ window.PlatformMap = (function () {
   }
 
   function trackLabelClass(kind) {
-    if (kind === "threat") return "threat-label";
-    if (kind === "civilian") return "civilian-label";
     if (kind === "destroyed") return "destroyed-label";
     if (kind === "impact") return "impact-label";
+    var affiliation = SymbolLibrary.affiliation(kind);
+    if (affiliation === "hostile") return "threat-label";
+    if (affiliation === "civilian") return "civilian-label";
     return "unknown-label";
   }
 
   function trackTrailColor(kind) {
-    if (kind === "threat") return "#ff5544";
-    if (kind === "civilian") return "#55dfb5";
     if (kind === "destroyed") return "#87969d";
     if (kind === "impact") return "#ffb24a";
+    var affiliation = SymbolLibrary.affiliation(kind);
+    if (affiliation === "hostile") return "#ff5544";
+    if (affiliation === "civilian") return "#55dfb5";
     return "#ffbf47";
   }
 
@@ -246,8 +237,10 @@ window.PlatformMap = (function () {
       return;
     }
     var element = marker.getElement && marker.getElement();
-    var rotator = element && element.querySelector(".marker-rotator");
-    if (rotator) rotator.style.transform = "rotate(" + Number(heading || 0) + "deg)";
+    var symbolBody = element && element.querySelector(".symbol-body");
+    if (symbolBody) {
+      symbolBody.setAttribute("transform", "rotate(" + Number(heading || 0) + " 28 28)");
+    }
   }
 
   function moveMarker(marker, targetPosition) {
@@ -294,6 +287,89 @@ window.PlatformMap = (function () {
     Object.keys(collection).forEach(function (key) { removeLayer(collection[key]); });
   }
 
+  function createPane(name, zIndex) {
+    var pane = map.createPane(name);
+    pane.style.zIndex = String(zIndex);
+    pane.style.pointerEvents = "none";
+  }
+
+  function addReliefLegend() {
+    if (reliefLegend) return;
+    reliefLegend = L.control({position: "bottomright"});
+    reliefLegend.onAdd = function () {
+      var div = L.DomUtil.create("div", "relief-legend");
+      div.innerHTML = '<div class="relief-legend-title"><b>地形 / 水深</b><span>m</span></div>' +
+        '<div class="relief-ramp land-ramp"><span>0</span><span>500</span><span>1500</span><span>3000+</span></div>' +
+        '<div class="relief-ramp sea-ramp"><span>0</span><span>-200</span><span>-1000</span><span>-3000</span><span>-6000</span></div>' +
+        '<small>ETOPO 2022 · 本地离线地形</small>';
+      L.DomEvent.disableClickPropagation(div);
+      return div;
+    };
+    reliefLegend.addTo(map);
+  }
+
+  function addCoordinateControl() {
+    var control = L.control({position: "bottomleft"});
+    control.onAdd = function () {
+      var div = L.DomUtil.create("div", "map-coordinate-control");
+      div.textContent = "22.2800°N  121.3200°E";
+      map.on("mousemove", function (event) {
+        var lat = event.latlng.lat;
+        var lng = event.latlng.lng;
+        div.textContent = Math.abs(lat).toFixed(4) + "°" + (lat >= 0 ? "N" : "S") + "  " +
+          Math.abs(lng).toFixed(4) + "°" + (lng >= 0 ? "E" : "W");
+      });
+      return div;
+    };
+    control.addTo(map);
+  }
+
+  function addNorthControl() {
+    var control = L.control({position: "topleft"});
+    control.onAdd = function () {
+      var div = L.DomUtil.create("div", "map-north-control");
+      div.innerHTML = "<b>N</b>";
+      div.title = "真北";
+      return div;
+    };
+    control.addTo(map);
+  }
+
+  function loadRelief(manifestPath) {
+    var path = manifestPath || "/static/assets/maps/taiwan-se-relief/manifest.json";
+    reliefManifestPath = path;
+    return fetch(path).then(function (response) {
+      if (!response.ok) throw new Error("offline relief manifest unavailable");
+      return response.json();
+    }).then(function (manifest) {
+      reliefManifest = manifest;
+      var bounds = manifest.bounds;
+      var imageBounds = [[bounds.south, bounds.west], [bounds.north, bounds.east]];
+      var basePath = path.slice(0, path.lastIndexOf("/") + 1);
+      var panes = {terrain: "terrainPane", hillshade: "hillshadePane", contours: "contourPane"};
+      var classes = {terrain: "relief-terrain", hillshade: "relief-hillshade", contours: "relief-contours"};
+      Object.keys(manifest.layers || {}).forEach(function (name) {
+        removeLayer(reliefLayers[name]);
+        reliefLayers[name] = L.imageOverlay(basePath + manifest.layers[name].path, imageBounds, {
+          pane: panes[name] || "terrainPane",
+          className: classes[name] || "",
+          opacity: 0,
+          interactive: false,
+          crossOrigin: false,
+        }).addTo(map);
+      });
+      addReliefLegend();
+      applyLayerVisibility();
+      return manifest;
+    }).catch(function () {
+      reliefManifest = null;
+      reliefManifestPath = null;
+      Object.keys(reliefLayers).forEach(function (name) { removeLayer(reliefLayers[name]); });
+      reliefLayers = {};
+      return null;
+    });
+  }
+
   function init() {
     map = L.map("map", {
       zoomControl: true,
@@ -301,6 +377,9 @@ window.PlatformMap = (function () {
       maxZoom: 14,
       preferCanvas: false,
     }).setView([23.50, 121.00], 8);
+    createPane("terrainPane", 205);
+    createPane("hillshadePane", 210);
+    createPane("contourPane", 215);
     protomapsL.leafletLayer({
       url: "/static/tiles/taiwan-southeast-tactical.pmtiles",
       flavor: "dark",
@@ -312,6 +391,8 @@ window.PlatformMap = (function () {
       attribution: 'Protomaps · © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     }).addTo(map);
     L.control.scale({metric: true, imperial: true, maxWidth: 150, position: "bottomleft"}).addTo(map);
+    addCoordinateControl();
+    addNorthControl();
     setTimeout(function () { map.invalidateSize(); }, 0);
   }
 
@@ -470,7 +551,18 @@ window.PlatformMap = (function () {
 
   function loadScenario(scenario) {
     clearAll();
-    layerState = Object.assign({sensors: false, ao: true},
+    var theaterId = String(((scenario.theater || {}).theater_id) || "");
+    var theaterRelief = theaterId === "taiwan_southeast_convoy_corridor"
+      ? "/static/assets/maps/taiwan-se-relief/manifest.json" : null;
+    var configuredRelief = (scenario.map_display || {}).relief_manifest || theaterRelief;
+    if (configuredRelief && configuredRelief !== reliefManifestPath) loadRelief(configuredRelief);
+    layerState = Object.assign({
+      terrain: Boolean(configuredRelief),
+      hillshade: Boolean(configuredRelief),
+      contours: Boolean(configuredRelief),
+      sensors: false,
+      ao: true,
+    },
       (scenario.map_display || {}).default_layers || {});
     scenarioSurface = (scenario.map_display || {}).base_surface || "maritime";
     var theater = scenario.theater || {};
@@ -505,6 +597,7 @@ window.PlatformMap = (function () {
       updateMarkerPopup(marker, assetPopupHtml(asset));
       ownMarkers[id] = marker;
     });
+    applyLayerVisibility();
     focusScenarioView();
   }
 
@@ -753,6 +846,17 @@ window.PlatformMap = (function () {
   }
 
   function applyLayerVisibility(name) {
+    if (!name || name === "terrain" || name === "hillshade" || name === "contours") {
+      var reliefOpacity = {terrain: 0.48, hillshade: 0.58, contours: 0.74};
+      ["terrain", "hillshade", "contours"].forEach(function (layerName) {
+        if (reliefLayers[layerName]) {
+          reliefLayers[layerName].setOpacity(layerState[layerName] ? reliefOpacity[layerName] : 0);
+        }
+      });
+      if (reliefLegend && reliefLegend.getContainer()) {
+        reliefLegend.getContainer().style.display = layerState.terrain ? "block" : "none";
+      }
+    }
     if (!name || name === "ao") {
       if (aoLayer) aoLayer.setStyle({
         opacity: layerState.ao ? 0.7 : 0,
@@ -781,5 +885,6 @@ window.PlatformMap = (function () {
     toggleLayer: toggleLayer,
     getLayerState: function () { return Object.assign({}, layerState); },
     applyLayerVisibility: applyLayerVisibility,
+    loadRelief: loadRelief,
   };
 })();

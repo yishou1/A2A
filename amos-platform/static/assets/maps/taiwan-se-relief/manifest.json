@@ -1,0 +1,56 @@
+{
+  "schema_version": "amos.offline-relief.v1",
+  "pack_id": "taiwan-se-etopo2022-v1",
+  "bounds": {
+    "south": 21.35,
+    "west": 120.35,
+    "north": 23.35,
+    "east": 122.05
+  },
+  "native_resolution_arc_seconds": 15,
+  "render_size": {
+    "width": 1632,
+    "height": 2048
+  },
+  "elevation_range_m": {
+    "minimum": -5350,
+    "maximum": 3546
+  },
+  "layers": {
+    "terrain": {
+      "path": "terrain-bathymetry.png",
+      "default_visible": true
+    },
+    "hillshade": {
+      "path": "hillshade.png",
+      "default_visible": true
+    },
+    "contours": {
+      "path": "contours.png",
+      "default_visible": true
+    }
+  },
+  "legend": {
+    "land_m": [
+      0,
+      500,
+      1500,
+      3000
+    ],
+    "sea_m": [
+      0,
+      -200,
+      -1000,
+      -3000,
+      -6000
+    ]
+  },
+  "source": {
+    "name": "NOAA NCEI ETOPO 2022 15 Arc-Second Global Relief Model",
+    "url": "https://www.ncei.noaa.gov/products/etopo-global-relief-model",
+    "doi": "10.25921/fd45-gt74",
+    "source_tile": "ETOPO_2022_v1_15s_N30E120_surface.tif",
+    "source_sha256": "5b46d290694fb0b5019b800334c6eb42157fe4fea0bc0b253c54424db924bb70"
+  },
+  "runtime_network_required": false
+}

@@ -6,7 +6,7 @@
 <title>Simulation 场景仿真平台</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
-<link rel="stylesheet" href="/static/css/platform.css?v=20260820a">
+<link rel="stylesheet" href="/static/css/platform.css?v=20260825a">
 <script src="/static/vendor/leaflet/leaflet.js"></script>
 <script src="/static/vendor/protomaps/protomaps-leaflet.js"></script>
 </head>
@@ -39,8 +39,13 @@
       <button class="btn btn-sm speed-btn" data-speed="32">32×</button>
     </div>
     <button class="btn btn-sm" id="btn-focus-map">任务区</button>
-    <button class="btn btn-sm" id="btn-toggle-sensors">传感器</button>
-    <button class="btn btn-sm" id="btn-toggle-ao">边界</button>
+    <div class="map-layer-group" aria-label="地图图层">
+      <button class="btn btn-sm" id="btn-toggle-terrain" title="地形与水深分层设色">地形</button>
+      <button class="btn btn-sm" id="btn-toggle-hillshade" title="山体阴影">阴影</button>
+      <button class="btn btn-sm" id="btn-toggle-contours" title="等高线与等深线">等高线</button>
+      <button class="btn btn-sm" id="btn-toggle-sensors">传感器</button>
+      <button class="btn btn-sm" id="btn-toggle-ao">边界</button>
+    </div>
   </div>
 </header>
 
@@ -332,9 +337,10 @@
 </footer>
 
 <script src="/static/js/api/platform-api.js?v=20260817d"></script>
-<script src="/static/js/map/platform-map.js?v=20260818b"></script>
+<script src="/static/js/map/tactical-symbols.js?v=20260825a"></script>
+<script src="/static/js/map/platform-map.js?v=20260825a"></script>
 <script src="/static/js/panels/platform-panels.js?v=20260818a"></script>
 <script src="/static/js/workflow/commander-workflow.js?v=20260820a"></script>
-<script src="/static/js/app/platform.js?v=20260818f"></script>
+<script src="/static/js/app/platform.js?v=20260825a"></script>
 </body>
 </html>

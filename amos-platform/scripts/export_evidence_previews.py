@@ -18,8 +18,6 @@ from amos_platform.simulation.engine import SimEngine
 
 ROOT = Path(__file__).resolve().parents[1]
 SCENARIOS = {
-    "amphibious-landing-joint-operation": "standard",
-    "border-uav-evacuation": "communication_degraded",
     "maritime-convoy-air-defense": "standard",
 }
 
@@ -43,9 +41,6 @@ def replay(scenario_id: str, branch: str) -> tuple[dict, SimEngine]:
     while float(engine.clock["elapsed_sec"]) < end:
         elapsed = float(engine.clock["elapsed_sec"])
         step = min(30.0, end - elapsed)
-        if scenario_id == "border-uav-evacuation" and elapsed < 1110 <= elapsed + step:
-            engine.assets["RELAY-UAV-01"]["health"]["comms_strength"] = 24.0
-            engine.assets["RELAY-UAV-01"]["_comms_fault_cap"] = 24.0
         engine._tick(step)
     return scenario, engine
 

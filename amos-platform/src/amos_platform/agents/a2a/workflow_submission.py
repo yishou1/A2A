@@ -60,7 +60,7 @@ def submit_current_workflow(
         raise WorkflowSubmissionError(400, "sim_context=false is not supported by the AMOS simulation boundary")
 
     active_scenario_id = str(engine.clock.get("scenario_id") or "")
-    scenario_id = str(data.get("scenario_id") or active_scenario_id or "amphibious-landing-joint-operation")
+    scenario_id = str(data.get("scenario_id") or active_scenario_id or "maritime-convoy-air-defense")
     if active_scenario_id and scenario_id != active_scenario_id:
         raise WorkflowSubmissionError(409, "submitted scenario_id does not match the active simulation")
     scenario = get_scenario(scenario_id)

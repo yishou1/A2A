@@ -979,7 +979,7 @@ def test_submit_route_returns_upstream_http_error_with_rejected_snapshot(monkeyp
             return {
                 "schema_version": "amos.commander.gateway.submit.v1",
                 "run_id": engine.clock["run_id"],
-                "chain_id": "amphibious-landing-joint-operation:situation-analysis",
+                "chain_id": "maritime-convoy-air-defense:situation-analysis",
                 "workflow": overrides.get("workflow", "bpel"),
             }
 
@@ -994,11 +994,11 @@ def test_submit_route_returns_upstream_http_error_with_rejected_snapshot(monkeyp
     app = create_app()
     app.testing = True
     client = app.test_client()
-    client.post("/api/v1/sim/reset", json={"scenario_id": "amphibious-landing-joint-operation"})
+    client.post("/api/v1/sim/reset", json={"scenario_id": "maritime-convoy-air-defense"})
 
     response = client.post(
         "/api/v1/a2a/workflows/submit",
-        json={"scenario_id": "amphibious-landing-joint-operation", "sim_context": True},
+        json={"scenario_id": "maritime-convoy-air-defense", "sim_context": True},
     )
     payload = response.get_json()
 
@@ -1028,7 +1028,7 @@ def test_submit_route_rejects_context_bypass_and_scenario_mismatch() -> None:
     app = create_app()
     app.testing = True
     client = app.test_client()
-    client.post("/api/v1/sim/reset", json={"scenario_id": "amphibious-landing-joint-operation"})
+    client.post("/api/v1/sim/reset", json={"scenario_id": "maritime-convoy-air-defense"})
 
     bypass = client.post(
         "/api/v1/a2a/workflows/submit",
@@ -1050,7 +1050,7 @@ def test_submit_route_summarizes_verified_gateway_package(monkeypatch) -> None:
 
     package = {
         "run_id": None,
-        "chain_id": "amphibious-landing-joint-operation:situation-analysis",
+        "chain_id": "maritime-convoy-air-defense:situation-analysis",
         "snapshot": {
             "run_id": None,
             "sequence": 2,
@@ -1089,7 +1089,7 @@ def test_submit_route_summarizes_verified_gateway_package(monkeypatch) -> None:
             return {
                 "schema_version": "amos.commander.gateway.submit.v1",
                 "run_id": engine.clock["run_id"],
-                "chain_id": "amphibious-landing-joint-operation:situation-analysis",
+                "chain_id": "maritime-convoy-air-defense:situation-analysis",
                 "workflow": overrides.get("workflow", "bpel"),
             }
 
@@ -1111,11 +1111,11 @@ def test_submit_route_summarizes_verified_gateway_package(monkeypatch) -> None:
     app = create_app()
     app.testing = True
     client = app.test_client()
-    client.post("/api/v1/sim/reset", json={"scenario_id": "amphibious-landing-joint-operation"})
+    client.post("/api/v1/sim/reset", json={"scenario_id": "maritime-convoy-air-defense"})
 
     response = client.post(
         "/api/v1/a2a/workflows/submit",
-        json={"scenario_id": "amphibious-landing-joint-operation", "sim_context": True},
+        json={"scenario_id": "maritime-convoy-air-defense", "sim_context": True},
     )
     submission = response.get_json()["data"]["amos_submission"]
 

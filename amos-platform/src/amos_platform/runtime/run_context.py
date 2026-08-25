@@ -18,7 +18,7 @@ def _now_iso() -> str:
 class RunContext:
     """Small metadata object for the active single-process run."""
 
-    scenario_id: str = "amphibious-landing-joint-operation"
+    scenario_id: str = "maritime-convoy-air-defense"
     run_id: str = field(default_factory=lambda: f"run-{uuid.uuid4().hex[:12]}")
     platform_mode: PlatformMode = PlatformMode.OFFLINE
     agent_backend: str = "gateway"

@@ -338,8 +338,8 @@ def test_product_routes_enforce_release_and_active_run_boundaries(monkeypatch) -
     class FakeEngine:
         clock = {
             "run_id": "run-route-evidence",
-            "scenario_id": "amphibious-landing-joint-operation",
-            "elapsed_sec": 780,
+            "scenario_id": "maritime-convoy-air-defense",
+            "elapsed_sec": 1080,
         }
 
         def get_operator_state(self):
@@ -351,15 +351,15 @@ def test_product_routes_enforce_release_and_active_run_boundaries(monkeypatch) -
                 "tasks": [],
                 "alerts": [],
                 "scenario_story": {"media_cues": [{
-                    "media_id": "AMP-MEDIA-02",
-                    "capture_id": "AMP-CAPTURE-02",
+                    "media_id": "MAR-MEDIA-02",
+                    "capture_id": "MAR-CAPTURE-02",
                     "product_type": "derived_sensor_product",
-                    "captured_at_sim_time": 780,
-                    "platform_id": "DDG-01",
+                    "captured_at_sim_time": 1080,
+                    "platform_id": "SHORE-RADAR-01",
                     "sensor_instance_id": "AESA-RADAR",
                     "observation_ids": ["OBS-ROUTE-01"],
                     "mime_type": "image/svg+xml",
-                    "title": "驱逐舰雷达批次",
+                    "title": "第二海面接触 AIS/雷达记录",
                 }]},
             }
 
@@ -367,7 +367,7 @@ def test_product_routes_enforce_release_and_active_run_boundaries(monkeypatch) -
         def get_agent_visible_state():
             return {"observations": [{
                 "observation_id": "OBS-ROUTE-01",
-                "asset_id": "DDG-01",
+                "asset_id": "SHORE-RADAR-01",
                 "sensor_id": "AESA-RADAR",
                 "bearing_deg": 42.5,
                 "range_nm": 11.2,
@@ -381,12 +381,12 @@ def test_product_routes_enforce_release_and_active_run_boundaries(monkeypatch) -
     run_id = engine.clock["run_id"]
 
     guessed = client.get(
-        f"/api/v1/evidence-products/{run_id}/AMP-MEDIA-02/779000.svg"
+        f"/api/v1/evidence-products/{run_id}/MAR-MEDIA-02/1079000.svg"
     )
     assert guessed.status_code == 404
 
     manifest = client.get("/api/v1/evidence-products").get_json()["data"]
-    radar = next(item for item in manifest["products"] if item["media_id"] == "AMP-MEDIA-02")
+    radar = next(item for item in manifest["products"] if item["media_id"] == "MAR-MEDIA-02")
     product_response = client.get(radar["uri"])
     assert product_response.status_code == 200
     assert product_response.mimetype == "image/svg+xml"

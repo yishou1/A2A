@@ -554,7 +554,7 @@ window.Platform = (function () {
       }
       document.getElementById("status-text").textContent = "场景就绪";
       var layerState = Map.getLayerState();
-      ["sensors", "ao"].forEach(function (name) {
+      ["terrain", "hillshade", "contours", "sensors", "ao"].forEach(function (name) {
         document.getElementById("btn-toggle-" + name).classList.toggle("layer-active", Boolean(layerState[name]));
       });
       refreshDirectorState();
@@ -1285,7 +1285,7 @@ window.Platform = (function () {
       switchScenario(this.value, {reset: true}).catch(function () {});
     });
     document.getElementById("btn-focus-map").addEventListener("click", Map.focusScenarioView);
-    ["sensors", "ao"].forEach(function (name) {
+    ["terrain", "hillshade", "contours", "sensors", "ao"].forEach(function (name) {
       document.getElementById("btn-toggle-" + name).addEventListener("click", function () { toggleLayer(name); });
     });
     document.getElementById("media-lightbox-close").addEventListener("click", closeMedia);

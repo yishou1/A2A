@@ -12,7 +12,7 @@ from amos_platform.runtime.platform_runtime import PlatformRuntime
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCENARIO_ID = "amphibious-landing-joint-operation"
+SCENARIO_ID = "maritime-convoy-air-defense"
 
 
 def test_new_runtime_bootstraps_a_consistent_ready_scene() -> None:
@@ -22,11 +22,11 @@ def test_new_runtime_bootstraps_a_consistent_ready_scene() -> None:
 
     assert state["clock"]["lifecycle"] == "ready"
     assert state["clock"]["run_id"] == runtime.context.run_id
-    assert len(state["assets"]) == 9
+    assert len(state["assets"]) == 5
     assert state["fused_tracks"] == []
 
 
-def test_catalog_exposes_only_the_midterm_scenario_and_no_legacy_routes() -> None:
+def test_catalog_exposes_only_the_active_scenario_and_no_legacy_routes() -> None:
     app = create_app()
     app.testing = True
     client = app.test_client()
@@ -221,7 +221,7 @@ def test_reset_returns_backend_and_frontend_to_t_zero() -> None:
     assert data["state"]["clock"]["elapsed_sec"] == 0
     assert data["state"]["clock"]["running"] is False
     assert data["state"]["clock"]["lifecycle"] == "ready"
-    assert len(data["state"]["assets"]) == 9
+    assert len(data["state"]["assets"]) == 5
     assert data["state"]["fused_tracks"] == []
 
 
@@ -377,7 +377,7 @@ def test_live_renderers_do_not_rebuild_unchanged_panels_or_map_layers() -> None:
     assert "顺序流程容器" in workflow
     assert "showWeaponImpact" in map_script
     assert "impact_sim_time" in map_script
-    assert 'return "civilian"' in map_script
+    assert 'return "civilianSurface"' in map_script
     assert 'return "destroyed"' in map_script
     assert "updateDestroyedImpactMarkers" in map_script
     assert "destroyedImpactMarkers" in map_script
@@ -468,12 +468,12 @@ def test_public_scenario_and_media_are_causally_released() -> None:
     get_engine().clock.pop("scenario_id", None)
 
     public = client.get(f"/api/v1/scenarios/{SCENARIO_ID}").get_json()["data"]
-    assert public["timeline"] == []
-    assert public["media_cues"] == []
+    assert all(float(item.get("at_sec", 0)) <= 0 for item in public["timeline"])
+    assert all(float(item.get("at_sec", 0)) <= 0 for item in public["media_cues"])
     assert "asset_routes" not in public
     assert "agent_plan" not in public
     assert client.get(
-        "/static/assets/scenarios/amphibious-landing-joint-operation/09-second-pass-eo.png"
+        "/static/assets/scenarios/maritime-convoy-air-defense/07-post-maneuver-observation.png"
     ).status_code == 404
 
     client.post("/api/v1/sim/start", json={})
@@ -485,14 +485,14 @@ def test_public_scenario_and_media_are_causally_released() -> None:
     assert [item["at_sec"] for item in story["media_cues"]] == [0]
     assert [cue["at_sec"] for cue in story["timeline"]] == [0]
     assert client.get(
-        "/static/assets/scenarios/amphibious-landing-joint-operation/00-satellite-coast-sar.png"
+        "/static/assets/scenarios/maritime-convoy-air-defense/00-convoy-overview.png"
     ).status_code == 200
     assert client.get(
-        "/static/assets/scenarios/amphibious-landing-joint-operation/02-ship-radar-picture.svg"
+        "/static/assets/scenarios/maritime-convoy-air-defense/01-aew-radar-picture.svg"
     ).status_code == 404
 
     payload = get_bridge().build_workflow_payload(get_scenario(SCENARIO_ID), engine=engine)
-    assert [item["id"] for item in payload["attachments"]] == ["AMP-MEDIA-00"]
+    assert [item["id"] for item in payload["attachments"]] == ["MAR-MEDIA-00"]
     client.post("/api/v1/sim/stop", json={})
 
 

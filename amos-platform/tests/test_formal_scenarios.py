@@ -13,22 +13,16 @@ from amos_platform.simulation.engine import SimEngine, _advance_position
 
 ROOT = Path(__file__).resolve().parents[1]
 SCENARIO_IDS = (
-    "amphibious-landing-joint-operation",
-    "border-uav-evacuation",
     "maritime-convoy-air-defense",
 )
 
 OBSERVATION_GATES = {
-    "amphibious-landing-joint-operation": [(450, 1), (780, 2), (1110, 3)],
-    "border-uav-evacuation": [(420, 1), (780, 2)],
     # The high-speed contact appears first; the slower AIS-correlated contact
     # is admitted later so discovery follows the declared sensor products.
     "maritime-convoy-air-defense": [(600, 1), (960, 2)],
 }
 
 EVIDENCE_SENSOR_CHECKS = (
-    ("amphibious-landing-joint-operation", 780, "DDG-01", 1),
-    ("border-uav-evacuation", 1080, "MOUNTAIN-RADAR-01", 2),
     ("maritime-convoy-air-defense", 720, "AEW-01", 1),
     ("maritime-convoy-air-defense", 1080, "SHORE-RADAR-01", 2),
 )
@@ -92,8 +86,7 @@ def test_formal_scenarios_use_taiwan_area_and_keep_all_geometry_inside_ao(
         assert _inside_ao(protected["lat"], protected["lon"], ao)
         assert protected["metadata"]["location_profile"] == "fictional_training_area"
 
-    expected_surface = "land" if scenario_id == "border-uav-evacuation" else "coastal"
-    assert scenario["map_display"]["base_surface"] == expected_surface
+    assert scenario["map_display"]["base_surface"] == "coastal"
 
 
 @pytest.mark.parametrize("scenario_id", SCENARIO_IDS)
@@ -299,31 +292,6 @@ def test_instrument_media_has_matching_sensor_observations(
         engine._tick(min(5, at_sec - engine.clock["elapsed_sec"]))
     current_observations = engine.sensor_fusion.last_observation_batch["observations"]
     assert sum(row["asset_id"] == sensor_asset_id for row in current_observations) >= minimum_observations
-
-
-def test_amphibious_scenario_has_three_threat_domains_and_joint_resources() -> None:
-    scenario = get_scenario("amphibious-landing-joint-operation")
-    assert scenario is not None
-    assert {row["threat_id"] for row in scenario["threats"]} == {
-        "CONTACT-SURFACE-FAST", "CONTACT-FORTIFICATION-01", "CONTACT-EMITTER-01"
-    }
-    assert {row["asset_id"] for row in scenario["assets"]} >= {
-        "LANDING-01", "DDG-01", "LOITER-01", "HELO-01", "ARTY-01"
-    }
-    assert scenario["acceptance_profile"]["required_loop_event"] == "re_attack_required"
-
-
-def test_border_scenario_has_relay_failure_and_evacuation_constraints() -> None:
-    scenario = get_scenario("border-uav-evacuation")
-    assert scenario is not None
-    assert {row["asset_id"] for row in scenario["assets"]} >= {
-        "RELAY-UAV-01", "MOUNTAIN-RADAR-01", "GROUND-PATROL-01"
-    }
-    assert {row["branch_id"] for row in scenario["expected_branches"]} >= {
-        "communication_degraded", "agent_failure", "low_confidence"
-    }
-    assert scenario["environment"]["civilian_area"]
-    assert scenario["environment"]["restricted_area"]
 
 
 def test_maritime_scenario_has_two_unknown_surface_targets_and_engagement_policy() -> None:

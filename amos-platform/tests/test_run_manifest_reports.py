@@ -18,7 +18,7 @@ from amos_platform.runtime.run_manifest import (
 def _context(run_id: str = "run-archive-1") -> dict:
     return {
         "run_id": run_id,
-        "scenario_id": "amphibious-landing-joint-operation",
+        "scenario_id": "maritime-convoy-air-defense",
         "seed": 771,
         "platform_mode": "online",
         "agent_backend": "gateway",
@@ -31,7 +31,7 @@ def test_sqlite_manifest_persists_complete_acceptance_evidence(tmp_path) -> None
     store = RunManifestStore(db_path)
     store.begin_run(
         _context(),
-        scenario_name="抢滩登陆联合行动",
+        scenario_name="海上编队护航与要地防空",
         mode="demonstration",
         branch="communication_degraded",
     )
@@ -47,7 +47,7 @@ def test_sqlite_manifest_persists_complete_acceptance_evidence(tmp_path) -> None
         "last_error": None,
     })
     submission = {
-        "scenario_id": "amphibious-landing-joint-operation",
+        "scenario_id": "maritime-convoy-air-defense",
         "run_id": "run-archive-1",
         "simulation_time_sec": 75,
         "accepted": True,
@@ -163,8 +163,8 @@ def test_runtime_director_submission_and_view_update_one_manifest(monkeypatch, t
     runtime = PlatformRuntime()
     engine = runtime.get_engine()
     engine.stop()
-    context = runtime.begin_run("amphibious-landing-joint-operation", seed=812)
-    scenario = get_scenario("amphibious-landing-joint-operation")
+    context = runtime.begin_run("maritime-convoy-air-defense", seed=812)
+    scenario = get_scenario("maritime-convoy-air-defense")
     assert scenario is not None
     engine.load_scenario(scenario, seed=812)
     engine.clock.update({"run_id": context.run_id, "scenario_id": context.scenario_id})
@@ -176,7 +176,7 @@ def test_runtime_director_submission_and_view_update_one_manifest(monkeypatch, t
     assert manifest["lifecycle"]["final_status"] == "stopped"
     assert manifest["alerts"][-1]["msg"] == "仿真已停止"
 
-    completion_context = runtime.begin_run("amphibious-landing-joint-operation", seed=812)
+    completion_context = runtime.begin_run("maritime-convoy-air-defense", seed=812)
     short_scenario = deepcopy(scenario)
     short_scenario["demo_controls"]["duration_sec"] = 1
     engine.load_scenario(short_scenario, seed=812)
@@ -194,7 +194,7 @@ def test_runtime_director_submission_and_view_update_one_manifest(monkeypatch, t
 
     director = runtime.get_director()
     state = director.configure(
-        scenario_id="amphibious-landing-joint-operation",
+        scenario_id="maritime-convoy-air-defense",
         mode="demonstration",
         branch="standard",
         seed=813,
@@ -265,11 +265,11 @@ def test_workflow_routes_archive_frozen_submission_and_v2_view(monkeypatch, tmp_
     app.testing = True
     client = app.test_client()
     reset = client.post("/api/v1/sim/reset", json={
-        "scenario_id": "amphibious-landing-joint-operation",
+        "scenario_id": "maritime-convoy-air-defense",
         "seed": 814,
     }).get_json()["data"]
     submitted = client.post("/api/v1/a2a/workflows/submit", json={
-        "scenario_id": "amphibious-landing-joint-operation",
+        "scenario_id": "maritime-convoy-air-defense",
         "sim_context": True,
     })
     viewed = client.get("/api/v1/a2a/workflows/wf-archive-route/view")

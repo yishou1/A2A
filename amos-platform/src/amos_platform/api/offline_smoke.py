@@ -17,6 +17,7 @@ def main() -> int:
     for path in (
         "/static/css/platform.css",
         "/static/js/api/platform-api.js",
+        "/static/js/map/tactical-symbols.js",
         "/static/js/map/platform-map.js",
         "/static/js/workflow/commander-workflow.js",
         "/static/js/app/platform.js",
@@ -26,6 +27,10 @@ def main() -> int:
         "/static/assets/maps/south-china-sea-basemap.geojson",
         "/static/tiles/manifest.json",
         "/static/tiles/taiwan-southeast-tactical.pmtiles",
+        "/static/assets/maps/taiwan-se-relief/manifest.json",
+        "/static/assets/maps/taiwan-se-relief/terrain-bathymetry.png",
+        "/static/assets/maps/taiwan-se-relief/hillshade.png",
+        "/static/assets/maps/taiwan-se-relief/contours.png",
     ):
         assert client.get(path).status_code == 200, path
 

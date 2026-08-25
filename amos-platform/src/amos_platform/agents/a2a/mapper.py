@@ -213,7 +213,7 @@ def build_commander_workflow_payload(
     scenario_options.update(options or {})
     options = scenario_options
     support = support_data or {}
-    scenario_id = scenario.get("id", "amphibious-landing-joint-operation")
+    scenario_id = scenario.get("id", "maritime-convoy-air-defense")
 
     own_assets = live_snapshot.get("own_asset_poses") or []
     tracks = live_snapshot.get("fused_tracks") or []

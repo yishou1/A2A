@@ -11,7 +11,7 @@ from amos_platform.api.responses import err, ok
 from amos_platform.data.scenario_repository import get_scenario
 from amos_platform.realtime.sse import operator_state_event_stream
 
-DEFAULT_SCENARIO_ID = "amphibious-landing-joint-operation"
+DEFAULT_SCENARIO_ID = "maritime-convoy-air-defense"
 
 
 def _seed_from_request(data: dict[str, Any], scenario: dict[str, Any]) -> int:

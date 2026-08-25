@@ -20,27 +20,12 @@ from amos_platform.simulation.engine import SimEngine
 
 
 SCENARIOS = {
-    "amphibious-landing-joint-operation": "standard",
-    # This is the only branch on which the relay degradation product is due.
-    "border-uav-evacuation": "communication_degraded",
     "maritime-convoy-air-defense": "standard",
 }
 SIMULATION_STEP_SEC = 30
-BOR_LINK_FAULT_AT_SEC = 1110
 ROOT = Path(__file__).resolve().parents[1]
 
 GEOMETRY_ANCHORS = {
-    "amphibious-landing-joint-operation": {
-        "AMP-MEDIA-01": ((22.671530, 120.393248, 12000), 119.99, 17.70, [6.19], [6.50]),
-        "AMP-MEDIA-07": ((22.582285, 120.402781, 9000), 64.90, 15.51, [5.34], [5.54]),
-        "AMP-MEDIA-08": ((22.671610, 120.328781, 9000), 109.13, 8.90, [9.46], [9.57]),
-        "AMP-MEDIA-09": ((22.569474, 120.382313, 8500), 63.06, 11.80, [6.70], [6.84]),
-    },
-    "border-uav-evacuation": {
-        "BOR-MEDIA-01": ((23.745453, 121.241375, 5200), 213.25, 32.36, [1.35], [1.60]),
-        "BOR-MEDIA-02": ((23.635755, 121.214146, 6000), 25.52, 5.49, [10.28], [10.33]),
-        "BOR-MEDIA-07": ((23.680000, 121.150000, 4800), 54.51, 8.39, [5.36, 11.73], [5.41, 11.76]),
-    },
     "maritime-convoy-air-defense": {
         "MAR-MEDIA-03": ((22.216446, 121.359430, 0), 141.30, 0.00, [7.61], [7.61]),
         "MAR-MEDIA-04": ((22.245648, 121.403350, 0), 187.65, 0.00, [15.47], [15.47]),
@@ -188,8 +173,6 @@ def _replay(scenario_id: str) -> Replay:
         elapsed = float(engine.clock["elapsed_sec"])
         step = min(float(SIMULATION_STEP_SEC), last_capture_sec - elapsed)
         next_elapsed = elapsed + step
-        if scenario_id == "border-uav-evacuation" and next_elapsed == BOR_LINK_FAULT_AT_SEC:
-            engine.assets["RELAY-UAV-01"]["health"]["comms_strength"] = 24.0
         if next_elapsed in command_at:
             _completed_commander_result(
                 engine,
@@ -421,24 +404,6 @@ def test_instrument_products_contain_only_contemporaneous_observations(
         }
 
 
-def test_border_final_review_observes_people_and_vehicle_as_distinct_contacts() -> None:
-    replay = _replay("border-uav-evacuation")
-    capture = replay.captures["BOR-MEDIA-07"]
-    expected_targets = {"CONTACT-PERSONNEL-01", "CONTACT-VEHICLE-01"}
-    observation_ids = [str(value) for value in capture["observation_ids"]]
-    associations = {
-        str(item["observation_id"]): str(item["truth_id"])
-        for item in replay.engine.sensor_fusion.truth_associations
-        if str(item.get("observation_id") or "") in set(observation_ids)
-    }
-
-    assert len(observation_ids) == 2
-    assert len(set(observation_ids)) == 2
-    assert set(associations) == set(observation_ids)
-    assert set(associations.values()) == expected_targets
-    assert len((capture.get("product_data") or {}).get("observations") or []) == 2
-
-
 @pytest.mark.parametrize("scenario_id", SCENARIOS)
 def test_external_precollected_media_never_fabricates_live_platform_pose(
     scenario_id: str,
@@ -488,40 +453,8 @@ def test_runtime_svg_products_are_immutable_and_addressed_by_capture_tick(
         assert hashlib.sha256(stored.content).hexdigest() == stored.checksum
 
 
-def test_border_link_monitor_freezes_metrics_before_and_after_relay_degradation() -> None:
-    replay = _replay("border-uav-evacuation")
-    capture = replay.captures["BOR-MEDIA-04"]
-    network = capture["product_data"]["network"]
-    history = network["history_records"]
-    before = [item for item in history if float(item["sim_time"]) < BOR_LINK_FAULT_AT_SEC]
-    after = [item for item in history if float(item["sim_time"]) >= BOR_LINK_FAULT_AT_SEC]
-
-    assert capture["product_data"]["renderer_type"] == "link_monitor"
-    assert float(history[0]["sim_time"]) <= 1050
-    assert float(history[-1]["sim_time"]) == pytest.approx(1470)
-    assert before and after
-    before_links = [link for sample in before for link in sample["links"]]
-    after_links = [link for sample in after for link in sample["links"]]
-    assert before_links and after_links
-    assert all(
-        "RELAY-UAV-01" in {link["from"], link["to"]}
-        for link in before_links + after_links
-    )
-    metric_keys = {
-        "quality", "bandwidth_mbps", "distance_km", "rssi_dbm", "snr_db",
-        "packet_loss_pct", "latency_ms", "jitter_ms",
-    }
-    assert all(metric_keys.issubset(link) for link in before_links + after_links)
-    assert sum(link["quality"] for link in after_links) / len(after_links) < (
-        sum(link["quality"] for link in before_links) / len(before_links)
-    )
-    assert sum(link["packet_loss_pct"] for link in after_links) / len(after_links) > (
-        sum(link["packet_loss_pct"] for link in before_links) / len(before_links)
-    )
-
-
 def test_command_product_waits_for_verified_completed_commander_result() -> None:
-    scenario = deepcopy(get_scenario("amphibious-landing-joint-operation"))
+    scenario = deepcopy(get_scenario("maritime-convoy-air-defense"))
     assert scenario is not None
     command_plan = next(
         plan for plan in scenario["capture_plans"]
@@ -560,7 +493,7 @@ def test_command_product_waits_for_verified_completed_commander_result() -> None
         "source": "commander_workflow",
         "status": "completed",
         "workflow_id": "wf-command-gate",
-        "applied_assessment_count": 0,
+        "applied_assessment_count": 2,
         "source_run_id": "run-command-gate",
         "source_snapshot_sequence": int(
             engine.sensor_fusion.last_observation_batch.get("tick_id", 0) or 0
