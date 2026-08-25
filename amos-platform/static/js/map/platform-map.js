@@ -25,6 +25,7 @@ window.PlatformMap = (function () {
   var reliefManifest = null;
   var reliefManifestPath = null;
   var reliefLegend = null;
+  var ownLabelLayoutFrame = null;
   var SymbolLibrary = window.TacticalSymbols;
 
   function escapeHtml(value) {
@@ -155,7 +156,8 @@ window.PlatformMap = (function () {
 
   function bindLabel(marker, label, className, direction) {
     var labelDirection = direction || "bottom";
-    var offset = labelDirection === "left" ? [-18, 0] : labelDirection === "right" ? [18, 0] : [0, 18];
+    var offset = labelDirection === "left" ? [-18, 0]
+      : (labelDirection === "right" ? [18, 0] : (labelDirection === "center" ? [0, 0] : [0, 18]));
     marker.bindTooltip(label, {
       permanent: true, direction: labelDirection, offset: offset, opacity: 1,
       className: "map-resource-label " + (className || ""),
@@ -167,6 +169,114 @@ window.PlatformMap = (function () {
     if (!marker || marker._amosTooltipContent === label) return;
     marker.setTooltipContent(label);
     marker._amosTooltipContent = label;
+  }
+
+  function rectanglesOverlap(first, second) {
+    return first.left < second.right && first.right > second.left &&
+      first.top < second.bottom && first.bottom > second.top;
+  }
+
+  function labelCandidates(marker, width, height) {
+    var iconGap = 28;
+    var horizontal = width / 2 + iconGap;
+    var vertical = height / 2 + iconGap;
+    var kind = marker._amosIconKind || "";
+    var slot = Number(marker._amosLabelSlot || 0);
+    var generic = [
+      [horizontal, 0], [-horizontal, 0], [0, vertical], [0, -vertical],
+      [horizontal, vertical], [-horizontal, -vertical], [horizontal, -vertical], [-horizontal, vertical],
+    ];
+    if (kind === "escort") {
+      return [[horizontal, 0], [horizontal, -vertical], [horizontal, vertical]].concat(generic);
+    }
+    if (kind === "merchant") {
+      return (slot % 2 === 0
+        ? [[-horizontal, -vertical], [-horizontal, 0], [0, -vertical]]
+        : [[-horizontal, vertical], [0, vertical], [-horizontal, 0]]).concat(generic);
+    }
+    if (kind === "shoreRadar") {
+      return [[-horizontal, 0], [-horizontal, -vertical], [-horizontal, vertical]].concat(generic);
+    }
+    if (kind === "aew" || kind === "uav" || kind === "uavSwarm" || kind === "satellite") {
+      return [[horizontal, -vertical], [horizontal, 0], [-horizontal, -vertical]].concat(generic);
+    }
+    return generic;
+  }
+
+  function labelPenalty(rect, occupied, iconRects, mapSize) {
+    var penalty = 0;
+    occupied.forEach(function (other) {
+      if (rectanglesOverlap(rect, other)) penalty += 100000;
+    });
+    iconRects.forEach(function (iconRect) {
+      if (rectanglesOverlap(rect, iconRect)) penalty += 120000;
+    });
+    if (rect.left < 5) penalty += (5 - rect.left) * 500;
+    if (rect.top < 5) penalty += (5 - rect.top) * 500;
+    if (rect.right > mapSize.x - 5) penalty += (rect.right - mapSize.x + 5) * 500;
+    if (rect.bottom > mapSize.y - 5) penalty += (rect.bottom - mapSize.y + 5) * 500;
+    return penalty;
+  }
+
+  function applyOwnLabelOffset(marker, offset) {
+    var tooltip = marker.getTooltip && marker.getTooltip();
+    if (!tooltip) return;
+    tooltip.options.offset = L.point(offset[0], offset[1]);
+    if (tooltip._updatePosition) tooltip._updatePosition();
+    var element = tooltip.getElement && tooltip.getElement();
+    if (!element) return;
+    var length = Math.max(0, Math.hypot(offset[0], offset[1]) - 16);
+    var angle = Math.atan2(-offset[1], -offset[0]) * 180 / Math.PI;
+    element.style.setProperty("--label-leader-length", length.toFixed(1) + "px");
+    element.style.setProperty("--label-leader-angle", angle.toFixed(1) + "deg");
+    element.classList.toggle("label-low-zoom", map.getZoom() < 8);
+    element.classList.add("label-decluttered");
+  }
+
+  function layoutOwnLabels() {
+    ownLabelLayoutFrame = null;
+    if (!map) return;
+    var markers = Object.keys(ownMarkers).map(function (id) { return ownMarkers[id]; })
+      .filter(function (marker) { return marker && map.hasLayer(marker) && marker.getTooltip(); });
+    var mapSize = map.getSize();
+    var iconRects = markers.map(function (marker) {
+      var point = map.latLngToContainerPoint(marker.getLatLng());
+      return {left: point.x - 21, top: point.y - 21, right: point.x + 21, bottom: point.y + 21};
+    });
+    var occupied = [];
+    markers.sort(function (first, second) {
+      var priority = {escort: 0, shoreRadar: 1, aew: 2, uav: 3, merchant: 4};
+      var firstPriority = priority[first._amosIconKind] == null ? 5 : priority[first._amosIconKind];
+      var secondPriority = priority[second._amosIconKind] == null ? 5 : priority[second._amosIconKind];
+      return firstPriority - secondPriority || first._amosLabelSlot - second._amosLabelSlot;
+    });
+    markers.forEach(function (marker) {
+      var tooltip = marker.getTooltip();
+      var element = tooltip.getElement && tooltip.getElement();
+      if (!element) return;
+      var markerPoint = map.latLngToContainerPoint(marker.getLatLng());
+      var width = Math.max(60, element.offsetWidth || 0);
+      var height = Math.max(18, element.offsetHeight || 0);
+      var candidates = labelCandidates(marker, width, height);
+      var best = null;
+      candidates.forEach(function (offset, index) {
+        var centerX = markerPoint.x + offset[0];
+        var centerY = markerPoint.y + offset[1];
+        var rect = {
+          left: centerX - width / 2, top: centerY - height / 2,
+          right: centerX + width / 2, bottom: centerY + height / 2,
+        };
+        var score = labelPenalty(rect, occupied, iconRects, mapSize) + index;
+        if (!best || score < best.score) best = {offset: offset, rect: rect, score: score};
+      });
+      applyOwnLabelOffset(marker, best.offset);
+      occupied.push(best.rect);
+    });
+  }
+
+  function scheduleOwnLabelLayout() {
+    if (ownLabelLayoutFrame) window.cancelAnimationFrame(ownLabelLayoutFrame);
+    ownLabelLayoutFrame = window.requestAnimationFrame(layoutOwnLabels);
   }
 
   function updateMarkerPopup(marker, html) {
@@ -396,7 +506,8 @@ window.PlatformMap = (function () {
       maxZoom: 14,
       preferCanvas: false,
     }).setView([23.50, 121.00], 8);
-    map.on("zoomend", function () { applyLayerVisibility(); });
+    map.on("zoomend", function () { applyLayerVisibility(); scheduleOwnLabelLayout(); });
+    map.on("moveend resize", scheduleOwnLabelLayout);
     createPane("terrainPane", 205);
     createPane("hillshadePane", 210);
     createPane("contourPane", 215);
@@ -551,6 +662,8 @@ window.PlatformMap = (function () {
   }
 
   function clearAll() {
+    if (ownLabelLayoutFrame) window.cancelAnimationFrame(ownLabelLayoutFrame);
+    ownLabelLayoutFrame = null;
     removeCollection(ownMarkers);
     removeCollection(weaponMarkers);
     removeCollection(weaponImpactLayers);
@@ -605,7 +718,7 @@ window.PlatformMap = (function () {
       bounds: operationalBounds || (ao ? [[ao.south, ao.west], [ao.north, ao.east]] : null),
     };
     renderTheaterAO(theater);
-    (scenario.assets || []).forEach(function (asset) {
+    (scenario.assets || []).forEach(function (asset, assetIndex) {
       var id = asset.asset_id || asset.id;
       var pos = position(asset);
       var marker = L.marker([pos.lat, pos.lng], {
@@ -613,12 +726,14 @@ window.PlatformMap = (function () {
       }).addTo(map);
       marker._amosIconKind = ownKind(asset);
       marker._amosIconSize = 34;
-      bindLabel(marker, ownLabel(asset), "own-label");
+      marker._amosLabelSlot = assetIndex;
+      bindLabel(marker, ownLabel(asset), "own-label", "center");
       updateMarkerPopup(marker, assetPopupHtml(asset));
       ownMarkers[id] = marker;
     });
     applyLayerVisibility();
     focusScenarioView();
+    scheduleOwnLabelLayout();
   }
 
   function smoothTrailPoints(points, passes) {
@@ -711,7 +826,7 @@ window.PlatformMap = (function () {
       }
     }
     var seenAssets = {};
-    (assets || []).forEach(function (asset) {
+    (assets || []).forEach(function (asset, assetIndex) {
       var id = asset.id || asset.asset_id;
       var pos = position(asset);
       seenAssets[id] = true;
@@ -719,8 +834,10 @@ window.PlatformMap = (function () {
         ownMarkers[id] = L.marker([pos.lat, pos.lng], {icon: icon(ownKind(asset), asset.heading, 34)}).addTo(map);
         ownMarkers[id]._amosIconKind = ownKind(asset);
         ownMarkers[id]._amosIconSize = 34;
-        bindLabel(ownMarkers[id], ownLabel(asset), "own-label");
+        ownMarkers[id]._amosLabelSlot = assetIndex;
+        bindLabel(ownMarkers[id], ownLabel(asset), "own-label", "center");
       } else {
+        ownMarkers[id]._amosLabelSlot = assetIndex;
         moveMarker(ownMarkers[id], pos);
         updateMarkerIcon(ownMarkers[id], ownKind(asset), asset.heading, 34);
         updateMarkerLabel(ownMarkers[id], ownLabel(asset));
@@ -742,6 +859,7 @@ window.PlatformMap = (function () {
         delete sensorPoseSignatures[id];
       }
     });
+    scheduleOwnLabelLayout();
 
     var seenWeapons = {};
     (weapons || []).forEach(function (weapon) {

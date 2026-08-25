@@ -109,3 +109,15 @@ def test_map_defaults_to_a_larger_view_and_supports_expanded_mode() -> None:
     assert 'id="btn-toggle-map-expanded"' in dashboard
     assert "function setMapExpanded(expanded)" in controller
     assert 'sessionStorage.setItem("amos.map.expanded"' in controller
+
+
+def test_own_force_labels_use_collision_aware_layout() -> None:
+    map_script = (ROOT / "static/js/map/platform-map.js").read_text(encoding="utf-8")
+    css = (ROOT / "static/css/platform.css").read_text(encoding="utf-8")
+
+    assert "function layoutOwnLabels()" in map_script
+    assert "function labelPenalty(" in map_script
+    assert "scheduleOwnLabelLayout();" in map_script
+    assert 'bindLabel(marker, ownLabel(asset), "own-label", "center")' in map_script
+    assert ".map-resource-label.own-label.label-decluttered::after" in css
+    assert ".map-resource-label.own-label.label-low-zoom" in css
