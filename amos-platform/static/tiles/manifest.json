@@ -1,18 +1,18 @@
 {
-  "tile_pack_id": "taiwan-western-pacific-protomaps-dark-v2",
+  "tile_pack_id": "east-asia-western-pacific-protomaps-dark-v3",
   "available": true,
   "path": "/static/tiles/taiwan-southeast-tactical.pmtiles",
   "format": "pmtiles-mvt",
   "style": "dark",
   "min_zoom": 0,
-  "max_zoom": 11,
+  "max_zoom": 9,
   "bounds": {
-    "south": 18.0,
-    "west": 120.0,
-    "north": 28.0,
-    "east": 127.0
+    "south": 8.0,
+    "west": 105.0,
+    "north": 35.0,
+    "east": 135.0
   },
-  "tile_count": 1481,
+  "tile_count": 2000,
   "source": {
     "name": "Protomaps Basemap / OpenStreetMap",
     "build": "20260824.pmtiles",

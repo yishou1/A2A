@@ -3,8 +3,8 @@ set -euo pipefail
 
 readonly PMTILES_VERSION="1.31.2"
 readonly BASEMAP_BUILD="20260824.pmtiles"
-readonly BOUNDS="120.0,18.0,127.0,28.0"
-readonly MAX_ZOOM="11"
+readonly BOUNDS="105.0,8.0,135.0,35.0"
+readonly MAX_ZOOM="9"
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 task_dir=$(mktemp -d)

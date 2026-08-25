@@ -20,13 +20,23 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = ROOT / "static" / "assets" / "maps" / "taiwan-se-relief"
-SOURCE_URL = (
+SOURCE_BASE_URL = (
     "https://www.ngdc.noaa.gov/mgg/global/relief/ETOPO2022/data/15s/"
-    "15s_surface_elev_gtif/ETOPO_2022_v1_15s_N30E120_surface.tif"
+    "15s_surface_elev_gtif"
 )
-SOURCE_SHA256 = "5b46d290694fb0b5019b800334c6eb42157fe4fea0bc0b253c54424db924bb70"
-BOUNDS = {"south": 18.0, "west": 120.0, "north": 28.0, "east": 127.0}
-OUTPUT_SIZE = (3584, 5120)
+SOURCE_TILES = (
+    ("N45E105", 105.0, 45.0, "0054f4d258a9678ba55988b408a936d05de95e6e6d430c2a7ea123efc2cec7e0"),
+    ("N45E120", 120.0, 45.0, "6468864758e6eab87a6d5349280d5eab1764a1e239d8e944159b6eeb2396bf9a"),
+    ("N30E105", 105.0, 30.0, "00c261fe202e85fa20946c40f113024101784d3c555a2112774d54b404d5f0ea"),
+    ("N30E120", 120.0, 30.0, "5b46d290694fb0b5019b800334c6eb42157fe4fea0bc0b253c54424db924bb70"),
+    ("N15E105", 105.0, 15.0, "d2cb7e439d3d85805ea9f55f5c873286e73c63dcb8de6e2b3e16fb6e8882cbd0"),
+    ("N15E120", 120.0, 15.0, "219d5232373f911caac573fa82c1f39f7277041ad89cc547ab5cba193aa5b495"),
+)
+BOUNDS = {"south": 8.0, "west": 105.0, "north": 35.0, "east": 135.0}
+OUTPUT_SIZE = (6144, 5530)
+DETAIL_BOUNDS = {"south": 18.0, "west": 120.0, "north": 28.0, "east": 127.0}
+DETAIL_SIZE = (3584, 5120)
+CELL_DEGREES = 15.0 / 3600.0
 
 COLOR_STOPS = (
     (-9000, (3, 11, 27)),
@@ -56,31 +66,65 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _ensure_source(path: Path, allow_download: bool) -> None:
-    if not path.exists():
-        if not allow_download:
-            raise SystemExit(f"source GeoTIFF is missing: {path}")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        print(f"Downloading {SOURCE_URL}")
-        urllib.request.urlretrieve(SOURCE_URL, path)
-    actual = _sha256(path)
-    if actual != SOURCE_SHA256:
-        raise SystemExit(f"source checksum mismatch: expected {SOURCE_SHA256}, got {actual}")
+def _tile_filename(tile_id: str) -> str:
+    return f"ETOPO_2022_v1_15s_{tile_id}_surface.tif"
 
 
-def _crop_source(path: Path) -> np.ndarray:
-    # The official tile is EPSG:4326, 15 arc-second, 120E..135E and 15N..30N.
-    tile_west, tile_north = 120.0, 30.0
-    cell = 15.0 / 3600.0
-    left = round((BOUNDS["west"] - tile_west) / cell)
-    right = round((BOUNDS["east"] - tile_west) / cell)
-    top = round((tile_north - BOUNDS["north"]) / cell)
-    bottom = round((tile_north - BOUNDS["south"]) / cell)
-    with Image.open(path) as source:
-        crop = source.crop((left, top, right, bottom))
-        values = np.asarray(crop, dtype=np.float32)
-    if values.ndim != 2 or not np.isfinite(values).all():
-        raise SystemExit("source relief crop is invalid")
+def _ensure_sources(source_dir: Path, allow_download: bool) -> list[Path]:
+    paths = []
+    for tile_id, _west, _north, expected_sha256 in SOURCE_TILES:
+        filename = _tile_filename(tile_id)
+        path = source_dir / filename
+        if not path.exists():
+            if not allow_download:
+                raise SystemExit(f"source GeoTIFF is missing: {path}")
+            source_dir.mkdir(parents=True, exist_ok=True)
+            url = f"{SOURCE_BASE_URL}/{filename}"
+            print(f"Downloading {url}")
+            urllib.request.urlretrieve(url, path)
+        actual = _sha256(path)
+        if actual != expected_sha256:
+            raise SystemExit(
+                f"source checksum mismatch for {filename}: expected {expected_sha256}, got {actual}"
+            )
+        paths.append(path)
+    return paths
+
+
+def _mosaic_sources(paths: list[Path]) -> np.ndarray:
+    width = round((BOUNDS["east"] - BOUNDS["west"]) / CELL_DEGREES)
+    height = round((BOUNDS["north"] - BOUNDS["south"]) / CELL_DEGREES)
+    values = np.full((height, width), np.nan, dtype=np.float32)
+
+    for path, (_tile_id, tile_west, tile_north, _sha256_value) in zip(paths, SOURCE_TILES):
+        tile_east = tile_west + 15.0
+        tile_south = tile_north - 15.0
+        overlap_west = max(BOUNDS["west"], tile_west)
+        overlap_east = min(BOUNDS["east"], tile_east)
+        overlap_south = max(BOUNDS["south"], tile_south)
+        overlap_north = min(BOUNDS["north"], tile_north)
+        if overlap_west >= overlap_east or overlap_south >= overlap_north:
+            continue
+
+        source_box = (
+            round((overlap_west - tile_west) / CELL_DEGREES),
+            round((tile_north - overlap_north) / CELL_DEGREES),
+            round((overlap_east - tile_west) / CELL_DEGREES),
+            round((tile_north - overlap_south) / CELL_DEGREES),
+        )
+        target_box = (
+            round((overlap_west - BOUNDS["west"]) / CELL_DEGREES),
+            round((BOUNDS["north"] - overlap_north) / CELL_DEGREES),
+            round((overlap_east - BOUNDS["west"]) / CELL_DEGREES),
+            round((BOUNDS["north"] - overlap_south) / CELL_DEGREES),
+        )
+        with Image.open(path) as source:
+            crop = np.asarray(source.crop(source_box), dtype=np.float32)
+        left, top, right, bottom = target_box
+        values[top:bottom, left:right] = crop
+
+    if not np.isfinite(values).all():
+        raise SystemExit("source relief mosaic has uncovered or invalid cells")
     return values
 
 
@@ -144,19 +188,30 @@ def _contours(values: np.ndarray) -> Image.Image:
     return Image.fromarray(rgba, mode="RGBA")
 
 
-def build(source: Path, output: Path) -> None:
+def _write_layers(values: np.ndarray, output: Path) -> None:
     output.mkdir(parents=True, exist_ok=True)
-    native = _crop_source(source)
+    _colorize(values).save(output / "terrain-bathymetry.png", optimize=True)
+    _hillshade(values).save(output / "hillshade.png", optimize=True)
+    _contours(values).save(output / "contours.png", optimize=True)
+
+
+def _crop_mosaic(values: np.ndarray, bounds: dict[str, float]) -> np.ndarray:
+    left = round((bounds["west"] - BOUNDS["west"]) / CELL_DEGREES)
+    right = round((bounds["east"] - BOUNDS["west"]) / CELL_DEGREES)
+    top = round((BOUNDS["north"] - bounds["north"]) / CELL_DEGREES)
+    bottom = round((BOUNDS["north"] - bounds["south"]) / CELL_DEGREES)
+    return values[top:bottom, left:right]
+
+
+def build(sources: list[Path], output: Path) -> None:
+    native = _mosaic_sources(sources)
     values = _resize_float(native, OUTPUT_SIZE)
-    terrain_path = output / "terrain-bathymetry.png"
-    hillshade_path = output / "hillshade.png"
-    contours_path = output / "contours.png"
-    _colorize(values).save(terrain_path, optimize=True)
-    _hillshade(values).save(hillshade_path, optimize=True)
-    _contours(values).save(contours_path, optimize=True)
+    detail_values = _resize_float(_crop_mosaic(native, DETAIL_BOUNDS), DETAIL_SIZE)
+    _write_layers(values, output)
+    _write_layers(detail_values, output / "detail")
     manifest = {
         "schema_version": "amos.offline-relief.v1",
-        "pack_id": "taiwan-western-pacific-etopo2022-v2",
+        "pack_id": "east-asia-western-pacific-etopo2022-v3",
         "bounds": BOUNDS,
         "native_resolution_arc_seconds": 15,
         "render_size": {"width": OUTPUT_SIZE[0], "height": OUTPUT_SIZE[1]},
@@ -165,9 +220,48 @@ def build(source: Path, output: Path) -> None:
             "maximum": round(float(values.max())),
         },
         "layers": {
-            "terrain": {"path": "terrain-bathymetry.png", "default_visible": True},
-            "hillshade": {"path": "hillshade.png", "default_visible": True},
-            "contours": {"path": "contours.png", "default_visible": True},
+            "terrain": {
+                "path": "terrain-bathymetry.png",
+                "kind": "terrain",
+                "max_zoom": 7,
+                "default_visible": True,
+            },
+            "hillshade": {
+                "path": "hillshade.png",
+                "kind": "hillshade",
+                "max_zoom": 7,
+                "default_visible": True,
+            },
+            "contours": {
+                "path": "contours.png",
+                "kind": "contours",
+                "max_zoom": 7,
+                "default_visible": True,
+            },
+            "terrain_detail": {
+                "path": "detail/terrain-bathymetry.png",
+                "kind": "terrain",
+                "bounds": DETAIL_BOUNDS,
+                "render_size": {"width": DETAIL_SIZE[0], "height": DETAIL_SIZE[1]},
+                "min_zoom": 8,
+                "default_visible": True,
+            },
+            "hillshade_detail": {
+                "path": "detail/hillshade.png",
+                "kind": "hillshade",
+                "bounds": DETAIL_BOUNDS,
+                "render_size": {"width": DETAIL_SIZE[0], "height": DETAIL_SIZE[1]},
+                "min_zoom": 8,
+                "default_visible": True,
+            },
+            "contours_detail": {
+                "path": "detail/contours.png",
+                "kind": "contours",
+                "bounds": DETAIL_BOUNDS,
+                "render_size": {"width": DETAIL_SIZE[0], "height": DETAIL_SIZE[1]},
+                "min_zoom": 8,
+                "default_visible": True,
+            },
         },
         "legend": {
             "land_m": [0, 500, 1500, 3000],
@@ -177,8 +271,10 @@ def build(source: Path, output: Path) -> None:
             "name": "NOAA NCEI ETOPO 2022 15 Arc-Second Global Relief Model",
             "url": "https://www.ncei.noaa.gov/products/etopo-global-relief-model",
             "doi": "10.25921/fd45-gt74",
-            "source_tile": "ETOPO_2022_v1_15s_N30E120_surface.tif",
-            "source_sha256": SOURCE_SHA256,
+            "source_tiles": [
+                {"name": _tile_filename(tile_id), "sha256": sha256_value}
+                for tile_id, _west, _north, sha256_value in SOURCE_TILES
+            ],
         },
         "runtime_network_required": False,
     }
@@ -191,12 +287,12 @@ def build(source: Path, output: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--source", type=Path, default=Path("/tmp/ETOPO_2022_v1_15s_N30E120_surface.tif"))
+    parser.add_argument("--source-dir", type=Path, default=Path("/tmp"))
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--download", action="store_true", help="download the official build-time source if absent")
     args = parser.parse_args()
-    _ensure_source(args.source, args.download)
-    build(args.source, args.output)
+    sources = _ensure_sources(args.source_dir, args.download)
+    build(sources, args.output)
     return 0
 
 

@@ -1,32 +1,86 @@
 {
   "schema_version": "amos.offline-relief.v1",
-  "pack_id": "taiwan-western-pacific-etopo2022-v2",
+  "pack_id": "east-asia-western-pacific-etopo2022-v3",
   "bounds": {
-    "south": 18.0,
-    "west": 120.0,
-    "north": 28.0,
-    "east": 127.0
+    "south": 8.0,
+    "west": 105.0,
+    "north": 35.0,
+    "east": 135.0
   },
   "native_resolution_arc_seconds": 15,
   "render_size": {
-    "width": 3584,
-    "height": 5120
+    "width": 6144,
+    "height": 5530
   },
   "elevation_range_m": {
-    "minimum": -8804,
-    "maximum": 3783
+    "minimum": -10092,
+    "maximum": 3752
   },
   "layers": {
     "terrain": {
       "path": "terrain-bathymetry.png",
+      "kind": "terrain",
+      "max_zoom": 7,
       "default_visible": true
     },
     "hillshade": {
       "path": "hillshade.png",
+      "kind": "hillshade",
+      "max_zoom": 7,
       "default_visible": true
     },
     "contours": {
       "path": "contours.png",
+      "kind": "contours",
+      "max_zoom": 7,
+      "default_visible": true
+    },
+    "terrain_detail": {
+      "path": "detail/terrain-bathymetry.png",
+      "kind": "terrain",
+      "bounds": {
+        "south": 18.0,
+        "west": 120.0,
+        "north": 28.0,
+        "east": 127.0
+      },
+      "render_size": {
+        "width": 3584,
+        "height": 5120
+      },
+      "min_zoom": 8,
+      "default_visible": true
+    },
+    "hillshade_detail": {
+      "path": "detail/hillshade.png",
+      "kind": "hillshade",
+      "bounds": {
+        "south": 18.0,
+        "west": 120.0,
+        "north": 28.0,
+        "east": 127.0
+      },
+      "render_size": {
+        "width": 3584,
+        "height": 5120
+      },
+      "min_zoom": 8,
+      "default_visible": true
+    },
+    "contours_detail": {
+      "path": "detail/contours.png",
+      "kind": "contours",
+      "bounds": {
+        "south": 18.0,
+        "west": 120.0,
+        "north": 28.0,
+        "east": 127.0
+      },
+      "render_size": {
+        "width": 3584,
+        "height": 5120
+      },
+      "min_zoom": 8,
       "default_visible": true
     }
   },
@@ -49,8 +103,32 @@
     "name": "NOAA NCEI ETOPO 2022 15 Arc-Second Global Relief Model",
     "url": "https://www.ncei.noaa.gov/products/etopo-global-relief-model",
     "doi": "10.25921/fd45-gt74",
-    "source_tile": "ETOPO_2022_v1_15s_N30E120_surface.tif",
-    "source_sha256": "5b46d290694fb0b5019b800334c6eb42157fe4fea0bc0b253c54424db924bb70"
+    "source_tiles": [
+      {
+        "name": "ETOPO_2022_v1_15s_N45E105_surface.tif",
+        "sha256": "0054f4d258a9678ba55988b408a936d05de95e6e6d430c2a7ea123efc2cec7e0"
+      },
+      {
+        "name": "ETOPO_2022_v1_15s_N45E120_surface.tif",
+        "sha256": "6468864758e6eab87a6d5349280d5eab1764a1e239d8e944159b6eeb2396bf9a"
+      },
+      {
+        "name": "ETOPO_2022_v1_15s_N30E105_surface.tif",
+        "sha256": "00c261fe202e85fa20946c40f113024101784d3c555a2112774d54b404d5f0ea"
+      },
+      {
+        "name": "ETOPO_2022_v1_15s_N30E120_surface.tif",
+        "sha256": "5b46d290694fb0b5019b800334c6eb42157fe4fea0bc0b253c54424db924bb70"
+      },
+      {
+        "name": "ETOPO_2022_v1_15s_N15E105_surface.tif",
+        "sha256": "d2cb7e439d3d85805ea9f55f5c873286e73c63dcb8de6e2b3e16fb6e8882cbd0"
+      },
+      {
+        "name": "ETOPO_2022_v1_15s_N15E120_surface.tif",
+        "sha256": "219d5232373f911caac573fa82c1f39f7277041ad89cc547ab5cba193aa5b495"
+      }
+    ]
   },
   "runtime_network_required": false
 }

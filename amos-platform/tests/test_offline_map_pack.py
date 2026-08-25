@@ -18,12 +18,17 @@ def test_relief_pack_is_complete_and_runtime_offline() -> None:
     assert manifest["schema_version"] == "amos.offline-relief.v1"
     assert manifest["runtime_network_required"] is False
     assert manifest["source"]["doi"] == "10.25921/fd45-gt74"
-    assert len(manifest["source"]["source_sha256"]) == 64
-    expected_size = (manifest["render_size"]["width"], manifest["render_size"]["height"])
-    assert set(manifest["layers"]) == {"terrain", "hillshade", "contours"}
+    assert len(manifest["source"]["source_tiles"]) == 6
+    assert all(len(tile["sha256"]) == 64 for tile in manifest["source"]["source_tiles"])
+    expected_kinds = {"terrain", "hillshade", "contours"}
+    assert {layer["kind"] for layer in manifest["layers"].values()} == expected_kinds
+    assert sum(layer.get("max_zoom") == 7 for layer in manifest["layers"].values()) == 3
+    assert sum(layer.get("min_zoom") == 8 for layer in manifest["layers"].values()) == 3
     for layer in manifest["layers"].values():
         path = PACK / layer["path"]
         assert path.is_file()
+        render_size = layer.get("render_size", manifest["render_size"])
+        expected_size = (render_size["width"], render_size["height"])
         with Image.open(path) as image:
             assert image.size == expected_size
 
@@ -44,20 +49,23 @@ def test_relief_pack_covers_active_scenario_and_is_served_locally() -> None:
     app = create_app()
     app.testing = True
     client = app.test_client()
-    for filename in ("manifest.json", "terrain-bathymetry.png", "hillshade.png", "contours.png"):
+    filenames = ("manifest.json", "terrain-bathymetry.png", "hillshade.png", "contours.png")
+    for filename in filenames:
         assert client.get(f"/static/assets/maps/taiwan-se-relief/{filename}").status_code == 200
+    for filename in filenames[1:]:
+        assert client.get(f"/static/assets/maps/taiwan-se-relief/detail/{filename}").status_code == 200
 
 
 def test_expanded_relief_and_vector_packs_share_western_pacific_coverage() -> None:
     relief = json.loads((PACK / "manifest.json").read_text(encoding="utf-8"))
     tiles = json.loads(TILE_MANIFEST.read_text(encoding="utf-8"))
-    expected_bounds = {"south": 18.0, "west": 120.0, "north": 28.0, "east": 127.0}
+    expected_bounds = {"south": 8.0, "west": 105.0, "north": 35.0, "east": 135.0}
 
     assert relief["bounds"] == expected_bounds
     assert tiles["bounds"] == expected_bounds
     assert tiles["available"] is True
     assert tiles["format"] == "pmtiles-mvt"
-    assert tiles["max_zoom"] == 11
+    assert tiles["max_zoom"] == 9
     assert (ROOT / tiles["path"].removeprefix("/")).is_file()
 
 

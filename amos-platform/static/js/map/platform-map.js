@@ -356,19 +356,25 @@ window.PlatformMap = (function () {
     }).then(function (manifest) {
       reliefManifest = manifest;
       var bounds = manifest.bounds;
-      var imageBounds = [[bounds.south, bounds.west], [bounds.north, bounds.east]];
       var basePath = path.slice(0, path.lastIndexOf("/") + 1);
       var panes = {terrain: "terrainPane", hillshade: "hillshadePane", contours: "contourPane"};
       var classes = {terrain: "relief-terrain", hillshade: "relief-hillshade", contours: "relief-contours"};
       Object.keys(manifest.layers || {}).forEach(function (name) {
+        var config = manifest.layers[name];
+        var kind = config.kind || name;
+        var layerBounds = config.bounds || bounds;
+        var imageBounds = [[layerBounds.south, layerBounds.west], [layerBounds.north, layerBounds.east]];
         removeLayer(reliefLayers[name]);
-        reliefLayers[name] = L.imageOverlay(basePath + manifest.layers[name].path, imageBounds, {
-          pane: panes[name] || "terrainPane",
-          className: classes[name] || "",
+        reliefLayers[name] = L.imageOverlay(basePath + config.path, imageBounds, {
+          pane: panes[kind] || "terrainPane",
+          className: classes[kind] || "",
           opacity: 0,
           interactive: false,
           crossOrigin: false,
         }).addTo(map);
+        reliefLayers[name]._amosReliefKind = kind;
+        reliefLayers[name]._amosMinZoom = Number(config.min_zoom == null ? -Infinity : config.min_zoom);
+        reliefLayers[name]._amosMaxZoom = Number(config.max_zoom == null ? Infinity : config.max_zoom);
       });
       addReliefLegend();
       applyLayerVisibility();
@@ -389,6 +395,7 @@ window.PlatformMap = (function () {
       maxZoom: 14,
       preferCanvas: false,
     }).setView([23.50, 121.00], 8);
+    map.on("zoomend", function () { applyLayerVisibility(); });
     createPane("terrainPane", 205);
     createPane("hillshadePane", 210);
     createPane("contourPane", 215);
@@ -857,10 +864,12 @@ window.PlatformMap = (function () {
   function applyLayerVisibility(name) {
     if (!name || name === "terrain" || name === "hillshade" || name === "contours") {
       var reliefOpacity = {terrain: 0.48, hillshade: 0.58, contours: 0.74};
-      ["terrain", "hillshade", "contours"].forEach(function (layerName) {
-        if (reliefLayers[layerName]) {
-          reliefLayers[layerName].setOpacity(layerState[layerName] ? reliefOpacity[layerName] : 0);
-        }
+      var zoom = map ? map.getZoom() : 0;
+      Object.keys(reliefLayers).forEach(function (layerName) {
+        var layer = reliefLayers[layerName];
+        var kind = layer._amosReliefKind || layerName;
+        var inZoomRange = zoom >= layer._amosMinZoom && zoom <= layer._amosMaxZoom;
+        layer.setOpacity(layerState[kind] && inZoomRange ? reliefOpacity[kind] : 0);
       });
       if (reliefLegend && reliefLegend.getContainer()) {
         reliefLegend.getContainer().style.display = layerState.terrain ? "block" : "none";
