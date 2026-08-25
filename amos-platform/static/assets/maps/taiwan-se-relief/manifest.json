@@ -1,6 +1,8 @@
 {
   "schema_version": "amos.offline-relief.v1",
   "pack_id": "east-asia-western-pacific-etopo2022-v3",
+  "projection": "EPSG:3857",
+  "cache_version": "20260825c",
   "bounds": {
     "south": 8.0,
     "west": 105.0,
@@ -13,26 +15,26 @@
     "height": 5530
   },
   "elevation_range_m": {
-    "minimum": -10092,
-    "maximum": 3752
+    "minimum": -10091,
+    "maximum": 3742
   },
   "layers": {
     "terrain": {
       "path": "terrain-bathymetry.png",
       "kind": "terrain",
-      "max_zoom": 7,
+      "max_zoom": 8,
       "default_visible": true
     },
     "hillshade": {
       "path": "hillshade.png",
       "kind": "hillshade",
-      "max_zoom": 7,
+      "max_zoom": 8,
       "default_visible": true
     },
     "contours": {
       "path": "contours.png",
       "kind": "contours",
-      "max_zoom": 7,
+      "max_zoom": 8,
       "default_visible": true
     },
     "terrain_detail": {
@@ -48,7 +50,7 @@
         "width": 3584,
         "height": 5120
       },
-      "min_zoom": 8,
+      "min_zoom": 9,
       "default_visible": true
     },
     "hillshade_detail": {
@@ -64,7 +66,7 @@
         "width": 3584,
         "height": 5120
       },
-      "min_zoom": 8,
+      "min_zoom": 9,
       "default_visible": true
     },
     "contours_detail": {
@@ -80,7 +82,7 @@
         "width": 3584,
         "height": 5120
       },
-      "min_zoom": 8,
+      "min_zoom": 9,
       "default_visible": true
     }
   },

@@ -364,8 +364,9 @@ window.PlatformMap = (function () {
         var kind = config.kind || name;
         var layerBounds = config.bounds || bounds;
         var imageBounds = [[layerBounds.south, layerBounds.west], [layerBounds.north, layerBounds.east]];
+        var cacheSuffix = manifest.cache_version ? "?v=" + encodeURIComponent(manifest.cache_version) : "";
         removeLayer(reliefLayers[name]);
-        reliefLayers[name] = L.imageOverlay(basePath + config.path, imageBounds, {
+        reliefLayers[name] = L.imageOverlay(basePath + config.path + cacheSuffix, imageBounds, {
           pane: panes[kind] || "terrainPane",
           className: classes[kind] || "",
           opacity: 0,

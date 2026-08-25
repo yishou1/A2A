@@ -16,14 +16,16 @@ def test_relief_pack_is_complete_and_runtime_offline() -> None:
     manifest = json.loads((PACK / "manifest.json").read_text(encoding="utf-8"))
 
     assert manifest["schema_version"] == "amos.offline-relief.v1"
+    assert manifest["projection"] == "EPSG:3857"
+    assert manifest["cache_version"]
     assert manifest["runtime_network_required"] is False
     assert manifest["source"]["doi"] == "10.25921/fd45-gt74"
     assert len(manifest["source"]["source_tiles"]) == 6
     assert all(len(tile["sha256"]) == 64 for tile in manifest["source"]["source_tiles"])
     expected_kinds = {"terrain", "hillshade", "contours"}
     assert {layer["kind"] for layer in manifest["layers"].values()} == expected_kinds
-    assert sum(layer.get("max_zoom") == 7 for layer in manifest["layers"].values()) == 3
-    assert sum(layer.get("min_zoom") == 8 for layer in manifest["layers"].values()) == 3
+    assert sum(layer.get("max_zoom") == 8 for layer in manifest["layers"].values()) == 3
+    assert sum(layer.get("min_zoom") == 9 for layer in manifest["layers"].values()) == 3
     for layer in manifest["layers"].values():
         path = PACK / layer["path"]
         assert path.is_file()
@@ -44,6 +46,7 @@ def test_relief_pack_covers_active_scenario_and_is_served_locally() -> None:
     map_script = (ROOT / "static/js/map/platform-map.js").read_text(encoding="utf-8")
     assert scenario["theater"]["theater_id"] in map_script
     assert "/static/assets/maps/taiwan-se-relief/manifest.json" in map_script
+    assert "manifest.cache_version" in map_script
     assert "Boolean(configuredRelief)" in map_script
 
     app = create_app()

@@ -128,9 +128,49 @@ def _mosaic_sources(paths: list[Path]) -> np.ndarray:
     return values
 
 
-def _resize_float(values: np.ndarray, size: tuple[int, int]) -> np.ndarray:
-    image = Image.fromarray(values, mode="F")
-    return np.asarray(image.resize(size, Image.Resampling.BICUBIC), dtype=np.float32)
+def _mercator_y(latitude: float | np.ndarray) -> float | np.ndarray:
+    radians = np.deg2rad(latitude)
+    return np.log(np.tan(np.pi / 4.0 + radians / 2.0))
+
+
+def _resize_web_mercator(
+    values: np.ndarray,
+    bounds: dict[str, float],
+    size: tuple[int, int],
+) -> np.ndarray:
+    """Resample an EPSG:4326 grid for affine display in a Leaflet image overlay."""
+    width, height = size
+    horizontal = np.asarray(
+        Image.fromarray(values, mode="F").resize(
+            (width, values.shape[0]),
+            Image.Resampling.BICUBIC,
+        ),
+        dtype=np.float32,
+    )
+
+    north_y = _mercator_y(bounds["north"])
+    south_y = _mercator_y(bounds["south"])
+    fractions = (np.arange(height, dtype=np.float64) + 0.5) / height
+    projected_y = north_y + fractions * (south_y - north_y)
+    latitudes = np.rad2deg(np.arctan(np.sinh(projected_y)))
+    source_rows = (
+        (bounds["north"] - latitudes)
+        / (bounds["north"] - bounds["south"])
+        * values.shape[0]
+        - 0.5
+    )
+    source_rows = np.clip(source_rows, 0.0, values.shape[0] - 1.0)
+    row_before = np.floor(source_rows).astype(np.int32)
+    row_after = np.minimum(row_before + 1, values.shape[0] - 1)
+    weights = (source_rows - row_before).astype(np.float32)
+
+    projected = np.empty((height, width), dtype=np.float32)
+    for row in range(height):
+        projected[row] = (
+            horizontal[row_before[row]] * (1.0 - weights[row])
+            + horizontal[row_after[row]] * weights[row]
+        )
+    return projected
 
 
 def _colorize(values: np.ndarray) -> Image.Image:
@@ -205,13 +245,19 @@ def _crop_mosaic(values: np.ndarray, bounds: dict[str, float]) -> np.ndarray:
 
 def build(sources: list[Path], output: Path) -> None:
     native = _mosaic_sources(sources)
-    values = _resize_float(native, OUTPUT_SIZE)
-    detail_values = _resize_float(_crop_mosaic(native, DETAIL_BOUNDS), DETAIL_SIZE)
+    values = _resize_web_mercator(native, BOUNDS, OUTPUT_SIZE)
+    detail_values = _resize_web_mercator(
+        _crop_mosaic(native, DETAIL_BOUNDS),
+        DETAIL_BOUNDS,
+        DETAIL_SIZE,
+    )
     _write_layers(values, output)
     _write_layers(detail_values, output / "detail")
     manifest = {
         "schema_version": "amos.offline-relief.v1",
         "pack_id": "east-asia-western-pacific-etopo2022-v3",
+        "projection": "EPSG:3857",
+        "cache_version": "20260825c",
         "bounds": BOUNDS,
         "native_resolution_arc_seconds": 15,
         "render_size": {"width": OUTPUT_SIZE[0], "height": OUTPUT_SIZE[1]},
@@ -223,19 +269,19 @@ def build(sources: list[Path], output: Path) -> None:
             "terrain": {
                 "path": "terrain-bathymetry.png",
                 "kind": "terrain",
-                "max_zoom": 7,
+                "max_zoom": 8,
                 "default_visible": True,
             },
             "hillshade": {
                 "path": "hillshade.png",
                 "kind": "hillshade",
-                "max_zoom": 7,
+                "max_zoom": 8,
                 "default_visible": True,
             },
             "contours": {
                 "path": "contours.png",
                 "kind": "contours",
-                "max_zoom": 7,
+                "max_zoom": 8,
                 "default_visible": True,
             },
             "terrain_detail": {
@@ -243,7 +289,7 @@ def build(sources: list[Path], output: Path) -> None:
                 "kind": "terrain",
                 "bounds": DETAIL_BOUNDS,
                 "render_size": {"width": DETAIL_SIZE[0], "height": DETAIL_SIZE[1]},
-                "min_zoom": 8,
+                "min_zoom": 9,
                 "default_visible": True,
             },
             "hillshade_detail": {
@@ -251,7 +297,7 @@ def build(sources: list[Path], output: Path) -> None:
                 "kind": "hillshade",
                 "bounds": DETAIL_BOUNDS,
                 "render_size": {"width": DETAIL_SIZE[0], "height": DETAIL_SIZE[1]},
-                "min_zoom": 8,
+                "min_zoom": 9,
                 "default_visible": True,
             },
             "contours_detail": {
@@ -259,7 +305,7 @@ def build(sources: list[Path], output: Path) -> None:
                 "kind": "contours",
                 "bounds": DETAIL_BOUNDS,
                 "render_size": {"width": DETAIL_SIZE[0], "height": DETAIL_SIZE[1]},
-                "min_zoom": 8,
+                "min_zoom": 9,
                 "default_visible": True,
             },
         },
