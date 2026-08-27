@@ -42,9 +42,10 @@ def test_resource_and_algorithm_catalog_are_discoverable():
     assert algorithms["execution_location"] == "zsl_algorithm_library_with_agent_local_fallback"
     assert algorithms["network_algorithm_calls"] is False
     assert algorithms["algorithm_library_runtime"]["llm_deployment"] == "gpt-4o-mini"
-    assert algorithms["contract_version"] == "track_threat_algorithms/v1"
-    assert any(item["algorithm_id"] == "covariance_kalman_cv_filter" for item in algorithms["algorithms"])
-    assert any(item["backend"] == "torchscript" for item in algorithms["algorithms"])
+    assert algorithms["contract_version"] == "track_threat_algorithms/v2"
+    assert any(item["algorithm_id"] == "cms_upstream_fused_track_sync" for item in algorithms["algorithms"])
+    assert any(item["algorithm_id"] == "trajectory_predictor" for item in algorithms["algorithms"])
+    assert any(item["backend"] == "python_http_service" for item in algorithms["algorithms"])
 
 
 @pytest.mark.anyio
@@ -174,14 +175,15 @@ def test_nacos_sdk_and_http_paths_use_the_same_default_cluster(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_a2a_response_reports_selected_local_algorithms_and_stage_timings():
+async def test_a2a_response_reports_selected_canonical_algorithms_and_stage_timings():
     main.reset_runtime_state()
 
     response = await main.send_message(_task("wi-algorithm-trace"), token="unit-test")
 
     assert response["status"] == "completed"
-    assert "covariance_kalman_cv_filter" in response["selected_algorithms"]
-    assert "st_gnn_dynamic_entity_tracking" in response["selected_algorithms"]
+    assert "cms_upstream_fused_track_sync" in response["selected_algorithms"]
+    assert "trajectory_predictor" in response["selected_algorithms"]
+    assert "threat_priority_random_forest" in response["selected_algorithms"]
     assert response["algorithm_duration_ms"]["trajectory_tracking_and_prediction"] >= 0
     assert response["algorithm_duration_ms"]["threat_assessment_and_xai"] >= 0
     assert response["artifact"]["trace"]["algorithm_duration_ms"] == response["algorithm_duration_ms"]

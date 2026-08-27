@@ -122,13 +122,72 @@ uav
 unknown
 ```
 
-`algorithm_level` 取值：
+`algorithm_level` 仅用于独立 Demo 的 `detections[]` 兼容入口：
 
 ```text
 small   最近邻关联 + alpha-beta 滤波
 medium  最近邻关联 + 简化 Kalman-like 滤波
 large   当前为接口占位，回退 medium，并在 metadata 标注 large_mock
 ```
+
+### 2.1 CMS intelligence_packet 输入
+
+当 CMS 已完成传感器级航迹聚合时，Commander 应把 CMS 输出放在：
+
+```text
+input.intelligence_packet
+```
+
+也兼容直接 packet、`output.intelligence_packet` 和 `value` 包装。核心输入为：
+
+```json
+{
+  "packet_id": "packet-002",
+  "mission_id": "wf-001",
+  "tracks": [
+    {
+      "track_id": "T-0001",
+      "track_instance_id": "optional-stable-uuid",
+      "object_type": "aircraft",
+      "class_name": "aircraft",
+      "timestamp": 1787450410.0,
+      "lat": 31.241,
+      "lon": 121.513,
+      "alt": 3010.0,
+      "speed": 211.0,
+      "heading": 131.0,
+      "confidence": 0.90,
+      "history_path": []
+    }
+  ],
+  "targets": []
+}
+```
+
+字段语义：
+
+```text
+packet_id + track_id + timestamp   每次上游观测的唯一事件身份
+mission_id + track_instance_id     稳定来源航迹身份
+mission_id + track_id              track_instance_id 缺失时的兼容身份
+tracks[]                            位置、速度、航向和历史路径的权威输入
+targets[]                           按 track_id 合并的语义补充，不参与物理建群判定
+```
+
+CMS 输入进入 `upstream_fused_tracks` 模式：不执行本地最近邻关联和 Kalman 更新，只做字段校验、来源身份幂等保护、history 合并，再调用算法库完成航线预测、群体关系推理和态势关注分类。输出 `tracks[].metadata` 包含：
+
+```text
+tracking_mode=upstream_fused_tracks
+local_association_performed=false
+local_filter_performed=false
+source_identity
+source_epoch
+upstream_track_id
+upstream_packet_id
+upstream_mission_id
+```
+
+若相同来源身份发生超过物理门限的位置跳变，Agent 将其视为上游编号复用：旧内部航迹标记为 superseded 并从活动 TrackStore 移除，新航迹以递增 `source_epoch` 创建。保护资产必须由 `scene` 或 AMOS 资产管理显式提供，不从目标位置推断。
 
 ## 3. A2A 任务信封输入：sendMessage
 
@@ -230,7 +289,7 @@ CognitionResult
 
 成功响应还包含：
 
-- `selected_algorithms`：本次 Skill 实际选择的稳定算法 ID，例如 `covariance_kalman_cv_filter`、`st_gnn_dynamic_entity_tracking`、`dynamic_bayesian_network`。
+- `selected_algorithms`：本次 Skill 实际选择的稳定算法 ID，例如 `cms_upstream_fused_track_sync`、`trajectory_predictor`、`graph_relation_reasoner`、`threat_priority_random_forest`。
 - `algorithm_duration_ms`：跟踪预测、威胁评估/XAI、编组、保护资产影响和统一排序的分阶段耗时。
 
 该追踪同时描述 GPT-4o-mini 工具规划、zsl 算法库 `/run` 执行和 Agent 本地降级。`trace.algorithm_library` 中的 `planner_mode`、`planned_algorithms`、`executions` 与 `local_fallbacks` 是实际调用证据，不依赖大模型生成算法结果。
@@ -488,6 +547,8 @@ metadata.hit_count
 metadata.consecutive_hit_count
 metadata.missed_count
 metadata.member_change
+metadata.held_member_ids
+metadata.member_relation_misses
 ```
 
 `group_type` 取值：
@@ -505,6 +566,13 @@ unknown_group
 - `confirmed`：连续命中达到门限，作为稳定群组输出。
 - `coasting`：本帧未满足关联门限，但在有限漏检窗口内保留原 `group_id`。
 - 超过 `max_missed_frames` 后群组从活动集合移除；当前实现不无限保存群组历史。
+
+关联使用按 `aircraft`、`uav`、`ship` 和 `unknown` 区分的可配置距离、航向差和速度差门限。门限仅是当前仿真 Agent 的候选关联配置，不代表通用物理或作战编队间距标准。
+
+已确认群体中，若某一成员短时未满足关联门限且没有被其他已观测群体吸收，Agent 可在 `member_exit_misses` 窗口内暂时保留该成员：
+
+- `metadata.held_member_ids`：本帧由离组滞回机制保留的成员。
+- `metadata.member_relation_misses`：对应成员连续未满足关联条件的帧数；达到退出门限后成员从群体移除。
 
 ### 4.5 asset_impacts
 
@@ -640,12 +708,12 @@ state_schema_url=http://127.0.0.1:8102/schema/state
 capability_version=track_threat_agent_v1
 artifact_schema_version=track_threat_group_artifact/v1
 input_schema_version=perception_result/v1
-algorithm_profile=kalman_stgnn_dbn_group_asset_xai
+algorithm_profile=cms_track_consumer_gpt4o_mini_algolib_track_threat
 model_status=no_model / model_loaded / model_training / model_error
 agent_card=http://127.0.0.1:8102/.well-known/agent-card.json
 skills=trajectory_tracking,trajectory_prediction,threat_ranking,group_detection,group_threat_ranking,protected_asset_impact_analysis
-algorithm_family=kalman,st_gnn,dbn,asset_impact,group_detection,xai
-runtime_providers=covariance_kalman_cv_filter,torchscript_st_gnn,dbn_risk_state_calibration_runtime,physical_relation_complete_link_clustering,predicted_path_asset_proximity
+algorithm_family=upstream_track_sync,trajectory_prediction,graph_relation,random_forest_priority,asset_impact,xai
+runtime_providers=cms_fused_track_packet,zsl_algorithm_library,azure_gpt_4o_mini,upstream_track_sync,remote_group_lifecycle_manager,predicted_path_asset_proximity
 fallback_providers=adaptive_cv_ca_ct_physics
 algorithm_levels=small,medium,large
 object_types=aircraft,ship,uav,unknown
@@ -665,11 +733,13 @@ models=track_state_kalman_cv,trajectory_adaptive_multi_model_physics,...
 models_ready=<Agent 已成功加载的模型>
 models_count=<模型数量>
 algorithm_deployment_status=ready / partial / unavailable
-algorithm_execution_location=agent_process
-algorithm_library_transport=none
-algorithm_loading_mode=agent_local_model_bundle
-remote_algorithm_execution=false
-algorithm_contract_version=track_threat_algorithms/v1
+upstream_track_authority=cms_tactical_intelligence_agent
+local_track_association=disabled_for_upstream_fused_tracks
+algorithm_execution_location=zsl_algorithm_library_with_agent_local_fallback
+algorithm_library_transport=HTTP+JSON
+algorithm_loading_mode=gpt_4o_mini_tool_plan_then_validated_algolib_run
+remote_algorithm_execution=<由 ALGORITHM_LIBRARY_ENABLED 决定>
+algorithm_contract_version=track_threat_algorithms/v2
 internal_workflow_engine=false
 active_tasks=0
 max_concurrent_tasks=1

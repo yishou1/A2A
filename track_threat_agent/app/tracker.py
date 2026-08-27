@@ -39,6 +39,12 @@ class MultiTargetTracker:
         self._recent_detection_ids: Dict[str, float] = {}
         self._ignored_duplicate_detection_count = 0
         self._ignored_out_of_order_detection_count = 0
+        self._upstream_identity_reuse_count = 0
+        self._upstream_duplicate_observation_count = 0
+        self._upstream_direct_update_count = 0
+        self._coalesced_same_source_detection_count = 0
+        self._source_identity_association_count = 0
+        self._source_identity_replacement_count = 0
 
     def reset(self) -> None:
         self.tracks.clear()
@@ -46,6 +52,12 @@ class MultiTargetTracker:
         self._recent_detection_ids.clear()
         self._ignored_duplicate_detection_count = 0
         self._ignored_out_of_order_detection_count = 0
+        self._upstream_identity_reuse_count = 0
+        self._upstream_duplicate_observation_count = 0
+        self._upstream_direct_update_count = 0
+        self._coalesced_same_source_detection_count = 0
+        self._source_identity_association_count = 0
+        self._source_identity_replacement_count = 0
 
     def restore_tracks(self, tracks: Dict[str, TrackState]) -> None:
         self.tracks = dict(tracks)
@@ -68,6 +80,12 @@ class MultiTargetTracker:
             "latest_detection_time": self._latest_detection_time,
             "ignored_duplicate_detection_count": self._ignored_duplicate_detection_count,
             "ignored_out_of_order_detection_count": self._ignored_out_of_order_detection_count,
+            "upstream_identity_reuse_count": self._upstream_identity_reuse_count,
+            "upstream_duplicate_observation_count": self._upstream_duplicate_observation_count,
+            "upstream_direct_update_count": self._upstream_direct_update_count,
+            "coalesced_same_source_detection_count": self._coalesced_same_source_detection_count,
+            "source_identity_association_count": self._source_identity_association_count,
+            "source_identity_replacement_count": self._source_identity_replacement_count,
             "lifecycle_counts": lifecycle_counts,
         }
 
@@ -85,7 +103,10 @@ class MultiTargetTracker:
         for detection_index, detection in enumerate(ordered_detections):
             association = associations.get(detection_index)
             if association is None:
+                source_epoch, identity_replaced = self._replace_unmatched_source_identity(detection)
                 track = self._new_track(detection)
+                track.metadata["source_epoch"] = source_epoch
+                track.metadata["source_identity_replaced"] = identity_replaced
             else:
                 track, association_metadata = association
                 previous = track.model_copy(deep=True)
@@ -108,6 +129,251 @@ class MultiTargetTracker:
         self._age_unassigned_tracks(assigned_tracks, now)
         return list(self.tracks.values())
 
+    def sync_upstream_tracks(self, observations: Iterable[Detection]) -> List[TrackState]:
+        """Synchronize already-fused upstream tracks without local association or filtering."""
+        validated = [
+            item if isinstance(item, Detection) else Detection.model_validate(item)
+            for item in observations
+        ]
+        by_identity: Dict[str, Detection] = {}
+        for observation in validated:
+            identity = self._upstream_source_identity(observation)
+            previous = by_identity.get(identity)
+            if previous is not None:
+                self._upstream_duplicate_observation_count += 1
+                if (observation.timestamp, observation.confidence) <= (
+                    previous.timestamp,
+                    previous.confidence,
+                ):
+                    continue
+            by_identity[identity] = observation
+
+        ordered = sorted(by_identity.items(), key=lambda item: (item[1].timestamp, item[0]))
+        now = max((observation.timestamp for _, observation in ordered), default=0.0)
+        self._mark_or_remove_stale(now)
+        assigned_track_ids: Set[str] = set()
+        observed_scope_keys: Set[tuple[str, str]] = set()
+
+        for source_identity, observation in ordered:
+            scope_key = (
+                observation.source_agent,
+                str(observation.metadata.get("upstream_mission_id", "unknown-mission")),
+            )
+            observed_scope_keys.add(scope_key)
+            existing = self._track_for_source_identity(source_identity)
+            source_epoch = int(existing.metadata.get("source_epoch", 1)) if existing else 1
+            identity_conflict = False
+
+            if existing is not None and observation.timestamp <= existing.last_update_time:
+                self._upstream_duplicate_observation_count += 1
+                assigned_track_ids.add(existing.track_id)
+                continue
+
+            if existing is not None and self._upstream_identity_is_reused(existing, observation):
+                source_epoch += 1
+                identity_conflict = True
+                self._upstream_identity_reuse_count += 1
+                existing.metadata.update(
+                    {
+                        "status": "superseded",
+                        "lifecycle_state": "lost",
+                        "superseded_reason": "upstream_track_id_reused_with_physical_conflict",
+                    }
+                )
+                del self.tracks[existing.track_id]
+                existing = None
+
+            if existing is None:
+                track = self._new_upstream_track(
+                    observation,
+                    source_identity=source_identity,
+                    source_epoch=source_epoch,
+                    identity_conflict=identity_conflict,
+                )
+            else:
+                track = self._update_upstream_track(existing, observation)
+
+            self.tracks[track.track_id] = track
+            assigned_track_ids.add(track.track_id)
+            self._upstream_direct_update_count += 1
+
+        self._age_unassigned_upstream_tracks(assigned_track_ids, observed_scope_keys, now)
+        if now > 0:
+            self._latest_detection_time = max(self._latest_detection_time or now, now)
+        return list(self.tracks.values())
+
+    def _upstream_source_identity(self, observation: Detection) -> str:
+        explicit = str(observation.metadata.get("source_identity") or "").strip()
+        if explicit:
+            return explicit
+        source_object_id = str(observation.metadata.get("source_object_id") or "").strip()
+        if source_object_id:
+            return f"{observation.source_agent}:{source_object_id}"
+        return f"{observation.source_agent}:event:{observation.detection_id}"
+
+    def _track_for_source_identity(self, source_identity: str) -> TrackState | None:
+        candidates = [
+            track
+            for track in self.tracks.values()
+            if str(track.metadata.get("source_identity") or "") == source_identity
+            and track.metadata.get("status") not in {"lost", "superseded"}
+        ]
+        if not candidates:
+            return None
+        return max(
+            candidates,
+            key=lambda track: (
+                track.metadata.get("status") == "active",
+                track.last_update_time,
+                track.track_quality,
+                int(track.metadata.get("hit_count", 0)),
+            ),
+        )
+
+    def _upstream_identity_is_reused(self, track: TrackState, observation: Detection) -> bool:
+        dt = max(0.0, observation.timestamp - track.last_update_time)
+        distance_m = haversine_m(track.lat, track.lon, observation.lat, observation.lon)
+        physical_gate_m = max(
+            self.association_gate_m,
+            max(track.speed, observation.speed, 1.0) * max(dt, 1.0) * 2.0 + 1_500.0,
+        )
+        return distance_m > physical_gate_m
+
+    def _new_upstream_track(
+        self,
+        observation: Detection,
+        *,
+        source_identity: str,
+        source_epoch: int,
+        identity_conflict: bool,
+    ) -> TrackState:
+        vx, vy = speed_heading_to_velocity(observation.speed, observation.heading)
+        history = self._merged_upstream_history([], observation)
+        metadata = {
+            **observation.metadata,
+            "status": "active",
+            "lifecycle_state": "confirmed",
+            "confirmed_once": True,
+            "hit_count": 1,
+            "consecutive_hit_count": 1,
+            "source_agent": observation.source_agent,
+            "source_identity": source_identity,
+            "source_epoch": source_epoch,
+            "last_detection_id": observation.detection_id,
+            "tracking_mode": "upstream_fused_tracks",
+            "local_association_performed": False,
+            "local_filter_performed": False,
+            "filter": "upstream_fused_track",
+            "upstream_identity_conflict": identity_conflict,
+            "anomaly": {"low_confidence": observation.confidence < 0.45},
+        }
+        track = TrackState(
+            track_id=f"trk-{uuid4().hex[:10]}",
+            object_type=observation.object_type,
+            lat=observation.lat,
+            lon=observation.lon,
+            alt=observation.alt,
+            speed=observation.speed,
+            heading=observation.heading,
+            vx=vx,
+            vy=vy,
+            track_quality=clamp(observation.confidence),
+            last_update_time=observation.timestamp,
+            missed_count=0,
+            history_path=history,
+            metadata=metadata,
+        )
+        track.predicted_path = self._predict_path(track)
+        return track
+
+    def _update_upstream_track(self, track: TrackState, observation: Detection) -> TrackState:
+        previous = track.model_copy(deep=True)
+        vx, vy = speed_heading_to_velocity(observation.speed, observation.heading)
+        track.object_type = observation.object_type
+        track.lat = observation.lat
+        track.lon = observation.lon
+        track.alt = observation.alt
+        track.speed = observation.speed
+        track.heading = observation.heading
+        track.vx = vx
+        track.vy = vy
+        track.last_update_time = observation.timestamp
+        track.missed_count = 0
+        track.track_quality = self._quality_from_detection(track.track_quality, observation.confidence)
+        track.history_path = self._merged_upstream_history(track.history_path, observation)
+        hit_count = int(track.metadata.get("hit_count", 0)) + 1
+        track.metadata.update(observation.metadata)
+        track.metadata.update(
+            {
+                "status": "active",
+                "lifecycle_state": "confirmed",
+                "confirmed_once": True,
+                "hit_count": hit_count,
+                "consecutive_hit_count": int(track.metadata.get("consecutive_hit_count", 0)) + 1,
+                "source_agent": observation.source_agent,
+                "last_detection_id": observation.detection_id,
+                "tracking_mode": "upstream_fused_tracks",
+                "local_association_performed": False,
+                "local_filter_performed": False,
+                "filter": "upstream_fused_track",
+                "upstream_identity_conflict": False,
+                "anomaly": self._detect_anomaly(previous, observation),
+            }
+        )
+        track.predicted_path = self._predict_path(track)
+        return track
+
+    def _merged_upstream_history(
+        self,
+        existing: List[Dict[str, float]],
+        observation: Detection,
+    ) -> List[Dict[str, float]]:
+        points = [dict(point) for point in existing]
+        points.extend(
+            dict(point)
+            for point in observation.metadata.get("upstream_history_path", []) or []
+            if isinstance(point, dict) and "lat" in point and "lon" in point
+        )
+        points.append(
+            self._history_point(
+                observation.lat,
+                observation.lon,
+                observation.alt,
+                observation.timestamp,
+                observation.speed,
+                observation.heading,
+            )
+        )
+        by_timestamp: Dict[float, Dict[str, float]] = {}
+        for point in points:
+            timestamp = float(point.get("timestamp", 0.0))
+            by_timestamp[timestamp] = point
+        return [by_timestamp[timestamp] for timestamp in sorted(by_timestamp)][-50:]
+
+    def _age_unassigned_upstream_tracks(
+        self,
+        assigned_track_ids: Set[str],
+        observed_scope_keys: Set[tuple[str, str]],
+        now: float,
+    ) -> None:
+        for track in self.tracks.values():
+            if track.track_id in assigned_track_ids:
+                continue
+            if track.metadata.get("tracking_mode") != "upstream_fused_tracks":
+                continue
+            scope_key = (
+                str(track.metadata.get("source_agent", "")),
+                str(track.metadata.get("upstream_mission_id", "unknown-mission")),
+            )
+            if scope_key not in observed_scope_keys:
+                continue
+            track.missed_count += 1
+            track.track_quality = clamp(track.track_quality * 0.96)
+            track.metadata["status"] = "coasting"
+            track.metadata["lifecycle_state"] = "coasting"
+            track.metadata["consecutive_hit_count"] = 0
+            track.predicted_path = self._predict_path(track)
+
     def _prepare_detections(self, detections: Iterable[Detection]) -> List[Detection]:
         validated = [d if isinstance(d, Detection) else Detection.model_validate(d) for d in detections]
         unique_by_id: Dict[str, Detection] = {}
@@ -119,6 +385,27 @@ class MultiTargetTracker:
                     unique_by_id[detection.detection_id] = detection
                 continue
             unique_by_id[detection.detection_id] = detection
+
+        coalesced_by_source: Dict[str, Detection] = {}
+        unscoped: List[Detection] = []
+        for detection in unique_by_id.values():
+            identity = self._detection_source_identity(detection)
+            if not identity:
+                unscoped.append(detection)
+                continue
+            existing = coalesced_by_source.get(identity)
+            if existing is not None:
+                self._coalesced_same_source_detection_count += 1
+                if (detection.timestamp, detection.confidence) <= (
+                    existing.timestamp,
+                    existing.confidence,
+                ):
+                    continue
+            coalesced_by_source[identity] = detection
+        unique_by_id = {
+            detection.detection_id: detection
+            for detection in [*coalesced_by_source.values(), *unscoped]
+        }
 
         accepted = []
         previous_watermark = self._latest_detection_time
@@ -188,11 +475,21 @@ class MultiTargetTracker:
                     "position_nis": round(float(metrics["position_nis"]), 4),
                     "position_nis_gate": self._POSITION_NIS_GATE,
                     "physical_gate_m": round(float(metrics["physical_gate_m"]), 2),
+                    "source_identity_matched": bool(metrics.get("source_identity_matched", False)),
                 },
             )
+            if metrics.get("source_identity_matched"):
+                self._source_identity_association_count += 1
         return associations
 
     def _association_metrics(self, track: TrackState, detection: Detection) -> Dict[str, float] | None:
+        track_identity = self._track_source_identity(track)
+        detection_identity = self._detection_source_identity(detection)
+        if track_identity and detection_identity and track_identity != detection_identity:
+            return None
+        source_identity_matched = bool(
+            track_identity and detection_identity and track_identity == detection_identity
+        )
         known_types = {"aircraft", "ship", "uav"}
         if track.object_type in known_types and detection.object_type in known_types:
             if track.object_type != detection.object_type:
@@ -231,12 +528,59 @@ class MultiTargetTracker:
             + type_penalty
             + quality_penalty
         )
+        if source_identity_matched:
+            cost *= 0.05
         return {
             "cost": cost,
             "distance_m": distance_m,
             "position_nis": position_nis,
             "physical_gate_m": physical_gate_m,
+            "source_identity_matched": source_identity_matched,
         }
+
+    def _detection_source_identity(self, detection: Detection) -> str:
+        explicit = str(detection.metadata.get("source_identity") or "").strip()
+        if explicit:
+            return explicit
+        source_object_id = str(detection.metadata.get("source_object_id") or "").strip()
+        if source_object_id:
+            return f"{detection.source_agent}:{source_object_id}"
+        return ""
+
+    def _track_source_identity(self, track: TrackState) -> str:
+        explicit = str(track.metadata.get("source_identity") or "").strip()
+        if explicit:
+            return explicit
+        source_object_id = str(track.metadata.get("source_object_id") or "").strip()
+        source_agent = str(track.metadata.get("source_agent") or "").strip()
+        if source_object_id and source_agent:
+            return f"{source_agent}:{source_object_id}"
+        return ""
+
+    def _replace_unmatched_source_identity(self, detection: Detection) -> tuple[int, bool]:
+        identity = self._detection_source_identity(detection)
+        if not identity:
+            return 1, False
+        duplicates = [
+            track
+            for track in self.tracks.values()
+            if self._track_source_identity(track) == identity
+            and track.metadata.get("status") not in {"lost", "superseded"}
+        ]
+        if not duplicates:
+            return 1, False
+        source_epoch = max(int(track.metadata.get("source_epoch", 1)) for track in duplicates) + 1
+        for track in duplicates:
+            track.metadata.update(
+                {
+                    "status": "superseded",
+                    "lifecycle_state": "lost",
+                    "superseded_reason": "trusted_source_identity_restarted_after_association_failure",
+                }
+            )
+            self.tracks.pop(track.track_id, None)
+        self._source_identity_replacement_count += len(duplicates)
+        return source_epoch, True
 
     def _association_position_covariance(
         self,
@@ -366,6 +710,7 @@ class MultiTargetTracker:
                 "consecutive_hit_count": 1,
                 "confirmed_once": self.confirmation_hits <= 1,
                 "source_agent": detection.source_agent,
+                "source_identity": self._detection_source_identity(detection),
                 "last_detection_id": detection.detection_id,
                 "anomaly": anomaly,
                 "filter": "initialized",

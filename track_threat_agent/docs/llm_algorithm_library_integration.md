@@ -25,10 +25,9 @@ Only these zsl packages can be selected:
 
 ```text
 multimodal_feature_fuser
-target_type_classifier
-track_state_updater
 trajectory_predictor
 graph_relation_reasoner
+threat_priority_random_forest
 ```
 
 An LLM response outside this list, outside the requested Skill, or with a wrong
@@ -63,15 +62,14 @@ uv run --with-requirements services/requirements.txt \
 
 It listens on `127.0.0.1:9022`.
 
-Register and activate the five packages in terminal 2:
+Register and activate the four packages in terminal 2:
 
 ```bash
 for algorithm_id in \
   multimodal_feature_fuser \
-  target_type_classifier \
-  track_state_updater \
   trajectory_predictor \
-  graph_relation_reasoner
+  graph_relation_reasoner \
+  threat_priority_random_forest
 do
   ./build/algolib register "examples/${algorithm_id}/1.0.0"
   ./build/algolib activate "${algorithm_id}" 1.0.0 python_http_service

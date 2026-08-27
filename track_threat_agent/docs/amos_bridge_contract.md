@@ -51,9 +51,10 @@ AMOS 地图建议：
 - `history_path`：实线历史航迹。
 - `predicted_path`：虚线预测航线。
 - `predicted_path[].uncertainty_radius_m`：预测误差圈或 popup 字段。
-- `metadata.plan_algorithms.trajectory_prediction`：ST-GNN 动态实体跟踪与轨迹预测契约说明。
-- `predicted_path[].model_used`：`st_gnn_torchscript` 表示正式模型已应用；`adaptive_multi_model_fused` 表示物理回退。
-- `predicted_path[].model_version`：模型版本；物理回退点可为空。
+- `metadata.plan_algorithms.trajectory_prediction`：航线预测的算法、运行位置与降级原因；正式链路为算法库 `trajectory_predictor`。
+- `predicted_path[].model_used`：`algorithm_library` 表示算法库预测器已返回结果；`adaptive_multi_model_fused` 表示本地物理回退。
+- `predicted_path[].prediction_provenance`：包含 `algorithm`、`role`、`execution_location`，前端可显示结果来源而不推断模型细节。
+- `predicted_path[].model_version`：算法模型版本；物理回退点可为空。
 - `predicted_path[].prediction_confidence` / `uncertainty_radius_m`：置信度与不确定半径。
 
 ### 3.2 编组/编队
@@ -74,7 +75,9 @@ AMOS 地图建议：
   "metadata": {
     "lifecycle_state": "confirmed",
     "hit_count": 4,
-    "missed_count": 0
+    "missed_count": 0,
+    "held_member_ids": [],
+    "member_relation_misses": {}
   }
 }
 ```
@@ -86,6 +89,8 @@ AMOS 地图建议：
 - `centroid_prediction`：群体中心虚线预测路线。
 - `members`：在 popup 中显示成员 track。
 - `metadata.lifecycle_state`：`tentative` 为待确认，`confirmed` 为连续确认，`coasting` 为短时漏检保持；前端可降低 coasting 包络透明度。
+- `metadata.held_member_ids`：成员因单帧速度、航向或距离异常而暂时保留；前端可将这类成员显示为低透明度或“待确认离组”。
+- `metadata.formation_inference.membership_source=algorithm_library`：成员关系来自 `graph_relation_reasoner`；包络、生命周期和风险汇总由本 Agent 生成。
 
 ### 3.3 保护资产
 

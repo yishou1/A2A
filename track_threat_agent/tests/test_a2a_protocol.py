@@ -196,6 +196,55 @@ async def test_send_message_accepts_required_skills_context_and_output_hint():
 
 
 @pytest.mark.anyio
+async def test_cms_fused_tracks_bypass_local_reassociation_and_keep_track_identity():
+    main.reset_runtime_state()
+
+    def task(packet_id: str, timestamp: float, lon: float) -> dict:
+        return _commander_task(
+            work_item=f"wi-cms-{packet_id}",
+            required_skill="track_threat_situation_analysis",
+            output_hint="track_threat_group_artifact",
+            input_payload={
+                "intelligence_packet": {
+                    "schema_version": "1.0",
+                    "packet_id": packet_id,
+                    "mission_id": "wf-cms-integration",
+                    "created_at": timestamp,
+                    "tracks": [
+                        {
+                            "track_id": "T-0001",
+                            "object_type": "aircraft",
+                            "class_name": "aircraft",
+                            "timestamp": timestamp,
+                            "lat": 31.23,
+                            "lon": lon,
+                            "alt": 3000.0,
+                            "speed": 200.0,
+                            "heading": 90.0,
+                            "confidence": 0.9,
+                            "history_path": [],
+                        }
+                    ],
+                    "targets": [{"track_id": "T-0001", "class": "aircraft"}],
+                }
+            },
+        )
+
+    first = await send_message(task("packet-1", 1000.0, 121.0), token="unit-test")
+    second = await send_message(task("packet-2", 1010.0, 121.02), token="unit-test")
+
+    first_track = first["artifact"]["tracks"][0]
+    second_track = second["artifact"]["tracks"][0]
+    assert first_track["track_id"] == second_track["track_id"]
+    assert second_track["metadata"]["tracking_mode"] == "upstream_fused_tracks"
+    assert second_track["metadata"]["local_association_performed"] is False
+    assert second_track["metadata"]["local_filter_performed"] is False
+    assert second["artifact"]["trace"]["input_kind"] == "upstream_tracks"
+    assert second["artifact"]["trace"]["track_input_count"] == 1
+    assert second["artifact"]["trace"]["detection_count"] == 0
+
+
+@pytest.mark.anyio
 async def test_commander_trajectory_tracking_skill_returns_requested_output_key():
     main.reset_runtime_state()
     payload = json.loads((DATA_DIR / "frame_1.json").read_text())

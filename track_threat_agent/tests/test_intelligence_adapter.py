@@ -16,7 +16,9 @@ from app.intelligence_adapter import (
     DetectionFrameCache,
     convert_intelligence_to_detections,
     convert_target_to_detection,
+    extract_intelligence_packet,
     extract_scene_from_intelligence,
+    has_upstream_tracks,
     is_intelligence_format,
     map_class_to_object_type,
     reset_adapter_cache,
@@ -102,6 +104,48 @@ INTEL_SAMPLE = {
 }
 
 
+CMS_TRACK_PACKET = {
+    "schema_version": "1.0",
+    "packet_id": "packet-001",
+    "mission_id": "wf-cms-001",
+    "created_at": "2026-08-23T10:00:00Z",
+    "tracks": [
+        {
+            "track_id": "T-0001",
+            "object_type": "aircraft",
+            "class_name": "uav",
+            "timestamp": 1787450400.0,
+            "lat": 31.2300,
+            "lon": 121.4700,
+            "alt": 1200.0,
+            "speed": 42.0,
+            "heading": 90.0,
+            "confidence": 0.91,
+            "history_path": [
+                {
+                    "timestamp": 1787450390.0,
+                    "lat": 31.2300,
+                    "lon": 121.4656,
+                    "alt": 1200.0,
+                    "speed": 42.0,
+                    "heading": 90.0,
+                }
+            ],
+        }
+    ],
+    "targets": [
+        {
+            "track_id": "T-0001",
+            "class": "uav",
+            "label": "unknown",
+            "affiliation": "unknown",
+            "threat_level": "medium",
+            "confidence": 0.88,
+        }
+    ],
+}
+
+
 # ==================== 类别映射测试 ====================
 
 @pytest.mark.parametrize(
@@ -136,6 +180,49 @@ def test_is_intelligence_format_negative():
     assert is_intelligence_format({}) is False
     assert is_intelligence_format({"detections": []}) is False
     assert is_intelligence_format({"targets": "not_a_list"}) is False
+
+
+def test_extracts_cms_packet_from_commander_output_envelope():
+    wrapped = {"output": {"intelligence_packet": CMS_TRACK_PACKET}}
+
+    assert extract_intelligence_packet(wrapped) == CMS_TRACK_PACKET
+    assert is_intelligence_format(wrapped) is True
+    assert has_upstream_tracks(wrapped) is True
+
+
+def test_cms_tracks_use_unique_observation_id_and_stable_source_identity():
+    detections = convert_intelligence_to_detections(CMS_TRACK_PACKET)
+
+    assert len(detections) == 1
+    detection = detections[0]
+    assert detection.detection_id == "cms:packet-001:T-0001:1787450400.000000"
+    assert detection.metadata["source_object_id"] == "wf-cms-001:T-0001"
+    assert detection.metadata["upstream_track_id"] == "T-0001"
+    assert detection.metadata["input_kind"] == "fused_track"
+    assert detection.object_type == "uav"
+    assert detection.speed == 42.0
+    assert detection.heading == 90.0
+    assert detection.metadata["upstream_history_path"] == CMS_TRACK_PACKET["tracks"][0]["history_path"]
+
+
+def test_cms_next_packet_creates_new_observation_id_for_same_track():
+    next_packet = {
+        **CMS_TRACK_PACKET,
+        "packet_id": "packet-002",
+        "tracks": [
+            {
+                **CMS_TRACK_PACKET["tracks"][0],
+                "timestamp": 1787450410.0,
+                "lon": 121.4744,
+            }
+        ],
+    }
+
+    first = convert_intelligence_to_detections(CMS_TRACK_PACKET)[0]
+    second = convert_intelligence_to_detections(next_packet)[0]
+
+    assert first.detection_id != second.detection_id
+    assert first.metadata["source_object_id"] == second.metadata["source_object_id"]
 
 
 # ==================== 帧缓存测试 ====================
@@ -291,10 +378,8 @@ def test_extract_scene_from_intelligence():
     scene = extract_scene_from_intelligence(INTEL_SAMPLE)
     assert "operation_name" in scene
     assert scene["operation_name"] == "OP-IRON-VALLEY-2026"
-    # 从 targets 几何中心推算的保护区
-    assert "protected_zone_lat" in scene
-    assert "protected_zone_lon" in scene
-    assert "protected_radius_m" in scene
+    assert "protected_zone_lat" not in scene
+    assert scene["protected_assets"] == []
     assert scene["anti_jam_mode"] is True
     assert "provenance_summary" in scene
 

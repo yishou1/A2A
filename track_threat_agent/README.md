@@ -30,18 +30,17 @@ metadata.status=idle
 
 ## 2. 当前能力
 
-- 多目标航迹跟踪。
-- 协方差 NIS 门控 + Hungarian 全局最近邻关联，降低交叉航迹换号和检测输入顺序影响。
+- CMS 融合航迹同步：以 CMS 输出的稳定 `track_id` 和 `history_path` 为权威输入；本 Agent 不重复执行多源关联或滤波。
 - 未来 10 / 20 / 30 / 60 / 120 秒航线预测，并输出预测模型、置信度、不确定半径和时域类型。
-- 计划书算法 Provider：默认使用 `PlanAlgorithmProvider` 暴露 ST-GNN、DBN 风险校准、保护资产影响分析、编队识别和 XAI 证据链。
-- ST-GNN 动态实体跟踪与轨迹预测：安装 `requirements-model.txt` 后加载 Agent 内置、通过 schema/SHA256/golden I/O 校验的 TorchScript v2 模型包，飞机更新 10 / 20 / 30 / 60 秒预测点，船舶追加 600 / 1200 秒预测点。
+- 计划书算法 Provider：默认使用 `PlanAlgorithmProvider` 调度算法库的特征融合、ST-GNN 航迹预测、图关系推理和随机森林态势关注分类，并输出 XAI 证据链。
+- ST-GNN 航迹预测：由算法库 `trajectory_predictor` 在服务侧加载已冻结模型包，飞机输出 10 / 20 / 30 / 60 秒预测点，船舶可追加 600 / 1200 秒预测点。
 - 自适应物理多假设预测：同时生成 `constant_velocity`、`constant_acceleration`、`coordinated_turn` 三类轨迹，依据观测到的加速度、转向率、航迹质量和异常状态归一化融合；该回退实现不冒充完整 IMM。
-- 协方差 Kalman 滤波：`medium` 档使用 CV 状态空间 Kalman 更新，输出 state、covariance、innovation 和 kalman_gain。
+- 本地 Kalman/alpha-beta 仅保留给独立 Demo 的原始 `detections[]` 兼容入口；联调主路径不使用它重新建航迹。
 - ADE/FDE 回看评估：下一帧到达后记录上一帧预测误差，summary 中输出聚合评估。
-- DBN 动态态势关注校准：参数位于 `config/dbn_risk_model_v1.json`，输出 low / medium / high 后验概率、观测可信度、状态转移、可观测运动模式概率、参数版本和 SHA256。
+- 随机森林态势关注分类：算法库 `threat_priority_random_forest` 根据距离、速度、资产价值、情报置信度和基础风险特征输出 low / medium / high 关注级别及类别概率；本地风险因素用于证据链和故障回退。
 - XAI 可解释封装：输出 `evidence_chain`、`factor_chain`、`dbn_transition_evidence`、`safety_chain` 和 `model_trace`，用于解释排序原因并声明安全边界。
 - 下游决策 Agent 适配：artifact 同时输出兼容字段 `decision_risk_assessments` 和标准字段 `risk_assessments`；Commander 可使用 `output_hint=risk_assessments` 取得 `output.risk_assessments`，其元素字段对齐 lzh 决策规划 Agent 的 `RiskAssessment`。
-- 疑似空中编队和海上编组识别，完整连接约束防止距离过远的链式误并，并使用 `tentative / confirmed / coasting` 生命周期稳定连续帧 `group_id`。
+- 疑似空中编队和海上编组识别：算法库 `graph_relation_reasoner` 负责成员关系推理；本 Agent 只负责把关系结果转换为稳定 `group_id`、包络、中心预测线及 `tentative / confirmed / coasting` 生命周期。
 - 威胁排序直接使用 ST-GNN 或自适应物理预测路径、预测置信度和不确定性半径。
 - 己方保护资产影响分析。
 - 单体、群体、资产影响统一关注排序。
@@ -56,11 +55,11 @@ metadata.status=idle
 - `GET /resources` 返回主机与 Agent 进程 CPU、内存、磁盘和线程快照，供 Commander 调度观察。
 - `POST /recovery/notify`、`GET /recovery/status` 接收并查询 Commander 重规划/恢复通知。
 - Nacos role/status metadata 和 heartbeat_ts 心跳；心跳会保留 Commander 写入的 busy/unavailable/lease_* 状态。
-- `AlgorithmProvider` 作为算法边界，默认主线已经切换到本地可运行的计划书算法栈。
+- `AlgorithmProvider` 作为算法边界，在线主线对齐 CMS 上游航迹和算法库标准包；本地模型只作为显式降级能力。
 - 本地 JSON 状态快照，支持演示环境重启后恢复航迹、最近 artifact、幂等缓存和 workflow work list。
 - 独立 ST-GNN 模型包发现：默认发现 `models/track_threat` 下的内置模型包，也可通过 `ST_GNN_AIRCRAFT_MODEL_DIR`、`ST_GNN_SHIP_MODEL_DIR` 或旧 `ST_GNN_MODEL_DIR` 覆盖；模型不可用时安全回退。
 
-当前工程采用与 `lzh` 分支一致的“工具小模型规划 + 算法库执行”模式。Agent 从 zsl 算法库 `/algorithms` 获取已激活目录，Azure GPT-4o-mini 只输出受白名单限制的 JSON `algorithm_calls`，代码再次校验算法 ID、版本和 backend 后调用 `/run`。算法库不可用、LLM 未配置或规划无效时，`PlanAlgorithmProvider` 回退 Agent 本地的 Kalman、CV/CA/CT、TorchScript ST-GNN、DBN、编组和保护资产影响算法。知识库/RAG/方案规划/合规授权仍属于独立下游 Agent。
+当前工程采用“工具小模型规划 + 算法库执行”模式。Agent 从算法库 `/algorithms` 获取已激活目录，Azure GPT-4o-mini 只输出受白名单限制的 JSON `algorithm_calls`，代码再次校验算法 ID、版本和 backend 后调用 `/run`。在线主线调用 `multimodal_feature_fuser`、`trajectory_predictor`、`graph_relation_reasoner` 和 `threat_priority_random_forest`；算法库或 LLM 不可用时，才显式记录并回退本地物理预测、风险证据与群体生命周期逻辑。知识库/RAG/方案规划/合规授权仍属于独立下游 Agent。
 
 ## 2.1 独立 ST-GNN 训练工程
 
@@ -167,11 +166,24 @@ export HEARTBEAT_INTERVAL=5
 
 完整 Nacos 联调步骤见 `docs/nacos_smoke_test.md`。该文档覆盖 Docker Compose 启动 Nacos、Agent 注册、师兄 `NacosRegistry` 发现、以及通过发现到的 `/sendMessage` endpoint 发起 A2A 调用。
 
-### 4.1 Agent 本地模型执行
+### 4.1 算法库执行与本地降级
 
-Agent 持有权威 `TrackStore`、任务幂等缓存、宕机恢复快照和模型实例。启动时从 `models/track_threat` 或 `ST_GNN_*_MODEL_DIR` 加载 TorchScript 模型，每帧航迹在本进程完成推理。`GET /models` 和 Nacos metadata 会公布 `models`、`models_ready`、`models_count` 和 `algorithm_deployment_status`。
+Agent 持有 CMS 航迹同步状态、任务幂等缓存和宕机恢复快照。在线预测、群体成员关系和优先级分类由算法库执行；`GET /algorithms` 会公开当前主算法包及其服务后端。本地 `models/track_threat` 或 `ST_GNN_*_MODEL_DIR` 仅用于算法库不可用时的受控降级，`GET /models` 和 Nacos metadata 会标记其状态。
 
-Nacos 只发现 Agent、公布 skill/模型/健康状态，不调度算法、不传输模型输入、不承载逐帧航迹。模型超时、输入不足或 bundle 校验失败时，当前帧在 Agent 内回退自适应 CV/CA/CT 物理预测，不会转发给远程算法服务。
+Nacos 只发现 Agent、公布 Skill、健康状态和算法摘要，不调度算法、不传输模型输入、不承载逐帧航迹。算法库超时、输入不足或输出校验失败时，当前帧在 Agent 内回退自适应 CV/CA/CT 物理预测，并在 `algorithm_execution_trace.local_fallbacks` 中留下原因。
+
+### 4.2 CMS 融合航迹输入
+
+Agent 现在区分两种航迹输入模式：
+
+- `output.intelligence_packet.tracks[]`：联调正式入口。CMS 已完成航迹聚合，本 Agent 按上游身份直接同步，不再次运行最近邻关联或本地 Kalman。
+- `detections[]`：只保留为独立 Demo 与历史兼容入口，不作为 CMS 联调的生产路径。
+
+CMS 模式使用 `packet_id + track_id + timestamp` 形成唯一观测 ID，使用 `mission_id + track_instance_id/track_id` 形成稳定来源身份。相同来源身份连续帧更新同一内部航迹；相同编号发生物理不可能的位置跳变时启动新的 `source_epoch` 并淘汰旧航迹。CMS `history_path` 按 timestamp 合并去重，最多保留 50 点。
+
+新群体只允许 `active` 航迹参与创建，`coasting` 航迹仅通过既有群体的生命周期短时保持；同一可信来源身份在一组群体候选中最多出现一次。这阻断了“旧 coasting 航迹 + 新 active 航迹形成虚假编队”的传播路径。
+
+保护资产必须由 Commander `context.scene`、剧本 `scene.protected_assets` 或 AMOS 资产管理提供。Agent 不再根据目标几何中心推断保护区域。
 
 接入 Commander 宕机恢复时，本 Agent 遵守师兄统一规范：
 
@@ -185,7 +197,7 @@ Nacos 只发现 Agent、公布 skill/模型/健康状态，不调度算法、不
 - SDK 注册/心跳失败时自动回退 Nacos HTTP API；metadata PUT 遇到 Nacos Raft metadata 更新异常时，以幂等 POST 重新注册同一实例。
 - 当 `/lifecycle/ready` 设置为 `ready=false` 时，`/sendMessage` 返回标准失败信封，`/sendMessageStream` 返回 503，Commander 可切换到同 role 其他 idle Agent。
 
-本次实现复用了 `lzh` 分支的远程算法库思路，但加入航迹 Agent 所需的状态保护与本地降级。GPT-4o-mini 负责从 Track Threat 白名单中规划算法，zsl AlgorithmRepo 的 `/run` 负责执行 Python Service；本地 TrackStore 仍是航迹状态权威来源，远端轨迹预测会合并进 `predicted_path`，算法库故障时继续使用本地预测。Nacos 发布发现、容量、心跳、资源、Skill、小模型部署名和算法库地址摘要；API Key 永远不进入 Nacos metadata。
+GPT-4o-mini 负责从 Track Threat 白名单中规划算法，算法库 `/run` 负责执行 Python Service；CMS 对原始航迹状态负责，本 Agent 对同步幂等、预测结果整合、群体生命周期、保护资产影响和 A2A/AMOS 输出负责。Nacos 发布发现、容量、心跳、资源、Skill 和算法库地址摘要；API Key 永远不进入 Nacos metadata。
 
 ### GPT-4o-mini 与 zsl AlgorithmRepo
 
@@ -406,7 +418,7 @@ PYTHONPATH=.. uv run --with-requirements requirements.txt --with-requirements ..
 - `trace`：包含 `task_id`、`algorithm_level`、输入 detection 数量和处理时间。
 - `tracks`：连续航迹、历史路径、预测路径。
 - `threats`：单体关注排序。
-- `groups`：疑似编队/编组，`metadata.lifecycle_state` 标明待确认、已确认或短时保持状态。
+- `groups`：疑似编队/编组，`metadata.lifecycle_state` 标明待确认、已确认或短时保持状态；`metadata.held_member_ids` 和 `metadata.member_relation_misses` 说明因短时运动异常被暂时保留的成员及其连续异常帧数。
 - `asset_impacts`：保护资产影响分析，包含预测最近距离、保护半径距离裕度、是否进入保护半径和预计进入时间。
 - `unified_threat_ranking`：单体、群体、资产影响统一排序，包含 `reason`、`evidence`、`factors`，方便前端或 Commander 解释排序原因。
 - `events`：`track.updated`、`threat.updated`、`track.group.updated`、`threat.group.updated`、`threat.ranking.updated`、`asset.impact.updated` 等事件。

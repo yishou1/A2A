@@ -233,3 +233,121 @@ def test_group_detection_writes_physical_context_to_member_tracks():
         assert context["group_id"] == group.group_id
         assert context["group_type"] == "air_formation"
         assert context["cohesion_score"] == group.cohesion_score
+
+
+def test_default_profiles_apply_stricter_speed_gate_to_ships_than_aircraft():
+    aircraft = [
+        make_track("a1", "aircraft", 31.4200, 121.3000, 20, 132),
+        make_track("a2", "aircraft", 31.4210, 121.3010, 28, 133),
+    ]
+    ships = [
+        make_track("s1", "ship", 31.0200, 121.8200, 10, 292),
+        make_track("s2", "ship", 31.0210, 121.8210, 18, 293),
+    ]
+
+    detector = GroupDetector()
+    aircraft_groups = detector.detect(aircraft, [make_threat(track.track_id, 0.5) for track in aircraft])
+    detector.reset()
+    ship_groups = detector.detect(ships, [make_threat(track.track_id, 0.5) for track in ships])
+
+    assert len(aircraft_groups) == 1
+    assert ship_groups == []
+
+
+def test_default_uav_profile_rejects_wide_pair_that_aircraft_profile_accepts():
+    aircraft = [
+        make_track("a1", "aircraft", 31.4200, 121.3000, 30, 132),
+        make_track("a2", "aircraft", 31.4200, 121.3250, 30, 132),
+    ]
+    uavs = [
+        make_track("u1", "uav", 31.4200, 121.3000, 30, 132),
+        make_track("u2", "uav", 31.4200, 121.3250, 30, 132),
+    ]
+
+    detector = GroupDetector()
+    aircraft_groups = detector.detect(aircraft, [make_threat(track.track_id, 0.5) for track in aircraft])
+    detector.reset()
+    uav_groups = detector.detect(uavs, [make_threat(track.track_id, 0.5) for track in uavs])
+
+    assert len(aircraft_groups) == 1
+    assert uav_groups == []
+
+
+def test_confirmed_group_holds_a_member_for_one_short_speed_outlier_frame():
+    detector = GroupDetector(confirmation_hits=1, member_exit_misses=2)
+    tracks = [
+        make_track("a1", "aircraft", 31.4200, 121.3000, 210, 132),
+        make_track("a2", "aircraft", 31.4260, 121.3090, 208, 134),
+        make_track("a3", "aircraft", 31.4140, 121.2910, 212, 131),
+    ]
+    threats = [make_threat(track.track_id, 0.5) for track in tracks]
+
+    initial = detector.detect(tracks, threats)[0]
+    tracks[2].speed = 250
+    held = detector.detect(tracks, threats)[0]
+    removed = detector.detect(tracks, threats)[0]
+
+    assert initial.group_id == held.group_id == removed.group_id
+    assert set(held.member_track_ids) == {"a1", "a2", "a3"}
+    assert held.metadata["held_member_ids"] == ["a3"]
+    assert set(removed.member_track_ids) == {"a1", "a2"}
+    assert removed.metadata["member_relation_misses"] == {}
+
+
+def test_member_returning_before_exit_clears_member_hysteresis():
+    detector = GroupDetector(confirmation_hits=1, member_exit_misses=2)
+    tracks = [
+        make_track("a1", "aircraft", 31.4200, 121.3000, 210, 132),
+        make_track("a2", "aircraft", 31.4260, 121.3090, 208, 134),
+        make_track("a3", "aircraft", 31.4140, 121.2910, 212, 131),
+    ]
+    threats = [make_threat(track.track_id, 0.5) for track in tracks]
+
+    detector.detect(tracks, threats)
+    tracks[2].speed = 250
+    detector.detect(tracks, threats)
+    tracks[2].speed = 212
+    recovered = detector.detect(tracks, threats)[0]
+
+    assert set(recovered.member_track_ids) == {"a1", "a2", "a3"}
+    assert recovered.metadata["held_member_ids"] == []
+    assert recovered.metadata["member_relation_misses"] == {}
+
+
+def test_coasting_track_cannot_create_new_group_with_active_track():
+    active = make_track("active", "aircraft", 31.4200, 121.3000, 210, 132)
+    coasting = make_track("coasting", "aircraft", 31.4201, 121.3001, 210, 132)
+    coasting.metadata["status"] = "coasting"
+    coasting.metadata["lifecycle_state"] = "coasting"
+
+    groups = GroupDetector(confirmation_hits=1).detect(
+        [active, coasting],
+        [make_threat(active.track_id, 0.5), make_threat(coasting.track_id, 0.5)],
+    )
+
+    assert groups == []
+
+
+def test_same_source_identity_is_present_at_most_once_in_group_candidates():
+    duplicate_old = make_track("old", "aircraft", 31.4200, 121.3000, 210, 132)
+    duplicate_new = make_track("new", "aircraft", 31.4201, 121.3001, 210, 132)
+    independent = make_track("other", "aircraft", 31.4210, 121.3010, 211, 133)
+    duplicate_old.metadata.update(
+        {"source_identity": "cms:wf-1:T-0001", "status": "active"}
+    )
+    duplicate_new.metadata.update(
+        {"source_identity": "cms:wf-1:T-0001", "status": "active"}
+    )
+    duplicate_old.track_quality = 0.6
+    duplicate_new.track_quality = 0.95
+
+    group = GroupDetector(confirmation_hits=1).detect(
+        [duplicate_old, duplicate_new, independent],
+        [
+            make_threat(duplicate_old.track_id, 0.5),
+            make_threat(duplicate_new.track_id, 0.5),
+            make_threat(independent.track_id, 0.5),
+        ],
+    )[0]
+
+    assert set(group.member_track_ids) == {"new", "other"}

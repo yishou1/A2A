@@ -16,7 +16,7 @@ def test_nacos_metadata_exposes_ready_and_metrics_endpoints(monkeypatch):
     assert settings.metadata["output_schema_url"] == "http://127.0.0.1:8102/schema/output"
     assert settings.metadata["capability_version"] == "track_threat_agent_v1"
     assert settings.metadata["model_status"] in {"no_model", "model_loaded"}
-    assert settings.metadata["algorithm_profile"] == "gpt4o_mini_algolib_track_threat_with_local_fallback"
+    assert settings.metadata["algorithm_profile"] == "cms_track_consumer_gpt4o_mini_algolib_track_threat"
     assert "kg_transformer" not in settings.metadata["algorithm_family"]
     assert "kg_transformer" not in settings.metadata["runtime_providers"]
     assert settings.metadata["object_types"] == "aircraft,ship,uav,unknown"
@@ -35,6 +35,10 @@ def test_nacos_metadata_exposes_ready_and_metrics_endpoints(monkeypatch):
     assert settings.metadata["tool_llm_provider"] == "azure_openai"
     assert settings.metadata["tool_llm_deployment"] == "gpt-4o-mini"
     assert "trajectory_predictor" in settings.metadata["algorithm_library_allowed_ids"]
+    assert "track_state_updater" not in settings.metadata["algorithm_library_allowed_ids"]
+    assert "threat_priority_random_forest" in settings.metadata["algorithm_library_allowed_ids"]
+    assert settings.metadata["upstream_track_authority"] == "cms_tactical_intelligence_agent"
+    assert settings.metadata["local_track_association"] == "disabled_for_upstream_fused_tracks"
     assert "track_state_kalman_cv" in settings.metadata["models"]
     assert "trajectory_adaptive_multi_model_physics" in settings.metadata["models_ready"]
     assert "trajectory_imm" not in settings.metadata["models"]

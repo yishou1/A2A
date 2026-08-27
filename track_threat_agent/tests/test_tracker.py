@@ -257,6 +257,110 @@ def test_track_lifecycle_moves_tentative_to_confirmed_and_coasting():
     assert original.metadata["confirmed_once"] is True
 
 
+def test_upstream_fused_tracks_update_same_internal_track_without_local_filter():
+    tracker = MultiTargetTracker()
+    first = Detection(
+        detection_id="cms:packet-1:T-0001:1000",
+        object_type="aircraft",
+        timestamp=1000.0,
+        lat=31.0,
+        lon=121.0,
+        alt=3000.0,
+        speed=200.0,
+        heading=90.0,
+        confidence=0.9,
+        source_agent="Tactical_Intelligence_Agent",
+        metadata={
+            "input_kind": "fused_track",
+            "source_object_id": "wf-1:T-0001",
+            "upstream_history_path": [
+                {"timestamp": 990.0, "lat": 31.0, "lon": 120.98, "alt": 3000.0}
+            ],
+        },
+    )
+    second = first.model_copy(
+        update={
+            "detection_id": "cms:packet-2:T-0001:1010",
+            "timestamp": 1010.0,
+            "lon": 121.02,
+        }
+    )
+
+    initial = tracker.sync_upstream_tracks([first])
+    updated = tracker.sync_upstream_tracks([second])
+
+    assert len(initial) == len(updated) == 1
+    assert initial[0].track_id == updated[0].track_id
+    assert updated[0].lon == 121.02
+    assert updated[0].metadata["tracking_mode"] == "upstream_fused_tracks"
+    assert updated[0].metadata["local_association_performed"] is False
+    assert updated[0].metadata["local_filter_performed"] is False
+    assert [point["timestamp"] for point in updated[0].history_path] == [990.0, 1000.0, 1010.0]
+
+
+def test_upstream_track_id_reuse_starts_new_epoch_and_removes_old_track():
+    tracker = MultiTargetTracker()
+    first = Detection(
+        detection_id="cms:packet-1:T-0001:1000",
+        object_type="aircraft",
+        timestamp=1000.0,
+        lat=31.0,
+        lon=121.0,
+        alt=3000.0,
+        speed=200.0,
+        heading=90.0,
+        confidence=0.9,
+        source_agent="Tactical_Intelligence_Agent",
+        metadata={"input_kind": "fused_track", "source_object_id": "wf-1:T-0001"},
+    )
+    reused = first.model_copy(
+        update={
+            "detection_id": "cms:packet-2:T-0001:1010",
+            "timestamp": 1010.0,
+            "lat": 35.0,
+            "lon": 125.0,
+        }
+    )
+
+    old_track = tracker.sync_upstream_tracks([first])[0]
+    new_track = tracker.sync_upstream_tracks([reused])[0]
+
+    assert new_track.track_id != old_track.track_id
+    assert new_track.metadata["source_epoch"] == 2
+    assert new_track.metadata["upstream_identity_conflict"] is True
+    assert old_track.track_id not in tracker.tracks
+    assert tracker.diagnostics()["upstream_identity_reuse_count"] == 1
+
+
+def test_same_source_reports_in_one_raw_frame_are_coalesced_before_tracking():
+    tracker = MultiTargetTracker()
+    first = _detection("adsb-1", 1000.0, 31.0, 121.0, 90.0, "aircraft")
+    second = _detection("adsb-2", 1004.0, 31.0, 121.008, 90.0, "aircraft")
+    for detection in (first, second):
+        detection.source_agent = "adsb-agent"
+        detection.metadata["source_object_id"] = "ICAO-A1B2C3"
+
+    tracks = tracker.update([first, second])
+
+    assert len(tracks) == 1
+    assert tracks[0].last_update_time == 1004.0
+    assert tracks[0].metadata["source_identity"] == "adsb-agent:ICAO-A1B2C3"
+    assert tracker.diagnostics()["coalesced_same_source_detection_count"] == 1
+
+
+def test_different_source_objects_remain_distinct_when_positions_are_close():
+    tracker = MultiTargetTracker()
+    first = _detection("adsb-1", 1000.0, 31.0, 121.0, 90.0, "aircraft")
+    second = _detection("adsb-2", 1000.0, 31.0001, 121.0001, 90.0, "aircraft")
+    first.source_agent = second.source_agent = "adsb-agent"
+    first.metadata["source_object_id"] = "ICAO-A1B2C3"
+    second.metadata["source_object_id"] = "ICAO-D4E5F6"
+
+    tracks = tracker.update([first, second])
+
+    assert len(tracks) == 2
+
+
 def test_duplicate_frame_is_ignored_without_growing_history():
     tracker = MultiTargetTracker()
     detection = _detection("duplicate", 10.0, 31.0, 121.0, 90.0)
