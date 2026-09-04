@@ -3,6 +3,9 @@ build/
 build-*/
 out/
 cmake-build-*/
+web/node_modules/
+web/dist/
+web/coverage/
 
 # Local algorithm registry, temporary registries, and runtime audit state.
 .algolib/

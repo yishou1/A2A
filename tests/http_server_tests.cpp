@@ -144,6 +144,27 @@ void TestHttpServerListsShowsAndRunsActiveOnnxAlgorithm() {
     Expect(algorithms.at("algorithms").at(0).value("algorithm_id", std::string()) ==
                "onnx_text_classifier",
            "Agent list should expose the ONNX algorithm.");
+    Expect(algorithms.at("algorithms").at(0).value("registry_status", std::string()) ==
+               "active",
+           "Algorithm list should expose the registry lifecycle status.");
+    Expect(algorithms.at("algorithms").at(0).value("card_status", std::string()) ==
+               "draft",
+           "Algorithm list should expose the algorithm card declaration status.");
+
+    const auto input_schema = GetJson(
+        server.port(),
+        "/algorithms/onnx_text_classifier/1.0.0/onnx/schemas/input", 200);
+    Expect(input_schema.value("type", std::string()) == "object",
+           "Input schema endpoint should return the complete JSON Schema.");
+    Expect(input_schema.at("properties").at("text").value("type", std::string()) ==
+               "string",
+           "Input schema endpoint should preserve property definitions.");
+
+    const auto output_schema = GetJson(
+        server.port(),
+        "/algorithms/onnx_text_classifier/1.0.0/onnx/schemas/output", 200);
+    Expect(output_schema.at("properties").contains("label"),
+           "Output schema endpoint should return output property definitions.");
 
     const auto card =
         GetJson(server.port(), "/algorithms/onnx_text_classifier/1.0.0/onnx", 200);
@@ -228,6 +249,24 @@ void TestHttpServerLifecycleEndpointsManageRegistry() {
                  nlohmann::json::object(), 200);
     Expect(activated.value("status", std::string()) == "active",
            "Activate endpoint should mark entry active.");
+
+    const nlohmann::json deployment{
+        {"deploy_id", "node-01/deploy-01"},
+        {"node_id", "node-01"},
+        {"deploy_status", "unloaded"},
+    };
+    const auto deployment_added = PostJson(
+        server.port(),
+        "/algorithms/onnx_text_classifier/1.0.0/onnx/deployments",
+        deployment, 201);
+    Expect(deployment_added.at("entry").at("deployments").size() == 1,
+           "Deployment endpoint should accept the documented node/deploy ID format.");
+    const auto deployment_removed = DeleteJson(
+        server.port(),
+        "/algorithms/onnx_text_classifier/1.0.0/onnx/deployments/node-01%2Fdeploy-01",
+        200);
+    Expect(deployment_removed.at("entry").at("deployments").empty(),
+           "Deployment endpoint should delete a URL-encoded node/deploy ID.");
 
     const auto deleted =
         DeleteJson(server.port(), "/algorithms/onnx_text_classifier/1.0.0/onnx", 200);

@@ -177,6 +177,10 @@ nlohmann::json ToAgentViewJson(const AlgorithmEntry& entry) {
     nlohmann::json agent_view;
     agent_view["algorithm_id"] = entry.key.algorithm_id;
     agent_view["version"] = entry.key.version;
+    // 管理界面必须区分注册表实际生命周期与算法卡声明状态。
+    // 保留 agent_view 的扁平结构，避免列表页为获取状态逐条请求详情。
+    agent_view["registry_status"] = ToString(entry.status);
+    agent_view["card_status"] = ToString(entry.card.status);
     // 中文注释：display_name 供 Agent 生成自然语言描述时使用，比 algorithm_id 更易读。
     agent_view["display_name"] = entry.card.display_name;
     agent_view["backend_type"] = ToString(entry.key.backend_type);

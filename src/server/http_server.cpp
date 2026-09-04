@@ -490,6 +490,86 @@ private:
                            {"algorithms", algorithms}});
         });
 
+        // 管理界面需要完整 JSON Schema 生成嵌套表单和执行 AJV 校验。
+        // 列表和 agent_view 中的 schema summary 只用于摘要展示，不能替代此端点。
+        server_.Get(
+            R"(/algorithms/([^/]+)/([^/]+)/([^/]+)/schemas/(input|output))",
+            [this](const httplib::Request& request, httplib::Response& response) {
+                if (request.matches.size() < 5) {
+                    const Status status = InvalidArgument(
+                        "URL must contain algorithm_id, version, backend_type and schema kind.");
+                    WriteJson(&response, 400, ErrorPayload(status));
+                    return;
+                }
+
+                auto key_result = ParseKeyFromMatches(request);
+                if (!key_result.ok()) {
+                    WriteJson(&response, HttpStatusForStatus(key_result.status()),
+                              ErrorPayload(key_result.status()));
+                    return;
+                }
+
+                std::lock_guard<std::mutex> lock(mutex_);
+                const Status reload_status = ReloadRegistryLocked();
+                if (!reload_status.ok()) {
+                    WriteJson(&response, HttpStatusForStatus(reload_status),
+                              ErrorPayload(reload_status));
+                    return;
+                }
+
+                auto entry_result = registry_.Get(key_result.value());
+                if (!entry_result.ok()) {
+                    WriteJson(&response, HttpStatusForStatus(entry_result.status()),
+                              ErrorPayload(entry_result.status()));
+                    return;
+                }
+
+                const AlgorithmEntry& entry = entry_result.value();
+                const bool is_input = request.matches[4].str() == "input";
+                const std::string schema_ref =
+                    is_input ? entry.card.machine_spec.input_schema_ref
+                             : entry.card.machine_spec.output_schema_ref;
+                if (schema_ref.empty() || schema_ref.find("..") != std::string::npos) {
+                    const Status status = InvalidArgument(
+                        "Algorithm card contains an invalid schema reference.");
+                    WriteJson(&response, 400, ErrorPayload(status));
+                    return;
+                }
+
+                const std::filesystem::path package_root =
+                    std::filesystem::weakly_canonical(entry.package_root);
+                const std::filesystem::path schema_path =
+                    std::filesystem::weakly_canonical(package_root / schema_ref);
+                const std::filesystem::path relative_path =
+                    schema_path.lexically_relative(package_root);
+                if (relative_path.empty() ||
+                    (!relative_path.begin()->empty() && *relative_path.begin() == "..")) {
+                    const Status status =
+                        InvalidArgument("Schema reference escapes package_root.");
+                    WriteJson(&response, 403, ErrorPayload(status));
+                    return;
+                }
+                if (!std::filesystem::exists(schema_path) ||
+                    !std::filesystem::is_regular_file(schema_path)) {
+                    const Status status = Status::Error(
+                        ErrorCode::kIoError, "Schema file not found: " + schema_ref);
+                    WriteJson(&response, 404, ErrorPayload(status));
+                    return;
+                }
+
+                auto schema_result = JsonUtils::ReadJsonFile(schema_path);
+                if (!schema_result.ok()) {
+                    WriteJson(&response, HttpStatusForStatus(schema_result.status()),
+                              ErrorPayload(schema_result.status()));
+                    return;
+                }
+
+                response.status = 200;
+                response.set_header("Cache-Control", "no-store");
+                response.set_content(JsonUtils::Dump(schema_result.value()),
+                                     "application/schema+json; charset=utf-8");
+            });
+
         // 中文注释：GET /algorithms/{id}/{version}/{backend}/files/{relative_path}
         // 文件服务端点：向远端节点暴露 package_root 下的模型文件（流式下载）。
         // 安全约束：
@@ -736,7 +816,7 @@ private:
         // 中文注释：DELETE /algorithms/{id}/{version}/{backend}/deployments/{deploy_id}
         // 从指定算法删除一条部署记录。
         server_.Delete(
-            R"(/algorithms/([^/]+)/([^/]+)/([^/]+)/deployments/([^/]+))",
+            R"(/algorithms/([^/]+)/([^/]+)/([^/]+)/deployments/(.+))",
             [this](const httplib::Request& request, httplib::Response& response) {
                 if (request.matches.size() < 5) {
                     const Status status =
@@ -776,7 +856,7 @@ private:
         //         "updated_at": "2024-01-01T00:00:00Z" }
         // 更新指定部署记录的状态。
         server_.Patch(
-            R"(/algorithms/([^/]+)/([^/]+)/([^/]+)/deployments/([^/]+)/status)",
+            R"(/algorithms/([^/]+)/([^/]+)/([^/]+)/deployments/(.+)/status)",
             [this](const httplib::Request& request, httplib::Response& response) {
                 if (request.matches.size() < 5) {
                     const Status status =
