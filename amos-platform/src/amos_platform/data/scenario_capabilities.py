@@ -22,7 +22,7 @@ FUNCTIONAL_AGENT_CATALOG: tuple[dict[str, Any], ...] = (
         "agent_id": "A1",
         "name": "感知探测与认知共享 Agent",
         "responsibilities": ["探测", "识别", "分类", "定位", "验证", "信息发布"],
-        "backend_roles": ["recon", "tactical_intelligence"],
+        "backend_roles": ["tactical_intelligence"],
         "activity_ids": ["multi_source_perception", "tactical_intelligence_fusion"],
         "skill_ids": ["tactical_intelligence_analysis"],
     },
@@ -132,7 +132,7 @@ FUNCTION_POINT_CATALOG: tuple[dict[str, Any], ...] = CANONICAL_FUNCTION_POINT_CA
 
 
 def functional_agents() -> list[dict[str, Any]]:
-    """Return the six document-defined Agent responsibilities in A1-A6 order."""
+    """Return the six document-defined functional Agent types in A1-A6 order."""
     return [{**deepcopy(item), "skills": [
         {"skill_id": skill_id, **deepcopy(SKILL_ALGORITHM_BINDINGS.get(skill_id, {}))}
         for skill_id in item.get("skill_ids", [])

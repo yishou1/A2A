@@ -187,6 +187,145 @@ class BPELWorkflowTest(unittest.TestCase):
             self.assertEqual(activity["request"]["context_keys"], ["mission_input", "workflow_id"])
             self.assertEqual(activity["request"]["attachment_count"], 1)
 
+    def test_workflow_result_persists_response_algorithm_invocations(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            commander = CommanderAgent(
+                mode="local",
+                workflow="bpel",
+                workflow_file="integrated_system/workflows/act_workflow.bpel",
+                workflow_id="wf-track-algorithm",
+                state_dir=temp_dir,
+            )
+            context = commander.initial_workflow_context()
+            context["work_list"] = [{
+                "activity_id": "A-TRACK",
+                "work_item": "wf-track-algorithm:A-TRACK",
+                "role": "track_threat",
+                "status": "completed",
+            }]
+            request_payload = {
+                "workflow_id": "wf-track-algorithm",
+                "work_item": "wf-track-algorithm:A-TRACK",
+                "command": "analyze_tracks",
+                "required_skill": "track_threat",
+                "required_skills": ["track_threat"],
+                "input": {"detections": [{"id": "DET-1"}]},
+                "context": {"mission_input": {"contacts": []}},
+                "output_hint": "tracking_result",
+            }
+            invocation = {
+                "algorithm_id": "track_state_updater",
+                "backend_type": "python_http_service",
+                "execution_mode": "algorithm_library",
+                "request_id": "REQ-TRACK",
+                "input": {"detections": [{"id": "DET-1"}]},
+                "output": {"tracks": [{"track_id": "TRK-1"}]},
+                "usage": {"latency_ms": 6.0},
+                "duration_ms": 6.0,
+            }
+            commander.workflow_context = context
+            commander._remember_task_response(
+                "wf-track-algorithm:A-TRACK",
+                {
+                    "status": "completed",
+                    "agent": "TrackThreatAgent",
+                    "output": {
+                        "tracking_result": {"tracks": [{"track_id": "TRK-1"}]},
+                        "algorithm_invocations": [invocation],
+                    },
+                },
+                role="track_threat",
+                target="test",
+                request_payload=request_payload,
+            )
+
+            result = commander._build_workflow_result(context)
+            activity = result["activity_results"][0]
+
+            self.assertEqual(activity["algorithm_invocations"], [invocation])
+            self.assertNotIn("tracking_result", activity["algorithm_invocations"][0])
+
+    def test_workflow_result_promotes_nested_act_algorithm_invocations(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            commander = CommanderAgent(
+                mode="local",
+                workflow="bpel",
+                workflow_file="beachhead_workflow.bpel",
+                workflow_id="wf-nested-act-algorithms",
+                state_dir=temp_dir,
+            )
+            context = commander.initial_workflow_context()
+            work_items = [
+                {
+                    "activity_id": "A-SIM",
+                    "work_item": "wf-nested-act-algorithms:A-SIM",
+                    "role": "simulation_execution",
+                    "status": "completed",
+                },
+                {
+                    "activity_id": "A-CLOSED",
+                    "work_item": "wf-nested-act-algorithms:A-CLOSED",
+                    "role": "closed_loop",
+                    "status": "completed",
+                },
+            ]
+            context["work_list"] = work_items
+            commander.workflow_context = context
+            execution_invocation = {
+                "algorithm_id": "execution_control_planner",
+                "backend_type": "python_http_service",
+                "execution_mode": "algolib_runtime",
+                "request_id": "REQ-EXECUTION",
+                "input": {"phase": "strike"},
+                "output": {"commands": [{"action": "area_suppression"}]},
+                "duration_ms": 8.0,
+            }
+            closed_loop_invocation = {
+                "algorithm_id": "closed_loop_decision_advisor",
+                "backend_type": "python_http_service",
+                "execution_mode": "algolib_runtime",
+                "request_id": "REQ-CLOSED-LOOP",
+                "input": {"targets": [{"target_id": "T-1"}]},
+                "output": {"action": "monitor"},
+                "duration_ms": 11.0,
+            }
+            for work_item, output_hint, invocation in (
+                (work_items[0]["work_item"], "execution_simulation_result", execution_invocation),
+                (work_items[1]["work_item"], "effect_evaluation_result", closed_loop_invocation),
+            ):
+                commander._remember_task_response(
+                    work_item,
+                    {
+                        "status": "completed",
+                        "agent": "Act_Agent",
+                        "output": {
+                            output_hint: {
+                                "task_type": output_hint,
+                                "output_data": {
+                                    "backend": "algolib",
+                                    "algorithm_invocations": [invocation],
+                                },
+                            }
+                        },
+                    },
+                    role="simulation_execution" if output_hint == "execution_simulation_result" else "closed_loop",
+                    target="test",
+                    request_payload={"input": {"phase": "strike"}},
+                )
+
+            result = commander._build_workflow_result(context)
+            activities = {row["role"]: row for row in result["activity_results"]}
+
+            self.assertEqual(
+                activities["simulation_execution"]["algorithm_invocations"][0]["algorithm_id"],
+                "execution_control_planner",
+            )
+            self.assertEqual(
+                activities["closed_loop"]["algorithm_invocations"][0]["algorithm_id"],
+                "closed_loop_decision_advisor",
+            )
+            self.assertEqual(activities["closed_loop"]["algorithm_invocations"][0]["duration_ms"], 11.0)
+
     def test_decide_phase_builds_valid_planning_and_compliance_contracts(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             commander = CommanderAgent(

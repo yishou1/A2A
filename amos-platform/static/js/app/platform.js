@@ -41,6 +41,7 @@ window.Platform = (function () {
   var storyHeroGeneration = 0;
   var storyHeroTarget = null;
   var activeStoryCueId = null;
+  var activeWorkflowStoryContext = null;
   var speedRequestQueue = Promise.resolve();
   var speedRequestGeneration = 0;
   var pendingSpeedRequests = 0;
@@ -419,11 +420,11 @@ window.Platform = (function () {
 
     document.getElementById("story-title").textContent = "场景态势";
     document.getElementById("story-phase-badge").textContent = cue && cue.phase || "READY";
-    document.getElementById("story-current-title").textContent = activeMedia && activeMedia.title ||
-      (cue && cue.title || "等待观测数据");
+    document.getElementById("story-current-title").textContent = cue && cue.title ||
+      (activeMedia && activeMedia.title || "等待观测数据");
     var activeSource = activeMedia ? sourceMetadata(activeMedia) : null;
     document.getElementById("story-current-prompt").textContent = activeMedia
-      ? activeSource.platformId + " / " + activeSource.sensorId + " · " + formatSimTime(activeSource.capturedAt)
+      ? (activeMedia.title || "观测资料") + " · " + activeSource.platformId + " / " + activeSource.sensorId + " · " + formatSimTime(activeSource.capturedAt)
       : "尚无可用传感器资料";
     document.getElementById("story-elapsed").textContent = formatSimTime(elapsed);
     document.getElementById("story-media-count").textContent = availableMedia.length;
@@ -523,6 +524,7 @@ window.Platform = (function () {
       latestState = null;
       latestStory = null;
       currentMediaId = null;
+      activeWorkflowStoryContext = null;
       authorizationPromptKey = null;
       authorizationSubmitting = false;
       closeAuthorizationDialog();
@@ -1132,6 +1134,10 @@ window.Platform = (function () {
   function reflectWorkflowEvidence(view) {
     var algorithmEvidence = document.getElementById("workflow-algorithm-evidence");
     if (algorithmEvidence) algorithmEvidence.hidden = true;
+    if (!view) {
+      activeWorkflowStoryContext = null;
+      if (latestStory) renderStory(latestStory, latestState);
+    }
   }
 
   function initWorkspaceResize() {
@@ -1328,6 +1334,10 @@ window.Platform = (function () {
       button.addEventListener("click", function () { downloadRunReport(this.dataset.reportFormat); });
     });
     document.addEventListener("amos:workflow-view", function (event) { reflectWorkflowEvidence(event.detail || null); });
+    document.addEventListener("amos:workflow-activity-context", function (event) {
+      activeWorkflowStoryContext = event.detail || null;
+      if (latestStory) renderStory(latestStory, latestState);
+    });
   }
 
   function showControlError(error) {

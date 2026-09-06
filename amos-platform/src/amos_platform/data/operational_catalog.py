@@ -30,11 +30,25 @@ _FUNCTIONS = (
     ("KC-27", "实施动态评估", "Conduct Dynamic Assessment", "act", "assess"), ("KC-28", "评估", "Evaluate", "act", "assess"),
 )
 
+# These are workflow-level implementation packages rather than standalone
+# M01-M20 business classes. Keep their ownership on the function record so
+# the relationship view remains complete when AlgoLib is offline or has not
+# returned an algorithm card yet.
+_FUNCTION_PRIMARY_IMPLEMENTATIONS: dict[str, tuple[str, str]] = {
+    "KC-04": ("mission_feature_adapter", "Mission Feature Adapter"),
+    "KC-23": ("execution_control_planner", "Execution Control Planner"),
+    "KC-28": ("mission_completion_scorer", "Mission Completion Scorer"),
+}
+
 
 FUNCTION_POINT_CATALOG: tuple[dict[str, Any], ...] = tuple(
     {"function_id": ident, "name": f"{chinese}（{english}）", "function_name": english,
      "chinese_name": chinese, "english_name": english, "ooda_phase": ooda,
-     "f2t2ea_stage": stage, "phase": stage.upper(), "category": stage.upper()}
+     "f2t2ea_stage": stage, "phase": stage.upper(), "category": stage.upper(),
+     "primary_algorithm_ids": ([_FUNCTION_PRIMARY_IMPLEMENTATIONS[ident][0]]
+                                if ident in _FUNCTION_PRIMARY_IMPLEMENTATIONS else []),
+     "primary_algorithm_names": ([_FUNCTION_PRIMARY_IMPLEMENTATIONS[ident][1]]
+                                  if ident in _FUNCTION_PRIMARY_IMPLEMENTATIONS else [])}
     for ident, chinese, english, ooda, stage in _FUNCTIONS
 )
 
@@ -50,7 +64,7 @@ _CLASSES = (
     ("M06", "neural_network", "传统神经网络模型", "基础算法", ["supcon_meta_classifier"], ["target_type_classifier"], ["supcon_meta_classifier_onnx"], ["KC-06", "KC-07"]),
     ("M07", "naive_bayes_network", "朴素贝叶斯网络", "基础算法", ["intent_gaussian_naive_bayes"], [], ["intent_gaussian_naive_bayes_onnx"], ["KC-06", "KC-07"]),
     ("M08", "generative_adversarial_network", "生成对抗网络", "知识增强", ["conditional_tabular_gan"], [], ["conditional_tabular_gan_onnx"], []),
-    ("M09", "large_language_model", "大语言模型", "知识增强", [], [], [], []),
+    ("M09", "large_language_model", "大语言模型", "知识增强", ["qwen3-1.7B"], [], [], []),
     ("M10", "retrieval_augmented_generation", "检索增强生成模型", "知识增强", ["synapse_rag_retriever"], ["knowledge_semantic_comm"], [], ["KC-10", "KC-15"]),
     ("M11", "agent_collaboration", "智能体模型", "分布式协同", ["decision_planning_core"], ["compliance_authorization_core"], [], ["KC-16", "KC-20", "KC-21"]),
     ("M12", "federated_learning", "联邦学习模型", "分布式协同", ["federated_fedavg_aggregator"], [], [], []),

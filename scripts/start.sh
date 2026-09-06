@@ -137,6 +137,13 @@ else
   export A2A_REQUEST_TIMEOUT="${A2A_REQUEST_TIMEOUT:-60}"
 fi
 export ALGOLIB_BASE_URL="${ALGOLIB_BASE_URL:-http://127.0.0.1:8088}"
+export ALGOLIB_TRANSPORT="${ALGOLIB_TRANSPORT:-gateway}"
+export A2A_ALGORITHM_BACKEND="${A2A_ALGORITHM_BACKEND:-algolib}"
+export TASK_SCHEDULING_BACKEND="${TASK_SCHEDULING_BACKEND:-algolib}"
+export DECISION_AGENT_BACKEND="${DECISION_AGENT_BACKEND:-algolib}"
+export EXECUTION_CONTROL_BACKEND="${EXECUTION_CONTROL_BACKEND:-algolib}"
+export CLOSED_LOOP_BACKEND="${CLOSED_LOOP_BACKEND:-algolib}"
+export ALGOLIB_FALLBACK_LOCAL="${ALGOLIB_FALLBACK_LOCAL:-true}"
 export ALGOLIB_REGISTRY_PATH="$ALGOLIB_DIR/registry.json"
 export ALGOLIB_EXECUTION_LOG_PATH="$ALGOLIB_DIR/executions.jsonl"
 export ALGOLIB_FUNCTION_CATALOG_PATH="${ALGOLIB_FUNCTION_CATALOG_PATH:-$COMMANDER_DIR/config/operational_function_catalog.yaml}"
@@ -247,10 +254,15 @@ if [[ "${ENABLE_LLM:-false}" == "true" && "$llm_provider" != "azure" && "$llm_pr
       echo "[llm] starting local Qwen endpoint"
       export LOCAL_QWEN_DEVICE="${LOCAL_QWEN_DEVICE:-cuda}"
       export LOCAL_QWEN_DTYPE="${LOCAL_QWEN_DTYPE:-float16}"
+      qwen_model_dir="${LOCAL_QWEN_MODEL_DIR:-$ROOT_DIR/local_models/qwen3-1.7b}"
+      if [[ ! -f "$qwen_model_dir/config.json" \
+        && -f "$ROOT_DIR/../local_models/qwen3-1.7b/config.json" ]]; then
+        qwen_model_dir="$ROOT_DIR/../local_models/qwen3-1.7b"
+      fi
       start_service "local-qwen" "$ROOT_DIR" "http://127.0.0.1:$llm_port/health" \
         "$A2A_PYTHON" scripts/local_qwen_openai_server.py \
         --host 127.0.0.1 --port "$llm_port" \
-        --model-dir "${LOCAL_QWEN_MODEL_DIR:-local_models/qwen3-1.7b}" \
+        --model-dir "$qwen_model_dir" \
         --model-name "${TOOL_LLM_NAME:-qwen3:1.7b}"
     fi
   fi
@@ -340,18 +352,20 @@ start_service agent-track-threat "$COMMANDER_DIR" "http://127.0.0.1:8102/health"
 start_service agent-task-scheduling "$COMMANDER_DIR" "http://127.0.0.1:10201/health" \
   env TASK_SCHEDULING_AGENT_PORT=10201 "$A2A_PYTHON" -m task_scheduling_agent.main
 start_service agent-decision-planning "$COMMANDER_DIR" "http://127.0.0.1:10202/health" \
-  env DECISION_PLANNING_AGENT_PORT=10202 DECISION_AGENT_BACKEND=algolib \
+  env DECISION_PLANNING_AGENT_PORT=10202 DECISION_AGENT_BACKEND="$DECISION_AGENT_BACKEND" \
   DECISION_AGENT_ALGOLIB_LLM="${DECISION_AGENT_ALGOLIB_LLM:-false}" \
   "$A2A_PYTHON" -m decision_planning_agent.main
 start_service agent-compliance "$COMMANDER_DIR" "http://127.0.0.1:10203/health" \
-  env COMPLIANCE_AUTHORIZATION_AGENT_PORT=10203 DECISION_AGENT_BACKEND=algolib \
+  env COMPLIANCE_AUTHORIZATION_AGENT_PORT=10203 DECISION_AGENT_BACKEND="$DECISION_AGENT_BACKEND" \
   DECISION_AGENT_ALGOLIB_LLM="${DECISION_AGENT_ALGOLIB_LLM:-false}" \
   "$A2A_PYTHON" -m compliance_authorization_agent.main
 start_service agent-simulation-execution "$COMMANDER_DIR" "http://127.0.0.1:10204/health" \
-  env ALGOLIB_ENABLE_LLM="$A2A_ACT_AGENT_LLM" EXECUTION_CONTROL_AGENT_ROLE=simulation_execution SIMULATION_EXECUTION_AGENT_PORT=10204 \
+  env ALGOLIB_ENABLE_LLM="$A2A_ACT_AGENT_LLM" EXECUTION_CONTROL_BACKEND="$EXECUTION_CONTROL_BACKEND" \
+  EXECUTION_CONTROL_AGENT_ROLE=simulation_execution SIMULATION_EXECUTION_AGENT_PORT=10204 \
   "$A2A_PYTHON" -m execution_control_agent.main
 start_service agent-closed-loop "$COMMANDER_DIR" "http://127.0.0.1:10205/health" \
-  env ALGOLIB_ENABLE_LLM="$A2A_ACT_AGENT_LLM" CLOSED_LOOP_AGENT_PORT=10205 "$A2A_PYTHON" -m closed_loop_agent.main
+  env ALGOLIB_ENABLE_LLM="$A2A_ACT_AGENT_LLM" CLOSED_LOOP_BACKEND="$CLOSED_LOOP_BACKEND" \
+  CLOSED_LOOP_AGENT_PORT=10205 "$A2A_PYTHON" -m closed_loop_agent.main
 
 start_service commander-manager "$COMMANDER_DIR" "http://127.0.0.1:8021/health" \
   "$A2A_PYTHON" commander_agent/main.py --mode remote --workflow bpel \
