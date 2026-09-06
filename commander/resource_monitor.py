@@ -92,7 +92,7 @@ class ResourceMonitor:
                 snapshot = self._unavailable_snapshot("psutil is not installed")
             else:
                 try:
-                    raw = self._sampler()
+                    raw = self._run_sampler_bounded()
                     snapshot = self._build_snapshot(raw)
                 except Exception as exc:
                     snapshot = self._unavailable_snapshot(str(exc))
@@ -100,6 +100,36 @@ class ResourceMonitor:
             self._last_snapshot = snapshot
             self._last_sampled_at = now
             return dict(snapshot)
+
+    def _run_sampler_bounded(self, timeout: Optional[float] = None) -> dict:
+        """Run the sampler with a hard wall-clock bound.
+
+        Some psutil probes (notably Process.open_files) can block indefinitely
+        on Windows while the kernel handle table is contended. A hung sampler
+        must never wedge the heartbeat thread or the /health handler; abandon
+        the stuck sample and report an unavailable snapshot instead.
+        """
+        bound = float(
+            timeout
+            if timeout is not None
+            else _env_float("A2A_RESOURCE_SAMPLE_TIMEOUT_SECONDS", 5.0)
+        )
+        outcome: dict = {}
+
+        def _target():
+            try:
+                outcome["raw"] = self._sampler()
+            except BaseException as exc:  # noqa: BLE001 - relayed below
+                outcome["error"] = exc
+
+        worker = threading.Thread(target=_target, daemon=True, name="resource-sampler")
+        worker.start()
+        worker.join(bound)
+        if worker.is_alive():
+            raise TimeoutError(f"resource sampler timed out after {bound:.1f}s")
+        if "error" in outcome:
+            raise outcome["error"]
+        return outcome["raw"]
 
     def heartbeat_metadata(self) -> dict:
         snapshot = self.snapshot()
@@ -153,10 +183,12 @@ class ResourceMonitor:
         except Exception:
             io_counters = {}
 
-        try:
-            open_files_count = len(process.open_files())
-        except Exception:
-            open_files_count = None
+        # NOTE: psutil.Process.open_files() is deliberately NOT called here.
+        # On Windows it enumerates the kernel handle table and can deadlock
+        # indefinitely, which used to wedge the heartbeat thread and the
+        # /health handler (agent silently vanished from Nacos discovery).
+        # The count is reported as None instead of risking the hang.
+        open_files_count = None
 
         return {
             "node_online": True,

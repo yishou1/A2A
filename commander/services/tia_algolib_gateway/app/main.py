@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import time
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -112,7 +113,21 @@ def _forward_predict(req: RunRequest) -> dict[str, Any]:
             "usage": {"latency_ms": 0.0},
             "error": {"code": f"HTTP_{exc.code}", "message": detail},
         }
-    except URLError as exc:
+    except TimeoutError as exc:
+        return {
+            "ok": False,
+            "request_id": req.request_id,
+            "trace_id": req.trace_id,
+            "algorithm_id": req.algorithm_id,
+            "version": req.version,
+            "outputs": {},
+            "usage": {"latency_ms": 0.0},
+            "error": {
+                "code": "UPSTREAM_TIMEOUT",
+                "message": f"timed out calling {endpoint}: {exc}",
+            },
+        }
+    except (URLError, socket.timeout) as exc:
         return {
             "ok": False,
             "request_id": req.request_id,

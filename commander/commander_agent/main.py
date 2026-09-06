@@ -1456,6 +1456,12 @@ class CommanderAgent:
             self._recover_interrupted_activities(context)
             state["workflow_id"] = self.workflow_id
             state["workflow"] = self.workflow
+            # Restore the persisted BPEL file so resume reloads the same
+            # workflow definition (resume calls may omit workflow_file).
+            if state.get("workflow_file") and not self.workflow_file:
+                self.workflow_file = state["workflow_file"]
+                self.bpel_definition = self.workflow_catalog.load(self.workflow_file)
+                self.workflow = "bpel"
             state["mode"] = self.mode
             state["status"] = state.get("status") or context["workflow_status"]
             state["current_activatity"] = (
@@ -1536,6 +1542,7 @@ class CommanderAgent:
             state = {
                 "workflow_id": self.workflow_id,
                 "workflow": self.workflow,
+                "workflow_file": self.workflow_file,
                 "mode": self.mode,
                 "status": normalized["workflow_status"],
                 "created_at": self.workflow_state.get("created_at", utc_now_iso()),

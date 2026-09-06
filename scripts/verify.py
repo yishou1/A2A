@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import json
 import os
 from pathlib import Path
@@ -46,6 +47,22 @@ EXPECTED_CHECKPOINTS = [
     "MAR-CP-PLAN",
     "MAR-CP-CLOSE",
 ]
+
+
+def process_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, SystemError):
+        if os.name != "nt":
+            return False
+    if os.name != "nt":
+        return False
+    handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+    if handle:
+        ctypes.windll.kernel32.CloseHandle(handle)
+        return True
+    return False
 EXPECTED_ACTIVITY_COUNTS = {
     "MAR-CP-PERCEPTION": 3,
     "MAR-CP-ASSESS": 3,
@@ -128,10 +145,7 @@ def verify_agent_processes() -> list[dict[str, Any]]:
         raw = path.read_text(encoding="ascii").strip()
         require(raw.isdigit(), f"invalid PID file: {path}")
         pid = int(raw)
-        try:
-            os.kill(pid, 0)
-        except OSError as exc:
-            raise VerificationError(f"agent process is not running: {name} ({pid})") from exc
+        require(process_exists(pid), f"agent process is not running: {name} ({pid})")
         require(pid not in pids, f"agents share a PID unexpectedly: {pid}")
         pids.add(pid)
         records.append({"service": name, "pid": pid})
@@ -203,6 +217,16 @@ def fire(track_id: str, approved: bool) -> tuple[int, dict[str, Any]]:
     })
 
 
+def warn(track_id: str, approved: bool) -> tuple[int, dict[str, Any]]:
+    return http_json(f"{AMOS}/api/v1/sim/commands", {
+        "command_type": "warn",
+        "params": {
+            "track_id": track_id,
+        },
+        "authorization": {"approved": approved},
+    })
+
+
 def run_scenario(
     *,
     authorize_fire: bool,
@@ -252,6 +276,7 @@ def run_scenario(
     final_director_state: dict[str, Any] = {}
     fast_advanced_after: set[str] = set()
     fast_gate_started = False
+    warning_issued = False
     while time.monotonic() < deadline:
         status, payload = http_json(f"{AMOS}/api/v1/director/state")
         require(status == 200, f"director state failed with HTTP {status}")
@@ -374,6 +399,24 @@ def run_scenario(
             if not launched_weapon_id:
                 hostile_track_id = str(authorization.get("hostile_track_id") or "")
                 require(bool(hostile_track_id), "authorization gate reached before hostile target validation")
+                authorization_stage = str(director_state.get("authorization_stage") or "")
+                if authorization_stage == "warning" and not warning_issued:
+                    warning_status, warning_payload = warn(hostile_track_id, True)
+                    require(
+                        warning_status == 200,
+                        f"authorized hostile warning failed with HTTP {warning_status}",
+                    )
+                    warning_result = data_of(warning_payload).get("result") or {}
+                    authorization.update({
+                        "approved_warning_http": warning_status,
+                        "warning_authorization": warning_result.get("authorization"),
+                        "fire_not_before_sec": warning_result.get("fire_not_before_sec"),
+                    })
+                    warning_issued = True
+                    continue
+                if authorization_stage != "fire":
+                    time.sleep(0.5)
+                    continue
                 approved_status, approved_payload = fire(hostile_track_id, True)
                 require(approved_status == 200, f"approved hostile fire failed with HTTP {approved_status}")
                 result = data_of(approved_payload).get("result") or {}
@@ -405,6 +448,22 @@ def run_scenario(
                     fast_advanced_after.add("MAR-CP-PLAN")
 
         if fast_forward and director_status not in {"awaiting_authorization", "completed"}:
+            if str(director_state.get("authorization_stage") or "") == "warning_wait":
+                not_before = float(director_state.get("authorization_not_before_sec") or 0)
+                elapsed = float(director_state.get("elapsed_sec") or 0)
+                step_sec = 30.0
+                if not_before > elapsed:
+                    step_sec = max(1.0, min(30.0, not_before - elapsed))
+                step_status, step_payload = http_json(
+                    f"{AMOS}/api/v1/director/action",
+                    {"action": "step_tick", "step_sec": step_sec},
+                )
+                require(
+                    step_status == 200,
+                    f"fast-forward warning wait failed with HTTP {step_status}: {step_payload.get('error')}",
+                )
+                time.sleep(0.1)
+                continue
             current = director_state.get("current_checkpoint")
             current_id = str(current.get("checkpoint_id") or "") if isinstance(current, dict) else ""
             current_analysis = str(current.get("analysis_status") or "") if isinstance(current, dict) else ""

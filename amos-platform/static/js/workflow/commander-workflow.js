@@ -17,6 +17,7 @@ window.PlatformWorkflow = (function () {
   var historyRunId = null;
   var historyLoadingRunId = null;
   var viewCache = {};
+  var viewLoadInFlight = false;
   var selectedActivityId = null;
   var selectedFunctionPointId = null;
   var activityTab = "input";
@@ -947,13 +948,23 @@ window.PlatformWorkflow = (function () {
 
   async function loadView(id, generation) {
     if (!id) return null;
-    var view = await API.getWorkflowView(id);
-    if (generation != null && (generation !== viewGeneration || String(id) !== String(activeWorkflowId || ""))) return null;
-    viewCache[String(id)] = view;
-    renderTaskHistory();
-    if (String(id) === String(workflowId || "")) renderView(view);
-    else processActiveView(view);
-    return view;
+    // Re-entrancy guard: when the upstream gateway is slow, a new poll must
+    // NOT fire while the previous request is still in flight — otherwise
+    // requests pile up on the server (one waitress worker each) and every
+    // other dashboard action, including operator sim commands, starves.
+    if (viewLoadInFlight) return null;
+    viewLoadInFlight = true;
+    try {
+      var view = await API.getWorkflowView(id);
+      if (generation != null && (generation !== viewGeneration || String(id) !== String(activeWorkflowId || ""))) return null;
+      viewCache[String(id)] = view;
+      renderTaskHistory();
+      if (String(id) === String(workflowId || "")) renderView(view);
+      else processActiveView(view);
+      return view;
+    } finally {
+      viewLoadInFlight = false;
+    }
   }
 
   function startPolling(id) {

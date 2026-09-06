@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -261,7 +262,17 @@ class NacosRegistrar:
                 LOGGER.warning("Nacos sdk unavailable; trying HTTP registration: %s", exc)
                 self.client = None
             await asyncio.to_thread(self._register_instance)
-            self.heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+            # Run liveness beats on a dedicated daemon thread instead of an
+            # asyncio task: a long-running request handler blocks the event
+            # loop, which used to starve the heartbeat task and let Nacos
+            # mark the instance unhealthy mid-task (late-response failures).
+            self._heartbeat_stop = threading.Event()
+            self.heartbeat_thread = threading.Thread(
+                target=self._heartbeat_thread_loop,
+                name="nacos-heartbeat",
+                daemon=True,
+            )
+            self.heartbeat_thread.start()
             LOGGER.info(
                 "Registered service %s at %s:%s with Nacos %s",
                 self.settings.service_name,
@@ -275,13 +286,13 @@ class NacosRegistrar:
             self.registered = False
 
     async def stop(self) -> None:
-        if self.heartbeat_task and not self.heartbeat_task.done():
-            self.heartbeat_task.cancel()
-            try:
-                await self.heartbeat_task
-            except asyncio.CancelledError:
-                pass
-        self.heartbeat_task = None
+        stop_event = getattr(self, "_heartbeat_stop", None)
+        if stop_event is not None:
+            stop_event.set()
+        thread = getattr(self, "heartbeat_thread", None)
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=10.0)
+        self.heartbeat_thread = None
 
         if not self.registered:
             return
@@ -424,13 +435,31 @@ class NacosRegistrar:
             self._instance_http_request("DELETE", include_metadata=False)
         self.registered = False
 
+    def _heartbeat_thread_loop(self) -> None:
+        interval = max(1.0, float(self.settings.heartbeat_interval))
+        while not self._heartbeat_stop.wait(interval):
+            if not self.registered:
+                return
+            try:
+                self._send_heartbeat()
+            except Exception as exc:  # pragma: no cover - depends on external service
+                LOGGER.warning("Nacos heartbeat failed: %s", exc)
+
     async def _heartbeat_loop(self) -> None:
         while True:
             await asyncio.sleep(self.settings.heartbeat_interval)
             if not self.registered:
                 return
             try:
-                await asyncio.to_thread(self._send_heartbeat)
+                # Bounded wait: a single pathological beat (network stall, SDK
+                # hang) must never stop the liveness loop; skip and retry on
+                # the next interval instead.
+                await asyncio.wait_for(
+                    asyncio.to_thread(self._send_heartbeat),
+                    timeout=max(15.0, float(self.settings.heartbeat_interval) * 3.0),
+                )
+            except asyncio.TimeoutError:
+                LOGGER.warning("Nacos heartbeat beat timed out; skipping this cycle")
             except Exception as exc:  # pragma: no cover - depends on external service
                 LOGGER.warning("Nacos heartbeat failed: %s", exc)
 
@@ -438,29 +467,37 @@ class NacosRegistrar:
         self.settings.metadata = self._build_heartbeat_metadata()
         wire_metadata = _wire_metadata(self.settings.metadata)
         transport = "http"
+        # Prefer the plain HTTP beat API with an explicit timeout: the legacy
+        # SDK send_heartbeat has been observed to hang indefinitely under
+        # load. Because the asyncio heartbeat loop awaits this call, a hung
+        # SDK beat stalls liveness updates entirely and the agent gets
+        # evicted from Nacos discovery mid-task (late-response failures).
         try:
-            if self.client is not None:
-                try:
-                    self.client.send_heartbeat(
-                        self.settings.service_name,
-                        self.settings.service_ip,
-                        self.settings.service_port,
-                        cluster_name="DEFAULT",
-                        group_name=self.settings.group_name,
-                        metadata=wire_metadata,
-                        ephemeral=True,
-                    )
-                    transport = "sdk"
-                except Exception as exc:
-                    LOGGER.warning("Nacos SDK heartbeat failed; trying HTTP fallback: %s", exc)
-                    self._send_heartbeat_http()
-            else:
-                self._send_heartbeat_http()
-            self._update_instance_metadata_http()
-        except Exception as exc:
-            self.heartbeat_failure_count += 1
-            self.last_heartbeat_error = str(exc)
-            raise
+            self._send_heartbeat_http()
+        except Exception as http_error:
+            if self.client is None:
+                raise
+            LOGGER.warning(
+                "Nacos HTTP heartbeat failed; trying SDK fallback: %s",
+                http_error,
+            )
+            try:
+                self.client.send_heartbeat(
+                    self.settings.service_name,
+                    self.settings.service_ip,
+                    self.settings.service_port,
+                    cluster_name="DEFAULT",
+                    group_name=self.settings.group_name,
+                    metadata=wire_metadata,
+                    ephemeral=True,
+                )
+                transport = "sdk"
+            except Exception as sdk_error:
+                LOGGER.warning(
+                    "Nacos SDK heartbeat also failed: %s", sdk_error
+                )
+                raise http_error
+        self._update_instance_metadata_http()
         self.heartbeat_success_count += 1
         self.last_heartbeat_success_at = _utc_now_iso()
         self.last_heartbeat_error = None
