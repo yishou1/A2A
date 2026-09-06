@@ -16,6 +16,7 @@ from amos_platform.data.operational_catalog import (
     SKILL_ALGORITHM_BINDINGS,
     operational_functions,
 )
+from amos_platform.data.scenario_capabilities import FUNCTIONAL_AGENT_CATALOG
 
 
 VIEW_SCHEMA_VERSION = "amos.workflow-view.v2"
@@ -1198,13 +1199,14 @@ def _algorithm_evidence(
         input_value = value.get("input") if "input" in value else value.get("inputs")
         output_value = value.get("output") if "output" in value else value.get("outputs")
         usage_value = value.get("usage") if isinstance(value.get("usage"), dict) else None
+        params_value = value.get("params") if "params" in value else None
         records.append({
             "id": str(algorithm_id or model_id),
             "name": value.get("algorithm_name") or value.get("name") or str(algorithm_id or model_id),
             "category": value.get("algorithm_category") or value.get("category") or category,
             "model_id": model_id,
             "version": value.get("model_version") or value.get("version"),
-            "params": value.get("params") or value.get("parameter_count"),
+            "params": params_value if params_value is not None else value.get("parameter_count"),
             "flops": value.get("flops"),
             "execution_mode": value.get("execution_mode"),
             "duration_ms": own_latency_ms,
@@ -1349,6 +1351,21 @@ def _explicit_function_points(value: Any, *, depth: int = 0) -> list[str]:
         if isinstance(item, (dict, list)):
             found.extend(_explicit_function_points(item, depth=depth + 1))
     return list(dict.fromkeys(found))
+
+
+def _role_function_points(activity: dict[str, Any]) -> list[str]:
+    role = str(activity.get("role") or "").casefold()
+    if not role:
+        return []
+    points: list[str] = []
+    for agent in FUNCTIONAL_AGENT_CATALOG:
+        backend_roles = {str(item).casefold() for item in agent.get("backend_roles") or []}
+        if role not in backend_roles:
+            continue
+        for skill_id in agent.get("skill_ids") or []:
+            binding = SKILL_ALGORITHM_BINDINGS.get(str(skill_id), {})
+            points.extend(str(item) for item in binding.get("function_points") or [] if item)
+    return list(dict.fromkeys(points))
 
 
 def _status_rank(status: str) -> int:
@@ -1668,7 +1685,7 @@ def _build_algorithm_view(
                 row["duration_source"] = "algorithm_evidence"
         has_invocation_detail = any(
             evidence.get(field) is not None
-            for field in ("inputs", "input", "output", "usage")
+            for field in ("inputs", "input", "output", "params", "usage")
         )
         if has_invocation_detail:
             invocation = {
@@ -1834,6 +1851,7 @@ def _build_function_point_view(
         for row in rows.values():
             if activity_id and activity_id in row["activity_ids"]:
                 explicit_ids.append(row["function_point_id"])
+        explicit_ids.extend(_role_function_points(activity))
         for point_id in dict.fromkeys(explicit_ids):
             key = point_id.casefold()
             row = rows.setdefault(key, {
@@ -1910,6 +1928,7 @@ def _build_function_point_view(
         for declared in rows.values():
             if activity_id and activity_id in declared.get("activity_ids", []):
                 activity_ids.add(str(declared["function_point_id"]))
+        activity_ids.update(_role_function_points(activity))
         if not activity_ids:
             continue
         for evidence in _activity_algorithm_evidence(activity):
@@ -2139,6 +2158,18 @@ def _build_activity_details(
                 trace_refs.append(f"trace:{trace_index}")
 
         activity_refs = {f"activity:{alias}" for alias in aliases}
+        activity_duration_ms = next(
+            (
+                value
+                for value in (
+                    activity.get("duration_ms"),
+                    activity.get("agent_duration_ms"),
+                    activity.get("dispatch_duration_ms"),
+                )
+                if _positive_duration_ms(value) is not None
+            ),
+            None,
+        )
         algorithm_rows = []
         for row in algorithms.get("items") or []:
             evidence_match = activity_refs.intersection(set(row.get("evidence_refs") or []))
@@ -2147,6 +2178,42 @@ def _build_activity_details(
             algorithm_row = deepcopy(row)
             algorithm_row["runtime_observed"] = True
             algorithm_row["planned_for_activity"] = False
+            # Some Track Threat responses expose only ``used`` metadata and a
+            # result summary. Preserve the real activity I/O as an explicit
+            # invocation so the operator can inspect what the algorithm saw
+            # and produced even when the gateway omits call-level telemetry.
+            if (
+                str(algorithm_row.get("algorithm_id") or "") == "track_state_updater"
+                and str(activity.get("role") or "") == "track_threat"
+                and not algorithm_row.get("invocations")
+                and (input_value or output_value)
+            ):
+                algorithm_row["invocations"] = [{
+                    "algorithm_id": "track_state_updater",
+                    "name": algorithm_row.get("name") or "track_state_updater",
+                    "version": algorithm_row.get("version") or "1.0.0",
+                    "backend_type": algorithm_row.get("backend_type") or "python_http_service",
+                    "status": algorithm_row.get("execution_status") or activity.get("status"),
+                    "execution_mode": algorithm_row.get("execution_mode") or "activity_evidence",
+                    "params": deepcopy(algorithm_row.get("params") or {}),
+                    "input": _safe_detail_value(input_value),
+                    "output": _safe_detail_value(output_value),
+                    "duration_ms": activity_duration_ms,
+                    "latency_ms": activity_duration_ms,
+                    "duration_source": "activity_duration_fallback",
+                    "input_summary": deepcopy(algorithm_row.get("input_summary")),
+                    "result_summary": deepcopy(algorithm_row.get("result_summary")),
+                    "reason": "活动已返回真实输入/输出；网关未单独上报算法调用明细",
+                    "inferred_from_activity": True,
+                }]
+                algorithm_row["invocation_count"] = 1
+                algorithm_row["version"] = algorithm_row.get("version") or "1.0.0"
+                algorithm_row["backend_type"] = algorithm_row.get("backend_type") or "python_http_service"
+                algorithm_row["execution_mode"] = algorithm_row.get("execution_mode") or "activity_evidence"
+                if activity_duration_ms is not None:
+                    algorithm_row["duration_ms"] = activity_duration_ms
+                    algorithm_row["latency_ms"] = activity_duration_ms
+                    algorithm_row["duration_source"] = "activity_duration_fallback"
             algorithm_rows.append(algorithm_row)
         instance_id = activity.get("instance_id")
         matching_instances = [

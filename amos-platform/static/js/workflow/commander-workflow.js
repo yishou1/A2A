@@ -27,10 +27,10 @@ window.PlatformWorkflow = (function () {
   var submitting = false;
   var notifiedTerminalKey = null;
   var workflowTasks = [
-    {phase:"OBSERVE", label:"观察与识别", subtitle:"Observe · Find/Fix", checkpoints:["MAR-CP-PERCEPTION"]},
-    {phase:"ORIENT", label:"航迹评估", subtitle:"Orient · Track", checkpoints:["MAR-CP-ASSESS"]},
-    {phase:"DECIDE", label:"方案决策", subtitle:"Decide · Target", checkpoints:["MAR-CP-PLAN"]},
-    {phase:"ACT", label:"执行与复核", subtitle:"Act · Engage/Assess", checkpoints:["MAR-CP-CLOSE"]},
+    {phase:"OBSERVE", label:"观察与识别", subtitle:"Observe · Find/Fix", checkpoints:["MAR-CP-PERCEPTION", "AMP-CP-PERCEPTION", "BOR-CP-DETECT"]},
+    {phase:"ORIENT", label:"航迹评估", subtitle:"Orient · Track", checkpoints:["MAR-CP-ASSESS", "AMP-CP-ASSESS", "BOR-CP-TRACK"]},
+    {phase:"DECIDE", label:"方案决策", subtitle:"Decide · Target", checkpoints:["MAR-CP-PLAN", "AMP-CP-PLAN", "BOR-CP-LINK", "BOR-CP-PLAN"]},
+    {phase:"ACT", label:"执行与复核", subtitle:"Act · Engage/Assess", checkpoints:["MAR-CP-CLOSE", "AMP-CP-BDA", "AMP-CP-CLOSE", "BOR-CP-CLOSE"]},
   ];
 
   function escapeHtml(value) {
@@ -74,6 +74,7 @@ window.PlatformWorkflow = (function () {
       branch_builtin_algorithm: "内置算法",
       branch_builtin_algorithm_simulation_only: "仿真内置算法",
       branch_pipeline_mock_driven: "Mock 驱动",
+      activity_evidence: "活动级证据回填",
       stub: "Stub",
       mock: "Mock",
       unspecified: "",
@@ -119,10 +120,13 @@ window.PlatformWorkflow = (function () {
     if (phase === "TRACK") return "ORIENT";
     if (phase === "TARGET") return "DECIDE";
     if (phase === "ENGAGE" || phase === "ASSESS") return "ACT";
-    if (checkpoint === "MAR-CP-PERCEPTION") return "OBSERVE";
-    if (checkpoint === "MAR-CP-ASSESS") return "ORIENT";
-    if (checkpoint === "MAR-CP-PLAN") return "DECIDE";
-    if (checkpoint === "MAR-CP-CLOSE") return "ACT";
+    for (var i = 0; i < workflowTasks.length; i += 1) {
+      if ((workflowTasks[i].checkpoints || []).indexOf(checkpoint) >= 0) return workflowTasks[i].phase;
+    }
+    if (/-(PERCEPTION|DETECT)$/.test(checkpoint)) return "OBSERVE";
+    if (/-(ASSESS|TRACK)$/.test(checkpoint)) return "ORIENT";
+    if (/-(PLAN|LINK)$/.test(checkpoint)) return "DECIDE";
+    if (/-(BDA|CLOSE)$/.test(checkpoint)) return "ACT";
     return null;
   }
 
@@ -184,6 +188,71 @@ window.PlatformWorkflow = (function () {
     }, 0);
     if (algorithmDuration > 0) parts.push("算法累计 " + formatDuration(algorithmDuration));
     return parts.join(" · ") || null;
+  }
+
+  function activityRequiredSkills(item) {
+    var skills = [];
+    if (item && Array.isArray(item.required_skills)) skills = skills.concat(item.required_skills);
+    if (item && item.required_skill) skills.push(item.required_skill);
+    if (item && item.request && item.request.required_skill) skills.push(item.request.required_skill);
+    if (item && item.request && Array.isArray(item.request.required_skills)) skills = skills.concat(item.request.required_skills);
+    return skills.map(function (value) { return String(value || "").toLowerCase(); }).filter(Boolean);
+  }
+
+  function activityRoleDisplayName(role, skills, phaseContext) {
+    var key = String(role || "").toLowerCase();
+    skills = Array.isArray(skills) ? skills : [];
+    var hasSkill = function (name) { return skills.indexOf(name) >= 0; };
+    if (key.indexOf("tactical_intelligence") >= 0 || key.indexOf("recon") >= 0) {
+      return phaseContext && phaseContext.ooda === "OBSERVE"
+        ? "感知识别融合"
+        : "态势认知共享";
+    }
+    if (key.indexOf("track_threat") >= 0 || key.indexOf("track") >= 0) {
+      if (hasSkill("threat_ranking")) return "威胁排序评估";
+      if (hasSkill("trajectory_tracking")) {
+        return phaseContext && phaseContext.ooda === "OBSERVE"
+          ? "航迹初始化"
+          : "航迹维护更新";
+      }
+      if (phaseContext && phaseContext.ooda === "OBSERVE") return "航迹初始化";
+      if (phaseContext && phaseContext.ooda === "ORIENT") return "航迹威胁评估";
+    }
+    if (key.indexOf("task_scheduling") >= 0 || key.indexOf("sched") >= 0) {
+      return "任务调度分配";
+    }
+    if (key.indexOf("resource_allocation") >= 0 || key.indexOf("resource") >= 0) {
+      return "资源协同分配";
+    }
+    if (key.indexOf("decision_planning") >= 0 || key.indexOf("decision") >= 0 || key.indexOf("planning") >= 0 || key.indexOf("plan") >= 0) {
+      return "方案规划决策";
+    }
+    if (key.indexOf("compliance_authorization") >= 0 || key.indexOf("compliance") >= 0 || key.indexOf("authorization") >= 0 || key.indexOf("roe") >= 0) {
+      return "规则授权审查";
+    }
+    if (key.indexOf("simulation_execution") >= 0 || hasSkill("execution_control")) {
+      return "执行仿真控制";
+    }
+    if (key.indexOf("closed_loop") >= 0 || hasSkill("closed_loop_optimization")) {
+      return "闭环效果评估";
+    }
+    if (key.indexOf("commander") >= 0) return "指挥编排";
+    return null;
+  }
+
+  function activityAgentDisplayName(role, skills, phaseContext) {
+    var displayName = activityRoleDisplayName(role, skills, phaseContext);
+    return displayName ? displayName + " Agent" : null;
+  }
+
+  function activityDisplayTitle(item, sequenceContainer, phaseContext) {
+    if (sequenceContainer) return "顺序流程容器";
+    var role = String(item && item.role || "");
+    var key = String(role || item && item.work_item || item && item.activity_id || "").toLowerCase();
+    var skills = activityRequiredSkills(item);
+    var displayName = activityRoleDisplayName(key, skills, phaseContext);
+    if (displayName) return displayName;
+    return role || item.work_item || item.activity_id || "执行项";
   }
 
   function renderTaskHistory() {
@@ -490,6 +559,9 @@ window.PlatformWorkflow = (function () {
         ? formatDuration(row.duration_ms || row.latency_ms)
         : "算法未单独上报耗时",
     ]);
+    if (row.duration_source === "activity_duration_fallback") {
+      rows.push(["耗时来源", "活动耗时回填（算法服务未单独上报）"]);
+    }
     if ((row.evidence_refs || []).length) rows.push(["运行证据", row.evidence_refs.join(", ")]);
     return rows;
   }
@@ -525,6 +597,7 @@ window.PlatformWorkflow = (function () {
         ["执行模式", item.execution_mode ? modeLabel(item.execution_mode) : null],
         ["选择原因", item.reason],
         ["耗时", positiveDuration(item.duration_ms || item.latency_ms) > 0 ? formatDuration(item.duration_ms || item.latency_ms) : null],
+        ["耗时来源", item.duration_source === "activity_duration_fallback" ? "活动耗时回填（算法服务未单独上报）" : null],
       ];
       var usageMetrics = usageWithoutTiming(item.usage);
       if (usageMetrics) invocationRows.push(["服务端指标", compactValue(usageMetrics)]);
@@ -582,8 +655,9 @@ window.PlatformWorkflow = (function () {
     }
     if (activityTab === "call") {
       var call = detail.agent_call || {};
+      var callRoleLabel = activityAgentDisplayName(call.role, activityRequiredSkills(activity), workflowPhaseContext(view)) || call.role;
       root.innerHTML = '<div class="workflow-detail-section"><h4>Agent 调用</h4>' + detailDefinitionList([
-        ["角色", call.role], ["Agent", call.agent],
+        ["Agent 类型", callRoleLabel], ["后端角色", call.role], ["Agent", call.agent],
         ["执行模式", call.execution_mode ? modeLabel(call.execution_mode) : null],
         ["Agent调用耗时", formatDuration(call.agent_duration_ms || call.duration_ms)],
         ["调度窗口耗时", formatDuration(call.dispatch_duration_ms)],
@@ -636,11 +710,21 @@ window.PlatformWorkflow = (function () {
     function activityDescription(item, sequenceContainer, phaseContext) {
       if (sequenceContainer) return "流程容器负责按 BPEL 顺序串联子活动，本身不代表业务 Agent 执行。";
       var key = String(item.role || item.work_item || item.activity_id || "").toLowerCase();
+      var skills = activityRequiredSkills(item);
       if (item.description || item.summary) return item.description || item.summary;
       if (key.indexOf("tactical_intelligence") >= 0 || key.indexOf("recon") >= 0) {
         return "汇聚传感器观测与算法输出，完成目标初始发现、识别线索整理和态势信息共享。";
       }
       if (key.indexOf("track_threat") >= 0 || key.indexOf("track") >= 0) {
+        if (skills.indexOf("threat_ranking") >= 0) {
+          return "读取已形成航迹，计算威胁等级、目标优先级和后续处置关注点。";
+        }
+        if (skills.indexOf("trajectory_tracking") >= 0 && phaseContext && phaseContext.ooda === "OBSERVE") {
+          return "观察阶段调用跟踪 Agent，把感知识别结果固定成初始航迹、位置和后续研判输入。";
+        }
+        if (skills.indexOf("trajectory_tracking") >= 0) {
+          return "持续维护目标航迹，融合当前观测并输出稳定航迹状态。";
+        }
         if (phaseContext && phaseContext.ooda === "OBSERVE") {
           return "观察阶段调用跟踪 Agent，把感知识别结果固定成初始航迹、位置和后续研判输入。";
         }
@@ -687,10 +771,28 @@ window.PlatformWorkflow = (function () {
         '<span class="workflow-activity-meta"><span class="workflow-state-tag">' + escapeHtml(statusLabel(state)) + '</span></span></span>' +
       '</button>';
     }).join("") : '<div class="workflow-empty">未返回执行计划</div>';
+    var selectedActivity = rows.find(function (item) {
+      return activityKey(item) === selectedActivityId;
+    });
+    document.dispatchEvent(new CustomEvent("amos:workflow-activity-context", {
+      detail: selectedActivity ? {
+        activity_id: activityKey(selectedActivity),
+        activity_title: activityDisplayTitle(
+          selectedActivity,
+          selectedActivity.type === "sequence" || /activatity-\d+-sequence$/i.test(selectedActivity.activity_id || ""),
+          phaseContext
+        ),
+        status: selectedActivity.status || "pending",
+        ooda: phaseContext.ooda,
+        f2: phaseContext.f2,
+        label: phaseContext.label,
+      } : null,
+    }));
 
     var trace = (orchestration || {}).trace || [];
     traceRoot.innerHTML = trace.length ? trace.slice().reverse().map(function (item) {
-      var traceMeta = [item.role, item.agent, item.work_item, item.message].filter(Boolean).join(" · ");
+      var traceRole = activityRoleDisplayName(item.role, [], phaseContext) || item.role;
+      var traceMeta = [traceRole, item.agent, item.work_item, item.message].filter(Boolean).join(" · ");
       return '<div class="workflow-trace-row"><span>' + escapeHtml(item.timestamp || "—") + '</span><b>' + escapeHtml(item.event) + '</b><small>' +
         escapeHtml(traceMeta) + '</small></div>';
     }).join("") : '<div class="workflow-empty">未返回执行事件</div>';
@@ -800,7 +902,7 @@ window.PlatformWorkflow = (function () {
     var rows = functionPoints.items || [];
     if (!selectedFunctionPointId && rows.length) selectedFunctionPointId = rows[0].function_point_id;
     var selected = rows.filter(function (row) { return row.function_point_id === selectedFunctionPointId; })[0] || rows[0];
-    function algorithmText(items) { return (items || []).map(function (item) { return item.algorithm_id + (item.onnx_model_provided ? "（ONNX 已提供" + (item.onnx_runtime_available ? "，可执行" : "，当前不可执行") + "）" : ""); }).join("；") || "未映射"; }
+    function algorithmText(items) { return (items || []).map(function (item) { return item.algorithm_id + (item.onnx_model_provided ? "（ONNX 已提供）" : ""); }).join("；") || "未映射"; }
     root.innerHTML =
       '<div class="workflow-v2-summary">' +
         '<span><small>全部功能点</small><b>' + escapeHtml(provided(counts.total)) + '</b></span>' +

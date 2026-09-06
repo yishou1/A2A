@@ -1,6 +1,26 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from amos_platform.agents.commander_bridge import CommanderBridge
+from amos_platform.data.operational_catalog import algorithm_classes, operational_functions
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_function_point_catalog_declares_workflow_primary_implementations() -> None:
+    rows = {item["function_id"]: item for item in operational_functions()}
+
+    assert rows["KC-04"]["primary_algorithm_ids"] == ["mission_feature_adapter"]
+    assert rows["KC-23"]["primary_algorithm_ids"] == ["execution_control_planner"]
+    assert rows["KC-28"]["primary_algorithm_ids"] == ["mission_completion_scorer"]
+
+
+def test_large_language_model_declares_qwen_primary_implementation() -> None:
+    rows = {item["requirement_id"]: item for item in algorithm_classes()}
+
+    assert rows["M09"]["primary_algorithm_ids"] == ["qwen3-1.7B"]
 
 
 def test_algorithm_catalog_only_counts_healthy_active_runtimes(monkeypatch) -> None:
@@ -103,3 +123,11 @@ def test_algorithm_catalog_accepts_flat_algolib_gateway_shape(monkeypatch) -> No
     assert catalog["algorithms"][0]["runtime_status"] == "ready"
     assert catalog["algorithms"][0]["predict_endpoint"] == "http://runtime/flat/predict"
 
+
+def test_algorithm_panel_only_lists_onnx_packages_in_onnx_group() -> None:
+    panels = (ROOT / "static/js/panels/platform-panels.js").read_text(encoding="utf-8")
+
+    assert 'renderGroup("ONNX 模型包", onnxRows)' in panels
+    assert 'renderGroup("其他实现包"' not in panels
+    assert "当前不可执行" not in panels
+    assert "运行时不可用" not in panels

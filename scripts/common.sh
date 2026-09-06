@@ -35,6 +35,10 @@ load_root_env() {
 resolve_a2a_python() {
   if [[ -n "${A2A_CONDA_PREFIX:-}" && -x "$A2A_CONDA_PREFIX/bin/python" ]]; then
     A2A_PYTHON="$A2A_CONDA_PREFIX/bin/python"
+  elif [[ -x "$ROOT_DIR/../envs/a2a/bin/python" ]]; then
+    # The release bundle ships its runtime beside the repository. This keeps
+    # startup independent of whether Conda is installed or initialized.
+    A2A_PYTHON="$ROOT_DIR/../envs/a2a/bin/python"
   else
     local prefix
     prefix="$(conda env list | awk '$1 == "a2a" {print $NF; exit}')"
