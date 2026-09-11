@@ -2,7 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { App as AntApp, ConfigProvider } from 'antd'
+import { App as AntApp, ConfigProvider, theme as antTheme } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import { App } from './app/App'
 import './styles.css'
@@ -28,16 +28,45 @@ createRoot(document.getElementById('root')!).render(
     <ConfigProvider
       locale={zhCN}
       theme={{
+        algorithm: antTheme.darkAlgorithm,
         token: {
-          colorPrimary: '#2563eb',
-          colorInfo: '#2563eb',
-          borderRadius: 8,
+          colorPrimary: '#4aa3c7',
+          colorInfo: '#4aa3c7',
+          colorSuccess: '#4db68b',
+          colorWarning: '#d6a34d',
+          colorError: '#d46a62',
+          colorBgBase: '#071018',
+          colorBgContainer: '#0b151e',
+          colorBgElevated: '#0f1b25',
+          colorBorder: '#243441',
+          colorSplit: '#243441',
+          colorText: '#d6e0e7',
+          colorTextSecondary: '#95a6b2',
+          borderRadius: 5,
+          controlHeight: 32,
+          fontSize: 13,
+          boxShadowSecondary: '0 10px 30px rgb(0 0 0 / 35%)',
           fontFamily:
-            "Inter, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif",
+            "Inter, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif",
         },
         components: {
-          Table: { cellPaddingBlockSM: 10, cellPaddingInlineSM: 12 },
-          Layout: { bodyBg: '#f3f6fa', siderBg: '#0b1220' },
+          Table: {
+            cellPaddingBlockSM: 9,
+            cellPaddingInlineSM: 11,
+            headerBg: '#0f1b25',
+            headerColor: '#95a6b2',
+            rowHoverBg: '#10212c',
+            borderColor: '#243441',
+          },
+          Layout: { bodyBg: '#071018', headerBg: '#09131c', siderBg: '#09131b' },
+          Menu: {
+            darkItemBg: '#09131b',
+            darkItemColor: '#81939f',
+            darkItemHoverBg: '#0e1c26',
+            darkItemSelectedBg: '#173a49',
+            darkItemSelectedColor: '#d8f2fb',
+            itemBorderRadius: 4,
+          },
         },
       }}
     >
