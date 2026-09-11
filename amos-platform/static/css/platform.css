@@ -105,6 +105,8 @@ select,input{
 .compact-card{min-width:0;margin:0}
 .card-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:10px}
 .card-heading h2,.workflow-heading h2{font-size:13px;font-weight:600;color:#dbe5ea}
+.card-heading-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:6px}
+.algolib-console-link{display:inline-flex;align-items:center;gap:4px;text-decoration:none}
 .two-column-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:10px}
 .status-chip,.badge{display:inline-flex;align-items:center;min-height:20px;padding:2px 7px;border:1px solid var(--line-strong);border-radius:999px;background:#101d26;color:var(--text-soft);font-size:10px;white-space:nowrap}
 .status-chip.info,.badge-cyan{border-color:#2f6b84;background:#112e3c;color:#8ed4ee}

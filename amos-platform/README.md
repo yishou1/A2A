@@ -50,6 +50,10 @@ docs/                  当前架构、剧本及后端缺陷说明
 浏览器访问 `http://127.0.0.1:5000/`。自定义端口：`PORT=8080 ./start.sh`。
 日志写入 `.amos-server.log`。
 
+“算法与功能”页签默认在新标签页打开
+`http://127.0.0.1:5173/algorithms`。如算法管理台部署在其他地址，启动 AMOS 前设置
+`ALGOLIB_CONSOLE_URL` 即可覆盖，不需要修改模板。
+
 ## 新电脑首次部署
 
 1. 安装 Python 3.10+（Windows/macOS/Linux 均可，无需 conda）

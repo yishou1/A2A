@@ -4,6 +4,7 @@ import {
   CloudServerOutlined,
   DashboardOutlined,
   DeploymentUnitOutlined,
+  ExportOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   NodeIndexOutlined,
@@ -16,6 +17,9 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { queryKeys, useHealth } from '../api/queries'
 
 const { Header, Sider, Content } = Layout
+const amosConsoleUrl =
+  (import.meta.env.VITE_AMOS_URL as string | undefined)?.trim() ||
+  'http://127.0.0.1:5000/'
 
 export function AppShell() {
   const [collapsed, setCollapsed] = useState(false)
@@ -67,12 +71,22 @@ export function AppShell() {
       </Sider>
       <Layout>
         <Header className="app-header">
-          <Button
-            type="text"
-            aria-label={collapsed ? '展开导航' : '收起导航'}
-            icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-            onClick={() => setCollapsed((value) => !value)}
-          />
+          <Space size="small">
+            <Button
+              type="text"
+              aria-label={collapsed ? '展开导航' : '收起导航'}
+              icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+              onClick={() => setCollapsed((value) => !value)}
+            />
+            <Button
+              href={amosConsoleUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              icon={<ExportOutlined />}
+            >
+              AMOS 任务台
+            </Button>
+          </Space>
           <Space size="middle">
             <Tooltip title={health.error ? '服务不可达' : '服务连接正常'}>
               <Badge

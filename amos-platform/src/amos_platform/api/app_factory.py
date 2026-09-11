@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 
 
 from flask import Flask, abort, render_template, request
@@ -12,12 +13,19 @@ from amos_platform.api.dependencies import get_engine
 from amos_platform.config import static_dir, template_dir
 from amos_platform.frontend_state.temporal_story import media_is_released
 
+
+DEFAULT_ALGOLIB_CONSOLE_URL = "http://127.0.0.1:5173/algorithms"
+
+
 def create_app() -> Flask:
     """Create the Flask app with repository template and static paths."""
     app = Flask(
         __name__,
         template_folder=str(template_dir()),
         static_folder=str(static_dir()),
+    )
+    app.config["ALGOLIB_CONSOLE_URL"] = (
+        os.getenv("ALGOLIB_CONSOLE_URL", "").strip() or DEFAULT_ALGOLIB_CONSOLE_URL
     )
     app.register_blueprint(create_api_blueprint())
 
@@ -39,7 +47,10 @@ def create_app() -> Flask:
 
     @app.route("/")
     def index():
-        return render_template("dashboard.html")
+        return render_template(
+            "dashboard.html",
+            algolib_console_url=app.config["ALGOLIB_CONSOLE_URL"],
+        )
 
     return app
 

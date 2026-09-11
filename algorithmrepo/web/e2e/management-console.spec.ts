@@ -86,3 +86,13 @@ test('loads the overview and filters the algorithm catalog', async ({ page }) =>
   await expect(page.getByText('合规风险评分器')).toBeVisible()
   await expect(page.getByText('共 1 项')).toBeVisible()
 })
+
+test('provides a safe link back to the AMOS task console', async ({ page }) => {
+  await page.goto('/')
+
+  const link = page.getByRole('link', { name: 'AMOS 任务台' })
+  await expect(link).toBeVisible()
+  await expect(link).toHaveAttribute('href', 'http://127.0.0.1:5000/')
+  await expect(link).toHaveAttribute('target', '_blank')
+  await expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+})
