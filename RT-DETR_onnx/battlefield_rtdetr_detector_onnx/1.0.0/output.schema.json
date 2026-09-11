@@ -1,0 +1,52 @@
+{
+  "title": "Battlefield RT-DETR Detector ONNX Output",
+  "type": "object",
+  "required": [
+    "output0"
+  ],
+  "properties": {
+    "output0": {
+      "description": "Raw detection tensor shape [1, 300, 6]",
+      "type": "object",
+      "properties": {
+        "shape": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "dtype": {
+          "type": "string"
+        },
+        "min": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "max": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "mean": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "sha256_16": {
+          "type": "string"
+        },
+        "head": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        }
+      }
+    }
+  },
+  "additionalProperties": true
+}

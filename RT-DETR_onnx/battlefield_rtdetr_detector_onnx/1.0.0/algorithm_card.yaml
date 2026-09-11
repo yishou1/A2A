@@ -1,0 +1,91 @@
+algorithm_id: battlefield_rtdetr_detector_onnx
+version: 1.0.0
+display_name: Battlefield RT-DETR Detector ONNX
+backend_type: onnx
+status: draft
+
+task_family: detection
+modalities:
+  input:
+    - structured_json
+  output:
+    - structured_json
+
+capabilities:
+  - object_detection
+  - rt_detr
+  - onnx
+
+agent_card:
+  summary: >
+    Native ONNX core of the battlefield Ultralytics RT-DETR detector
+    (97-class unit17/coco25 taxonomy). Caller supplies a letterboxed
+    float32 NCHW image tensor; decode / letterbox / score filter / NMS /
+    ODConv refine remain in the python_http_service sibling.
+  when_to_use:
+    - Need RT-DETR backbone inference via ONNX Runtime without starting Python HTTP.
+    - Upstream already produced images [1, 3, 640, 640] in [0,1].
+  when_not_to_use:
+    - Raw frames / media_refs still need decode and letterbox (use battlefield_rtdetr_detector).
+    - ODConv confidence refine or full TIA orchestration is required.
+  input_description: >
+    images float32 NCHW tensor shape [1, 3, 640, 640], RGB-normalized to [0,1]
+    after letterbox to 640.
+  output_description: >
+    Raw Ultralytics RT-DETR ONNX tensor `output0` shape [1, 300, 6].
+    Map class ids with label_map.json; apply conf / NMS outside the graph.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  tensor_contract_ref: tensor_contract.yaml
+  runtime:
+    backend_type: onnx
+    model_uri: model.onnx
+    execution_provider: cpu
+  preprocess:
+    config_uri: preprocess.yaml
+  postprocess:
+    config_uri: postprocess.yaml
+
+constraints:
+  max_input_chars: 20000000
+  max_request_bytes: 67108864
+  batch_supported: false
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 200
+  latency_ms_p95: 1500
+  primary_metric: onnx_native_inference
+  primary_score: 1.0
+  time_complexity: O(n)
+  space_complexity: O(n)
+  complexity_variable: [1, 3, 640, 640]
+  performance_notes: >
+    Native CPU ONNX Runtime for the detector backbone only. Image decode,
+    letterbox, NMS, and ODConv remain in battlefield_rtdetr_detector.
+
+resource_requirements:
+  min_cpu_cores: 2
+  recommended_cpu_cores: 4
+  min_memory_mb: 2048
+  recommended_memory_mb: 4096
+  min_gpu_count: 0
+  gpu_type: optional
+  min_vram_mb: 0
+  recommended_vram_mb: 4096
+  disk_mb: 256
+
+model_profile:
+  parameter_count: 33005411
+  parameter_count_text: "33005411"
+  flops: 0
+  flops_text: RT-DETR-L ~108 GFLOPs @ 640
+  flops_input_shape: [1, 3, 640, 640]
+  model_size_mb: 125
+  precision: fp32
+
+safety:
+  risk_level: medium
+  requires_human_review: true
