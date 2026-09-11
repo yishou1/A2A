@@ -95,6 +95,28 @@ Sentence Transformers 的 `paraphrase-MiniLM-L6-v2`，首次使用可能需要�
 
 ## 启停
 
+### Windows：只启动融合界面和算法库
+
+完成 AMOS Python 环境、AlgoLib 编译和前端 `npm ci` 后，可以双击
+`启动融合界面.bat`，或者执行：
+
+```powershell
+.\scripts\start_integrated_ui.ps1
+```
+
+脚本自动构建 React 前端，以隐藏进程启动 AlgoLib 8088 和 AMOS 5000，并等待健康检查。
+算法管理台由 AMOS 同源提供，因此不需要另外启动 5173。停止时双击
+`停止融合界面.bat`，或者执行：
+
+```powershell
+.\scripts\stop_integrated_ui.ps1
+```
+
+运行日志和 PID 记录位于 `.runtime/integrated-ui/`。这个入口只启动融合界面与算法库；
+需要 Commander、Gateway、Agent 和 Nacos 的完整任务链路时，仍使用下面的全栈脚本。
+
+### 完整 A2A 任务链路
+
 不调用 Azure、使用确定性算法规划启动：
 
 ```bash

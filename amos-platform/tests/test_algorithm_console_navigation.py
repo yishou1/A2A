@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from amos_platform.api import algolib_console
 from amos_platform.api.app_factory import create_app
@@ -30,6 +31,20 @@ def test_dashboard_accepts_configured_algorithm_console_url(monkeypatch) -> None
         'href="http://127.0.0.1:5000/algolib/algorithms"'
         in response.get_data(as_text=True)
     )
+
+
+def test_algorithm_cards_link_to_same_origin_management_details() -> None:
+    panels = (
+        Path(__file__).resolve().parents[1]
+        / "static"
+        / "js"
+        / "panels"
+        / "platform-panels.js"
+    ).read_text(encoding="utf-8")
+
+    assert '"/algolib/algorithms/"' in panels
+    assert 'class="algorithm-console-detail-link"' in panels
+    assert 'rel="noopener noreferrer"' in panels
 
 
 def test_amos_serves_algorithm_console_spa_routes(tmp_path, monkeypatch) -> None:

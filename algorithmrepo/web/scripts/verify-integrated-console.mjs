@@ -10,6 +10,18 @@ try {
   await amosPage.goto(`${amosUrl}/`)
   await amosPage.getByRole('tab', { name: '算法与功能' }).click()
 
+  const detailEntry = amosPage.locator('.algorithm-console-detail-link').first()
+  await detailEntry.waitFor()
+  const detailHref = await detailEntry.getAttribute('href')
+  assert.match(detailHref || '', /^\/algolib\/algorithms\/[^/]+\/[^/]+\/[^/]+$/)
+
+  const detailPopupPromise = context.waitForEvent('page')
+  await detailEntry.click()
+  const detailPage = await detailPopupPromise
+  await detailPage.waitForURL(`${amosUrl}${detailHref}`)
+  await detailPage.getByText('服务正常').waitFor()
+  await detailPage.close()
+
   const entry = amosPage.locator('#open-algorithm-console')
   await entry.waitFor()
   assert.equal(await entry.getAttribute('href'), '/algolib/algorithms')
@@ -33,6 +45,7 @@ try {
     JSON.stringify({
       amosUrl,
       consoleUrl: consolePage.url(),
+      detailUrl: `${amosUrl}${detailHref}`,
       serviceReady: true,
       algorithmRows,
     }),

@@ -40,6 +40,10 @@ AMOS、AlgoLib Server 和生产构建都启动后，可执行真实浏览器冒�
 npm run test:e2e:integrated
 ```
 
+在合并后的 Windows 总项目根目录，可以使用
+`scripts/start_integrated_ui.ps1` 和 `scripts/stop_integrated_ui.ps1` 统一启停 AMOS、
+AlgoLib Server 与生产管理页面，无需单独运行 Vite。
+
 ## 当前开发范围
 
 已接入真实健康接口、运行总览、算法目录、算法详情、服务器路径注册、生命周期管理、部署管理、Schema/JSON 在线调用、28 个 KC 功能点矩阵和按 trace ID 执行链路查询。

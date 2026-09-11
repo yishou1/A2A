@@ -529,8 +529,14 @@ window.PlatformPanels = (function () {
       var onnxPackage = item.onnx_model_provided || /_onnx$/i.test(String(item.algorithm_id || ""));
       var stateText = onnxPackage ? "ONNX 已提供" : (ready ? "运行就绪" : "未运行");
       var localized = localizedAlgorithm(item);
+      var detailParts = [item.algorithm_id, item.version, item.backend_type];
+      var detailUrl = detailParts.every(function (value) { return Boolean(value); }) ?
+        "/algolib/algorithms/" + detailParts.map(function (value) { return encodeURIComponent(String(value)); }).join("/") : "";
+      var title = detailUrl ? '<a class="algorithm-console-detail-link" href="' + escapeHtml(detailUrl) +
+        '" target="_blank" rel="noopener noreferrer" title="在算法管理台查看详情">' +
+        escapeHtml(localized.name) + ' <span aria-hidden="true">↗</span></a>' : '<b>' + escapeHtml(localized.name) + '</b>';
       return '<article class="backend-function-card ' + (ready || onnxPackage ? "runtime-ready" : "runtime-unavailable") + '">' +
-        '<header><div><b>' + escapeHtml(localized.name) + '</b></div><span>' + escapeHtml(stateText) + '</span></header>' +
+        '<header><div>' + title + '</div><span>' + escapeHtml(stateText) + '</span></header>' +
         '<p>' + escapeHtml(localized.summary) + '</p>' +
         '<div class="backend-runtime-meta"><span>任务族 <b>' + escapeHtml(taskFamilyLabel(item.task_family || "未上报")) + '</b></span>' +
         '<span>版本 <b>' + escapeHtml(item.version || "未上报") + '</b></span>' +
