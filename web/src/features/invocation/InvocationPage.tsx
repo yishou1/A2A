@@ -3,13 +3,15 @@ import { useMutation } from '@tanstack/react-query'
 import { Alert, App, Button, Card, Col, Descriptions, Input, Row, Select, Space, Tabs, Tag, Typography } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { ApiError, api, type AlgorithmKey } from '../../api/client'
+import { api, type AlgorithmKey } from '../../api/client'
 import type { AlgorithmSummary, RunRequest, RunResponse } from '../../api/contracts'
 import { useAlgorithms, useAlgorithmSchema } from '../../api/queries'
 import { QueryState } from '../../components/QueryState'
 import { backendLabel } from '../../lib/presentation'
+import { isRetryableRunFailure, normalizeRunFailure } from '../../lib/runError'
 import { createInitialInputs, SchemaInputForm } from './SchemaInputForm'
 import { validateSchemaInputs } from '../../lib/schemaValidation'
+import { createRequestTemplates } from './requestTemplates'
 
 function keyValue(item: AlgorithmSummary) {
   return `${item.algorithm_id}\u0000${item.version}\u0000${item.backend_type}`
@@ -53,6 +55,12 @@ export function InvocationPage() {
   const [result, setResult] = useState<RunResponse>()
   const [requestPreview, setRequestPreview] = useState<RunRequest>()
   const [editorError, setEditorError] = useState<string>()
+  const [templateKey, setTemplateKey] = useState('')
+
+  const requestTemplates = useMemo(
+    () => createRequestTemplates(schemaQuery.data, selected?.agent_card.examples ?? []),
+    [schemaQuery.data, selected?.agent_card.examples],
+  )
 
   useEffect(() => {
     if (!activeAlgorithms.length) return
@@ -66,27 +74,32 @@ export function InvocationPage() {
 
   useEffect(() => {
     if (!selected || !schemaQuery.data) return
-    const initial = createInitialInputs(schemaQuery.data, selected.agent_card.examples[0]?.input)
+    const initialTemplate = requestTemplates[0]
+    const initial = initialTemplate?.inputs ?? createInitialInputs(schemaQuery.data)
     setInputs(initial)
     setRawInputs(JSON.stringify(initial, null, 2))
     setRawParams('{}')
+    setTemplateKey(initialTemplate?.key ?? '')
     setDeployId(undefined)
     setFunctionId(undefined)
     setResult(undefined)
     setEditorError(undefined)
-  }, [schemaQuery.data, selected])
+  }, [requestTemplates, schemaQuery.data, selected])
 
   const mutation = useMutation({
     mutationFn: api.run,
+    onMutate: (request) => {
+      setRequestPreview(request)
+      setResult(undefined)
+    },
     onSuccess: (response) => {
       setResult(response)
       message.success('算法调用成功')
     },
-    onError: (error: Error) => {
-      if (error instanceof ApiError && error.payload && typeof error.payload === 'object') {
-        setResult(error.payload as RunResponse)
-      }
-      message.error(error.message)
+    onError: (error: Error, request) => {
+      const failure = normalizeRunFailure(error, request)
+      setResult(failure)
+      message.error(failure.error?.message ?? error.message)
     },
   })
 
@@ -139,12 +152,30 @@ export function InvocationPage() {
         }
       }
       setEditorError(undefined)
-      setRequestPreview(request)
-      setResult(undefined)
       mutation.mutate(request)
     } catch (error) {
       setEditorError(error instanceof Error ? error.message : 'JSON 格式错误')
     }
+  }
+
+  const retryLastRequest = () => {
+    if (!requestPreview || mutation.isPending) return
+    setEditorError(undefined)
+    mutation.mutate(requestPreview)
+  }
+
+  const loadRequestTemplate = () => {
+    const template = requestTemplates.find((item) => item.key === templateKey)
+    if (!template) return
+    const nextInputs = structuredClone(template.inputs)
+    const nextParams = structuredClone(template.params)
+    setInputs(nextInputs)
+    setRawInputs(JSON.stringify(nextInputs, null, 2))
+    setRawParams(JSON.stringify(nextParams, null, 2))
+    setResult(undefined)
+    setRequestPreview(undefined)
+    setEditorError(undefined)
+    message.success(`已加载${template.label}`)
   }
 
   const copyJson = async (value: unknown, label: string) => {
@@ -178,6 +209,21 @@ export function InvocationPage() {
           <Row gutter={16} className="invocation-workspace">
             <Col xs={24} xl={12}>
               <Card title="请求" className="surface-card" extra={<Tag>{backendLabel(selected.backend_type)}</Tag>}>
+                <div className="request-template-bar">
+                  <label className="compact-field">
+                    <span>请求模板</span>
+                    <Select
+                      value={templateKey || undefined}
+                      onChange={setTemplateKey}
+                      options={requestTemplates.map((template) => ({
+                        value: template.key,
+                        label: template.label,
+                      }))}
+                      placeholder="当前算法没有可用模板"
+                    />
+                  </label>
+                  <Button disabled={!templateKey} onClick={loadRequestTemplate}>加载模板</Button>
+                </div>
                 <Tabs activeKey={mode} onChange={(key) => {
                   const next = key as 'form' | 'json'
                   if (next === 'json') setRawInputs(JSON.stringify(inputs, null, 2))
@@ -206,7 +252,15 @@ export function InvocationPage() {
                 {mutation.isPending && <Alert type="info" showIcon message="正在执行算法，请勿重复提交。" />}
                 {result && (
                   <Space direction="vertical" size="middle" className="full-width">
-                    <Alert type={result.ok ? 'success' : 'error'} showIcon message={result.ok ? '调用成功' : `调用失败：${result.error?.code ?? 'UNKNOWN_ERROR'}`} description={result.error?.message} />
+                    <Alert
+                      type={result.ok ? 'success' : 'error'}
+                      showIcon
+                      message={result.ok ? '调用成功' : `调用失败：${result.error?.code ?? 'UNKNOWN_ERROR'}`}
+                      description={result.error?.message}
+                      action={isRetryableRunFailure(result) && requestPreview
+                        ? <Button size="small" icon={<ReloadOutlined />} loading={mutation.isPending} onClick={retryLastRequest}>重试本次请求</Button>
+                        : undefined}
+                    />
                     <Descriptions bordered size="small" column={2}>
                       <Descriptions.Item label="Request ID">{result.request_id}</Descriptions.Item>
                       <Descriptions.Item label="Trace ID">

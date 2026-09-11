@@ -13,10 +13,11 @@ $executionLogPath = Join-Path $runtimeRoot 'execution.jsonl'
 $algolibPath = Join-Path $repoRoot 'build-smoke-offline\Debug\algolib.exe'
 $serverPath = Join-Path $repoRoot 'build-smoke-offline\Debug\algolib_server.exe'
 $onnxPackagePath = Join-Path $repoRoot 'examples\compliance_risk_scorer_onnx\1.0.0'
+$conflictPackagePath = Join-Path $repoRoot 'examples\decision_plan_recommender_onnx\1.0.0'
 $pythonPackagePath = Join-Path $repoRoot 'examples\trajectory_linear_predictor\1.0.0'
 $functionCatalogPath = Join-Path $repoRoot 'config\operational_function_catalog.yaml'
 
-foreach ($requiredPath in @($algolibPath, $serverPath, $onnxPackagePath, $pythonPackagePath, $functionCatalogPath)) {
+foreach ($requiredPath in @($algolibPath, $serverPath, $onnxPackagePath, $conflictPackagePath, $pythonPackagePath, $functionCatalogPath)) {
     if (-not (Test-Path -LiteralPath $requiredPath)) {
         throw "Real E2E prerequisite not found: $requiredPath"
     }
@@ -38,6 +39,12 @@ try {
 
     & $algolibPath activate compliance_risk_scorer_onnx 1.0.0 onnx
     if ($LASTEXITCODE -ne 0) { throw 'Failed to activate the real ONNX E2E algorithm.' }
+
+    & $algolibPath register $conflictPackagePath
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to register the lifecycle-conflict E2E algorithm.' }
+
+    & $algolibPath activate decision_plan_recommender_onnx 1.0.0 onnx
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to activate the lifecycle-conflict E2E algorithm.' }
 
     & $algolibPath register $pythonPackagePath
     if ($LASTEXITCODE -ne 0) { throw 'Failed to register the real Python HTTP E2E algorithm.' }

@@ -67,6 +67,7 @@ button, input { font: inherit; }
 .compact-field > .ant-select { width: 100%; }
 .invocation-workspace > .ant-col { display: flex; }
 .invocation-workspace .surface-card { width: 100%; }
+.request-template-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; margin-bottom: 8px; }
 .schema-form { display: grid; gap: 16px; }
 .schema-field { display: flex; flex-direction: column; gap: 6px; }
 .schema-field-label { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-weight: 600; color: #24324a; }
@@ -75,6 +76,10 @@ button, input { font: inherit; }
 .schema-field .ant-input-number { width: 100%; }
 .schema-json-input, .code-textarea { font-family: 'Cascadia Code', Consolas, monospace !important; font-size: 12px !important; line-height: 1.6 !important; }
 .invocation-options { display: grid; gap: 14px; border-top: 1px solid #e8edf4; margin-top: 18px; padding-top: 18px; margin-bottom: 16px; }
+
+@media (max-width: 575px) {
+  .request-template-bar { grid-template-columns: 1fr; }
+}
 .invocation-empty { min-height: 360px; display: grid; place-items: center; text-align: center; }
 .invocation-result-json { max-height: 360px; }
 .request-preview { margin-top: 16px; }
