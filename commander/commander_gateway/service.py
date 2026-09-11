@@ -801,6 +801,25 @@ class GatewayService:
         self.store.save_workflow(workflow_id, record)
         return updated
 
+    def get_brief(self, workflow_id: str) -> dict:
+        """Status-only passthrough for fast pollers.
+
+        ``get_projection`` fetches the full commander snapshot (which embeds
+        the multi-MB checkpoint), the work-list, the trace, rebuilds the
+        projection and persists the workflow record — far too heavy for the
+        Director's 20 Hz lifecycle polling. The brief path performs exactly
+        one small commander request and no store writes."""
+        upstream = self.commander.get_workflow_brief(workflow_id)
+        if not isinstance(upstream, dict):
+            raise UpstreamError("COMMANDER_INVALID_RESPONSE", "commander brief is invalid", 502, True)
+        status = str(upstream.get("status") or "unknown").lower()
+        return {
+            "workflow_id": str(upstream.get("workflow_id") or workflow_id),
+            "status": status,
+            "started_at": upstream.get("started_at"),
+            "finished_at": upstream.get("finished_at"),
+        }
+
     def get_work_list(self, workflow_id: str) -> list:
         return self._get_checkpoint_field(workflow_id, "work_list")
 

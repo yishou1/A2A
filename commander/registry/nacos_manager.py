@@ -421,22 +421,15 @@ class NacosRegistry:
         cluster_name = self._normalize_cluster_name(cluster_name)
         heartbeat_metadata = dict(metadata or {})
         heartbeat_metadata["heartbeat_ts"] = int(time.time())
+        heartbeat_metadata["beat_seq"] = str(int(time.time() * 1000))
         heartbeat_metadata["heartbeat_at"] = utc_now_iso()
         heartbeat_metadata = self._nacos_metadata(heartbeat_metadata)
 
+        # Prefer the plain HTTP beat API with an explicit timeout: the legacy
+        # SDK send_heartbeat path has been observed to hang indefinitely under
+        # load, silently killing the heartbeat thread and evicting the agent
+        # from discovery mid-workflow.
         try:
-            return self.client.send_heartbeat(
-                service_name,
-                ip,
-                port,
-                cluster_name=cluster_name,
-                weight=weight,
-                metadata=heartbeat_metadata,
-                ephemeral=ephemeral,
-                group_name=group_name,
-            )
-        except Exception as client_error:
-            print(f"Nacos SDK heartbeat failed for {service_name}: {client_error}. Trying HTTP fallback.")
             return self._send_heartbeat_http(
                 service_name,
                 ip,
@@ -447,6 +440,22 @@ class NacosRegistry:
                 ephemeral=ephemeral,
                 group_name=group_name,
             )
+        except Exception as http_error:
+            print(f"Nacos HTTP heartbeat failed for {service_name}: {http_error}. Trying SDK fallback.")
+            try:
+                return self.client.send_heartbeat(
+                    service_name,
+                    ip,
+                    port,
+                    cluster_name=cluster_name,
+                    weight=weight,
+                    metadata=heartbeat_metadata,
+                    ephemeral=ephemeral,
+                    group_name=group_name,
+                )
+            except Exception as sdk_error:
+                print(f"Nacos SDK heartbeat also failed for {service_name}: {sdk_error}")
+                raise http_error
 
     def _start_heartbeat(
         self,
@@ -700,7 +709,16 @@ class AgentHeartbeatSupervisor(threading.Thread):
             f"[HEARTBEAT] started for {heartbeat_key} every {self.heartbeat_interval:.1f}s"
         )
         while not self._stop_event.is_set():
-            heartbeat_metadata = self._metadata_for_heartbeat()
+            try:
+                heartbeat_metadata = self._metadata_for_heartbeat()
+            except Exception as exc:
+                # Metadata collection must never kill the beat loop; send an
+                # empty beat so liveness is preserved and retry next cycle.
+                print(f"[HEARTBEAT] metadata collection failed for {heartbeat_key}: {exc}")
+                heartbeat_metadata = {
+                    "heartbeat_ts": int(time.time()),
+                    "heartbeat_at": utc_now_iso(),
+                }
 
             try:
                 self.registry.send_heartbeat(

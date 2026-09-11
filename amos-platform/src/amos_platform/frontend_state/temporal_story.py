@@ -10,7 +10,10 @@ from copy import deepcopy
 from typing import Any
 
 PUBLIC_CONTROL_KEYS = {"recommended_speed"}
-PUBLIC_CUE_KEYS = {"cue_id", "at_sec", "phase", "level", "title", "description", "media_ids"}
+PUBLIC_CUE_KEYS = {
+    "cue_id", "at_sec", "phase", "level", "title", "description",
+    "media_ids", "function_ids",
+}
 PUBLIC_CAPTURE_KEYS = {
     "capture_id", "media_id", "product_type", "at_sec", "captured_at_sim_time",
     "captured_at_tick_id", "run_id", "platform_id", "sensor_instance_id",

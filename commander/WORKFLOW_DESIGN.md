@@ -103,7 +103,7 @@ states:
   - name: AssaultPhase
     type: operation
     actions:
-      - functionRef: 
+      - functionRef:
           refName: AssaultAgent
     end: true
 ```

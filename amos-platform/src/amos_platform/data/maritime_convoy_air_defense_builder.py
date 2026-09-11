@@ -137,7 +137,7 @@ def _capture_contract() -> tuple[list[dict[str, Any]], list[dict[str, Any]], lis
 
 def _timeline() -> list[dict[str, Any]]:
     return [
-        {"cue_id": "MAR-CUE-01", "at_sec": 0, "phase": "FIND", "level": "INFO", "title": "海上编队进入责任区", "description": "编队、护航舰和民用航道交通进入当前态势。", "media_ids": ["MAR-MEDIA-00"], "functional_agent_ids": ["A1"], "model_requirement_ids": ["M17"], "function_ids": []},
+        {"cue_id": "MAR-CUE-01", "at_sec": 0, "phase": "FIND", "level": "INFO", "title": "海上编队进入责任区", "description": "编队、护航舰和民用航道交通进入当前态势，由感知探测功能点建立初始观测基线。", "media_ids": ["MAR-MEDIA-00"], "functional_agent_ids": ["A1"], "model_requirement_ids": ["M17"], "function_ids": ["KC-01"]},
         {"cue_id": "MAR-CUE-02", "at_sec": 720, "phase": "FIND", "level": "INFO", "title": "发现首个高速海面接触", "description": "侦察无人机首先形成一个连续高速雷达航迹，其身份与威胁等级保持未知。", "media_ids": ["MAR-MEDIA-01"], "functional_agent_ids": ["A1"], "model_requirement_ids": ["M01", "M15", "M17"], "function_ids": ["KC-01", "KC-08"]},
         {"cue_id": "MAR-CUE-02B", "at_sec": 1080, "phase": "FIND", "level": "INFO", "title": "发现第二个慢速海面接触", "description": "首个高速航迹稳定后，岸基雷达在南侧民用航道形成第二个慢速航迹，并收到可关联的 AIS 信息。", "media_ids": ["MAR-MEDIA-02"], "functional_agent_ids": ["A1"], "model_requirement_ids": ["M01", "M06", "M17"], "function_ids": ["KC-01", "KC-04", "KC-08"]},
         {"cue_id": "MAR-CUE-03", "at_sec": 1440, "phase": "FIX", "level": "INFO", "title": "双目标跨源关联完成", "description": "AIS 与多部雷达记录已到达，可由后端分别固定目标位置并保持身份未知。", "media_ids": [], "functional_agent_ids": ["A1"], "model_requirement_ids": ["M06", "M07", "M19"], "function_ids": ["KC-05", "KC-06", "KC-07", "KC-09", "KC-10", "KC-11"]},

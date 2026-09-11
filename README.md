@@ -11,17 +11,18 @@ Commander 通过 Nacos 发现并协调 7 个独立 HTTP Agent，Agent 经 AlgoLi
 
 | 组件 | 运行方式 | 地址 |
 | --- | --- | --- |
-| AMOS 仿真与前端 | WSL 原生 Python 进程 | <http://127.0.0.1:5000/> |
-| Commander | WSL 原生 Python 进程 | <http://127.0.0.1:8021/supervisor> |
-| AMOS/Commander Gateway | WSL 原生 Python 进程 | <http://127.0.0.1:8030/gateway/v1/health> |
-| AlgoLib | WSL 原生 C++ HTTP 进程 | <http://127.0.0.1:8088/health> |
-| 7 个 Agent | 7 个独立 WSL HTTP 进程 | 8102、10200–10205 |
-| Nacos | Docker Desktop 容器 | <http://127.0.0.1:8848/nacos/> |
-| 认证 mock | Docker Desktop 容器 | <http://127.0.0.1:8080/get> |
+| AMOS 仿真与前端 | Windows 原生 Python 进程 | <http://127.0.0.1:5000/> |
+| Commander | Windows 原生 Python 进程 | <http://127.0.0.1:8021/supervisor> |
+| AMOS/Commander Gateway | Windows 原生 Python 进程 | <http://127.0.0.1:8030/gateway/v1/health> |
+| AlgoLib | Windows 原生 C++ HTTP 进程 | <http://127.0.0.1:8088/health> |
+| 7 个 Agent | 7 个独立 Windows HTTP 进程 | 8102、10200–10205 |
+| Nacos | Windows 原生 Java 进程（v2.4.3，JRE 17） | <http://127.0.0.1:8848/nacos/> |
+| 认证 mock | Windows 原生 Python 进程 | <http://127.0.0.1:8080/get> |
 
-Docker 只用于固定 Nacos/Java 环境和认证 mock 的状态边界，Agent 本身不在容器中。
-Windows Docker Desktop 开启 WSL Integration 后，WSL 中的客户端会连接 Windows 上的
-Docker Engine，不需要在 WSL 中再运行一套 daemon。可用 `docker info` 验证连接。
+全栈已无 Docker 依赖。Nacos 使用原生发行版（`.runtime\nacos`，随启动脚本自动拉起，
+依赖便携版 JRE 17：`D:\A2A\jre-17`）；认证 mock 为纯 Python 进程
+（`commander\scripts\auth_mock_server.py`）。启动/停止脚本：
+`.runtime\start-windows-current.ps1` / `.runtime\stop-windows-current.ps1`。
 
 ## 首次安装
 

@@ -547,6 +547,96 @@ def test_activity_detail_ignores_stage_transfer_algorithm_plan() -> None:
     assert algorithms["marl_ppo_task_scheduler"]["invocation_count"] == 1
 
 
+def test_activity_detail_renders_row_level_track_algorithm_invocations() -> None:
+    status = {
+        "workflow_id": "wf-track-runtime-algorithm",
+        "status": "completed",
+        "result": {"activity_results": [{
+            "activity_id": "A-TRACK",
+            "work_item": "track",
+            "role": "track_threat",
+            "status": "completed",
+            "agent": "TrackThreatAgent",
+            "input": {"detections": [{"id": "DET-1"}]},
+            "output": {"tracking_result": {"tracks": [{"track_id": "TRK-1"}]}},
+            "algorithm_invocations": [{
+                "algorithm_id": "track_state_updater",
+                "backend_type": "python_http_service",
+                "execution_mode": "algorithm_library",
+                "status": "completed",
+                "request_id": "REQ-TRACK",
+                "trace_id": "TRACE-TRACK",
+                "params": {},
+                "input": {"detections": [{"id": "DET-1"}]},
+                "output": {"tracks": [{"track_id": "TRK-1"}]},
+                "usage": {"duration_ms": 6.0},
+                "duration_ms": 6.0,
+            }],
+        }]},
+    }
+
+    view = build_workflow_view(status)
+    algorithms = {
+        row["algorithm_id"]: row
+        for row in view["activity_details"]["A-TRACK"]["algorithms"]
+    }
+
+    assert set(algorithms) == {"track_state_updater"}
+    invocation = algorithms["track_state_updater"]["invocations"][0]
+    assert invocation["input"] == {"detections": [{"id": "DET-1"}]}
+    assert invocation["output"] == {"tracks": [{"track_id": "TRK-1"}]}
+    assert invocation["params"] == {}
+    assert invocation["trace_id"] == "TRACE-TRACK"
+
+
+def test_activity_detail_recovers_nested_algorithm_library_execution_details() -> None:
+    status = {
+        "workflow_id": "wf-track-nested-runtime",
+        "status": "completed",
+        "result": {"activity_results": [{
+            "activity_id": "A-TRACK",
+            "work_item": "track",
+            "role": "track_threat",
+            "status": "completed",
+            "output": {
+                "artifact": {
+                    "trace": {
+                        "algorithm_library": {
+                            "executions": [{
+                                "algorithm_id": "track_state_updater",
+                                "algorithm_name": "track_state_updater",
+                                "version": "1.0.0",
+                                "backend_type": "python_http_service",
+                                "execution_mode": "algorithm_library",
+                                "status": "completed",
+                                "request_id": "REQ-NESTED",
+                                "trace_id": "TRACE-NESTED",
+                                "params": {},
+                                "input": {"detections": [{"id": "DET-1"}]},
+                                "output": {"tracks": [{"track_id": "TRK-1"}]},
+                                "usage": {"latency_ms": 4.5},
+                                "duration_ms": 4.5,
+                            }],
+                        },
+                    },
+                },
+            },
+        }]},
+    }
+
+    view = build_workflow_view(status)
+    algorithms = {
+        row["algorithm_id"]: row
+        for row in view["activity_details"]["A-TRACK"]["algorithms"]
+    }
+
+    invocation = algorithms["track_state_updater"]["invocations"][0]
+    assert invocation["input"] == {"detections": [{"id": "DET-1"}]}
+    assert invocation["output"] == {"tracks": [{"track_id": "TRK-1"}]}
+    assert invocation["params"] == {}
+    assert invocation["request_id"] == "REQ-NESTED"
+
+
 def test_activity_detail_does_not_inherit_upstream_algorithm_calls_from_input() -> None:
     status = {
         "workflow_id": "wf-upstream-input",
@@ -849,6 +939,43 @@ def test_workflow_view_verifies_agent_algorithm_library_used_records_only() -> N
     assert "unused_candidate" not in algorithms
 
 
+def test_track_algorithm_falls_back_to_activity_io_when_gateway_omits_invocation() -> None:
+    status = {
+        "workflow_id": "wf-track-activity-io-fallback",
+        "status": "completed",
+        "result": {"activity_results": [{
+            "activity_id": "A-TRACK",
+            "work_item": "track",
+            "role": "track_threat",
+            "status": "completed",
+            "input": {"detections": [{"id": "DET-1"}]},
+            "output": {
+                "tracks": [{
+                    "track_id": "TRK-1",
+                    "metadata": {
+                        "algorithm_library": {
+                            "track_state_updater": {
+                                "used": True,
+                                "schema_version": "track_state_updater/v1",
+                            },
+                        },
+                    },
+                }],
+            },
+        }]},
+    }
+
+    view = build_workflow_view(status)
+    row = view["activity_details"]["A-TRACK"]["algorithms"][0]
+
+    assert row["algorithm_id"] == "track_state_updater"
+    assert row["invocation_count"] == 1
+    assert row["invocations"][0]["input"] == {"detections": [{"id": "DET-1"}]}
+    assert row["invocations"][0]["output"]["tracks"][0]["track_id"] == "TRK-1"
+    assert row["invocations"][0]["backend_type"] == "python_http_service"
+    assert row["invocations"][0]["inferred_from_activity"] is True
+
+
 def test_workflow_view_v2_uses_explicit_function_mapping_and_dag_dependencies() -> None:
     submission = {"function_point_coverage": [
         {"id": "FP-01", "name": "航迹建立", "activity_ids": ["A-1"]},
@@ -893,6 +1020,36 @@ def test_workflow_view_v2_uses_explicit_function_mapping_and_dag_dependencies() 
     assert view["metrics"]["average_latency_ms"] == 40
     assert view["metrics"]["retry_count"] == 1
     assert view["metrics"]["alert_count"] == 0
+
+
+def test_function_points_use_backend_role_when_runtime_activity_id_is_generated() -> None:
+    status = {
+        "workflow_id": "wf-runtime-role-function-map",
+        "status": "completed",
+        "result": {"activity_results": [{
+            "activity_id": "activatity-003-decisionplanning",
+            "role": "decision_planning",
+            "status": "completed",
+            "output": {"algorithm_invocations": [{
+                "algorithm_id": "decision_planning_core",
+                "execution_mode": "algorithm_library",
+                "status": "completed",
+                "output": {"candidate_plans": [{"plan_id": "P-1"}]},
+            }]},
+        }]},
+    }
+
+    view = build_workflow_view(status)
+    points = {row["function_point_id"]: row for row in view["function_points"]["items"]}
+
+    for point_id in ("KC-16", "KC-17", "KC-18", "KC-20"):
+        assert points[point_id]["status"] == "verified"
+        assert points[point_id]["actual_algorithms"] == [{
+            "algorithm_id": "decision_planning_core",
+            "name": "decision_planning_core",
+            "activity_id": "activatity-003-decisionplanning",
+            "status": "completed",
+        }]
 
 
 def test_submission_snapshot_carries_declared_coverage_without_promoting_it() -> None:

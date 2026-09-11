@@ -414,6 +414,20 @@ class CommanderBridge:
     def get_workflow(self, workflow_id: str) -> dict[str, Any]:
         return self.client.get_workflow(workflow_id)
 
+    def get_workflow_brief(self, workflow_id: str) -> dict[str, Any]:
+        """Status-only snapshot; local mode falls back to the full status."""
+        brief = getattr(self.client, "get_workflow_brief", None)
+        if brief is not None:
+            return brief(workflow_id)
+        status = self.client.get_workflow(workflow_id)
+        state = str(status.get("status") or "unknown").lower()
+        return {
+            "workflow_id": workflow_id,
+            "status": state,
+            "started_at": status.get("started_at"),
+            "finished_at": status.get("finished_at"),
+        }
+
     def get_submission_package(
         self,
         package_id: str,

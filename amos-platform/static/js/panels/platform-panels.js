@@ -392,10 +392,22 @@ window.PlatformPanels = (function () {
   }
 
   function algorithmLabel(id, catalog) {
+    var runtimeMatch = ((catalog && catalog.algorithms) || []).filter(function (item) {
+      return item.algorithm_id === id;
+    })[0];
+    if (runtimeMatch && (runtimeMatch.display_name || runtimeMatch.algorithm_id)) {
+      return (runtimeMatch.display_name || runtimeMatch.algorithm_id) + '（' + id + '）';
+    }
     var match = ((catalog && catalog.algorithm_classes) || []).filter(function (item) {
       return (item.primary_algorithm_ids || []).indexOf(id) >= 0 || (item.auxiliary_algorithm_ids || []).indexOf(id) >= 0;
     })[0];
-    return match ? (match.requirement_id + ' · ' + match.name + '（' + id + '）') : id;
+    if (match) return match.requirement_id + ' · ' + match.name + '（' + id + '）';
+    var knownNames = {
+      mission_feature_adapter: "Mission Feature Adapter",
+      execution_control_planner: "Execution Control Planner",
+      mission_completion_scorer: "Mission Completion Scorer",
+    };
+    return knownNames[id] ? knownNames[id] + '（' + id + '）' : id;
   }
 
   function stageLabel(stage) {
@@ -478,8 +490,12 @@ window.PlatformPanels = (function () {
     var catalog = runtimeAlgorithmCatalog || {};
     var allRows = Array.isArray(catalog.algorithms) ? catalog.algorithms : [];
     var classes = Array.isArray(catalog.algorithm_classes) ? catalog.algorithm_classes : [];
-    var readyRows = allRows.filter(function (item) { return item.runtime_status === "ready"; });
-    var unavailableRows = allRows.filter(function (item) { return item.runtime_status !== "ready"; });
+    var onnxRows = allRows.filter(function (item) {
+      return item.onnx_model_provided || /_onnx$/i.test(String(item.algorithm_id || ""));
+    });
+    var readyRows = allRows.filter(function (item) {
+      return item.runtime_status === "ready" && onnxRows.indexOf(item) < 0;
+    });
     var families = {};
     allRows.forEach(function (item) { if (item.task_family) families[item.task_family] = true; });
     var activeCount = catalog.algorithm_class_count;
@@ -488,7 +504,7 @@ window.PlatformPanels = (function () {
     if (activeNode) activeNode.textContent = activeCount || 0;
     var runtimeKnown = catalog.status === "ready" || catalog.status === "degraded";
     document.getElementById("backend-runnable-count").textContent = runtimeKnown ? (catalog.algorithm_package_count == null ? allRows.length : catalog.algorithm_package_count) : "未知";
-    document.getElementById("backend-unavailable-count").textContent = runtimeKnown ? (catalog.unavailable_count == null ? unavailableRows.length : catalog.unavailable_count) : "未知";
+    document.getElementById("backend-unavailable-count").textContent = runtimeKnown ? onnxRows.length : "未知";
     document.getElementById("backend-family-count").textContent = runtimeKnown ? Object.keys(families).length : "未知";
     var plannedNode = document.getElementById("scenario-algorithm-count");
     if (plannedNode) plannedNode.textContent = activeScenario ? asList(activeScenario.algorithm_coverage).length : "—";
@@ -504,15 +520,16 @@ window.PlatformPanels = (function () {
       var checkedAt = catalog.checked_at ? new Date(catalog.checked_at).toLocaleString() : "未上报";
       meta.innerHTML = '<span>来源 <b>' + escapeHtml(catalog.source || "未上报") + '</b></span>' +
         '<span>最近检查 <b>' + escapeHtml(checkedAt) + '</b></span>' +
-        '<span>ONNX <b>' + escapeHtml(catalog.onnx_runtime_available ? "模型已提供且当前可执行" : "模型包可提供；当前运行时未启用") + '</b></span>';
+        '<span>ONNX <b>' + escapeHtml(onnxRows.length ? "已提供 " + onnxRows.length + " 个模型包" : "未提供") + '</b></span>';
     }
     function renderAlgorithmCard(item) {
       var profile = item.model_profile || {};
       var params = profile.parameter_count_text || (profile.parameter_count == null ? "未上报" : String(profile.parameter_count));
       var ready = item.runtime_status === "ready";
-      var stateText = ready ? "运行就绪" : "不可用";
+      var onnxPackage = item.onnx_model_provided || /_onnx$/i.test(String(item.algorithm_id || ""));
+      var stateText = onnxPackage ? "ONNX 已提供" : (ready ? "运行就绪" : "未运行");
       var localized = localizedAlgorithm(item);
-      return '<article class="backend-function-card ' + (ready ? "runtime-ready" : "runtime-unavailable") + '">' +
+      return '<article class="backend-function-card ' + (ready || onnxPackage ? "runtime-ready" : "runtime-unavailable") + '">' +
         '<header><div><b>' + escapeHtml(localized.name) + '</b></div><span>' + escapeHtml(stateText) + '</span></header>' +
         '<p>' + escapeHtml(localized.summary) + '</p>' +
         '<div class="backend-runtime-meta"><span>任务族 <b>' + escapeHtml(taskFamilyLabel(item.task_family || "未上报")) + '</b></span>' +
@@ -550,11 +567,11 @@ window.PlatformPanels = (function () {
         '<section><label>覆盖功能</label><div class="algorithm-class-tags">' + ((item.function_points || []).length ? tags(item.function_points.map(function (id) { return functionLabel(id, names); }), "function") : '<span class="algorithm-class-empty">基础/支撑能力</span>') + '</div></section>' +
         '<footer><div><label>主实现</label><span class="algorithm-class-tags">' + (primary.length ? tags(primary, "primary") : '<span class="algorithm-class-empty">未接入</span>') + '</span></div>' +
         (auxiliary.length ? '<div><label>辅助实现</label><span class="algorithm-class-tags">' + tags(auxiliary, "supporting") + '</span></div>' : '') +
-        '<div class="algorithm-class-onnx ' + (onnx.length ? "provided" : "missing") + '"><label>ONNX</label><b>' + escapeHtml(onnx.length ? (item.onnx_runtime_available ? "已提供 · 可执行" : "已提供 · 当前不可执行") : "未提供") + '</b></div></footer></article>';
+        '<div class="algorithm-class-onnx ' + (onnx.length ? "provided" : "missing") + '"><label>ONNX</label><b>' + escapeHtml(onnx.length ? "已提供" : "未提供") + '</b></div></footer></article>';
     }
     var implementationHtml = allRows.length ?
       '<section class="runtime-implementation-section"><header><div><b>运行实现包</b><small>算法库实时发现的可调度实现、模型信息及运行状态</small></div><span>' + escapeHtml(allRows.length) + '</span></header>' +
-      renderGroup("可调度实现", readyRows) + renderGroup("运行时不可用", unavailableRows) + '</section>' :
+      renderGroup("可调度实现", readyRows) + renderGroup("ONNX 模型包", onnxRows) + '</section>' :
       '<div class="empty-state">' + escapeHtml(catalog.error || "后端当前没有返回算法目录") + '</div>';
     var html = classes.length ? '<section class="backend-family-section algorithm-class-section"><header><b>二十项算法类别（M01–M20）</b><span>' + escapeHtml(classes.length) + '</span></header><div class="algorithm-class-grid">' + classes.map(renderClassCard).join("") + '</div></section>' +
       '<div class="algorithm-implementation-summary"><b>实现包状态</b><span>已注册 ' + escapeHtml(catalog.registered_package_count == null ? allRows.length : catalog.registered_package_count) + ' · 业务实现 ' + escapeHtml(catalog.algorithm_package_count == null ? allRows.length : catalog.algorithm_package_count) + ' · 运行就绪 ' + escapeHtml(catalog.runnable_count || 0) + '</span></div>' + implementationHtml : implementationHtml;
@@ -572,11 +589,24 @@ window.PlatformPanels = (function () {
       return;
     }
     var grouped = {};
+    var packageLinks = {};
+    (Array.isArray(catalog.algorithms) ? catalog.algorithms : []).forEach(function (item) {
+      (item.operational_functions || []).forEach(function (coverage) {
+        var pointId = String((coverage && coverage.function_id) || "");
+        if (!pointId) return;
+        if (!packageLinks[pointId]) packageLinks[pointId] = [];
+        packageLinks[pointId].push({
+          algorithm_id: item.algorithm_id,
+          name: item.display_name || item.algorithm_id,
+          role: String((coverage && coverage.role) || "").toLowerCase(),
+        });
+      });
+    });
     functions.forEach(function (point) {
       var stage = String(point.f2t2ea_stage || "other").toLowerCase();
       if (!grouped[stage]) grouped[stage] = [];
       var linked = classes.filter(function (item) { return (item.function_points || []).indexOf(point.function_id) >= 0; });
-      grouped[stage].push({point: point, linked: linked});
+      grouped[stage].push({point: point, linked: linked, packages: packageLinks[point.function_id] || []});
     });
     var order = ["find", "fix", "track", "target", "engage", "assess"];
     function relationTags(values, className) {
@@ -587,11 +617,22 @@ window.PlatformPanels = (function () {
     var html = '<section class="function-algorithm-section"><header><div><b>28 项功能点—算法关系</b></div><span>' + escapeHtml(functions.length) + '</span></header>' +
       order.filter(function (stage) { return grouped[stage]; }).map(function (stage) {
         return '<section class="function-algorithm-stage"><h3>' + escapeHtml(stageLabel(stage)) + '</h3><div class="function-algorithm-grid">' + grouped[stage].map(function (entry) {
-          var primary = entry.linked.map(function (item) { return item.primary_algorithm_ids || []; }).flat();
-          var auxiliary = entry.linked.map(function (item) { return item.auxiliary_algorithm_ids || []; }).flat();
+          var classPrimary = entry.linked.map(function (item) { return item.primary_algorithm_ids || []; }).flat();
+          var classAuxiliary = entry.linked.map(function (item) { return item.auxiliary_algorithm_ids || []; }).flat();
+          var functionPrimary = entry.point.primary_algorithm_ids || [];
+          var packagePrimary = entry.packages.filter(function (item) { return item.role === "primary" || item.role === "handoff"; }).map(function (item) { return item.algorithm_id; });
+          var packageAuxiliary = entry.packages.filter(function (item) { return item.role && item.role !== "primary" && item.role !== "handoff"; }).map(function (item) { return item.algorithm_id; });
+          var primary = Array.from(new Set(classPrimary.concat(functionPrimary).concat(packagePrimary)));
+          var auxiliary = Array.from(new Set(classAuxiliary.concat(packageAuxiliary)));
           var primaryLabels = entry.linked.map(function (item) { return item.requirement_id + ' · ' + item.name; });
+          var functionPrimaryLabels = (entry.point.primary_algorithm_names || []).map(function (name, index) {
+            var id = functionPrimary[index];
+            return name + '（' + id + '）';
+          });
+          var packageLabels = Array.from(new Set(packagePrimary.map(function (id) { return algorithmLabel(id, catalog); })));
+          var mainLabels = Array.from(new Set(primaryLabels.concat(functionPrimaryLabels).concat(packageLabels)));
           return '<article><header><code>' + escapeHtml(entry.point.function_id) + '</code><b>' + escapeHtml(entry.point.name || entry.point.function_name) + '</b></header>' +
-            '<div class="function-relation-line"><label>主算法</label>' + (primaryLabels.length ? relationTags(primaryLabels, "primary") : '<span class="function-relation-empty">未直接绑定</span>') + '</div>' +
+            '<div class="function-relation-line"><label>主算法</label>' + (mainLabels.length ? relationTags(mainLabels, "primary") : '<span class="function-relation-empty">未直接绑定</span>') + '</div>' +
             (primary.length ? '<div class="function-relation-line implementation"><label>实现包</label>' + relationTags(primary, "implementation") + '</div>' : '') +
             (auxiliary.length ? '<div class="function-relation-line"><label>辅助算法</label>' + relationTags(auxiliary.map(function (id) { return algorithmLabel(id, catalog); }), "supporting") + '</div>' : '') + '</article>';
         }).join("") + '</div></section>';
@@ -604,6 +645,18 @@ window.PlatformPanels = (function () {
     if (!root || !scenario) return;
     var elapsed = Number(state && state.clock && state.clock.elapsed_sec || 0);
     var cueRows = Array.isArray(scenario.function_point_schedule) && scenario.function_point_schedule.length ? scenario.function_point_schedule : (Array.isArray(scenario.timeline) ? scenario.timeline : []);
+    var releasedCueById = ((state && state.scenario_story && state.scenario_story.timeline) || []).reduce(function (result, cue) {
+      if (cue && cue.cue_id) result[String(cue.cue_id)] = cue;
+      return result;
+    }, {});
+    function cueForDisplay(cue) {
+      var cueId = cue && cue.cue_id;
+      return cueId && releasedCueById[String(cueId)] || cue || {};
+    }
+    function cueLabel(cue) {
+      var displayCue = cueForDisplay(cue);
+      return displayCue.title || (displayCue.phase ? stageLabel(displayCue.phase) : "");
+    }
     var points = {};
     (scenario.function_point_coverage || []).forEach(function (point) {
       var id = point.function_id || point.id;
@@ -620,7 +673,7 @@ window.PlatformPanels = (function () {
       var triggered = point.events.filter(function (event) { return event.at <= elapsed; }).pop();
       if (triggered) {
         point.at = triggered.at;
-        point.cue = triggered.cue;
+        point.cue = cueForDisplay(triggered.cue);
       } else if (point.events.length) {
         point.cue = point.events[0].cue;
       }
@@ -671,7 +724,12 @@ window.PlatformPanels = (function () {
       var chineseName = String(names[id] || "").split("（")[0];
       return id + (chineseName ? " · " + chineseName : "");
     }).join("、") || "—");
-    root.innerHTML = '<div class="workflow-v2-summary"><span><small>当前仿真时间</small><b>T+' + escapeHtml(String(hours).padStart(2, "0") + ":" + String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0")) + '</b></span><span class="current-function"><small>当前触发功能</small><b>' + escapeHtml(currentText) + '</b></span><span><small>已推进</small><b>' + escapeHtml(completedIds.length) + '</b></span><span><small>触发中</small><b>' + escapeHtml(activeIds.length) + '</b></span><span><small>待触发</small><b>' + escapeHtml(pendingIds.length) + '</b></span><span><small>条件分支</small><b>' + escapeHtml(conditionalIds.length) + '</b></span></div>' +
+    var currentCueText = terminal ? "仿真已完成" : (activeIds.map(function (id) {
+      return cueLabel(points[id] && points[id].cue);
+    }).filter(Boolean).filter(function (value, index, array) {
+      return array.indexOf(value) === index;
+    }).join("、") || "等待下一剧情事件");
+    root.innerHTML = '<div class="workflow-v2-summary"><span><small>当前仿真时间</small><b>T+' + escapeHtml(String(hours).padStart(2, "0") + ":" + String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0")) + '</b></span><span class="current-function"><small>当前剧情事件</small><b>' + escapeHtml(currentCueText) + '</b></span><span class="current-function"><small>当前触发功能</small><b>' + escapeHtml(currentText) + '</b></span><span><small>已推进</small><b>' + escapeHtml(completedIds.length) + '</b></span><span><small>待触发</small><b>' + escapeHtml(pendingIds.length) + '</b></span><span><small>条件分支</small><b>' + escapeHtml(conditionalIds.length) + '</b></span></div>' +
       ["find", "fix", "track", "target", "engage", "assess", "other"].filter(function (stage) { return grouped[stage]; }).map(function (stage) {
         return '<section class="kill-chain-stage"><h3>' + escapeHtml(stageLabel(stage)) + '</h3><div class="kill-chain-stage-grid">' + grouped[stage].map(function (id) {
           var item = points[id];
@@ -680,7 +738,9 @@ window.PlatformPanels = (function () {
           var status = active ? "executing" : (item.at < elapsed ? "verified" : (conditional ? "conditional" : "declared"));
           var statusText = active ? "触发中" : (item.at < elapsed ? "已推进" : (conditional ? "条件触发" : "待触发"));
           var pointName = names[id] || item.cue.title || id;
-          return '<button type="button" class="workflow-function-point ' + status + '" data-kill-chain-function="' + escapeHtml(id) + '" title="' + escapeHtml(id + " · " + pointName + " · " + statusText) + '"><span>' + escapeHtml(id) + '</span><b>' + escapeHtml(pointName) + '</b><small>' + escapeHtml(stageLabel(stage)) + ' · ' + escapeHtml(statusText) + '</small></button>';
+          var linkedCue = cueLabel(item.cue);
+          var cueText = linkedCue ? ("剧情：" + linkedCue) : "等待对应剧情事件";
+          return '<button type="button" class="workflow-function-point ' + status + '" data-kill-chain-function="' + escapeHtml(id) + '" title="' + escapeHtml(id + " · " + pointName + " · " + statusText + " · " + cueText) + '"><span>' + escapeHtml(id) + '</span><b>' + escapeHtml(pointName) + '</b><small>' + escapeHtml(stageLabel(stage)) + ' · ' + escapeHtml(statusText) + '</small><small class="kill-chain-progress-note">' + escapeHtml(cueText) + '</small></button>';
         }).join("") + '</div></section>';
       }).join("");
   }

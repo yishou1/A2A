@@ -46,6 +46,21 @@ test('offline runtime is unknown, connected empty runtime has zero packages', ()
   assert.equal(document.getElementById('backend-runnable-count').textContent, 0);
 });
 
+test('ONNX summary counts model packages, not unavailable implementations', () => {
+  const {window, document} = load('panels/platform-panels.js');
+  const algorithms = [
+    {algorithm_id:'model_onnx', runtime_status:'ready'},
+    {algorithm_id:'explicit_model', onnx_model_provided:true, runtime_status:'unavailable'},
+    {algorithm_id:'ordinary', runtime_status:'unavailable'}
+  ];
+  for (const status of ['ready', 'degraded']) {
+    window.PlatformPanels.updateRuntimeAlgorithms({status, algorithms, unavailable_count:9});
+    assert.equal(document.getElementById('backend-unavailable-count').textContent, 2);
+  }
+  window.PlatformPanels.updateRuntimeAlgorithms({status:'offline', algorithms});
+  assert.equal(document.getElementById('backend-unavailable-count').textContent, '未知');
+});
+
 test('carrier scenario resources use dedicated offline tactical symbols', () => {
   const {window} = load('map/tactical-symbols.js');
   const symbols = window.TacticalSymbols;

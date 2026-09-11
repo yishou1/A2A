@@ -12,7 +12,7 @@ from amos_platform.data.scenario_repository import get_scenario
 
 
 CheckpointCallback = Callable[[dict[str, Any]], dict[str, Any] | None]
-WorkflowStateCallback = Callable[[str], dict[str, Any]]
+WorkflowStateCallback = Callable[..., dict[str, Any]]
 
 
 def _now_iso() -> str:
@@ -397,7 +397,14 @@ class DirectorService:
         if not workflow_id or self.workflow_state_callback is None:
             return "manual"
         try:
-            view = self.workflow_state_callback(str(workflow_id))
+            try:
+                # Light first: while the workflow is live, poll only the small
+                # status payload so the completion signal is not queued behind
+                # the full UI projection (work-list + trace round-trips).
+                view = self.workflow_state_callback(str(workflow_id), light=True)
+            except TypeError:
+                # Older callback signature: full view on every poll.
+                view = self.workflow_state_callback(str(workflow_id))
         except Exception as exc:
             checkpoint["analysis_status"] = "backend_unreachable"
             checkpoint["analysis_error"] = f"{type(exc).__name__}: {exc}"
@@ -434,6 +441,11 @@ class DirectorService:
             self._state["awaiting_analysis"] = False
             self._clear_analysis_motion_limit()
             self.runtime.get_engine().pause()
+            # Clear the analysis crawl lock as well: a paused engine must not
+            # inherit a lingering 1x lock when the operator resumes later.
+            self.runtime.get_engine().unlock_speed_for_confirmation(
+                "analysis_motion", restore=True
+            )
             self._set_status("error", analysis_status="failed")
             self._record(
                 "checkpoint_analysis_failed",
@@ -449,6 +461,12 @@ class DirectorService:
         self._state["awaiting_analysis"] = False
         self._state["last_error"] = None
         self._clear_analysis_motion_limit()
+        # Release the analysis crawl lock (if held) so the demo speed is
+        # restored; the follow-launch confirmation lock, when separately
+        # pending, keeps holding 1x on its own until the operator answers.
+        self.runtime.get_engine().unlock_speed_for_confirmation(
+            "analysis_motion", restore=True
+        )
         self._set_status("auto_running" if resume_on_success else "paused", analysis_status="completed")
         self._record(
             "checkpoint_analysis_completed",
@@ -555,6 +573,29 @@ class DirectorService:
                 if isinstance(current, dict) and current.get("analysis_status") in {
                     "submitted", "running", "backend_unreachable",
                 }:
+                    # Analysis still in flight and the story clock has reached
+                    # the analysis motion limit: instead of freezing the left
+                    # panel in place, drop the hard clamp so the scene keeps
+                    # moving while the agents work. With the follow-launch
+                    # confirmation dialog pending the demo speed (e.g. 32x)
+                    # continues; otherwise playback holds 1x until the
+                    # analysis completes (or fails) restores the demo speed.
+                    limit = getattr(engine, "_director_motion_limit_sec", None)
+                    if (
+                        limit is not None
+                        and engine.clock.get("running")
+                        and float(engine.clock.get("elapsed_sec", 0) or 0)
+                        >= float(limit) - 1e-6
+                    ):
+                        self._clear_analysis_motion_limit()
+                        if engine.follow_confirmation_pending():
+                            # While the follow-launch confirmation dialog is
+                            # open, keep the operator demo speed (e.g. 32x)
+                            # during the analysis instead of crawling at 1x.
+                            self._record("analysis_motion_continue", limit_sec=float(limit))
+                        else:
+                            engine.lock_speed_for_confirmation("analysis_motion")
+                            self._record("analysis_motion_slowdown", limit_sec=float(limit))
                     result = self._poll_current_analysis(resume_on_success=True)
                     if result in {"pending", "failed"}:
                         if result == "failed":

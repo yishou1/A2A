@@ -42,6 +42,7 @@ window.Platform = (function () {
   var storyHeroGeneration = 0;
   var storyHeroTarget = null;
   var activeStoryCueId = null;
+  var activeWorkflowStoryContext = null;
   var speedRequestQueue = Promise.resolve();
   var speedRequestGeneration = 0;
   var pendingSpeedRequests = 0;
@@ -444,11 +445,11 @@ window.Platform = (function () {
 
     document.getElementById("story-title").textContent = "当前资料";
     document.getElementById("story-phase-badge").textContent = cue && cue.phase || "READY";
-    document.getElementById("story-current-title").textContent = activeMedia && activeMedia.title ||
-      (cue && cue.title || "等待观测数据");
+    document.getElementById("story-current-title").textContent = cue && cue.title ||
+      (activeMedia && activeMedia.title || "等待观测数据");
     var activeSource = activeMedia ? sourceMetadata(activeMedia) : null;
     document.getElementById("story-current-prompt").textContent = activeMedia
-      ? activeSource.platformId + " / " + activeSource.sensorId + " · " + formatSimTime(activeSource.capturedAt)
+      ? (activeMedia.title || "观测资料") + " · " + activeSource.platformId + " / " + activeSource.sensorId + " · " + formatSimTime(activeSource.capturedAt)
       : "尚无可用传感器资料";
     document.getElementById("story-elapsed").textContent = formatSimTime(elapsed);
     document.getElementById("story-media-count").textContent = availableMedia.length;
@@ -553,6 +554,7 @@ window.Platform = (function () {
       latestState = null;
       latestStory = null;
       currentMediaId = null;
+      activeWorkflowStoryContext = null;
       authorizationPromptKey = null;
       authorizationSubmitting = false;
       closeAuthorizationDialog();
@@ -630,7 +632,7 @@ window.Platform = (function () {
       speedGroup.classList.toggle("speed-locked", speedLocked);
       speedGroup.setAttribute("aria-busy", pendingSpeedRequests > 0 ? "true" : "false");
       speedGroup.title = speedLocked
-        ? "等待确认期间固定为 1×，确认完成后恢复 " +
+        ? "等待武器授权期间固定为 1×，授权完成后恢复 " +
           Number(clock.speed_resume_value || speedResumeValue || 1) + "×"
         : "仿真倍率";
     }
@@ -1097,8 +1099,8 @@ window.Platform = (function () {
     if (directorStatus === "awaiting_authorization") {
       statusText = "等待操作员授权，仿真以 1× 继续运行";
       modeText = "待授权";
-    } else if (clock.speed_locked_reason === "awaiting_follow_confirmation") {
-      statusText = "等待无人机派遣确认，仿真以 1× 继续运行";
+    } else if (followLaunchPrompt()) {
+      statusText = "等待无人机派遣确认，仿真按当前倍率继续";
       modeText = "待确认";
     } else if (directorStatus === "awaiting_analysis") {
       statusText = running
@@ -1236,6 +1238,10 @@ window.Platform = (function () {
   function reflectWorkflowEvidence(view) {
     var algorithmEvidence = document.getElementById("workflow-algorithm-evidence");
     if (algorithmEvidence) algorithmEvidence.hidden = true;
+    if (!view) {
+      activeWorkflowStoryContext = null;
+      if (latestStory) renderStory(latestStory, latestState);
+    }
   }
 
   function initWorkspaceResize() {
@@ -1453,6 +1459,10 @@ window.Platform = (function () {
       button.addEventListener("click", function () { downloadRunReport(this.dataset.reportFormat); });
     });
     document.addEventListener("amos:workflow-view", function (event) { reflectWorkflowEvidence(event.detail || null); });
+    document.addEventListener("amos:workflow-activity-context", function (event) {
+      activeWorkflowStoryContext = event.detail || null;
+      if (latestStory) renderStory(latestStory, latestState);
+    });
   }
 
   function showControlError(error) {

@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from agent.algorithm_library.factory import (
@@ -99,17 +100,29 @@ class PerceptionSkill:
             damage_inputs: dict[str, Any] = {"frames": visual_frames}
             if isinstance(ref, dict):
                 damage_inputs["reference_frame"] = ref
-            damage_output, invocation = _run_and_record(
-                self.damage,
-                _planned_inputs(damage_inputs, plan, _algorithm_id(self.damage)),
+            run_without_reference = (
+                os.environ.get("TIA_RUN_OPTIONAL_DAMAGE_WITHOUT_REFERENCE", "0")
+                .strip()
+                .lower()
+                in {"1", "true", "yes", "on"}
             )
-            if invocation:
-                invocations.append(invocation)
-            damage_reports = _as_list(
-                damage_output,
-                "damage_reports",
-            )
-            trace[self.damage.name] = f"{len(damage_reports)} damage masks"
+            if not isinstance(ref, dict) and not run_without_reference:
+                trace[self.damage.name] = "skipped:no_reference_frame"
+            else:
+                try:
+                    damage_output, invocation = _run_and_record(
+                        self.damage,
+                        _planned_inputs(damage_inputs, plan, _algorithm_id(self.damage)),
+                    )
+                    if invocation:
+                        invocations.append(invocation)
+                    damage_reports = _as_list(
+                        damage_output,
+                        "damage_reports",
+                    )
+                    trace[self.damage.name] = f"{len(damage_reports)} damage masks"
+                except Exception as exc:
+                    trace[self.damage.name] = f"optional_failed:{type(exc).__name__}:{exc}"
         else:
             trace[self.damage.name] = "skipped"
 

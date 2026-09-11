@@ -15,6 +15,23 @@ TIA_ALLOWED_ALGORITHMS: set[str] = set(TIA_ALGORITHM_PORTS) - {"marl_ppo_task_sc
 # 独立任务调度 Agent 白名单（经 algolib /algorithms 发现）
 SCHEDULING_ALLOWED_ALGORITHMS: set[str] = {"marl_ppo_task_scheduler"}
 
+ORCHESTRATION_ALLOWED_ALGORITHMS: set[str] = {
+    "execution_rule_matcher",
+    "trajectory_linear_predictor",
+    "decision_planning_core",
+    "compliance_authorization_core",
+    "execution_control_planner",
+    "mission_feature_adapter",
+    "mission_completion_scorer",
+    "closed_loop_decision_advisor",
+    "xbd_damage_assessor",
+    "clustering_engine",
+    "threat_priority_random_forest",
+    "intent_gaussian_naive_bayes",
+    "federated_fedavg_aggregator",
+    "conditional_tabular_gan",
+}
+
 TIA_DEFAULT_PIPELINE: list[str] = [
     "battlefield_rtdetr_detector",
     "siamese_mask2former_damage",
@@ -58,6 +75,20 @@ ALGORITHM_STAGE: dict[str, str] = {
     "synapse_rag_retriever": "cognition",
     "knowledge_semantic_comm": "communication",
     "marl_dynamic_router": "communication",
+    "execution_rule_matcher": "authorization",
+    "trajectory_linear_predictor": "cognition",
+    "decision_planning_core": "planning",
+    "compliance_authorization_core": "authorization",
+    "execution_control_planner": "execution",
+    "mission_feature_adapter": "closed_loop",
+    "mission_completion_scorer": "closed_loop",
+    "closed_loop_decision_advisor": "closed_loop",
+    "xbd_damage_assessor": "assessment",
+    "clustering_engine": "perception",
+    "threat_priority_random_forest": "cognition",
+    "intent_gaussian_naive_bayes": "cognition",
+    "federated_fedavg_aggregator": "coordination",
+    "conditional_tabular_gan": "generation",
 }
 
 ALGORITHM_MODEL_IDS: dict[str, str] = {
@@ -77,6 +108,20 @@ ALGORITHM_MODEL_IDS: dict[str, str] = {
     "synapse_rag_retriever": "synapse-rag-retriever",
     "knowledge_semantic_comm": "knowledge-semantic-comm",
     "marl_dynamic_router": "marl-dynamic-router",
+    "execution_rule_matcher": "execution-rule-matcher",
+    "trajectory_linear_predictor": "trajectory-linear-predictor",
+    "decision_planning_core": "decision-planning-core",
+    "compliance_authorization_core": "compliance-authorization-core",
+    "execution_control_planner": "execution-control-planner",
+    "mission_feature_adapter": "mission-feature-adapter",
+    "mission_completion_scorer": "mission-completion-scorer",
+    "closed_loop_decision_advisor": "closed-loop-decision-advisor",
+    "xbd_damage_assessor": "xbd-damage-assessor",
+    "clustering_engine": "clustering-engine",
+    "threat_priority_random_forest": "threat-priority-random-forest",
+    "intent_gaussian_naive_bayes": "intent-gaussian-naive-bayes",
+    "federated_fedavg_aggregator": "federated-fedavg-aggregator",
+    "conditional_tabular_gan": "conditional-tabular-gan",
 }
 
 ALGORITHM_MODEL_PROFILES: dict[str, dict[str, Any]] = {
@@ -203,6 +248,90 @@ ALGORITHM_MODEL_PROFILES: dict[str, dict[str, Any]] = {
         "flops_text": "varies_by_submodel",
         "precision": "fp32",
     },
+    "execution_rule_matcher": {
+        "parameter_count": 0,
+        "parameter_count_text": "mined execution-rule matcher",
+        "model_size_mb": 0,
+        "precision": "fp32",
+    },
+    "trajectory_linear_predictor": {
+        "parameter_count": 0,
+        "parameter_count_text": "linear trajectory predictor",
+        "model_size_mb": 0,
+        "precision": "fp32",
+    },
+    "decision_planning_core": {
+        "parameter_count": 0,
+        "parameter_count_text": "deterministic decision-planning runtime",
+        "model_size_mb": 0,
+        "precision": "fp32",
+    },
+    "compliance_authorization_core": {
+        "parameter_count": 0,
+        "parameter_count_text": "deterministic compliance runtime",
+        "model_size_mb": 0,
+        "precision": "fp32",
+    },
+    "execution_control_planner": {
+        "parameter_count": 0,
+        "parameter_count_text": "deterministic execution-control planner",
+        "model_size_mb": 0,
+        "precision": "fp32",
+    },
+    "mission_feature_adapter": {
+        "parameter_count": 0,
+        "parameter_count_text": "deterministic mission feature adapter",
+        "model_size_mb": 0,
+        "precision": "fp32",
+    },
+    "mission_completion_scorer": {
+        "parameter_count": 0,
+        "parameter_count_text": "mission completion scoring runtime",
+        "model_size_mb": 0,
+        "precision": "fp32",
+    },
+    "closed_loop_decision_advisor": {
+        "parameter_count": 0,
+        "parameter_count_text": "deterministic closed-loop advisor",
+        "model_size_mb": 0,
+        "precision": "fp32",
+    },
+    "xbd_damage_assessor": {
+        "parameter_count": 0,
+        "parameter_count_text": "xBD damage assessment runtime",
+        "model_size_mb": 0,
+        "precision": "fp32",
+    },
+    "clustering_engine": {
+        "parameter_count": 0,
+        "parameter_count_text": "classical clustering runtime",
+        "model_size_mb": 0,
+        "precision": "fp32",
+    },
+    "threat_priority_random_forest": {
+        "parameter_count": 0,
+        "parameter_count_text": "random forest threat priority model",
+        "model_size_mb": 0,
+        "precision": "fp32",
+    },
+    "intent_gaussian_naive_bayes": {
+        "parameter_count": 0,
+        "parameter_count_text": "Gaussian naive Bayes intent classifier",
+        "model_size_mb": 0,
+        "precision": "fp32",
+    },
+    "federated_fedavg_aggregator": {
+        "parameter_count": 0,
+        "parameter_count_text": "FedAvg reference aggregator",
+        "model_size_mb": 0,
+        "precision": "fp32",
+    },
+    "conditional_tabular_gan": {
+        "parameter_count": 0,
+        "parameter_count_text": "conditional tabular GAN runtime",
+        "model_size_mb": 0,
+        "precision": "fp32",
+    },
 }
 
 _ALGORITHM_CARDS: dict[str, dict[str, Any]] = {
@@ -318,6 +447,104 @@ _ALGORITHM_CARDS: dict[str, dict[str, Any]] = {
         "required_fields": ["packet"],
         "optional": True,
     },
+    "execution_rule_matcher": {
+        "task_family": "decision",
+        "capabilities": ["rule_matching", "execution_constraint_lookup"],
+        "summary": "Execution rule matcher algorithm",
+        "required_fields": ["rules", "facts"],
+        "optional": False,
+    },
+    "trajectory_linear_predictor": {
+        "task_family": "forecasting",
+        "capabilities": ["linear_motion_prediction", "trajectory_forecast"],
+        "summary": "Linear trajectory prediction algorithm",
+        "required_fields": ["tracks"],
+        "optional": False,
+    },
+    "decision_planning_core": {
+        "task_family": "decision_planning",
+        "capabilities": ["candidate_plan_generation", "engagement_option_scoring"],
+        "summary": "Decision Planning Agent core planning algorithm",
+        "required_fields": ["scheduled_tasks", "resources"],
+        "optional": False,
+    },
+    "compliance_authorization_core": {
+        "task_family": "authorization",
+        "capabilities": ["roe_check", "authorization_gate", "evidence_review"],
+        "summary": "Compliance Authorization Agent rule and evidence review algorithm",
+        "required_fields": ["candidate_plans", "authorization"],
+        "optional": False,
+    },
+    "execution_control_planner": {
+        "task_family": "execution_control",
+        "capabilities": ["execution_command_generation", "fire_control_preparation"],
+        "summary": "Execution Control Agent planner algorithm",
+        "required_fields": ["phase", "results"],
+        "optional": False,
+    },
+    "mission_feature_adapter": {
+        "task_family": "feature_engineering",
+        "capabilities": ["mission_feature_vectorization", "result_normalization"],
+        "summary": "Closed-loop mission feature adapter",
+        "required_fields": ["results"],
+        "optional": False,
+    },
+    "mission_completion_scorer": {
+        "task_family": "scoring",
+        "capabilities": ["mission_completion_scoring", "objective_progress"],
+        "summary": "Closed-loop mission completion scoring algorithm",
+        "required_fields": ["features"],
+        "optional": False,
+    },
+    "closed_loop_decision_advisor": {
+        "task_family": "closed_loop_decision",
+        "capabilities": ["replan_advice", "target_followup_action"],
+        "summary": "Closed-loop decision advisor algorithm",
+        "required_fields": ["targets", "mission_score"],
+        "optional": False,
+    },
+    "xbd_damage_assessor": {
+        "task_family": "damage_assessment",
+        "capabilities": ["battle_damage_assessment", "damage_probability"],
+        "summary": "xBD-style battle damage assessment algorithm",
+        "required_fields": ["targets"],
+        "optional": False,
+    },
+    "clustering_engine": {
+        "task_family": "clustering",
+        "capabilities": ["contact_clustering", "group_discovery"],
+        "summary": "Clustering engine algorithm",
+        "required_fields": ["points"],
+        "optional": False,
+    },
+    "threat_priority_random_forest": {
+        "task_family": "classification",
+        "capabilities": ["threat_priority_scoring", "risk_ranking"],
+        "summary": "Random forest threat priority algorithm",
+        "required_fields": ["features"],
+        "optional": False,
+    },
+    "intent_gaussian_naive_bayes": {
+        "task_family": "classification",
+        "capabilities": ["intent_classification", "probabilistic_classification"],
+        "summary": "Gaussian naive Bayes intent classification algorithm",
+        "required_fields": ["features"],
+        "optional": False,
+    },
+    "federated_fedavg_aggregator": {
+        "task_family": "federated_learning",
+        "capabilities": ["federated_weight_aggregation", "fedavg"],
+        "summary": "Federated FedAvg aggregation algorithm",
+        "required_fields": ["client_updates"],
+        "optional": False,
+    },
+    "conditional_tabular_gan": {
+        "task_family": "generation",
+        "capabilities": ["synthetic_tabular_generation", "conditional_generation"],
+        "summary": "Conditional tabular GAN algorithm",
+        "required_fields": ["conditions"],
+        "optional": False,
+    },
 }
 
 
@@ -335,7 +562,10 @@ def build_algorithm_catalog(
         # 调度算法不在 TIA 管线内，但网关需对外暴露给 task_scheduling_agent
         if "marl_ppo_task_scheduler" not in pipeline:
             pipeline = ["marl_ppo_task_scheduler", *pipeline]
-        allow = set(allow) | SCHEDULING_ALLOWED_ALGORITHMS
+        for algorithm_id in ORCHESTRATION_ALLOWED_ALGORITHMS:
+            if algorithm_id not in pipeline:
+                pipeline.append(algorithm_id)
+        allow = set(allow) | SCHEDULING_ALLOWED_ALGORITHMS | ORCHESTRATION_ALLOWED_ALGORITHMS
     for algorithm_id in pipeline:
         if algorithm_id not in allow:
             continue

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from agent.algorithm_library.factory import (
@@ -183,6 +184,15 @@ class CognitionSkill:
         plan: AlgorithmPlan | None = None,
     ) -> CognitionOutput:
         def enabled(aid: str) -> bool:
+            if aid == "synapse_rag_retriever":
+                run_without_kb = (
+                    os.environ.get("TIA_RUN_OPTIONAL_RAG_WITHOUT_KB", "0")
+                    .strip()
+                    .lower()
+                    in {"1", "true", "yes", "on"}
+                )
+                if not batch.context.get("knowledge_base") and not run_without_kb:
+                    return False
             return plan is None or plan.is_enabled(aid)
 
         frame_dicts = [f.model_dump(mode="json") for f in batch.frames]
@@ -190,56 +200,68 @@ class CognitionSkill:
         invocations: list[dict[str, Any]] = []
 
         if enabled("imagebind_multimodal_encoder"):
-            embeddings, invocation = _run_and_record(
-                self.encoder,
-                _planned_inputs({"frames": frame_dicts}, plan, _algorithm_id(self.encoder)),
-            )
-            if invocation:
-                invocations.append(invocation)
-            if not isinstance(embeddings, dict):
+            try:
+                embeddings, invocation = _run_and_record(
+                    self.encoder,
+                    _planned_inputs({"frames": frame_dicts}, plan, _algorithm_id(self.encoder)),
+                )
+                if invocation:
+                    invocations.append(invocation)
+                if not isinstance(embeddings, dict):
+                    embeddings = {}
+                trace[self.encoder.name] = f"{len(embeddings)} modality embeddings"
+            except Exception as exc:
                 embeddings = {}
-            trace[self.encoder.name] = f"{len(embeddings)} modality embeddings"
+                trace[self.encoder.name] = f"optional_failed:{type(exc).__name__}:{exc}"
         else:
             embeddings = {}
             trace[self.encoder.name] = "skipped"
 
         if enabled("multimodal_mamba_fusion"):
-            fusion_out, invocation = _run_and_record(
-                self.fusion,
-                _planned_inputs(
-                    {"embeddings": embeddings, "tracks": perception.tracks},
-                    plan,
-                    _algorithm_id(self.fusion),
-                ),
-            )
-            if invocation:
-                invocations.append(invocation)
-            if not isinstance(fusion_out, dict):
-                fusion_out = {}
-            fused = fusion_out.get("fused_embeddings", {})
-            trace[self.fusion.name] = f"seq_len={fusion_out.get('sequence_length', 0)}"
+            try:
+                fusion_out, invocation = _run_and_record(
+                    self.fusion,
+                    _planned_inputs(
+                        {"embeddings": embeddings, "tracks": perception.tracks},
+                        plan,
+                        _algorithm_id(self.fusion),
+                    ),
+                )
+                if invocation:
+                    invocations.append(invocation)
+                if not isinstance(fusion_out, dict):
+                    fusion_out = {}
+                fused = fusion_out.get("fused_embeddings", {})
+                trace[self.fusion.name] = f"seq_len={fusion_out.get('sequence_length', 0)}"
+            except Exception as exc:
+                fused = {}
+                trace[self.fusion.name] = f"optional_failed:{type(exc).__name__}:{exc}"
         else:
             fused = {}
             trace[self.fusion.name] = "skipped"
 
         if enabled("supcon_meta_classifier"):
             support_shots = batch.context.get("support_shots") or []
-            classifications, invocation = _run_and_record(
-                self.classifier,
-                _planned_inputs(
-                    {"fused_embeddings": fused, "support_shots": support_shots},
-                    plan,
-                    _algorithm_id(self.classifier),
-                ),
-            )
-            if invocation:
-                invocations.append(invocation)
-            if isinstance(classifications, dict):
-                classifications = classifications.get("classifications") or []
-            if not isinstance(classifications, list):
+            try:
+                classifications, invocation = _run_and_record(
+                    self.classifier,
+                    _planned_inputs(
+                        {"fused_embeddings": fused, "support_shots": support_shots},
+                        plan,
+                        _algorithm_id(self.classifier),
+                    ),
+                )
+                if invocation:
+                    invocations.append(invocation)
+                if isinstance(classifications, dict):
+                    classifications = classifications.get("classifications") or []
+                if not isinstance(classifications, list):
+                    classifications = []
+                classifications = self._apply_simulation_force_prior(batch, classifications)
+                trace[self.classifier.name] = f"{len(classifications)} classifications"
+            except Exception as exc:
                 classifications = []
-            classifications = self._apply_simulation_force_prior(batch, classifications)
-            trace[self.classifier.name] = f"{len(classifications)} classifications"
+                trace[self.classifier.name] = f"optional_failed:{type(exc).__name__}:{exc}"
         else:
             classifications = [
                 {

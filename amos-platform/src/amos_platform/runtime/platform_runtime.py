@@ -72,9 +72,54 @@ class PlatformRuntime:
             self._director = DirectorService(
                 self,
                 checkpoint_callback=submit_checkpoint,
-                workflow_state_callback=self.get_workflow_view,
+                workflow_state_callback=self.get_workflow_status_view,
             )
         return self._director
+
+    def get_workflow_status_view(self, workflow_id: str, light: bool = False) -> dict[str, Any]:
+        """Status-first view for the Director checkpoint poller.
+
+        The full view (``get_workflow_view``) performs three backend
+        round-trips (status + work-list + trace) and builds the complete UI
+        projection. The running-state poll only needs ``status``/``terminal``
+        until the workflow ends, so poll the tiny brief payload while the
+        workflow is live (the commander brief endpoint serves a few hundred
+        bytes instead of the multi-MB full snapshot) and pay the full cost
+        exactly once at the terminal poll.
+        """
+        from amos_platform.agents.a2a.workflow_view import TERMINAL_STATES
+
+        if not light:
+            return self.get_workflow_view(workflow_id)
+        bridge = self.get_bridge()
+        brief = getattr(bridge, "get_workflow_brief", None)
+        if brief is not None:
+            payload = brief(workflow_id)
+            state = str(payload.get("status") or "unknown").lower()
+            if state in TERMINAL_STATES:
+                return self.get_workflow_view(workflow_id)
+            if payload.get("error"):
+                return {
+                    "workflow_id": workflow_id,
+                    "status": state or "unknown",
+                    "terminal": False,
+                    "error": payload.get("error"),
+                }
+            return {
+                "workflow_id": workflow_id,
+                "status": state,
+                "terminal": False,
+            }
+        status = bridge.get_workflow(workflow_id)
+        status.setdefault("workflow_id", workflow_id)
+        state = str(status.get("status") or "unknown").lower()
+        if state in TERMINAL_STATES or status.get("error"):
+            return self.get_workflow_view(workflow_id)
+        return {
+            "workflow_id": workflow_id,
+            "status": state,
+            "terminal": False,
+        }
 
     def get_workflow_view(self, workflow_id: str) -> dict[str, Any]:
         """Read one backend workflow and project verified terminal output."""

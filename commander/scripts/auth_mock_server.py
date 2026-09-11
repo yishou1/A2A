@@ -16,6 +16,16 @@ class AuthMockHandler(BaseHTTPRequestHandler):
         if self.path in {"/", "/health"}:
             self._write_json(200, {"status": "ok"})
             return
+        if self.path in {"/get", "/headers"}:
+            # httpbin-compatible echo endpoint: the startup/status scripts
+            # probe http://127.0.0.1:8080/get to detect the auth mock.
+            self._write_json(200, {
+                "args": {},
+                "headers": {},
+                "origin": "127.0.0.1",
+                "url": "http://127.0.0.1:8080/get",
+            })
+            return
         self._write_json(404, {"error": "not_found"})
 
     def do_POST(self):

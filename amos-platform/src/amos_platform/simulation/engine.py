@@ -1157,14 +1157,18 @@ class SimEngine:
                     "timestamp": time.time(),
                 })
 
-        follow_confirmation_pending = any(
+        # The follow-launch confirmation dialog no longer forces 1x playback:
+        # the operator-selected demo speed (e.g. 32x) keeps running while the
+        # dialog is pending and while the backend analysis continues. Safety
+        # is unchanged — the UAV only launches after the explicit
+        # authorize_follow_asset operator command.
+
+    def follow_confirmation_pending(self) -> bool:
+        """True while any asset waits for the operator follow-launch decision."""
+        return any(
             isinstance(asset.get("_follow_pending_prompt"), dict)
             for asset in self.assets.values()
         )
-        if follow_confirmation_pending:
-            self.lock_speed_for_confirmation("awaiting_follow_confirmation")
-        else:
-            self.unlock_speed_for_confirmation("awaiting_follow_confirmation")
 
     @staticmethod
     def _estimated_track_speed_kts(track: dict) -> float:

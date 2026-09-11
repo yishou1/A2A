@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 TIA_ALGORITHM_PORTS: dict[str, int] = {
+    "execution_rule_matcher": 9010,
+    "trajectory_linear_predictor": 9011,
     "battlefield_rtdetr_detector": 9020,
     "siamese_mask2former_damage": 9021,
     "edl_evidential_verifier": 9022,
@@ -14,6 +16,18 @@ TIA_ALGORITHM_PORTS: dict[str, int] = {
     "synapse_rag_retriever": 9028,
     "knowledge_semantic_comm": 9029,
     "marl_dynamic_router": 9030,
+    "clustering_engine": 9031,
+    "threat_priority_random_forest": 9032,
+    "intent_gaussian_naive_bayes": 9033,
+    "federated_fedavg_aggregator": 9034,
+    "conditional_tabular_gan": 9035,
+    "execution_control_planner": 9012,
+    "mission_feature_adapter": 9013,
+    "mission_completion_scorer": 9014,
+    "closed_loop_decision_advisor": 9015,
+    "xbd_damage_assessor": 9016,
+    "decision_planning_core": 9040,
+    "compliance_authorization_core": 9041,
     "multimodal_feature_fuser": 9042,
     "target_type_classifier": 9042,
     "track_state_updater": 9042,

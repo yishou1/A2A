@@ -241,6 +241,43 @@ class CommanderAgent:
         print(f"checkpoint={self.state_store.state_path(self.workflow_id)}")
         print("========================")
 
+    @staticmethod
+    def _runtime_records_from_output(value: object) -> dict[str, list[dict]]:
+        """Collect runtime call records from an agent's output envelope.
+
+        Agents commonly return ``{output_hint: {output_data: {...}}}``, while
+        older agents put the same records directly on the response output.
+        Keep both protocol shapes visible at the activity level so consumers
+        do not need to know the agent-specific envelope.
+        """
+        runtime_keys = (
+            "algorithm_calls",
+            "algorithm_invocations",
+            "model_calls",
+            "model_invocations",
+        )
+        records: dict[str, list[dict]] = {key: [] for key in runtime_keys}
+
+        def visit(node: object, depth: int = 0) -> None:
+            if depth > 8:
+                return
+            if isinstance(node, list):
+                for item in node:
+                    visit(item, depth + 1)
+                return
+            if not isinstance(node, dict):
+                return
+            for key in runtime_keys:
+                value = node.get(key)
+                if isinstance(value, list):
+                    records[key].extend(deepcopy(item) for item in value)
+            for child in node.values():
+                if isinstance(child, (dict, list)):
+                    visit(child, depth + 1)
+
+        visit(value)
+        return {key: value for key, value in records.items() if value}
+
     def _build_workflow_result(self, context: dict) -> dict:
         work_list = deepcopy(context.get("work_list", []))
         agent_results = context.get("agent_results", {}) or {}
@@ -285,33 +322,34 @@ class CommanderAgent:
                     (f"outputs.{key}" for key in output_keys_for_activity if key in outputs),
                     None,
                 )
-            activity_results.append(
-                {
-                    "activity_id": item.get("activity_id") or item.get("activatity_id"),
-                    "work_item": work_item,
-                    "type": item.get("type"),
-                    "role": item.get("role"),
-                    "required_skills": list(item.get("required_skills", [])),
-                    "status": item.get("status"),
-                    "error": item.get("error"),
-                    "agent": response.get("agent"),
-                    "instance_id": response.get("instance_id") or response.get("agent_instance_id"),
-                    "execution_mode": (
-                        response.get("execution_mode")
-                        or ("local_agent" if response.get("mode") == "local" else response.get("mode"))
-                    ),
-                    "input": deepcopy(request.get("input") or {}),
-                    "input_source": request.get("input_source") or "agent_request.input",
-                    "request": {
-                        key: deepcopy(value)
-                        for key, value in request.items()
-                        if key != "input"
-                    },
-                    "output_ref": output_ref,
-                    "output_keys": output_keys_for_activity,
-                    "metrics": response.get("metrics", {}),
-                }
-            )
+            activity_row = {
+                "activity_id": item.get("activity_id") or item.get("activatity_id"),
+                "work_item": work_item,
+                "type": item.get("type"),
+                "role": item.get("role"),
+                "required_skills": list(item.get("required_skills", [])),
+                "status": item.get("status"),
+                "error": item.get("error"),
+                "agent": response.get("agent"),
+                "instance_id": response.get("instance_id") or response.get("agent_instance_id"),
+                "execution_mode": (
+                    response.get("execution_mode")
+                    or ("local_agent" if response.get("mode") == "local" else response.get("mode"))
+                ),
+                "input": deepcopy(request.get("input") or {}),
+                "input_source": request.get("input_source") or "agent_request.input",
+                "request": {
+                    key: deepcopy(value)
+                    for key, value in request.items()
+                    if key != "input"
+                },
+                "output_ref": output_ref,
+                "output_keys": output_keys_for_activity,
+                "metrics": response.get("metrics", {}),
+            }
+            if isinstance(response_output, dict):
+                activity_row.update(self._runtime_records_from_output(response_output))
+            activity_results.append(activity_row)
 
         counts = {
             status: sum(1 for item in work_list if item.get("status") == status)
@@ -1456,6 +1494,12 @@ class CommanderAgent:
             self._recover_interrupted_activities(context)
             state["workflow_id"] = self.workflow_id
             state["workflow"] = self.workflow
+            # Restore the persisted BPEL file so resume reloads the same
+            # workflow definition (resume calls may omit workflow_file).
+            if state.get("workflow_file") and not self.workflow_file:
+                self.workflow_file = state["workflow_file"]
+                self.bpel_definition = self.workflow_catalog.load(self.workflow_file)
+                self.workflow = "bpel"
             state["mode"] = self.mode
             state["status"] = state.get("status") or context["workflow_status"]
             state["current_activatity"] = (
@@ -1536,6 +1580,7 @@ class CommanderAgent:
             state = {
                 "workflow_id": self.workflow_id,
                 "workflow": self.workflow,
+                "workflow_file": self.workflow_file,
                 "mode": self.mode,
                 "status": normalized["workflow_status"],
                 "created_at": self.workflow_state.get("created_at", utc_now_iso()),

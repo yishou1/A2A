@@ -333,11 +333,13 @@ def test_confirm_uav_launches_from_escort_and_follows_confirmed_high_threat() ->
     assert prompt["prompt_type"] == "launch_follow_uav"
     assert prompt["asset_id"] == "UAV-CONFIRM-01"
     assert prompt["track_id"] == hostile.id
-    assert prompt_state["clock"]["speed"] == 1
-    assert prompt_state["clock"]["speed_locked_reason"] == "awaiting_follow_confirmation"
-    assert prompt_state["clock"]["speed_resume_value"] == 8
+    # The confirmation dialog must not force 1x playback: the
+    # operator-selected speed keeps running while the dialog is pending.
+    assert prompt_state["clock"]["speed"] == 8
+    assert "speed_locked_reason" not in prompt_state["clock"]
+    assert "speed_resume_value" not in prompt_state["clock"]
     engine.set_speed(32)
-    assert engine.clock["speed"] == 1
+    assert engine.clock["speed"] == 32
     assert engine.assets["UAV-CONFIRM-01"]["status"] == "staged"
     assert not any(
         asset["id"] == "UAV-CONFIRM-01"
@@ -351,7 +353,7 @@ def test_confirm_uav_launches_from_escort_and_follows_confirmed_high_threat() ->
         authorized=True,
     )
     assert authorized["status"] == "authorized"
-    assert engine.clock["speed"] == 8
+    assert engine.clock["speed"] == 32
     assert "speed_locked_reason" not in engine.clock
 
     uav = engine.assets["UAV-CONFIRM-01"]
