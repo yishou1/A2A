@@ -16,6 +16,11 @@ capabilities:
   - trajectory_extrapolation
   - velocity_estimation
 
+operational_functions:
+  - {function_id: KC-19, function_code: maintain_track, function_name: Maintain Track, role: primary, coverage_level: partial}
+  - {function_id: KC-18, function_code: determine_time_available, function_name: Determine Time Available, role: supporting, coverage_level: partial}
+  - {function_id: KC-24, function_code: track_weapon, function_name: Track Weapon, role: supporting, coverage_level: partial}
+
 agent_card:
   summary: >
     Deterministic per-request ordinary least-squares regression for estimating

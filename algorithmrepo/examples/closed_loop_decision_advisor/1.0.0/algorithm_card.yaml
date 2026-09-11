@@ -14,6 +14,11 @@ modalities:
 capabilities:
   - closed_loop_decision_advisor
 
+operational_functions:
+  - {function_id: KC-16, function_code: nominate_engagement_option, function_name: Nominate Engagement Option, role: primary, coverage_level: partial}
+  - {function_id: KC-20, function_code: select_attack_option, function_name: Select Attack Option, role: supporting, coverage_level: partial}
+  - {function_id: KC-26, function_code: task_re_attack, function_name: Task Re-Attack, role: supporting, coverage_level: partial}
+
 agent_card:
   summary: >
     Closed Loop Decision Advisor packaged for the A2A algorithm library.

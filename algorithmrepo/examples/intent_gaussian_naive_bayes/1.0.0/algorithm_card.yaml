@@ -17,6 +17,10 @@ capabilities:
   - probabilistic_intent_classification
   - posterior_probability_estimation
 
+operational_functions:
+  - {function_id: KC-06, function_code: classify, function_name: Classify, role: primary, coverage_level: full}
+  - {function_id: KC-07, function_code: identify, function_name: Identify, role: supporting, coverage_level: partial}
+
 agent_card:
   summary: >
     Frozen Gaussian Naive Bayes model that estimates benign, surveillance, and

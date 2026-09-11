@@ -15,6 +15,13 @@ capabilities:
   - text_classification
   - confidence_score
 
+operational_functions:
+  - function_id: KC-06
+    function_code: classify
+    function_name: Classify
+    role: supporting
+    coverage_level: partial
+
 agent_card:
   summary: >
     Exercise the text-tokenization, ONNX Runtime, and classification-postprocess

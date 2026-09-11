@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MARL-PPO Task Scheduler ONNX Output",
+  "type": "object",
+  "required": ["masked_action_logits", "action_probabilities", "selected_actions", "state_values"],
+  "properties": {
+    "masked_action_logits": {"$ref": "#/$defs/action_rows"},
+    "action_probabilities": {"$ref": "#/$defs/probability_rows"},
+    "selected_actions": {
+      "type": "array",
+      "items": {"type": "integer", "minimum": 0, "maximum": 8}
+    },
+    "state_values": {
+      "type": "array",
+      "items": {"type": "number"}
+    }
+  },
+  "$defs": {
+    "action_rows": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "minItems": 9,
+        "maxItems": 9,
+        "items": {"type": "number"}
+      }
+    },
+    "probability_rows": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "minItems": 9,
+        "maxItems": 9,
+        "items": {"type": "number", "minimum": 0.0, "maximum": 1.00001}
+      }
+    }
+  },
+  "additionalProperties": false
+}

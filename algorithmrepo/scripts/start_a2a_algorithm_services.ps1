@@ -20,8 +20,9 @@ $LegacyAlgorithms = @(
     @{ Id = "intent_gaussian_naive_bayes"; Port = 9033 },
     @{ Id = "federated_fedavg_aggregator"; Port = 9034 },
     @{ Id = "conditional_tabular_gan"; Port = 9035 },
-    @{ Id = "decision_planning_core"; Port = 9020 },
-    @{ Id = "compliance_authorization_core"; Port = 9021 }
+    @{ Id = "decision_planning_core"; Port = 9036 },
+    @{ Id = "compliance_authorization_core"; Port = 9037 },
+    @{ Id = "track_threat_algorithms"; Port = 9038 }
 )
 
 $TiaAlgorithms = @(

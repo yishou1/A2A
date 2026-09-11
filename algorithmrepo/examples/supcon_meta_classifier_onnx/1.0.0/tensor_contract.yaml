@@ -1,0 +1,11 @@
+inputs:
+  - name: features
+    dtype: float32
+    shape: [-1, 256]
+outputs:
+  - name: predicted_class_indices
+    dtype: int64
+    shape: [-1]
+  - name: class_probabilities
+    dtype: float32
+    shape: [-1, 4]

@@ -1,0 +1,87 @@
+algorithm_id: conditional_tabular_gan_onnx
+version: 1.0.0
+display_name: Conditional Tabular GAN ONNX
+backend_type: onnx
+status: validated
+algorithm_class: M08
+
+task_family: generation
+modalities:
+  input: [numeric_features, generation_condition]
+  output: [synthetic_numeric_features, structured_json]
+
+capabilities:
+  - conditional_gan_generation
+  - tabular_feature_synthesis
+  - batch_inference
+  - lightweight_onnx_inference
+
+agent_card:
+  summary: Native ONNX Runtime variant of the trained M08 conditional tabular generator.
+  when_to_use:
+    - Explicit noise rows and benign, surveillance, or hostile one-hot conditions are available.
+    - Portable synthetic feature generation is needed without a Python service.
+  when_not_to_use:
+    - The caller requires seed-based noise generation or named feature objects automatically.
+    - Generated data could be represented as genuine sensor observations.
+  input_description: Float32 noise rows of length eight and aligned three-class one-hot conditions.
+  output_description: Bounded feature rows ordered as radar activity, communication intensity, movement consistency, weapon signature, proximity score.
+
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  tensor_contract_ref: tensor_contract.yaml
+  runtime:
+    backend_type: onnx
+    model_uri: model.onnx
+    execution_provider: cpu
+  preprocess:
+    config_uri: preprocess.yaml
+  postprocess:
+    config_uri: postprocess.yaml
+
+constraints:
+  max_input_chars: 2000000
+  max_request_bytes: 4194304
+  batch_supported: true
+  streaming_supported: false
+
+performance:
+  latency_ms_p50: 1
+  latency_ms_p95: 5
+  primary_metric: class_conditional_feature_mean_absolute_error
+  primary_score: 0.056212
+  time_complexity: O(B*H^2)
+  space_complexity: O(B*H)
+  complexity_variable: B=batch rows, H=32 hidden dimensions
+  performance_notes: Reference metrics use deterministic synthetic observations.
+
+resource_requirements:
+  min_cpu_cores: 1
+  recommended_cpu_cores: 1
+  min_memory_mb: 64
+  recommended_memory_mb: 128
+  min_gpu_count: 0
+  gpu_type: none
+  min_vram_mb: 0
+  recommended_vram_mb: 0
+  disk_mb: 1
+
+model_profile:
+  parameter_count: 1605
+  parameter_count_text: 1605_generator_parameters
+  flops: 3104
+  flops_text: approximate multiply-add count per generated row
+  flops_input_shape: [1, 11]
+  model_size_mb: 1
+  precision: fp32
+
+provenance:
+  model_artifact_ref: model.onnx
+  model_metadata_ref: model.metadata.json
+  training_script_ref: ../../../scripts/train_conditional_tabular_gan.py
+  dataset_ref: ../../../data/intent_naive_bayes/reference_observations.csv
+
+safety:
+  risk_level: medium
+  requires_human_review: true

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SupCon Meta Classifier ONNX Output",
+  "type": "object",
+  "required": ["predicted_class_indices", "class_probabilities"],
+  "properties": {
+    "predicted_class_indices": {
+      "type": "array",
+      "items": {"type": "integer", "minimum": 0, "maximum": 3},
+      "description": "Indices into friendly, neutral, hostile, unknown."
+    },
+    "class_probabilities": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "minItems": 4,
+        "maxItems": 4,
+        "items": {"type": "number", "minimum": 0.0, "maximum": 1.00001}
+      }
+    }
+  },
+  "additionalProperties": false
+}

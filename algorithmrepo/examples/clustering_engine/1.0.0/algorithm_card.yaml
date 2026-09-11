@@ -17,6 +17,10 @@ capabilities:
   - dbscan_density_clustering
   - noise_detection
 
+operational_functions:
+  - {function_id: KC-12, function_code: sort, function_name: Sort, role: primary, coverage_level: full}
+  - {function_id: KC-05, function_code: characterize, function_name: Characterize, role: supporting, coverage_level: partial}
+
 agent_card:
   summary: >
     Deterministic CPU clustering with real K-Means and DBSCAN implementations.

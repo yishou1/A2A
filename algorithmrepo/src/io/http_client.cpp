@@ -1,12 +1,14 @@
 #include "algolib/io/http_client.h"
 
 #include <chrono>
+#include <fstream>
 #include <memory>
 #include <regex>
 #include <string>
 
 #include <httplib.h>
 
+#include "algolib/io/file_utils.h"
 #include "algolib/io/json_utils.h"
 
 namespace algolib {
@@ -113,6 +115,62 @@ Result<HttpResponse> HttpClient::PostJson(const std::string& url,
     }
 
     return HttpResponse{response->status, response->body};
+}
+
+Status HttpClient::DownloadFile(const std::string& url,
+                                const std::filesystem::path& dest_path,
+                                int timeout_ms) const {
+    auto parsed_result = ParseHttpUrl(url);
+    if (!parsed_result.ok()) {
+        return parsed_result.status();
+    }
+    const ParsedUrl& parsed = parsed_result.value();
+
+    // 中文注释：确保目标目录存在。
+    auto ensure_status = FileUtils::EnsureParentDirectory(dest_path);
+    if (!ensure_status.ok()) {
+        return ensure_status;
+    }
+
+    std::ofstream out(dest_path, std::ios::out | std::ios::binary | std::ios::trunc);
+    if (!out.is_open()) {
+        return Status::Error(ErrorCode::kIoError,
+                             "Cannot open dest file for writing: " +
+                                 dest_path.generic_string());
+    }
+
+    const int effective_timeout = timeout_ms > 0 ? timeout_ms : 60000;
+    auto client = std::make_unique<httplib::Client>(parsed.host, parsed.port);
+    ConfigureTimeouts(client.get(), effective_timeout);
+
+    // 中文注释：使用 content_receiver 回调流式写入，避免将整个文件加载到内存。
+    bool write_error = false;
+    auto response = client->Get(
+        parsed.target.c_str(),
+        httplib::Headers{},
+        [&out, &write_error](const char* data, std::size_t length) -> bool {
+            out.write(data, static_cast<std::streamsize>(length));
+            if (!out.good()) {
+                write_error = true;
+                return false;  // 返回 false 终止传输
+            }
+            return true;
+        });
+
+    if (!response) {
+        return MapTransportError(response.error(), url);
+    }
+    if (response->status != 200) {
+        return Status::Error(
+            ErrorCode::kServiceHttpError,
+            "DownloadFile: server returned HTTP " + std::to_string(response->status) +
+                " for " + url + ".");
+    }
+    if (write_error) {
+        return Status::Error(ErrorCode::kIoError,
+                             "DownloadFile: write error to " + dest_path.generic_string());
+    }
+    return Status::Ok();
 }
 
 }  // namespace algolib

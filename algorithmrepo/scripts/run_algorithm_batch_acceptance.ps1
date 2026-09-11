@@ -260,18 +260,18 @@ $M15Services = @(
 $M20Services = @(
     New-ServiceDefinition `
         -Name "graph_relation_reasoner" `
-        -Port 9022 `
+        -Port 9038 `
         -Main "services\track_threat_algorithms\app\main.py" `
-        -HealthUrl "http://127.0.0.1:9022/graph_relation_reasoner/health" `
+        -HealthUrl "http://127.0.0.1:9038/graph_relation_reasoner/health" `
         -ExpectedAlgorithmId "graph_relation_reasoner"
 )
 
 $TrackServices = @(
     New-ServiceDefinition `
         -Name "track_threat_algorithms" `
-        -Port 9022 `
+        -Port 9038 `
         -Main "services\track_threat_algorithms\app\main.py" `
-        -HealthUrl "http://127.0.0.1:9022/health"
+        -HealthUrl "http://127.0.0.1:9038/health"
 )
 
 $TiaServices = foreach ($item in @(
@@ -307,8 +307,8 @@ $AuxiliaryServices = foreach ($item in @(
 }
 
 $ExternalA2aServices = foreach ($item in @(
-    @{ Id = "decision_planning_core"; Port = 9020 },
-    @{ Id = "compliance_authorization_core"; Port = 9021 }
+    @{ Id = "decision_planning_core"; Port = 9036 },
+    @{ Id = "compliance_authorization_core"; Port = 9037 }
 )) {
     New-ServiceDefinition `
         -Name $item.Id `

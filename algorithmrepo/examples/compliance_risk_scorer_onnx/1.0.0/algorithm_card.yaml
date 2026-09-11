@@ -15,6 +15,9 @@ capabilities:
   - compliance_risk_scoring
   - authorization_risk_probability
 
+operational_functions:
+  - {function_id: KC-21, function_code: verify_rules_of_engagement, function_name: Verify Rules of Engagement (ROE), role: supporting, coverage_level: partial}
+
 agent_card:
   summary: >
     Score one compliance feature row with a reproducibly trained and

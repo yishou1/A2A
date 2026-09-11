@@ -1,0 +1,10 @@
+type: json_to_tensor_map
+mappings:
+  - json_path: $.sequence
+    tensor_name: sequence
+    dtype: float32
+    shape: [-1, 4, 256]
+  - json_path: $.mask
+    tensor_name: mask
+    dtype: float32
+    shape: [-1, 4]

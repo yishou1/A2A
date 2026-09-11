@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Intent Gaussian Naive Bayes ONNX Output",
+  "type": "object",
+  "required": ["predicted_class_indices", "class_probabilities"],
+  "properties": {
+    "predicted_class_indices": {
+      "type": "array",
+      "items": {"type": "integer", "minimum": 0, "maximum": 2},
+      "description": "Indices into class order benign, surveillance, hostile."
+    },
+    "class_probabilities": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "minItems": 3,
+        "maxItems": 3,
+        "items": {"type": "number", "minimum": 0.0, "maximum": 1.00001}
+      },
+      "description": "Posterior rows in class order benign, surveillance, hostile."
+    }
+  },
+  "additionalProperties": false
+}

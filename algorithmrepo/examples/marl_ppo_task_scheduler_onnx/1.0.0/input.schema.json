@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MARL-PPO Task Scheduler ONNX Input",
+  "type": "object",
+  "required": ["observations", "action_mask"],
+  "properties": {
+    "observations": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "type": "array",
+        "minItems": 104,
+        "maxItems": 104,
+        "items": {"type": "number"}
+      }
+    },
+    "action_mask": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "type": "array",
+        "minItems": 9,
+        "maxItems": 9,
+        "items": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+      },
+      "description": "At least one action must be enabled in every row."
+    }
+  },
+  "additionalProperties": false
+}

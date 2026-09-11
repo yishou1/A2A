@@ -6,11 +6,11 @@ This document records the five algorithm packages prepared for the Track Threat 
 
 | Class | Algorithm package | Directory | Runtime endpoint |
 |---|---|---|---|
-| M03 多模态融合 | `multimodal_feature_fuser` | `examples/multimodal_feature_fuser/1.0.0` | `http://127.0.0.1:9022/multimodal_feature_fuser/predict` |
-| M04 特征编码与分类 | `target_type_classifier` | `examples/target_type_classifier/1.0.0` | `http://127.0.0.1:9022/target_type_classifier/predict` |
-| M05 多目标跟踪与定位 | `track_state_updater` | `examples/track_state_updater/1.0.0` | `http://127.0.0.1:9022/track_state_updater/predict` |
-| M06 时间序列预测 | `trajectory_predictor` | `examples/trajectory_predictor/1.0.0` | `http://127.0.0.1:9022/trajectory_predictor/predict` |
-| M20 图神经网络 | `graph_relation_reasoner` | `examples/graph_relation_reasoner/1.0.0` | `http://127.0.0.1:9022/graph_relation_reasoner/predict` |
+| M03 多模态融合 | `multimodal_feature_fuser` | `examples/multimodal_feature_fuser/1.0.0` | `http://127.0.0.1:9038/multimodal_feature_fuser/predict` |
+| M04 特征编码与分类 | `target_type_classifier` | `examples/target_type_classifier/1.0.0` | `http://127.0.0.1:9038/target_type_classifier/predict` |
+| M05 多目标跟踪与定位 | `track_state_updater` | `examples/track_state_updater/1.0.0` | `http://127.0.0.1:9038/track_state_updater/predict` |
+| M06 时间序列预测 | `trajectory_predictor` | `examples/trajectory_predictor/1.0.0` | `http://127.0.0.1:9038/trajectory_predictor/predict` |
+| M20 图神经网络 | `graph_relation_reasoner` | `examples/graph_relation_reasoner/1.0.0` | `http://127.0.0.1:9038/graph_relation_reasoner/predict` |
 
 ## Service
 
@@ -29,7 +29,7 @@ python services/track_threat_algorithms/app/main.py
 Service health:
 
 ```text
-GET http://127.0.0.1:9022/health
+GET http://127.0.0.1:9038/health
 ```
 
 Each mounted algorithm also exposes:

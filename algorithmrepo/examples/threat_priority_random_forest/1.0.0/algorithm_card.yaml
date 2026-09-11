@@ -17,6 +17,10 @@ capabilities:
   - threat_priority_scoring
   - batch_inference
 
+operational_functions:
+  - {function_id: KC-17, function_code: prioritize_target_threat, function_name: Prioritize Target / Threat, role: primary, coverage_level: full}
+  - {function_id: KC-13, function_code: determine_target_threat_urgency, function_name: Determine Target / Threat Urgency, role: supporting, coverage_level: partial}
+
 agent_card:
   summary: >
     Frozen sklearn Random Forest that classifies structured targets into low,

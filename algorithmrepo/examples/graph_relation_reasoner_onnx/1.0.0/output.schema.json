@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Graph Relation Reasoner ONNX Output",
+  "type": "object",
+  "required": ["relation_logits", "relation_probabilities"],
+  "properties": {
+    "relation_logits": {"$ref": "#/$defs/matrices"},
+    "relation_probabilities": {"$ref": "#/$defs/probability_matrices"}
+  },
+  "$defs": {
+    "matrices": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "minItems": 10,
+        "maxItems": 10,
+        "items": {
+          "type": "array",
+          "minItems": 10,
+          "maxItems": 10,
+          "items": {"type": "number"}
+        }
+      }
+    },
+    "probability_matrices": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "minItems": 10,
+        "maxItems": 10,
+        "items": {
+          "type": "array",
+          "minItems": 10,
+          "maxItems": 10,
+          "items": {"type": "number", "minimum": 0.0, "maximum": 1.00001}
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

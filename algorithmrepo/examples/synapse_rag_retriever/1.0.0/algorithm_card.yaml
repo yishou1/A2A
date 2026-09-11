@@ -15,6 +15,9 @@ capabilities:
   - knowledge_retrieval
   - entity_linking
 
+operational_functions:
+  - {function_id: KC-15, function_code: validate_target_threat, function_name: Validate Target / Threat, role: supporting, coverage_level: partial}
+
 agent_card:
   summary: >
     Synapse RAG Retriever from the TIA tactical intelligence agent pipeline.

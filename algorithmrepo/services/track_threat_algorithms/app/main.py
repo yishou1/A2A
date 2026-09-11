@@ -24,7 +24,7 @@ from a2a_algorithms_common.track_threat_algorithms import (  # noqa: E402
 )
 
 VERSION = "1.0.0"
-PORT = int(os.environ.get("PORT", "9022"))
+PORT = int(os.environ.get("PORT", "9038"))
 
 
 def _model_loaded() -> bool:

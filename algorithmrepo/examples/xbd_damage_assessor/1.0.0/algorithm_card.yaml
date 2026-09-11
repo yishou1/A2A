@@ -16,6 +16,11 @@ capabilities:
   - xbd_damage_assessor
   - dual_input_mode
 
+operational_functions:
+  - {function_id: KC-02, function_code: battle_damage_assessment_detection, function_name: Battle Damage Assessment (BDA) Detection, role: primary, coverage_level: full}
+  - {function_id: KC-25, function_code: confirm_impact, function_name: Confirm Impact, role: supporting, coverage_level: partial}
+  - {function_id: KC-27, function_code: conduct_dynamic_assessment, function_name: Conduct Dynamic Assessment, role: supporting, coverage_level: partial}
+
 agent_card:
   summary: >
     Frozen xBD damage assessor using handcrafted ROI features plus ResNet18 embeddings

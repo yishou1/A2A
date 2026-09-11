@@ -1,0 +1,11 @@
+inputs:
+  - name: sequence
+    dtype: float32
+    shape: [-1, 4, 256]
+  - name: mask
+    dtype: float32
+    shape: [-1, 4]
+outputs:
+  - name: fused_embeddings
+    dtype: float32
+    shape: [-1, 256]

@@ -19,6 +19,10 @@ capabilities:
   - structured_track_feature_classification
   - object_type_completion
 
+operational_functions:
+  - {function_id: KC-06, function_code: classify, function_name: Classify, role: primary, coverage_level: full}
+  - {function_id: KC-07, function_code: identify, function_name: Identify, role: supporting, coverage_level: partial}
+
 agent_card:
   summary: >
     M04 package for the Track Threat Agent. Classifies or completes target object type from structured detection and track fields.
@@ -37,9 +41,9 @@ machine_spec:
   output_schema_ref: output.schema.json
   runtime:
     backend_type: python_http_service
-    endpoint: http://127.0.0.1:9022/target_type_classifier/predict
-    health_endpoint: http://127.0.0.1:9022/target_type_classifier/health
-    metadata_endpoint: http://127.0.0.1:9022/target_type_classifier/metadata
+    endpoint: http://127.0.0.1:9038/target_type_classifier/predict
+    health_endpoint: http://127.0.0.1:9038/target_type_classifier/health
+    metadata_endpoint: http://127.0.0.1:9038/target_type_classifier/metadata
     timeout_ms: 3000
 
 constraints:

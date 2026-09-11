@@ -21,6 +21,11 @@ capabilities:
   - physics_baseline_fallback
   - uncertainty_output
 
+operational_functions:
+  - {function_id: KC-19, function_code: maintain_track, function_name: Maintain Track, role: primary, coverage_level: partial}
+  - {function_id: KC-18, function_code: determine_time_available, function_name: Determine Time Available, role: supporting, coverage_level: partial}
+  - {function_id: KC-24, function_code: track_weapon, function_name: Track Weapon, role: supporting, coverage_level: partial}
+
 agent_card:
   summary: >
     M06 package for the Track Threat Agent. Predicts future trajectory points from track history using frozen ST-GNN model bundles when available and physics baselines as fallback.
@@ -38,9 +43,9 @@ machine_spec:
   output_schema_ref: output.schema.json
   runtime:
     backend_type: python_http_service
-    endpoint: http://127.0.0.1:9022/trajectory_predictor/predict
-    health_endpoint: http://127.0.0.1:9022/trajectory_predictor/health
-    metadata_endpoint: http://127.0.0.1:9022/trajectory_predictor/metadata
+    endpoint: http://127.0.0.1:9038/trajectory_predictor/predict
+    health_endpoint: http://127.0.0.1:9038/trajectory_predictor/health
+    metadata_endpoint: http://127.0.0.1:9038/trajectory_predictor/metadata
     timeout_ms: 5000
 
 constraints:

@@ -9,7 +9,7 @@ pip install -r services/requirements.txt
 python services/track_threat_algorithms/app/main.py
 ```
 
-Default port: `9022`.
+Default port: `9038`.
 
 Mounted algorithm endpoints:
 
