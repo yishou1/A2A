@@ -25,6 +25,21 @@
 页头的“AMOS 任务台”默认在新标签页打开 `http://127.0.0.1:5000/`。如 AMOS
 使用其他地址，可在启动 Vite 前设置 `VITE_AMOS_URL`。
 
+## AMOS 同源部署
+
+执行 `npm run build` 时，生产资源默认使用 `/algolib/` 基路径，浏览器 API 请求默认
+使用 `/algolib-api`。AMOS 会提供 SPA 路由回退并把 API 转发到 AlgoLib Server，因此
+最终用户只需访问 `http://127.0.0.1:5000/algolib/algorithms`。
+
+如需覆盖生产路径，可在构建前设置 `ALGOLIB_WEB_BASE` 和
+`VITE_ALGOLIB_API_PREFIX`。Vite 开发模式仍使用根路径和 `/api` 代理，不受生产配置影响。
+
+AMOS、AlgoLib Server 和生产构建都启动后，可执行真实浏览器冒烟验证：
+
+```powershell
+npm run test:e2e:integrated
+```
+
 ## 当前开发范围
 
 已接入真实健康接口、运行总览、算法目录、算法详情、服务器路径注册、生命周期管理、部署管理、Schema/JSON 在线调用、28 个 KC 功能点矩阵和按 trace ID 执行链路查询。

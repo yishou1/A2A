@@ -23,8 +23,13 @@ export class ApiError extends Error {
   }
 }
 
+const apiPrefix = (
+  import.meta.env.VITE_ALGOLIB_API_PREFIX?.trim() ||
+  (import.meta.env.DEV ? '/api' : '/algolib-api')
+).replace(/\/+$/, '')
+
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`/api${path}`, {
+  const response = await fetch(`${apiPrefix}${path}`, {
     ...init,
     headers: {
       Accept: 'application/json, application/schema+json',

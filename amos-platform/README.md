@@ -50,9 +50,10 @@ docs/                  当前架构、剧本及后端缺陷说明
 浏览器访问 `http://127.0.0.1:5000/`。自定义端口：`PORT=8080 ./start.sh`。
 日志写入 `.amos-server.log`。
 
-“算法与功能”页签默认在新标签页打开
-`http://127.0.0.1:5173/algorithms`。如算法管理台部署在其他地址，启动 AMOS 前设置
-`ALGOLIB_CONSOLE_URL` 即可覆盖，不需要修改模板。
+“算法与功能”页签默认在新标签页打开同源管理页面 `/algolib/algorithms`。AMOS 从
+`algorithmrepo/web/dist` 提供 React SPA，并将 `/algolib-api/*` 转发到
+`http://127.0.0.1:8088/*`。部署到其他位置时可通过 `ALGOLIB_CONSOLE_URL`、
+`ALGOLIB_WEB_DIST`、`ALGOLIB_API_URL` 和 `ALGOLIB_PROXY_TIMEOUT` 覆盖默认值。
 
 ## 新电脑首次部署
 

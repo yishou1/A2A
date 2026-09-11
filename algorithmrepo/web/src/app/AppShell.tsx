@@ -19,7 +19,7 @@ import { queryKeys, useHealth } from '../api/queries'
 const { Header, Sider, Content } = Layout
 const amosConsoleUrl =
   (import.meta.env.VITE_AMOS_URL as string | undefined)?.trim() ||
-  'http://127.0.0.1:5000/'
+  (import.meta.env.DEV ? 'http://127.0.0.1:5000/' : '/')
 
 export function AppShell() {
   const [collapsed, setCollapsed] = useState(false)

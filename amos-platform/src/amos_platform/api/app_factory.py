@@ -8,13 +8,14 @@ import os
 
 from flask import Flask, abort, render_template, request
 
+from amos_platform.api.algolib_console import register_algolib_console_routes
 from amos_platform.api.blueprint import create_api_blueprint
 from amos_platform.api.dependencies import get_engine
 from amos_platform.config import static_dir, template_dir
 from amos_platform.frontend_state.temporal_story import media_is_released
 
 
-DEFAULT_ALGOLIB_CONSOLE_URL = "http://127.0.0.1:5173/algorithms"
+DEFAULT_ALGOLIB_CONSOLE_URL = "/algolib/algorithms"
 
 
 def create_app() -> Flask:
@@ -28,6 +29,7 @@ def create_app() -> Flask:
         os.getenv("ALGOLIB_CONSOLE_URL", "").strip() or DEFAULT_ALGOLIB_CONSOLE_URL
     )
     app.register_blueprint(create_api_blueprint())
+    register_algolib_console_routes(app)
 
     @app.before_request
     def enforce_scripted_media_release():
