@@ -49,7 +49,11 @@ class FileStateStore:
             "runtime_state": runtime_state,
         }
         tmp_path = self.path.with_suffix(f"{self.path.suffix}.tmp")
-        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+        # Compact serialization: this runs synchronously on every /sendMessage,
+        # and the payload includes full track states + cached artifacts.
+        # Pretty-printing (indent/sort_keys) roughly doubles both CPU time and
+        # file size for zero runtime benefit; keep the file machine-readable.
+        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
         os.replace(tmp_path, self.path)
 
     def load(self) -> RestoredAgentState | None:

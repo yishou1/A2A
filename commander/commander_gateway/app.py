@@ -133,6 +133,13 @@ def build_gateway_app(
     async def get_workflow(workflow_id: str):
         return gateway_service.get_projection(workflow_id)
 
+    @app.get(
+        "/gateway/v1/workflows/{workflow_id}/brief",
+        dependencies=[control],
+    )
+    async def get_workflow_brief(workflow_id: str):
+        return gateway_service.get_brief(workflow_id)
+
     @app.post(
         "/gateway/v1/workflows/{workflow_id}/resume",
         response_model=CommanderProjectionV1,

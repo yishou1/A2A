@@ -81,13 +81,13 @@ def test_authorization_wait_locks_speed_and_restores_previous_multiplier() -> No
     director._enter_authorization_wait()
     assert engine.clock["speed"] == 1
     assert engine.clock["speed_resume_value"] == 8
-    engine.lock_speed_for_confirmation("awaiting_follow_confirmation")
+    engine.lock_speed_for_confirmation("test_secondary_lock")
 
     director._leave_authorization_wait()
 
     assert engine.clock["speed"] == 1
-    assert engine.clock["speed_locked_reason"] == "awaiting_follow_confirmation"
-    engine.unlock_speed_for_confirmation("awaiting_follow_confirmation")
+    assert engine.clock["speed_locked_reason"] == "test_secondary_lock"
+    engine.unlock_speed_for_confirmation("test_secondary_lock")
     assert engine.clock["speed"] == 8
     assert "speed_locked_reason" not in engine.clock
     assert "speed_resume_value" not in engine.clock

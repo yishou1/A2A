@@ -176,6 +176,36 @@ class WorkflowManager:
             result["checkpoint"] = self.state_store.load(workflow_id)
         return result
 
+    def get_workflow_brief(self, workflow_id: str) -> dict:
+        """Status-only snapshot (hundreds of bytes) for fast pollers.
+
+        ``get_workflow`` deep-copies the whole job context — with the full
+        result artifacts and (when requested) the multi-MB checkpoint file —
+        so serving it at 20 Hz serializes the single-threaded commander and
+        delays every consumer. Pollers that only need the lifecycle state
+        (the AMOS Director checkpoint monitor) must use this instead."""
+        brief_keys = (
+            "workflow_id",
+            "workflow",
+            "workflow_file",
+            "mode",
+            "status",
+            "submitted_at",
+            "started_at",
+            "finished_at",
+            "current_activatity",
+            "current_activity",
+            "run_id",
+            "last_error",
+        )
+        with self._lock:
+            job = self._jobs.get(workflow_id)
+            if job is not None:
+                return {key: job[key] for key in brief_keys if key in job}
+            if self.state_store.exists(workflow_id):
+                return {"workflow_id": workflow_id, "status": "checkpoint_only"}
+        raise KeyError(workflow_id)
+
     def list_agent_leases(self) -> list[dict]:
         if self.lease_manager is None:
             return []

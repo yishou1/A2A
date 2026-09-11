@@ -13,6 +13,14 @@ from datetime import datetime, timezone
 import time
 from typing import Any, Dict, List
 
+# Bounded retention for per-work-item response caches. Each entry embeds the
+# full task artifact (hundreds of KB); export_persistent_state() deep-copies
+# these caches and state_store.save() serializes them on EVERY request, so
+# unbounded growth makes each call slower over a long demo session (observed:
+# 78 MB state file after ~200 cached work items, adding ~10 s per call).
+# 16 entries comfortably covers retries/replays across concurrent workflows.
+TASK_CACHE_MAX_ENTRIES = 16
+
 
 @dataclass
 class A2ARuntimeState:
@@ -62,6 +70,13 @@ class A2ARuntimeState:
         cached = deepcopy(response)
         cached["cached"] = False
         self._task_response_cache[work_item] = cached
+        # Bounded retention: each cached response embeds the full artifact
+        # (~hundreds of KB), and export_persistent_state() deep-copies this
+        # cache on every request. Without a cap the per-request cost grows
+        # linearly with the demo session (deepcopy + JSON dump).
+        while len(self._task_response_cache) > TASK_CACHE_MAX_ENTRIES:
+            oldest = next(iter(self._task_response_cache))
+            self._task_response_cache.pop(oldest, None)
         self.processed_task_count += 1
 
     def get_stream_events(self, work_item: str) -> List[str] | None:
@@ -70,6 +85,9 @@ class A2ARuntimeState:
 
     def set_stream_events(self, work_item: str, events: List[str]) -> None:
         self._stream_response_cache[work_item] = list(events)
+        while len(self._stream_response_cache) > TASK_CACHE_MAX_ENTRIES:
+            oldest = next(iter(self._stream_response_cache))
+            self._stream_response_cache.pop(oldest, None)
 
     def mark_busy(self, workflow_id: str | None, work_item: str | None) -> None:
         self.agent_status = "busy"

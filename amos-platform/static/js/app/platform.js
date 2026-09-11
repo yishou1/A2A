@@ -600,7 +600,7 @@ window.Platform = (function () {
       speedGroup.classList.toggle("speed-locked", speedLocked);
       speedGroup.setAttribute("aria-busy", pendingSpeedRequests > 0 ? "true" : "false");
       speedGroup.title = speedLocked
-        ? "等待确认期间固定为 1×，确认完成后恢复 " +
+        ? "等待武器授权期间固定为 1×，授权完成后恢复 " +
           Number(clock.speed_resume_value || speedResumeValue || 1) + "×"
         : "仿真倍率";
     }
@@ -1022,8 +1022,8 @@ window.Platform = (function () {
     if (directorStatus === "awaiting_authorization") {
       statusText = "等待操作员授权，仿真以 1× 继续运行";
       modeText = "待授权";
-    } else if (clock.speed_locked_reason === "awaiting_follow_confirmation") {
-      statusText = "等待无人机派遣确认，仿真以 1× 继续运行";
+    } else if (followLaunchPrompt()) {
+      statusText = "等待无人机派遣确认，仿真按当前倍率继续";
       modeText = "待确认";
     } else if (directorStatus === "awaiting_analysis") {
       statusText = running

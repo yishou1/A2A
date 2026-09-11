@@ -131,6 +131,14 @@ def build_workflow_manager_app(
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    @app.get("/workflows/{workflow_id}/brief")
+    async def get_workflow_brief(workflow_id: str):
+        """Status-only payload for the Director checkpoint poller."""
+        try:
+            return app.state.workflow_manager.get_workflow_brief(workflow_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     @app.post("/workflows/{workflow_id}/resume", status_code=202)
     async def resume_workflow(workflow_id: str, request: WorkflowSubmitRequest):
         payload = _request_payload(request)

@@ -72,6 +72,14 @@ class GatewayClient:
             "GET", f"/gateway/v1/workflows/{workflow_id}", timeout_sec=self.VIEW_TIMEOUT_SEC
         )
 
+    def get_workflow_brief(self, workflow_id: str) -> dict[str, Any]:
+        """Status-only payload for the Director checkpoint poller."""
+        return self._request(
+            "GET",
+            f"/gateway/v1/workflows/{workflow_id}/brief",
+            timeout_sec=10.0,
+        )
+
     def get_package(self, package_id: str) -> dict[str, Any]:
         return self._request(
             "GET", f"/gateway/v1/packages/{package_id}", timeout_sec=self.VIEW_TIMEOUT_SEC

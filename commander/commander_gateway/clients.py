@@ -159,6 +159,14 @@ class CommanderClient(_JsonHttpClient):
             return restored
         return payload
 
+    def get_workflow_brief(self, workflow_id: str) -> dict:
+        """Status-only payload (no checkpoint embed, no artifacts)."""
+        return self._request(
+            "GET",
+            f"/workflows/{workflow_id}/brief",
+            service="COMMANDER",
+        )
+
     def get_work_list(self, workflow_id: str) -> dict:
         return self._request(
             "GET", f"/workflows/{workflow_id}/work-list", service="COMMANDER"
