@@ -29,3 +29,8 @@ commander/.algolib/
 commander/runs/
 commander/track_threat_agent/artifacts/
 amos-platform/.playwright/
+
+# Root-level local algorithm runtime and generated build outputs
+/.algolib/
+/build*/
+/web/
