@@ -229,6 +229,7 @@ def _style() -> str:
       .small{fill:#80939f;font:12px 'DejaVu Sans',sans-serif}.tiny{fill:#687d89;font:10px 'DejaVu Sans Mono',monospace}
       .title{fill:#e3edf1;font:600 20px 'DejaVu Sans',sans-serif}.value{fill:#a9d9e9;font:600 14px 'DejaVu Sans Mono',monospace}
       .unknown{fill:#8999a2;font:13px 'DejaVu Sans',sans-serif}.dot{fill:#58adca;stroke:#b9e3f0;stroke-width:1}
+      text{font-family:'Microsoft YaHei','Noto Sans CJK SC','DejaVu Sans',sans-serif}
     """
 
 
@@ -243,8 +244,8 @@ def _header(capture: dict[str, Any], snapshot: dict[str, Any], renderer_type: st
     consumer_label = ""
     if roles or models:
         consumer_label = (
-            f'<text x="928" y="42" text-anchor="end" class="tiny">'
-            f'PLANNED INPUT · {_xml(roles or UNAVAILABLE)} · {_xml(models or UNAVAILABLE)} · TRACE REQUIRED</text>'
+            f'<desc>PLANNED INPUT · {_xml(roles or UNAVAILABLE)} · '
+            f'{_xml(models or UNAVAILABLE)} · TRACE REQUIRED</desc>'
         )
     return f"""
       <text x="32" y="42" class="title">{_xml(capture.get('title') or renderer_type.replace('_', ' ').upper())}</text>

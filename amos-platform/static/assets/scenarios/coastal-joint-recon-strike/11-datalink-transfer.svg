@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif">
+  <rect width="960" height="540" fill="#09151f" />
+  <text x="32" y="43" fill="#e2edf4" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="600" stroke="none">多源情报数据链传输确认</text>
+  <text x="918" y="69" text-anchor="end" fill="#8fb3c1" font-family="Consolas, monospace" font-size="12" stroke="none">CJR-LINK / T+00:38:00</text>
+  <g fill="none" stroke-width="2">
+    <path d="M235 150 377 222" stroke="#69c4df" />
+    <path d="M235 366 377 290" stroke="#69c4df" />
+    <path d="M587 222 725 150" stroke="#75c9ad" />
+    <path d="M587 290 725 366" stroke="#75c9ad" />
+  </g>
+  <g font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" text-anchor="middle">
+    <g fill="#132530" stroke="#69c4df" stroke-width="1.6">
+      <rect x="45" y="104" width="190" height="92" rx="12" />
+      <rect x="45" y="320" width="190" height="92" rx="12" />
+    </g>
+    <g fill="#122c2a" stroke="#75c9ad" stroke-width="1.6">
+      <rect x="377" y="191" width="210" height="130" rx="14" />
+    </g>
+    <g fill="#132530" stroke="#69c4df" stroke-width="1.6">
+      <rect x="725" y="104" width="190" height="92" rx="12" />
+      <rect x="725" y="320" width="190" height="92" rx="12" />
+    </g>
+    <g fill="#e9fbff" font-size="16">
+      <text x="140" y="142" stroke="none">卫星 SAR 产品</text>
+      <text x="140" y="171" fill="#acd6e3" stroke="none">SAT-RECON-01</text>
+      <text x="140" y="358" stroke="none">无侦-10传感器包</text>
+      <text x="140" y="387" fill="#acd6e3" stroke="none">SAR · EO/IR · ELINT</text>
+      <text x="482" y="235" stroke="none">海上联合指挥舰 01</text>
+      <text x="482" y="266" fill="#bcebd4" stroke="none">时间对齐 · 校验 · 融合</text>
+      <text x="482" y="296" fill="#bcebd4" stroke="none">待分析地面接触</text>
+      <text x="820" y="142" stroke="none">歼-16任务数据包</text>
+      <text x="820" y="171" fill="#acd6e3" stroke="none">航迹摘要 · 约束集</text>
+      <text x="820" y="358" stroke="none">无人机01 / 02</text>
+      <text x="820" y="387" fill="#acd6e3" stroke="none">独立航路 · 释放阵位</text>
+    </g>
+  </g>
+  <g fill="#d8b36a" font-family="Consolas, monospace" font-size="12">
+    <text x="306" y="149" stroke="none" text-anchor="middle" font-size="11">
+      <tspan x="306" dy="0">SATCOM</tspan>
+      <tspan x="306" dy="16">SHA-256 OK</tspan>
+    </text>
+    <text x="306" y="354" stroke="none" text-anchor="middle" font-size="11">
+      <tspan x="306" dy="0">TACTICAL LINK</tspan>
+      <tspan x="306" dy="16">CRC OK</tspan>
+    </text>
+    <text x="655" y="149" stroke="none" text-anchor="middle" font-size="11">
+      <tspan x="655" dy="0">MISSION PKT</tspan>
+      <tspan x="655" dy="16">ACK</tspan>
+    </text>
+    <text x="655" y="354" stroke="none" text-anchor="middle" font-size="11">
+      <tspan x="655" dy="0">ROUTE PKT</tspan>
+      <tspan x="655" dy="16">ACK×2</tspan>
+    </text>
+  </g>
+  <rect x="45" y="455" width="870" height="48" rx="8" fill="#0e252f" stroke="#315866" />
+  <text x="65" y="486" fill="#a8c7d0" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="14" stroke="none">仅传输当前已释放观测、融合航迹、保护区约束与候选航路；攻击执行状态仍需操作员授权后产生</text>
+</svg>

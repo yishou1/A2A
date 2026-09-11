@@ -50,6 +50,9 @@ class AssetSnapshot:
     autonomy_tier: int = 2
     endurance_hr: float = 0.0
     health: dict[str, Any] = field(default_factory=dict)
+    member_count: int = 1
+    formation_role: str = ""
+    network_role: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -69,6 +72,12 @@ class AssetSnapshot:
             result["endurance_hr"] = self.endurance_hr
         if self.health:
             result["health"] = dict(self.health)
+        if self.member_count > 1:
+            result["member_count"] = int(self.member_count)
+        if self.formation_role:
+            result["formation_role"] = self.formation_role
+        if self.network_role:
+            result["network_role"] = self.network_role
         return result
 
 

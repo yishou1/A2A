@@ -1,7 +1,9 @@
 import json
+import math
 from pathlib import Path
 
 from PIL import Image
+import pytest
 
 from amos_platform.api.app_factory import create_app
 from amos_platform.data.maritime_convoy_air_defense_builder import build_maritime_convoy_air_defense_scenario
@@ -71,6 +73,18 @@ def test_expanded_relief_and_vector_packs_share_western_pacific_coverage() -> No
     assert tiles["max_zoom"] == 9
     assert (ROOT / tiles["path"].removeprefix("/")).is_file()
 
+    map_script = (ROOT / "static/js/map/platform-map.js").read_text(encoding="utf-8")
+    assert f'maxDataZoom: {tiles["max_zoom"]}' in map_script
+
+
+def test_relief_zoom_switch_falls_back_without_partial_view_seams() -> None:
+    map_script = (ROOT / "static/js/map/platform-map.js").read_text(encoding="utf-8")
+
+    assert "reliefLayers[name]._amosBounds = L.latLngBounds(imageBounds)" in map_script
+    assert "layer._amosBounds.contains(viewBounds)" in map_script
+    assert "var selected = candidates[0] || null" in map_script
+    assert 'map.on("moveend", function () { applyLayerVisibility();' in map_script
+
 
 def test_browser_map_code_has_no_remote_runtime_dependency() -> None:
     scripts = "\n".join(
@@ -91,11 +105,17 @@ def test_tactical_symbols_keep_affiliation_frames_north_up() -> None:
 
     assert 'class="symbol-body"' in symbols
     assert 'transform="rotate(' in symbols
-    assert "hostileSurface" in map_script
-    assert "unknownSurface" in map_script
+    assert 'return prefix + "Surface"' in map_script
+    assert 'prefix + "MissileSite"' in map_script
+    assert '? "hostile" : "unknown"' in map_script
     assert "civilianSurface" in map_script
     assert "SymbolLibrary.svg(kind, heading)" in map_script
-    for platform_kind in ("merchant", "escort", "aew", "uav", "shoreRadar", "satellite", "uavSwarm"):
+    for platform_kind in (
+        "merchant", "escort", "aew", "uav", "shoreRadar", "satellite", "uavSwarm",
+        "j16", "wz10", "commandCenter", "missileSite", "aircraftCarrier",
+        "commandUav", "strikeUav", "loiterUav", "mobileSam", "radarVehicle",
+        "runway", "groundCommand",
+    ):
         assert platform_kind in symbols
 
 
@@ -104,11 +124,36 @@ def test_map_defaults_to_a_larger_view_and_supports_expanded_mode() -> None:
     controller = (ROOT / "static/js/app/platform.js").read_text(encoding="utf-8")
     dashboard = (ROOT / "templates/dashboard.html").read_text(encoding="utf-8")
 
-    assert "--workspace-width:34vw" in css
+    assert "--workspace-width:46vw" in css
     assert ".main.map-expanded #map-panel" in css
     assert 'id="btn-toggle-map-expanded"' in dashboard
     assert "function setMapExpanded(expanded)" in controller
     assert 'sessionStorage.setItem("amos.map.expanded"' in controller
+
+
+@pytest.mark.parametrize("subdirectory", ["", "detail"])
+def test_natural_terrain_tiles_cover_the_entire_offline_region(subdirectory) -> None:
+    pack = ROOT / "static/tiles/natural-terrain" / subdirectory
+    manifest = json.loads((pack / "manifest.json").read_text())
+    bounds = manifest["bounds"]
+    count = 0
+    for zoom in range(manifest["min_zoom"], manifest["max_zoom"] + 1):
+        n = 2 ** zoom
+        north = (1 - math.asinh(math.tan(math.radians(bounds["north"]))) / math.pi) / 2 * n
+        south = (1 - math.asinh(math.tan(math.radians(bounds["south"]))) / math.pi) / 2 * n
+        for x in range(math.floor((bounds["west"] + 180) / 360 * n), math.ceil((bounds["east"] + 180) / 360 * n)):
+            for y in range(math.floor(north), math.ceil(south)):
+                assert (pack / str(zoom) / str(x) / f"{y}.webp").is_file()
+                count += 1
+    assert count == manifest["tile_count"]
+    assert manifest["runtime_network_required"] is False
+    client = create_app().test_client()
+    sample = next(pack.glob("*/*/*.webp"))
+    response = client.get("/" + sample.relative_to(ROOT).as_posix())
+    assert response.status_code == 200
+    assert response.mimetype == "image/webp"
+    with Image.open(sample) as image:
+        assert image.size == (256, 256)
 
 
 def test_own_force_labels_use_collision_aware_layout() -> None:
@@ -118,6 +163,24 @@ def test_own_force_labels_use_collision_aware_layout() -> None:
     assert "function layoutOwnLabels()" in map_script
     assert "function labelPenalty(" in map_script
     assert "scheduleOwnLabelLayout();" in map_script
-    assert 'bindLabel(marker, ownLabel(asset), "own-label", "center")' in map_script
+    assert "function syncOwnLabel(marker, asset)" in map_script
+    assert 'bindLabel(marker, label, "own-label", "center")' in map_script
     assert ".map-resource-label.own-label.label-decluttered::after" in css
     assert ".map-resource-label.own-label.label-low-zoom" in css
+
+
+def test_map_uses_decluttered_short_trails_and_slow_space_projection() -> None:
+    map_script = (ROOT / "static/js/map/platform-map.js").read_text(encoding="utf-8")
+    dashboard = (ROOT / "templates/dashboard.html").read_text(encoding="utf-8")
+    css = (ROOT / "static/css/platform.css").read_text(encoding="utf-8")
+
+    assert "function visualAssetPosition(marker, asset, actual)" in map_script
+    assert "spaceVisualSpeedFactor" in map_script
+    assert "function renderSpaceGroundTracks(tracks)" in map_script
+    assert "function renderSpaceOperations(elapsedSec)" in map_script
+    assert "function updateSpaceGroundTracks(elapsedSec)" in map_script
+    assert 'id="space-operations-strip"' in dashboard
+    assert ".space-operations-strip" in css
+    assert "trackTrailWindowSec" in map_script
+    assert 'opacity: 0.30, weight: 1.25, dashArray: "4 6"' in map_script
+    assert 'renderTrail(\n        trackTrails, id, track.history_path, trackTrailStyle(kind), 48, true,' in map_script

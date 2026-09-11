@@ -5,6 +5,8 @@ from amos_platform.api.app_factory import create_app
 
 SCENARIO_IDS = (
     "maritime-convoy-air-defense",
+    "coastal-joint-recon-strike",
+    "air-space-sea-carrier-strike",
 )
 
 

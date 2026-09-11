@@ -121,7 +121,8 @@ else
 fi
 
 export PYTHONPATH="$COMMANDER_DIR:$COMMANDER_DIR/services:$AMOS_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
-export NACOS_ADDR="${NACOS_ADDR:-127.0.0.1:8848}"
+export NACOS_ADDR="${NACOS_ADDR:-127.0.0.1:${NACOS_PORT:-8848}}"
+export NACOS_PORT="${NACOS_PORT:-${NACOS_ADDR##*:}}"
 export NACOS_SERVER="$NACOS_ADDR"
 export NACOS_ENABLED=true
 export A2A_SERVICE_IP="${A2A_SERVICE_IP:-127.0.0.1}"
@@ -228,7 +229,7 @@ is_track_threat_mounted_algorithm() {
 echo "[infra] checking Docker Desktop connection"
 docker info >/dev/null
 docker compose -f "$COMMANDER_DIR/docker-compose.yml" up -d nacos auth-server
-wait_http "Nacos" "http://127.0.0.1:8848/nacos/v1/console/health/readiness" 120
+wait_http "Nacos" "http://${NACOS_ADDR}/nacos/v1/console/health/readiness" 120
 wait_http "A2A auth mock" "http://127.0.0.1:8080/get" 60
 
 llm_url="${TOOL_LLM_URL:-}"
@@ -366,7 +367,7 @@ echo
 echo "System is running:"
 echo "  AMOS UI:       http://127.0.0.1:5000/"
 echo "  Commander:     http://127.0.0.1:8021/supervisor"
-echo "  Nacos console: http://127.0.0.1:8848/nacos/"
+echo "  Nacos console: http://${NACOS_ADDR}/nacos/"
 echo "  LLM profile:   $active_llm_profile"
 echo "  LLM provider:  ${LLM_PROVIDER:-disabled}"
 echo "  Planner mode:  $TIA_ALGORITHM_PLANNER"

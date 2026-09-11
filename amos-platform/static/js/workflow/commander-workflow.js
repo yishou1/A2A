@@ -66,7 +66,7 @@ window.PlatformWorkflow = (function () {
       onnx_runtime: "ONNX Runtime",
       local_fallback: "本地回退算法",
       builtin: "内置执行",
-      demo_adapter: "演示适配器",
+      demo_adapter: "适配器",
       simulated_adapter: "模拟适配器",
       simulation_executor: "模拟执行器",
       derived_from_tracking: "后端派生",
@@ -633,7 +633,7 @@ window.PlatformWorkflow = (function () {
     if (count) count.textContent = rows.length + " 项";
     var phaseContext = workflowPhaseContext(view);
     function activityDescription(item, sequenceContainer, phaseContext) {
-      if (sequenceContainer) return "流程容器负责按 BPEL 顺序串联子活动，本身不代表业务 Agent 执行。";
+      if (sequenceContainer) return "按 BPEL 顺序执行子活动。";
       var key = String(item.role || item.work_item || item.activity_id || "").toLowerCase();
       if (item.description || item.summary) return item.description || item.summary;
       if (key.indexOf("tactical_intelligence") >= 0 || key.indexOf("recon") >= 0) {

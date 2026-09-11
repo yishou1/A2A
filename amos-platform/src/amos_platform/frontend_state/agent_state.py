@@ -16,7 +16,9 @@ from amos_platform.sensors.observation_builder import build_observations_from_tr
 
 def build_agent_visible_state(internal_state: dict[str, Any]) -> dict[str, Any]:
     """Build the packet-safe state visible to external Agent backends."""
-    operator_state = build_operator_state(internal_state)
+    # Agent snapshots retain bounded link history for causal network analysis;
+    # the browser-facing projection deliberately omits this high-volume field.
+    operator_state = build_operator_state(internal_state, include_network_history=True)
     observation_batch = deepcopy(internal_state.get("observation_batch") or {})
     observations = list(observation_batch.get("observations") or [])
     media_items = list(observation_batch.get("media_refs") or observation_batch.get("media_items") or [])
@@ -53,5 +55,6 @@ def build_agent_visible_state(internal_state: dict[str, Any]) -> dict[str, Any]:
         "scenario_story": deepcopy(operator_state.get("scenario_story") or {}),
         "coverage": operator_state.get("coverage", {}),
         "network": operator_state.get("network", {}),
+        "coordination_links": operator_state.get("coordination_links", []),
         "alerts": operator_state.get("alerts", []),
     }, source_state=internal_state)

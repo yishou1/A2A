@@ -83,7 +83,11 @@ class SimEngine:
         self.tasks: list[dict] = []
         self._scenario_task_schedule: list[dict] = []
         self._scenario_capture_plans: list[dict] = []
+        self._scenario_identification_rules: list[dict] = []
+        self._evidence_classification_applied: set[str] = set()
         self._scenario_asset_follow_tasks: list[dict] = []
+        self._scenario_coordination_links: list[dict] = []
+        self._scenario_protected_assets: list[dict] = []
         self._engagement_policy: dict = {}
         self._operator_contact_labels: dict[str, str] = {}
         self.scenario_story: dict = {}
@@ -302,6 +306,11 @@ class SimEngine:
                 candidates.append(float(window.get("start_sec", 0) or 0))
                 if window.get("end_sec") is not None:
                     candidates.append(float(window["end_sec"]))
+            phases = asset.get("_behavior_phases") or []
+            next_index = int(asset.get("_next_behavior_phase_index", 0) or 0)
+            for phase in phases[next_index:]:
+                if isinstance(phase, dict):
+                    candidates.append(float(phase.get("at_sec", 0) or 0))
         for threat in self.threats.values():
             window = threat.get("_observation_window") or {}
             if window:
@@ -394,10 +403,52 @@ class SimEngine:
                 "timestamp": time.time(),
             })
 
+        # Change each platform's actual route, speed and operating state when
+        # its mission phase becomes due.  This models airborne holding/search
+        # patterns and maritime patrols without exposing future coordinates to
+        # operator-facing state.
+        current_sim_time = float(self.clock["elapsed_sec"])
+        for asset_id, asset in self.assets.items():
+            phases = asset.get("_behavior_phases") or []
+            next_index = int(asset.get("_next_behavior_phase_index", 0) or 0)
+            while next_index < len(phases):
+                phase = phases[next_index]
+                if not isinstance(phase, dict):
+                    next_index += 1
+                    continue
+                at_sec = float(phase.get("at_sec", 0) or 0)
+                if current_sim_time + 1e-9 < at_sec:
+                    break
+                if isinstance(phase.get("route"), list):
+                    self.waypoint_nav.set_route(
+                        asset_id,
+                        [dict(point) for point in phase["route"]],
+                        mode=str(phase.get("mode") or "hold"),
+                    )
+                if phase.get("speed_kts") is not None:
+                    phase_speed = float(phase.get("speed_kts") or 0)
+                    asset["_cruise_speed_kts"] = phase_speed
+                    asset["speed_kts"] = phase_speed
+                if phase.get("alt_ft") is not None:
+                    asset["position"]["alt_ft"] = float(phase.get("alt_ft") or 0)
+                asset["status"] = str(phase.get("status") or asset.get("_configured_status") or "active")
+                asset["_current_behavior"] = str(phase.get("behavior") or "")
+                asset["_current_behavior_label"] = str(phase.get("label") or "")
+                asset["_behavior_phase_started_at"] = at_sec
+                next_index += 1
+                asset["_next_behavior_phase_index"] = next_index
+                self.events.append({
+                    "type": "asset_behavior_phase_started",
+                    "asset_id": asset_id,
+                    "behavior": asset["_current_behavior"],
+                    "label": asset["_current_behavior_label"],
+                    "sim_time": round(current_sim_time, 2),
+                    "timestamp": time.time(),
+                })
+
         # Apply private scenario motion windows before movement. These windows
         # prevent standby or post-action assets from following future task
         # routes before the corresponding phase has actually occurred.
-        current_sim_time = float(self.clock["elapsed_sec"])
         for asset in self.assets.values():
             window = asset.get("_motion_window") or {}
             if not window:
@@ -411,6 +462,16 @@ class SimEngine:
                 active_now = bool(asset.get("_operator_follow_visible")) and (
                     end_raw is None or current_sim_time < float(end_raw)
                 )
+            # A behavior phase may set the scripted platform to ``active`` at
+            # the same instant its motion window opens.  Apply the physical
+            # host origin in either case so deck-launched assets never appear
+            # to originate from a stale, preconfigured map coordinate.
+            if (
+                active_now
+                and window.get("launch_from_asset")
+                and not asset.get("_follow_launch_origin_applied")
+            ):
+                self._apply_follow_launch_origin(asset)
             if active_now and asset.get("status") == "staged":
                 self._apply_follow_launch_origin(asset)
                 asset["status"] = asset.get("_configured_status", "active")
@@ -638,6 +699,18 @@ class SimEngine:
         # 3.6. Move weapons + hit detection
         finished_weapons = []
         for wid, w in self.weapons.items():
+            weapon_dt = float(dt)
+            if w.get("status") == "scheduled":
+                launch_at = float(w.get("scheduled_launch_time", 0) or 0)
+                now = float(self.clock.get("elapsed_sec", 0) or 0)
+                if now + 1e-9 < launch_at:
+                    w["eta_sec"] = round(
+                        launch_at - now + float(w.get("flight_time_sec", 0) or 0), 1,
+                    )
+                    continue
+                w["status"] = "in_flight"
+                w["launch_time"] = launch_at
+                weapon_dt = min(float(dt), max(0.0, now - launch_at))
             if w.get("status") != "in_flight":
                 finished_weapons.append(wid)
                 continue
@@ -665,7 +738,7 @@ class SimEngine:
 
             # Move weapon
             speed = w.get("speed_kts", 500)
-            travel_nm = float(speed) * dt / 3600.0
+            travel_nm = float(speed) * weapon_dt / 3600.0
             reaches_target = travel_nm >= dist_nm
             if reaches_target:
                 w["lat"], w["lng"] = float(tlat), float(tlng)
@@ -686,11 +759,76 @@ class SimEngine:
                 damage = "impact_pending"
                 w["status"] = "hit"
                 w["damage_state"] = damage
+                if (self._engagement_policy or {}).get("stochastic_damage_assessment"):
+                    effect_rng = random.Random(
+                        f"{self._seed}:{wid}:{w.get('target_threat_id', '')}:weapon-effect"
+                    )
+                    w["effect_roll"] = round(effect_rng.random(), 6)
+                    w["predicted_damage_state"] = (
+                        "destroyed"
+                        if float(w["effect_roll"]) <= float(w.get("p_kill", 0) or 0)
+                        else "damaged"
+                    )
+                else:
+                    w["predicted_damage_state"] = "destroyed"
                 w["eta_sec"] = 0.0
-                w["impact_sim_time"] = round(
-                    float(self.clock.get("elapsed_sec", 0.0) or 0.0), 2,
-                )
+                impact_time = float(self.clock.get("elapsed_sec", 0.0) or 0.0)
+                coordinated_policy = (self._engagement_policy or {}).get("coordinated_engagement") or {}
+                if (
+                    reaches_target and float(speed) > 0
+                    and coordinated_policy.get("coordination_mode") == "time_on_target"
+                ):
+                    overshoot_sec = max(0.0, travel_nm - dist_nm) / float(speed) * 3600.0
+                    impact_time -= min(weapon_dt, overshoot_sec)
+                w["impact_sim_time"] = round(impact_time, 2)
                 self._apply_damage(target, damage)
+                coordinated_policy = (self._engagement_policy or {}).get("coordinated_engagement") or {}
+                chain_id = str(w.get("coordination_chain_id") or "")
+                expected_members = int(
+                    w.get("expected_chain_members")
+                    or len(coordinated_policy.get("participants") or [])
+                    or 0
+                )
+                if chain_id and (
+                    chain_id == str(coordinated_policy.get("chain_id") or "")
+                    or bool(w.get("expected_chain_members"))
+                ):
+                    chain_impacts = [
+                        item for item in self.weapons.values()
+                        if str(item.get("coordination_chain_id") or "") == chain_id
+                        and item.get("status") == "hit"
+                        and item.get("impact_sim_time") is not None
+                    ]
+                    if expected_members and len(chain_impacts) >= expected_members and not any(
+                        item.get("_tot_audit_emitted") for item in chain_impacts
+                    ):
+                        impact_times = [float(item["impact_sim_time"]) for item in chain_impacts]
+                        actual_span = max(impact_times) - min(impact_times)
+                        tolerance = max(
+                            0.0,
+                            float(
+                                w.get("arrival_tolerance_sec")
+                                or coordinated_policy.get("arrival_tolerance_sec", 20)
+                                or 20
+                            ),
+                        )
+                        compliant = actual_span <= tolerance + 1e-9
+                        for item in chain_impacts:
+                            item["tot_compliant"] = compliant
+                            item["actual_arrival_span_sec"] = round(actual_span, 2)
+                            item["_tot_audit_emitted"] = True
+                        self.events.append({
+                            "type": (
+                                "time_on_target_verified"
+                                if compliant else "time_on_target_violation"
+                            ),
+                            "coordination_chain_id": chain_id,
+                            "weapon_ids": [item.get("id") for item in chain_impacts],
+                            "actual_arrival_span_sec": round(actual_span, 2),
+                            "arrival_tolerance_sec": tolerance,
+                            "sim_time": round(impact_time, 2),
+                            "timestamp": time.time(),
+                        })
                 finished_weapons.append(wid)
                 target_track_id = str(w.get("target_track_id") or "")
                 target_track = self.sensor_fusion.tracks.get(target_track_id)
@@ -713,7 +851,10 @@ class SimEngine:
         # Clean up finished weapons (keep last 10 for history)
         for wid in finished_weapons:
             w = self.weapons.get(wid)
-            if w and w.get("status") in ("hit", "aborted"):
+            if (
+                w and w.get("status") in ("hit", "aborted")
+                and not w.get("_terminal_event_emitted")
+            ):
                 self.events.append({
                     "type": f"weapon_{w['status']}",
                     "weapon_id": wid,
@@ -725,6 +866,7 @@ class SimEngine:
                     "sim_time": w.get("impact_sim_time"),
                     "timestamp": time.time(),
                 })
+                w["_terminal_event_emitted"] = True
         if len(self.weapons) > 50:
             # Prune old finished weapons
             stale = [k for k, v in self.weapons.items()
@@ -824,6 +966,7 @@ class SimEngine:
                 scenario_id=str(self.clock.get("scenario_id") or ""),
             )
         records = self.media_capture.evaluate(self)
+        self._apply_evidence_classification_rules()
         self._update_scenario_tasks()
         for record in records:
             self.events.append({
@@ -837,6 +980,64 @@ class SimEngine:
                 "timestamp": time.time(),
             })
         return records
+
+    def _apply_evidence_classification_rules(self) -> None:
+        """Publish simulated sensor classification only after its evidence exists.
+
+        Scenario truth remains private: rules resolve a truth object internally,
+        then attach only the evidence-derived class to the corresponding public
+        fused track.  Commander must still confirm that candidate before the
+        engagement gate can open.
+        """
+        released = set(self.media_capture.captured_media_ids)
+        for rule in self._scenario_identification_rules:
+            rule_id = str(rule.get("rule_id") or "")
+            target_ref = str(rule.get("target_ref") or "")
+            classification = str(rule.get("classification") or "").strip().upper()
+            required_media = {
+                str(value) for value in rule.get("required_media_ids") or [] if value
+            }
+            if (
+                not rule_id
+                or not target_ref
+                or not classification
+                or not required_media.issubset(released)
+            ):
+                continue
+            for matched_track in self.sensor_fusion.tracks.values():
+                applied_key = f"{rule_id}:{matched_track.id}"
+                if (
+                    applied_key in self._evidence_classification_applied
+                    or self._truth_target_for_track(matched_track) != target_ref
+                ):
+                    continue
+                matched_track.classification = classification
+                # A collected intelligence product outlives the short sensor
+                # access window that created it.  Scenario authors may retain
+                # the fused track until a declared validity horizon instead
+                # of deleting it as soon as the spacecraft or aircraft leaves
+                # coverage.  Freshness remains visible through last_sim_time;
+                # retention does not manufacture a new observation.
+                if rule.get("retain_until_sec") is not None:
+                    matched_track.retain_until_sim_time = max(
+                        float(matched_track.retain_until_sim_time or 0.0),
+                        float(rule["retain_until_sec"]),
+                    )
+                matched_track.agent_assessment = {
+                    "status": "pending",
+                    "label": "新证据待后端确认",
+                    "source": None,
+                    "evidence_media_ids": sorted(required_media),
+                }
+                self._evidence_classification_applied.add(applied_key)
+                self.events.append({
+                    "type": "sensor_classification_candidate",
+                    "track_id": matched_track.id,
+                    "classification": classification,
+                    "evidence_media_ids": sorted(required_media),
+                    "sim_time": round(float(self.clock.get("elapsed_sec", 0) or 0), 2),
+                    "timestamp": time.time(),
+                })
 
     def _update_asset_follow_tasks(self) -> None:
         """Retask scenario assets from public fused-track attributes only."""
@@ -1113,6 +1314,14 @@ class SimEngine:
             row for row in self._scenario_asset_follow_tasks
             if str(row.get("asset_id") or "") == asset_id and row.get("launch_from_asset")
         ), None)
+        # Scripted launches can be tied to a physical host without being an
+        # operator-follow task (for example a scheduled carrier deck launch).
+        # Prefer an explicit follow task when present, otherwise use the
+        # scenario motion window's launch host.
+        if not task:
+            window = asset.get("_motion_window") or {}
+            if window.get("launch_from_asset"):
+                task = window
         if not task:
             return
         host = self.assets.get(str(task.get("launch_from_asset")))
@@ -1124,6 +1333,20 @@ class SimEngine:
         pos["lng"] = round(float(host_pos.get("lng", pos.get("lng", 0))), 6)
         if pos.get("alt_ft") is None:
             pos["alt_ft"] = 0
+        # Deck and host launches start on the route's first outbound bearing.
+        # Retaining a stale scenario heading here produces a visible corkscrew
+        # immediately after launch while the turn-rate limiter catches up.
+        route = self.waypoint_nav.get_route(asset_id)
+        align_route_heading = bool(
+            (asset.get("_motion_window") or {}).get("align_route_heading")
+        )
+        if route and align_route_heading:
+            first = route[0]
+            asset["heading_deg"] = round(self.waypoint_nav._bearing(
+                float(pos.get("lat", 0)), float(pos.get("lng", 0)),
+                float(first.get("lat", pos.get("lat", 0))),
+                float(first.get("lng", pos.get("lng", 0))),
+            ), 1)
         asset["_history_path"] = [{
             "lat": pos.get("lat", 0),
             "lng": pos.get("lng", 0),
@@ -1202,16 +1425,103 @@ class SimEngine:
         weapon_names = list(policy.get("authorized_weapons") or [])
         if not asset_ids or not weapon_names:
             return state
+        coordinated = policy.get("coordinated_engagement") or {}
+        participants = []
+        for participant in coordinated.get("participants") or []:
+            participant_asset_id = str(participant.get("asset_id") or "")
+            participant_weapon_name = str(participant.get("weapon_name") or "")
+            if participant_asset_id and participant_weapon_name:
+                participants.append({
+                    "asset_id": participant_asset_id,
+                    "weapon_name": participant_weapon_name,
+                    "role": str(participant.get("role") or "member"),
+                })
+        state["engagement_action"] = {
+            "asset_id": str(asset_ids[0]),
+            "weapon_name": str(weapon_names[0]),
+            "action_label": str(policy.get("action_label") or weapon_names[0]),
+            "authorization_message": str(policy.get("authorization_message") or ""),
+            "coordinated": len(participants) >= 2,
+            "coordination_chain_id": str(coordinated.get("chain_id") or "") or None,
+            "participants": participants,
+        }
+        target_engagements = (
+            policy.get("target_engagements")
+            if isinstance(policy.get("target_engagements"), dict)
+            else {}
+        )
         for track in state.get("fused_tracks") or []:
             track_id = str(track.get("track_id") or track.get("id") or "")
+            source_track = self.sensor_fusion.tracks.get(track_id)
+            truth_target_id = self._truth_target_for_track(source_track)
+            assignment = (
+                target_engagements.get(str(truth_target_id or ""))
+                if truth_target_id else None
+            )
+            has_target_assignment = isinstance(assignment, dict) and bool(assignment)
+            assignment = assignment if has_target_assignment else {}
+            selected_asset_id = str(assignment.get("asset_id") or asset_ids[0])
+            selected_weapon_name = str(assignment.get("weapon_name") or weapon_names[0])
             eligibility = self.engagement_eligibility(
                 track_id,
-                asset_id=str(asset_ids[0]),
-                weapon_name=str(weapon_names[0]),
+                asset_id=selected_asset_id,
+                weapon_name=selected_weapon_name,
             )
-            track["engagement_eligible"] = eligibility.get("eligible") is True
+            prior_salvos = sum(
+                event.get("type") == "authorized_fire_command"
+                and str(event.get("target_track_id") or "") == track_id
+                for event in self.events
+            )
+            maximum_salvos = max(1, int(policy.get("max_salvos_per_track", 1) or 1))
+            track["engagement_eligible"] = (
+                eligibility.get("eligible") is True and prior_salvos < maximum_salvos
+            )
             if eligibility.get("reason"):
                 track["engagement_block_reason"] = str(eligibility["reason"])
+            elif prior_salvos >= maximum_salvos:
+                track["engagement_block_reason"] = "该航迹已完成授权打击"
+            assignment_wave = int(assignment.get("wave", 0) or 0)
+            if has_target_assignment:
+                wave_participants = [
+                    {
+                        "asset_id": str(member.get("asset_id") or ""),
+                        "weapon_name": str(member.get("weapon_name") or ""),
+                        "role": str(member.get("role") or "member"),
+                    }
+                    for member in target_engagements.values()
+                    if isinstance(member, dict)
+                    and assignment_wave > 0
+                    and int(member.get("wave", 0) or 0) == assignment_wave
+                ]
+            else:
+                # A scenario-wide coordinated engagement has no per-target
+                # assignment. Preserve the chain on the target action so the
+                # operator dialog does not present it as a single weapon.
+                wave_participants = [dict(member) for member in participants]
+            track["engagement_action"] = {
+                "asset_id": selected_asset_id,
+                "weapon_name": selected_weapon_name,
+                "action_label": str(
+                    assignment.get("wave_action_label")
+                    or assignment.get("action_label")
+                    or policy.get("action_label")
+                    or selected_weapon_name
+                ),
+                "authorization_message": str(
+                    assignment.get("authorization_message")
+                    or policy.get("authorization_message")
+                    or ""
+                ),
+                "wave": assignment.get("wave"),
+                "role": str(assignment.get("role") or ""),
+                "coordination_chain_id": str(
+                    assignment.get("chain_id")
+                    or (coordinated.get("chain_id") if not has_target_assignment else "")
+                    or ""
+                ) or None,
+                "coordinated": len(wave_participants) >= 2,
+                "participants": wave_participants,
+            }
         prompts = self._operator_follow_launch_prompts(state.get("fused_tracks") or [])
         state["follow_launch_prompts"] = prompts
         state["follow_launch_prompt"] = prompts[0] if prompts else None
@@ -1457,12 +1767,22 @@ class SimEngine:
     def _confirm_pending_damage_assessments(self) -> None:
         """Promote an impact to a confirmed kill after post-impact sensing."""
         now = float(self.clock.get("elapsed_sec", 0.0) or 0.0)
+        bda_not_before = max(
+            0.0,
+            float((self._engagement_policy or {}).get("bda_not_before_sec", 0) or 0),
+        )
+        if now < bda_not_before:
+            return
         observations = {
             str(item.get("observation_id") or ""): item
             for item in (self.sensor_fusion.last_observation_batch.get("observations") or [])
             if isinstance(item, dict)
         }
         visual_sensors = {"EO/IR", "IR", "SAR"}
+        allowed_observers = {
+            str(value) for value in (self._engagement_policy or {}).get("bda_observer_asset_ids") or []
+            if value
+        }
         for weapon in self.weapons.values():
             if weapon.get("status") != "hit" or weapon.get("damage_state") != "impact_pending":
                 continue
@@ -1475,6 +1795,8 @@ class SimEngine:
                 if str(association.get("truth_id") or "") != truth_id:
                     continue
                 observation = observations.get(str(association.get("observation_id") or "")) or {}
+                if allowed_observers and str(observation.get("asset_id") or "") not in allowed_observers:
+                    continue
                 if str(observation.get("sensor_id") or "").upper() in visual_sensors:
                     observer_id = str(observation.get("asset_id") or "") or None
                     break
@@ -1492,9 +1814,25 @@ class SimEngine:
             target = self.threats.get(truth_id)
             if not target:
                 continue
-            self._apply_damage(target, "destroyed")
-            weapon["damage_state"] = "destroyed"
-            weapon["assessed_sim_time"] = round(now, 2)
+            if target.get("neutralized"):
+                weapon["damage_state"] = "destroyed"
+                weapon["assessed_sim_time"] = round(now, 2)
+                continue
+            related_impacts = [
+                item for item in self.weapons.values()
+                if item.get("status") == "hit"
+                and str(item.get("target_threat_id") or "") == truth_id
+                and item.get("damage_state") == "impact_pending"
+            ]
+            assessed_damage = (
+                "destroyed"
+                if any(item.get("predicted_damage_state") == "destroyed" for item in related_impacts)
+                else "damaged"
+            )
+            self._apply_damage(target, assessed_damage)
+            for related in related_impacts:
+                related["damage_state"] = assessed_damage
+                related["assessed_sim_time"] = round(now, 2)
             target_track_id = str(weapon.get("target_track_id") or "")
             track = self.sensor_fusion.tracks.get(target_track_id)
             if track is not None:
@@ -1504,23 +1842,64 @@ class SimEngine:
                 )
                 assessment = dict(getattr(track, "agent_assessment", {}) or {})
                 assessment.update({
-                    "damage_state": "destroyed",
-                    "engagement_status": "destroyed",
-                    "behavior_label": "已击毁，威胁解除",
+                    "damage_state": assessed_damage,
+                    "engagement_status": assessed_damage,
+                    "behavior_label": (
+                        "已击毁，威胁解除"
+                        if assessed_damage == "destroyed"
+                        else "目标受损，需重新规划"
+                    ),
                     "assessment_observer": observer_id,
                 })
                 track.agent_assessment = assessment
             self._return_follow_assets_after_strike(target_track_id)
+            post_bda_routes = (self._engagement_policy or {}).get("post_bda_routes") or {}
+            post_bda_behaviors = (self._engagement_policy or {}).get("post_bda_behaviors") or {}
+            rerouted_assets = []
+            if isinstance(post_bda_routes, dict):
+                for route_asset_id, route in post_bda_routes.items():
+                    route_asset_id = str(route_asset_id or "")
+                    asset = self.assets.get(route_asset_id)
+                    if asset is None or not isinstance(route, list) or not route:
+                        continue
+                    waypoints = [dict(point) for point in route if isinstance(point, dict)]
+                    if not waypoints:
+                        continue
+                    self.waypoint_nav.set_route(route_asset_id, waypoints, mode="hold")
+                    asset["status"] = "active"
+                    behavior = (
+                        post_bda_behaviors.get(route_asset_id)
+                        if isinstance(post_bda_behaviors, dict) else None
+                    ) or {}
+                    asset["_current_behavior"] = str(behavior.get("behavior") or "post_bda_return")
+                    asset["_current_behavior_label"] = str(behavior.get("label") or "毁伤评估后返航/撤离")
+                    asset["_behavior_phase_started_at"] = now
+                    asset["_cruise_speed_kts"] = float(
+                        behavior.get("speed_kts", asset.get("_cruise_speed_kts", 1)) or 1
+                    )
+                    asset["speed_kts"] = max(
+                        1.0,
+                        float(asset.get("_cruise_speed_kts", 1) or 1),
+                    )
+                    rerouted_assets.append(route_asset_id)
             self.events.append({
                 "type": "damage_assessment_confirmed",
                 "weapon_id": weapon.get("id"),
                 "target_track_id": target_track_id,
-                "damage_state": "destroyed",
+                "damage_state": assessed_damage,
                 "observer_asset_id": observer_id,
                 "position": {"lat": weapon.get("lat"), "lng": weapon.get("lng")},
                 "sim_time": round(now, 2),
                 "timestamp": time.time(),
             })
+            if rerouted_assets:
+                self.events.append({
+                    "type": "post_bda_return_started",
+                    "asset_ids": rerouted_assets,
+                    "target_track_id": target_track_id,
+                    "sim_time": round(now, 2),
+                    "timestamp": time.time(),
+                })
 
     def _post_impact_visual_observer(self, truth_id: str) -> str | None:
         """Return an active visual platform currently able to assess an impact.
@@ -1537,7 +1916,13 @@ class SimEngine:
             self.assets,
             key=lambda asset_id: (asset_id != "UAV-CONFIRM-01", asset_id),
         )
+        allowed_observers = {
+            str(value) for value in (self._engagement_policy or {}).get("bda_observer_asset_ids") or []
+            if value
+        }
         for asset_id in candidates:
+            if allowed_observers and asset_id not in allowed_observers:
+                continue
             asset = self.assets[asset_id]
             if asset.get("status") not in {"operational", "active", "holding"}:
                 continue
@@ -1581,7 +1966,14 @@ class SimEngine:
         label = self._operator_contact_labels.get(track_id)
         if label:
             return label
-        label = f"海面接触 {len(self._operator_contact_labels) + 1:02d}"
+        track = self.sensor_fusion.tracks.get(track_id)
+        domain = str(getattr(track, "domain_hint", "") or "").casefold()
+        prefix = "空中接触" if domain == "air" else ("地面接触" if domain == "ground" else "海面接触")
+        same_domain_count = sum(
+            1 for value in self._operator_contact_labels.values()
+            if str(value).startswith(prefix)
+        )
+        label = f"{prefix} {same_domain_count + 1:02d}"
         self._operator_contact_labels[track_id] = label
         return label
 
@@ -1596,12 +1988,15 @@ class SimEngine:
             "CIVILIAN": "民用船只",
             "MERCHANT": "商船",
             "MERCHANT_VESSEL": "商船",
+            "COASTAL_MISSILE_SITE": "沿海导弹阵地",
+            "MISSILE_SITE": "导弹阵地",
+            "MISSILE_BATTERY": "导弹阵地",
         }
         for index, track in enumerate(self.sensor_fusion.tracks.values(), start=1):
             if self._truth_target_for_track(track) != threat_id:
                 continue
             track_id = str(getattr(track, "id", "") or "")
-            label = self._operator_label_for_track(track_id) if track_id else f"海面接触 {index:02d}"
+            label = self._operator_label_for_track(track_id) if track_id else f"待识别接触 {index:02d}"
             classification = str(getattr(track, "classification", "UNKNOWN") or "UNKNOWN").upper()
             if classification in classification_labels:
                 label += f" · {classification_labels[classification]}"
@@ -1647,8 +2042,63 @@ class SimEngine:
         truth_target_id = self._truth_target_for_track(track)
         if not truth_target_id:
             return {"eligible": False, "reason": "航迹无法与当前目标稳定关联"}
+        target_engagements = (
+            policy.get("target_engagements")
+            if isinstance(policy.get("target_engagements"), dict)
+            else {}
+        )
+        assignment = target_engagements.get(str(truth_target_id))
+        if isinstance(assignment, dict):
+            if str(assignment.get("asset_id") or "") != str(asset_id) or str(
+                assignment.get("weapon_name") or ""
+            ) != str(weapon_name):
+                return {"eligible": False, "reason": "该目标必须使用已分配的专用火力单元"}
+            elapsed = float(self.clock.get("elapsed_sec", 0) or 0)
+            not_before = max(0.0, float(assignment.get("not_before_sec", 0) or 0))
+            if elapsed < not_before:
+                return {
+                    "eligible": False,
+                    "reason": f"当前波次尚未开放，需等待至 T+{int(not_before)} 秒",
+                }
+            required_targets = {
+                str(value) for value in assignment.get("requires_completed_target_ids") or []
+            }
+            if required_targets:
+                completed_targets: set[str] = set()
+                for event in self.events:
+                    if event.get("type") != "authorized_fire_command":
+                        continue
+                    completed_track_id = str(event.get("target_track_id") or "")
+                    completed_track = self.sensor_fusion.tracks.get(completed_track_id)
+                    completed_target = self._truth_target_for_track(completed_track)
+                    if completed_target:
+                        completed_targets.add(str(completed_target))
+                if required_targets - completed_targets:
+                    return {"eligible": False, "reason": "必须先完成第一波全部固定目标攻击"}
+            if assignment.get("requires_damage_assessment") and not any(
+                event.get("type") == "damage_assessment_confirmed"
+                for event in self.events
+            ):
+                return {"eligible": False, "reason": "必须先完成第一波攻击毁伤评估"}
         if truth_target_id in set(policy.get("protected_truth_ids") or []):
             return {"eligible": False, "reason": "目标命中任务禁射保护规则"}
+        threat = self.threats.get(truth_target_id) or {}
+        buffer_nm = max(0.0, float(policy.get("protected_asset_buffer_nm", 0) or 0))
+        for protected_asset in self._scenario_protected_assets:
+            protected_lat = protected_asset.get("lat")
+            protected_lng = protected_asset.get("lng", protected_asset.get("lon"))
+            if protected_lat is None or protected_lng is None:
+                continue
+            radius_nm = max(
+                0.0,
+                float(protected_asset.get("protection_radius_m", 0) or 0) / 1852.0,
+            )
+            separation_nm = self.waypoint_nav._haversine(
+                float(threat.get("lat", 0)), float(threat.get("lng", 0)),
+                float(protected_lat), float(protected_lng),
+            )
+            if separation_nm < radius_nm + buffer_nm:
+                return {"eligible": False, "reason": "目标距民用保护区安全边界不足"}
         return {
             "eligible": True,
             "track_id": track_id,
@@ -1679,6 +2129,14 @@ class SimEngine:
             if not eligibility.get("eligible"):
                 return {"error": eligibility.get("reason", "目标不满足交战条件")}
             policy = self._engagement_policy or {}
+            maximum_salvos = max(1, int(policy.get("max_salvos_per_track", 1) or 1))
+            prior_salvos = sum(
+                event.get("type") == "authorized_fire_command"
+                and str(event.get("target_track_id") or "") == str(track_id)
+                for event in self.events
+            )
+            if prior_salvos >= maximum_salvos:
+                return {"error": "该航迹已执行授权齐射，禁止重复发射"}
             if policy.get("requires_prior_warning"):
                 warning = self._engagement_warnings.get(track_id)
                 if not warning:
@@ -1688,29 +2146,270 @@ class SimEngine:
                 if elapsed < not_before:
                     remaining = max(1, int(math.ceil(not_before - elapsed)))
                     return {"error": f"警告观察期尚未结束，还需等待 {remaining} 个仿真秒"}
-            result = self.fire_weapon(
-                asset_id,
-                str(eligibility["_truth_target_id"]),
-                weapon_name,
+            truth_target_id = str(eligibility["_truth_target_id"])
+            target_engagements = (
+                policy.get("target_engagements")
+                if isinstance(policy.get("target_engagements"), dict)
+                else {}
             )
-            if result.get("error"):
-                return result
-            weapon = self.weapons.get(str(result.get("weapon_id") or ""))
-            if weapon is not None:
-                weapon["target_track_id"] = track_id
-            track = self.sensor_fusion.tracks.get(track_id)
-            if track is not None:
-                track.kill_chain_phase = "ENGAGE"
-                track.kill_chain_times["ENGAGE"] = time.time()
-            self.events.append({
-                "type": "authorized_fire_command",
+            target_assignment = target_engagements.get(truth_target_id)
+            target_assignment = (
+                dict(target_assignment) if isinstance(target_assignment, dict) else None
+            )
+            coordinated = target_assignment or policy.get("coordinated_engagement")
+            if target_assignment and target_assignment.get("authorize_wave_as_group"):
+                selected_wave = int(target_assignment.get("wave", 0) or 0)
+                wave_members = []
+                for member_target_id, raw_member in target_engagements.items():
+                    if not isinstance(raw_member, dict) or int(raw_member.get("wave", 0) or 0) != selected_wave:
+                        continue
+                    member_track_id = next(
+                        (
+                            candidate.id
+                            for candidate in self.sensor_fusion.tracks.values()
+                            if self._truth_target_for_track(candidate) == str(member_target_id)
+                        ),
+                        "",
+                    )
+                    member = dict(raw_member)
+                    member["_truth_target_id"] = str(member_target_id)
+                    member["_target_track_id"] = str(member_track_id)
+                    wave_members.append(member)
+                wave_members.sort(
+                    key=lambda item: 0 if item.get("_truth_target_id") == truth_target_id else 1
+                )
+                coordinated = {
+                    "chain_id": str(target_assignment.get("chain_id") or f"wave-{selected_wave}"),
+                    "coordination_mode": str(target_assignment.get("coordination_mode") or "time_on_target"),
+                    "arrival_tolerance_sec": float(target_assignment.get("arrival_tolerance_sec", 30) or 30),
+                    "max_launch_stagger_sec": float(target_assignment.get("max_launch_stagger_sec", 180) or 180),
+                    "participants": wave_members,
+                    "multi_target": True,
+                    "wave": selected_wave,
+                }
+            participants = [
+                dict(item) for item in (coordinated or {}).get("participants") or []
+                if isinstance(item, dict)
+            ] if isinstance(coordinated, dict) else []
+            if target_assignment and not participants:
+                participants = [target_assignment]
+            if participants and (
+                str(participants[0].get("asset_id") or "") != asset_id
+                or str(participants[0].get("weapon_name") or "") != weapon_name
+            ):
+                return {"error": "协同武器链必须由配置的主攻击平台发起"}
+            launch_plan = participants or [{"asset_id": asset_id, "weapon_name": weapon_name, "role": "single"}]
+            for participant in launch_plan:
+                participant_asset = str(participant.get("asset_id") or "")
+                participant_weapon = str(participant.get("weapon_name") or "")
+                participant_track_id = str(participant.get("_target_track_id") or track_id)
+                participant_truth_target_id = str(
+                    participant.get("_truth_target_id") or truth_target_id
+                )
+                if not participant_track_id:
+                    return {"error": f"协同节点 {participant_asset} 缺少当前目标航迹"}
+                participant_eligibility = self.engagement_eligibility(
+                    participant_track_id,
+                    asset_id=participant_asset,
+                    weapon_name=participant_weapon,
+                )
+                if not participant_eligibility.get("eligible"):
+                    return {
+                        "error": (
+                            f"协同节点 {participant_asset} 不满足交战条件："
+                            f"{participant_eligibility.get('reason', 'unknown')}"
+                        )
+                    }
+                preflight_error = self._weapon_launch_preflight(
+                    participant_asset,
+                    participant_truth_target_id,
+                    participant_weapon,
+                )
+                if preflight_error:
+                    return {"error": f"协同节点 {participant_asset} 发射前检查失败：{preflight_error}"}
+
+            launch_delays: dict[str, float] = {}
+            if isinstance(coordinated, dict) and coordinated.get("coordination_mode") == "time_on_target":
+                from amos_platform.data.scenario_repository import get_weapon_spec
+
+                target = self.threats[truth_target_id]
+                arrival_times = []
+                for participant in launch_plan:
+                    participant_asset = self.assets[str(participant.get("asset_id") or "")]
+                    participant_position = participant_asset.get("position", participant_asset)
+                    participant_spec = get_weapon_spec(str(participant.get("weapon_name") or ""))
+                    if participant_spec is None:
+                        return {"error": "协同武器链存在未知武器规格"}
+                    participant_target = self.threats[str(
+                        participant.get("_truth_target_id") or truth_target_id
+                    )]
+                    distance_nm = self.waypoint_nav._haversine(
+                        float(participant_position.get("lat", 0)),
+                        float(participant_position.get("lng", 0)),
+                        float(participant_target.get("lat", 0)),
+                        float(participant_target.get("lng", 0)),
+                    )
+                    arrival_times.append(distance_nm / participant_spec.speed_kts * 3600.0)
+                longest_flight = max(arrival_times) if arrival_times else 0.0
+                maximum_stagger = max(
+                    0.0, float(coordinated.get("max_launch_stagger_sec", 90) or 90),
+                )
+                if arrival_times and longest_flight - min(arrival_times) > maximum_stagger:
+                    return {"error": "协同武器所需发射间隔超限，需重新规划攻击阵位"}
+                launch_delays = {
+                    str(participant.get("asset_id") or ""): longest_flight - flight_time
+                    for participant, flight_time in zip(launch_plan, arrival_times)
+                }
+
+            launch_results = []
+            for participant in launch_plan:
+                participant_asset = str(participant.get("asset_id") or "")
+                participant_weapon = str(participant.get("weapon_name") or "")
+                participant_truth_target_id = str(
+                    participant.get("_truth_target_id") or truth_target_id
+                )
+                participant_track_id = str(participant.get("_target_track_id") or track_id)
+                launched = self.fire_weapon(
+                    participant_asset, participant_truth_target_id, participant_weapon
+                )
+                if launched.get("error"):
+                    return launched
+                weapon = self.weapons.get(str(launched.get("weapon_id") or ""))
+                if weapon is not None:
+                    launch_delay = max(0.0, launch_delays.get(participant_asset, 0.0))
+                    weapon["flight_time_sec"] = float(weapon.get("eta_sec", 0) or 0)
+                    weapon["planned_launch_delay_sec"] = round(launch_delay, 1)
+                    weapon["planned_time_on_target_sec"] = round(
+                        float(self.clock.get("elapsed_sec", 0) or 0)
+                        + launch_delay + float(weapon.get("flight_time_sec", 0) or 0),
+                        1,
+                    )
+                    if launch_delay > 0.05:
+                        weapon["status"] = "scheduled"
+                        weapon["scheduled_launch_time"] = (
+                            float(self.clock.get("elapsed_sec", 0) or 0) + launch_delay
+                        )
+                        weapon["eta_sec"] = round(
+                            launch_delay + float(weapon.get("flight_time_sec", 0) or 0), 1,
+                        )
+                    weapon["target_track_id"] = participant_track_id
+                    weapon["coordination_chain_id"] = (
+                        str((coordinated or {}).get("chain_id") or "") or None
+                    )
+                    weapon["coordination_role"] = str(participant.get("role") or "member")
+                    weapon["expected_chain_members"] = len(launch_plan)
+                    weapon["arrival_tolerance_sec"] = float(
+                        (coordinated or {}).get("arrival_tolerance_sec", 20) or 20
+                    )
+                    if participant.get("expend_source_asset"):
+                        weapon["source_asset_disposition"] = "expended_on_terminal_commit"
+                        source_asset = self.assets.get(participant_asset)
+                        if source_asset is not None:
+                            source_asset["status"] = "expended"
+                            source_asset["speed_kts"] = 0.0
+                            source_asset["_current_behavior"] = "terminal_attack_committed"
+                            source_asset["_current_behavior_label"] = "已转为一次性武器并执行末端攻击"
+                            source_asset["_operator_hidden_after_launch"] = True
+                            self.waypoint_nav.set_route(participant_asset, [], mode="hold")
+                            self.events.append({
+                                "type": "one_way_asset_committed",
+                                "asset_id": participant_asset,
+                                "weapon_id": weapon.get("id"),
+                                "target_track_id": participant_track_id,
+                                "sim_time": round(float(self.clock.get("elapsed_sec", 0) or 0), 2),
+                                "timestamp": time.time(),
+                            })
+                launch_results.append({
+                    **{key: value for key, value in launched.items() if key != "threat_id"},
+                    "asset_id": participant_asset,
+                    "weapon_name": participant_weapon,
+                    "coordination_role": str(participant.get("role") or "member"),
+                    "target_track_id": participant_track_id,
+                    "planned_launch_delay_sec": round(
+                        max(0.0, launch_delays.get(participant_asset, 0.0)), 1,
+                    ),
+                })
+            result = launch_results[0]
+            for launch_result in launch_results:
+                engaged_track_id = str(launch_result.get("target_track_id") or track_id)
+                engaged_track = self.sensor_fusion.tracks.get(engaged_track_id)
+                if engaged_track is not None:
+                    engaged_track.kill_chain_phase = "ENGAGE"
+                    engaged_track.kill_chain_times["ENGAGE"] = time.time()
+            event_base = {
                 "command_source": "operator",
                 "asset_id": asset_id,
-                "target_track_id": track_id,
+                "asset_ids": [item["asset_id"] for item in launch_results],
                 "weapon_id": result.get("weapon_id"),
+                "weapon_ids": [item.get("weapon_id") for item in launch_results],
+                "coordination_chain_id": str((coordinated or {}).get("chain_id") or "") or None,
                 "sim_time": round(float(self.clock.get("elapsed_sec", 0) or 0), 2),
                 "timestamp": time.time(),
-            })
+            }
+            if (coordinated or {}).get("multi_target"):
+                for launch_result in launch_results:
+                    self.events.append({
+                        **event_base,
+                        "type": "authorized_fire_command",
+                        "target_track_id": launch_result.get("target_track_id"),
+                    })
+                self.events.append({
+                    **event_base,
+                    "type": "authorized_strike_wave",
+                    "wave": (coordinated or {}).get("wave"),
+                    "target_track_ids": [
+                        item.get("target_track_id") for item in launch_results
+                    ],
+                })
+            else:
+                self.events.append({
+                    **event_base,
+                    "type": "authorized_fire_command",
+                    "target_track_id": track_id,
+                })
+            post_launch_routes = policy.get("post_launch_routes") or {}
+            post_launch_behaviors = policy.get("post_launch_behaviors") or {}
+            rerouted_assets = []
+            target_specific_assets = (
+                {item["asset_id"] for item in launch_results}
+                if target_assignment else None
+            )
+            if isinstance(post_launch_routes, dict):
+                for route_asset_id, route in post_launch_routes.items():
+                    route_asset_id = str(route_asset_id or "")
+                    if target_specific_assets is not None and route_asset_id not in target_specific_assets:
+                        continue
+                    asset = self.assets.get(route_asset_id)
+                    if asset is None or not isinstance(route, list) or not route:
+                        continue
+                    waypoints = [dict(point) for point in route if isinstance(point, dict)]
+                    if not waypoints:
+                        continue
+                    self.waypoint_nav.set_route(route_asset_id, waypoints, mode="hold")
+                    asset["status"] = "active"
+                    behavior = (
+                        post_launch_behaviors.get(route_asset_id)
+                        if isinstance(post_launch_behaviors, dict) else None
+                    ) or {}
+                    asset["_current_behavior"] = str(behavior.get("behavior") or "post_launch_egress")
+                    asset["_current_behavior_label"] = str(behavior.get("label") or "发射后脱离")
+                    asset["_behavior_phase_started_at"] = float(self.clock.get("elapsed_sec", 0) or 0)
+                    asset["_cruise_speed_kts"] = float(
+                        behavior.get("speed_kts", asset.get("_cruise_speed_kts", 1)) or 1
+                    )
+                    asset["speed_kts"] = max(
+                        1.0,
+                        float(asset.get("_cruise_speed_kts", 1) or 1),
+                    )
+                    rerouted_assets.append(route_asset_id)
+            if rerouted_assets:
+                self.events.append({
+                    "type": "post_launch_egress_started",
+                    "asset_ids": rerouted_assets,
+                    "target_track_id": track_id,
+                    "sim_time": round(float(self.clock.get("elapsed_sec", 0) or 0), 2),
+                    "timestamp": time.time(),
+                })
             # In the maritime demo the operator confirms one engagement
             # action.  The post-strike assessment UAV is an execution support
             # asset for that same authorized action, not a separate weapon
@@ -1731,6 +2430,10 @@ class SimEngine:
                     **result,
                     "track_id": track_id,
                     "authorization": "operator_confirmed",
+                    "coordinated": len(participants) >= 2,
+                    "coordination_chain_id": str((coordinated or {}).get("chain_id") or "") or None,
+                    "weapon_ids": [item.get("weapon_id") for item in launch_results],
+                    "participants": launch_results,
                 }.items()
                 if key != "threat_id"
             }
@@ -1791,6 +2494,39 @@ class SimEngine:
             })
             return dict(warning)
 
+    def _weapon_launch_preflight(self, asset_id: str, threat_id: str, weapon_name: str) -> str | None:
+        """Return a launch error without mutating ammunition or weapon state."""
+        from amos_platform.data.scenario_repository import get_weapon_spec
+
+        if asset_id not in self.assets:
+            return f"asset not found: {asset_id}"
+        if threat_id not in self.threats:
+            return f"threat not found: {threat_id}"
+        asset = self.assets[asset_id]
+        threat = self.threats[threat_id]
+        if str(asset.get("status") or "").casefold() not in {"active", "operational", "holding"}:
+            return f"asset {asset_id} is not available for weapon release"
+        if threat.get("neutralized"):
+            return f"threat already neutralized: {threat_id}"
+        spec = get_weapon_spec(weapon_name)
+        if spec is None:
+            return f"unknown weapon: {weapon_name}"
+        asset_weapons = asset.get("weapons", [])
+        if weapon_name not in asset_weapons and not any(
+            spec.weapon_id in carried or weapon_name in carried for carried in asset_weapons
+        ):
+            return f"asset {asset_id} does not carry {weapon_name}"
+        ammo = asset.get("_ammo") if isinstance(asset.get("_ammo"), dict) else {}
+        if weapon_name in ammo and int(ammo.get(weapon_name, 0) or 0) <= 0:
+            return f"asset {asset_id} has no remaining {weapon_name}"
+        apos = asset.get("position", asset)
+        dist_nm = self.waypoint_nav._haversine(
+            apos.get("lat", 0), apos.get("lng", 0), threat["lat"], threat["lng"]
+        )
+        if dist_nm > spec.range_nm * 1.1:
+            return f"target out of range: {dist_nm:.1f} NM > {spec.range_nm} NM"
+        return None
+
     def fire_weapon(self, asset_id: str, threat_id: str,
                     weapon_name: str) -> dict:
         """Launch a weapon from an asset toward a threat.
@@ -1810,41 +2546,19 @@ class SimEngine:
         from amos_platform.data.scenario_repository import get_weapon_spec
 
         with self._lock:
-            if asset_id not in self.assets:
-                return {"error": f"asset not found: {asset_id}"}
-            if threat_id not in self.threats:
-                return {"error": f"threat not found: {threat_id}"}
+            preflight_error = self._weapon_launch_preflight(asset_id, threat_id, weapon_name)
+            if preflight_error:
+                return {"error": preflight_error}
 
             asset = self.assets[asset_id]
             threat = self.threats[threat_id]
 
-            if threat.get("neutralized"):
-                return {"error": f"threat already neutralized: {threat_id}"}
-
             spec = get_weapon_spec(weapon_name)
-            if spec is None:
-                return {"error": f"unknown weapon: {weapon_name}"}
-
-            # Check asset carries this weapon
-            asset_weapons = asset.get("weapons", [])
-            if weapon_name not in asset_weapons:
-                # Try partial match
-                matched = False
-                for w in asset_weapons:
-                    if spec.weapon_id in w or weapon_name in w:
-                        matched = True
-                        break
-                if not matched:
-                    return {"error": f"asset {asset_id} does not carry {weapon_name}"}
-
-            # Range check
+            assert spec is not None
             apos = asset.get("position", asset)
             alat, alng = apos.get("lat", 0), apos.get("lng", 0)
             tlat, tlng = threat["lat"], threat["lng"]
             dist_nm = self.waypoint_nav._haversine(alat, alng, tlat, tlng)
-            if dist_nm > spec.range_nm * 1.1:  # 10% margin
-                return {"error": f"target out of range: {dist_nm:.1f} NM > {spec.range_nm} NM"}
-
             # Create weapon entity
             wid = f"WPN-{self._rng.getrandbits(24):06x}"
             heading = math.degrees(math.atan2(tlng - alng, tlat - alat)) % 360
@@ -1872,7 +2586,7 @@ class SimEngine:
 
             # Deduct ammo from asset
             ammo = asset.setdefault("_ammo", {})
-            ammo[weapon_name] = ammo.get(weapon_name, 2) - 1
+            ammo[weapon_name] = max(0, int(ammo.get(weapon_name, 2) or 0) - 1)
 
             self.alerts.append({
                 "level": "INFO",

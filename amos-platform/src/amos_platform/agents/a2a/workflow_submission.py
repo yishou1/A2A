@@ -145,7 +145,11 @@ def submit_current_workflow(
     submission = build_submission_snapshot(
         mission_payload,
         scenario_id=scenario_id,
-        accepted=bool(workflow_id and not result.get("error")),
+        accepted=bool(
+            workflow_id
+            and not result.get("error")
+            and (bridge.mode != "gateway" or package_verified)
+        ),
         transport=bridge.mode,
         backend_request=backend_payload,
         exchange_snapshot=exchange_snapshot,
@@ -170,6 +174,12 @@ def submit_current_workflow(
     if result.get("error"):
         status, message = normalize_upstream_error(result, "分析服务拒绝了当前输入快照")
         raise WorkflowSubmissionError(status, message, {"amos_submission": submission, "backend": result})
+    if bridge.mode == "gateway" and not package_verified:
+        raise WorkflowSubmissionError(
+            502,
+            "Gateway 输入包完整性校验失败，分析结果不会被接受",
+            {"amos_submission": submission, "backend": result},
+        )
     if not workflow_id:
         raise WorkflowSubmissionError(
             502,

@@ -208,6 +208,48 @@ def validate_scenario_definition(scenario: dict[str, Any]) -> list[str]:
         except (TypeError, ValueError):
             issues.append(f"{scenario_id}: invalid motion window for {asset_id}")
 
+    behavior_phases = (
+        scenario.get("asset_behavior_phases")
+        if isinstance(scenario.get("asset_behavior_phases"), dict) else {}
+    )
+    unknown_behavior_assets = set(str(value) for value in behavior_phases) - set(asset_ids)
+    if unknown_behavior_assets:
+        issues.append(
+            f"{scenario_id}: asset_behavior_phases references unknown assets "
+            f"{sorted(unknown_behavior_assets)}"
+        )
+    for asset_id, phases in behavior_phases.items():
+        if not isinstance(phases, list) or not phases:
+            issues.append(f"{scenario_id}: behavior phases for {asset_id} must be a non-empty list")
+            continue
+        phase_times: list[float] = []
+        for index, phase in enumerate(phases):
+            if not isinstance(phase, dict):
+                issues.append(f"{scenario_id}: behavior phase {asset_id}[{index}] must be an object")
+                continue
+            try:
+                at_sec = float(phase.get("at_sec", 0) or 0)
+                speed_kts = float(phase.get("speed_kts", 0) or 0)
+                if at_sec < 0 or (duration_sec and at_sec > duration_sec) or speed_kts < 0:
+                    raise ValueError
+                phase_times.append(at_sec)
+            except (TypeError, ValueError):
+                issues.append(f"{scenario_id}: invalid behavior timing or speed for {asset_id}[{index}]")
+            if not phase.get("behavior") or not phase.get("label"):
+                issues.append(f"{scenario_id}: behavior phase {asset_id}[{index}] requires behavior and label")
+            if phase.get("mode") not in {"hold", "loop"}:
+                issues.append(f"{scenario_id}: behavior phase {asset_id}[{index}] requires hold or loop mode")
+            route = phase.get("route")
+            if not isinstance(route, list) or any(
+                not isinstance(point, dict) or "lat" not in point or "lng" not in point
+                for point in route
+            ):
+                issues.append(f"{scenario_id}: behavior phase {asset_id}[{index}] has invalid route")
+        if phase_times and phase_times[0] != 0:
+            issues.append(f"{scenario_id}: behavior phases for {asset_id} must start at 0 seconds")
+        if phase_times != sorted(phase_times) or len(phase_times) != len(set(phase_times)):
+            issues.append(f"{scenario_id}: behavior phases for {asset_id} must be strictly chronological")
+
     threat_ids = {
         _identifier(item, "threat_id", "id")
         for item in scenario.get("threats") or [] if isinstance(item, dict)
@@ -238,6 +280,119 @@ def validate_scenario_definition(scenario: dict[str, Any]) -> list[str]:
                 raise ValueError
         except (TypeError, ValueError):
             issues.append(f"{scenario_id}: invalid observation window for {threat_id}")
+
+    coordination_links = [
+        item for item in scenario.get("coordination_links") or [] if isinstance(item, dict)
+    ]
+    link_ids = [_identifier(item, "link_id") for item in coordination_links]
+    if coordination_links and (
+        any(not value for value in link_ids) or len(set(link_ids)) != len(link_ids)
+    ):
+        issues.append(f"{scenario_id}: coordination link identifiers must be present and unique")
+    for link in coordination_links:
+        link_id = str(link.get("link_id") or "<coordination-link>")
+        link_type = str(link.get("link_type") or "")
+        source_id = str(link.get("source_asset_id") or "")
+        target_asset_id = str(link.get("target_asset_id") or "")
+        target_ref = str(link.get("target_ref") or "")
+        if link_type not in {"intelligence", "command", "weapon"}:
+            issues.append(f"{scenario_id}: coordination link {link_id} has invalid link_type")
+        if source_id not in set(asset_ids):
+            issues.append(f"{scenario_id}: coordination link {link_id} references unknown source asset")
+        if bool(target_asset_id) == bool(target_ref):
+            issues.append(f"{scenario_id}: coordination link {link_id} requires exactly one target endpoint")
+        elif target_asset_id and target_asset_id not in set(asset_ids):
+            issues.append(f"{scenario_id}: coordination link {link_id} references unknown target asset")
+        elif target_ref and target_ref not in threat_ids:
+            issues.append(f"{scenario_id}: coordination link {link_id} references unknown target")
+        try:
+            active_from = float(link.get("active_from_sec", 0) or 0)
+            if active_from < 0 or (duration_sec and active_from > duration_sec):
+                raise ValueError
+        except (TypeError, ValueError):
+            issues.append(f"{scenario_id}: coordination link {link_id} has invalid activation time")
+
+    engagement_policy = (
+        scenario.get("engagement_policy")
+        if isinstance(scenario.get("engagement_policy"), dict) else {}
+    )
+    carried_weapons = {
+        str(asset_id): {str(value) for value in asset.get("weapons") or []}
+        for asset_id, asset in zip(asset_ids, assets)
+    }
+    coordinated = engagement_policy.get("coordinated_engagement")
+    if isinstance(coordinated, dict):
+        participants = [
+            item for item in coordinated.get("participants") or [] if isinstance(item, dict)
+        ]
+        if len(participants) < 2:
+            issues.append(f"{scenario_id}: coordinated engagement requires at least two participants")
+        for participant in participants:
+            participant_asset = str(participant.get("asset_id") or "")
+            participant_weapon = str(participant.get("weapon_name") or "")
+            if participant_asset not in set(asset_ids):
+                issues.append(f"{scenario_id}: coordinated engagement references unknown asset {participant_asset}")
+            elif participant_weapon not in carried_weapons.get(participant_asset, set()):
+                issues.append(
+                    f"{scenario_id}: coordinated participant {participant_asset} does not carry {participant_weapon}"
+                )
+    target_engagements = engagement_policy.get("target_engagements")
+    if target_engagements is not None:
+        if not isinstance(target_engagements, dict) or not target_engagements:
+            issues.append(f"{scenario_id}: target_engagements must be a non-empty object")
+        else:
+            unknown_targets = set(str(value) for value in target_engagements) - threat_ids
+            if unknown_targets:
+                issues.append(
+                    f"{scenario_id}: target_engagements references unknown threats "
+                    f"{sorted(unknown_targets)}"
+                )
+            assigned_assets: set[str] = set()
+            for target_id, raw_assignment in target_engagements.items():
+                if not isinstance(raw_assignment, dict):
+                    issues.append(
+                        f"{scenario_id}: target engagement {target_id} must be an object"
+                    )
+                    continue
+                assigned_asset = str(raw_assignment.get("asset_id") or "")
+                assigned_weapon = str(raw_assignment.get("weapon_name") or "")
+                if assigned_asset not in set(asset_ids):
+                    issues.append(
+                        f"{scenario_id}: target engagement {target_id} references unknown asset"
+                    )
+                elif assigned_weapon not in carried_weapons.get(assigned_asset, set()):
+                    issues.append(
+                        f"{scenario_id}: target engagement {target_id} assigns unavailable weapon"
+                    )
+                if assigned_asset in assigned_assets:
+                    issues.append(
+                        f"{scenario_id}: target engagement asset {assigned_asset} is assigned more than once"
+                    )
+                assigned_assets.add(assigned_asset)
+                try:
+                    if int(raw_assignment.get("wave", 0) or 0) <= 0:
+                        raise ValueError
+                except (TypeError, ValueError):
+                    issues.append(
+                        f"{scenario_id}: target engagement {target_id} requires a positive wave"
+                    )
+                try:
+                    not_before = float(raw_assignment.get("not_before_sec", 0) or 0)
+                    if not_before < 0 or (duration_sec and not_before > duration_sec):
+                        raise ValueError
+                except (TypeError, ValueError):
+                    issues.append(
+                        f"{scenario_id}: target engagement {target_id} has invalid not_before_sec"
+                    )
+                unknown_prerequisites = {
+                    str(value)
+                    for value in raw_assignment.get("requires_completed_target_ids") or []
+                } - threat_ids
+                if unknown_prerequisites:
+                    issues.append(
+                        f"{scenario_id}: target engagement {target_id} has unknown prerequisites "
+                        f"{sorted(unknown_prerequisites)}"
+                    )
 
     required_agents = [item for item in scenario.get("required_agents") or [] if isinstance(item, dict)]
     if not required_agents:
@@ -533,6 +688,24 @@ def validate_scenario_definition(scenario: dict[str, Any]) -> list[str]:
                 != (reference.get("capture_parameters") or {}).get("registration_group")
             ):
                 issues.append(f"{scenario_id}: capture {capture_id} registration group mismatch")
+        required_source_media_ids = {
+            str(value)
+            for value in capture_parameters.get("required_source_media_ids") or []
+            if value
+        }
+        unknown_source_media_ids = required_source_media_ids - set(captures_by_media)
+        if unknown_source_media_ids:
+            issues.append(
+                f"{scenario_id}: capture {capture_id} references unknown source media "
+                f"{sorted(unknown_source_media_ids)}"
+            )
+        elif any(
+            float(captures_by_media[source_id].get("at_sec", float("inf"))) >= at_sec
+            for source_id in required_source_media_ids
+        ):
+            issues.append(
+                f"{scenario_id}: capture {capture_id} source media must be captured earlier"
+            )
         if (
             capture.get("product_type") == "raw_sensor_frame"
             and capability.get("sensor_type") in {"electro_optical", "infrared"}

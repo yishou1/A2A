@@ -6,7 +6,8 @@
 <title>Simulation 场景仿真平台</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
-<link rel="stylesheet" href="/static/css/platform.css?v=20260825c">
+<link rel="stylesheet" href="/static/css/platform.css?v=20260911b">
+<link rel="stylesheet" href="/static/css/authorization-dialog.css?v=20260907b">
 <script src="/static/vendor/leaflet/leaflet.js"></script>
 <script src="/static/vendor/protomaps/protomaps-leaflet.js"></script>
 </head>
@@ -40,10 +41,13 @@
     </div>
     <button class="btn btn-sm" id="btn-focus-map">任务区</button>
     <div class="map-layer-group" aria-label="地图图层">
-      <button class="btn btn-sm" id="btn-toggle-terrain" title="地形与水深分层设色">地形</button>
-      <button class="btn btn-sm" id="btn-toggle-hillshade" title="山体阴影">阴影</button>
-      <button class="btn btn-sm" id="btn-toggle-contours" title="等高线与等深线">等高线</button>
+      <span class="basemap-name" title="Natural Earth II 自然地形离线地图">自然地形</span>
+      <button class="btn btn-sm layer-active" id="btn-toggle-map-style" title="隐藏地名标注" aria-pressed="true">地名</button>
+      <button hidden class="btn btn-sm" id="btn-toggle-terrain">地形</button>
+      <button hidden class="btn btn-sm" id="btn-toggle-hillshade">阴影</button>
+      <button hidden class="btn btn-sm" id="btn-toggle-contours">等高线</button>
       <button class="btn btn-sm" id="btn-toggle-sensors">传感器</button>
+      <button class="btn btn-sm" id="btn-toggle-coordination" title="情报链、指挥链与武器链">协同链路</button>
       <button class="btn btn-sm" id="btn-toggle-ao">边界</button>
     </div>
   </div>
@@ -52,6 +56,7 @@
 <main class="main" id="main-layout">
   <section id="map-panel" aria-label="场景地图">
     <div id="map"></div>
+    <aside id="space-operations-strip" class="space-operations-strip" aria-live="polite" hidden></aside>
     <button class="btn btn-sm map-expand-button" id="btn-toggle-map-expanded" title="隐藏任务区，展开地图" aria-pressed="false">大地图</button>
   </section>
 
@@ -63,7 +68,7 @@
         <span class="workspace-kicker">任务工作区</span>
         <h1 id="scenario-context">未选择场景</h1>
       </div>
-      <span id="workspace-run-id" class="run-id">RUN —</span>
+      <div class="workspace-header-actions"><span id="workspace-run-id" class="run-id">RUN —</span><button class="btn btn-sm" id="btn-expand-workspace" type="button" aria-pressed="false">展开工作区</button></div>
     </div>
 
     <nav class="workspace-tabs" role="tablist" aria-label="任务工作区视图">
@@ -78,7 +83,7 @@
       <section class="workspace-panel active" data-workspace-panel="situation" role="tabpanel">
         <div id="scenario-story-card" class="card scenario-story-card" hidden>
           <div class="card-heading story-heading">
-            <div><span class="section-eyebrow">当前态势</span><h2 id="story-title">场景态势</h2></div>
+            <div><span class="section-eyebrow">观测资料</span><h2 id="story-title">当前资料</h2></div>
             <span id="story-phase-badge" class="status-chip info">READY</span>
           </div>
           <div class="story-hero" id="story-hero-wrap">
@@ -96,7 +101,7 @@
           </div>
           <div class="story-section-label">最新观测资料</div>
           <div id="story-media-strip" class="story-media-strip"></div>
-          <div class="story-section-label">已发生事件</div>
+          <div class="story-section-label">事件记录</div>
           <div id="story-timeline" class="story-timeline"></div>
         </div>
 
@@ -129,23 +134,25 @@
       </section>
 
       <section class="workspace-panel" data-workspace-panel="agents" role="tabpanel" hidden>
+        <div class="card"><div id="presentation-resource-counts" class="metric-strip four"></div></div>
         <div class="card">
           <div class="card-heading"><div><span class="section-eyebrow">场景职责</span><h2>六个功能 Agent</h2></div><span id="functional-agent-count" class="status-chip neutral">0/6</span></div>
           <div id="scenario-functional-agents" class="agent-topology">
-            <div class="empty-state">当前场景未声明功能 Agent</div>
+            <div class="empty-state">当前场景未配置功能 Agent</div>
           </div>
         </div>
-        <div class="card">
-          <div class="card-heading"><div><span class="section-eyebrow">部署关系</span><h2>Agent—设备算力映射</h2></div><span id="agent-deployment-count" class="status-chip neutral">0</span></div>
+        <details class="card presentation-details">
+          <summary class="card-heading"><div><span class="section-eyebrow">部署关系 · 点击展开</span><h2>Agent—设备算力映射</h2></div><span id="agent-deployment-count" class="status-chip neutral">0</span></summary>
           <div id="agent-deployment-topology" class="agent-deployment-topology">
-            <div class="empty-state">当前场景未声明 Agent 部署关系</div>
+            <div class="empty-state">当前场景未配置 Agent 部署关系</div>
           </div>
-        </div>
+        </details>
       </section>
 
       <section class="workspace-panel" data-workspace-panel="algorithms" role="tabpanel" hidden>
+        <p class="presentation-note algorithm-scope">当前任务关联算法 <b id="scenario-algorithm-count">—</b> 项</p>
         <div class="metric-strip four" id="backend-capability-summary">
-          <span><small>算法类别（M01–M20）</small><b id="backend-active-count">0</b></span>
+          <span><small>全局类别（M01–M20）</small><b id="backend-active-count">—</b></span>
           <span><small>运行包</small><b id="backend-runnable-count">0</b></span>
           <span><small>运行时不可用</small><b id="backend-unavailable-count">0</b></span>
           <span><small>任务族</small><b id="backend-family-count">0</b></span>
@@ -171,7 +178,7 @@
           </div>
         </div>
         <div class="card" id="kill-chain-runtime-card" hidden>
-          <div class="card-heading"><div><span class="section-eyebrow">仿真推进</span><h2>28 项杀伤链功能点</h2><small class="kill-chain-progress-note">状态表示任务推进；实际算法调用以本页底部“运行证据”为准</small></div></div>
+          <div class="card-heading"><div><span class="section-eyebrow">任务进度</span><h2>28 项杀伤链功能点</h2></div></div>
           <div id="kill-chain-runtime-view" class="kill-chain-runtime-view"><div class="empty-state">等待加载任务</div></div>
         </div>
 
@@ -320,7 +327,7 @@
 </div>
 
 <div id="media-lightbox" class="media-lightbox" aria-hidden="true">
-  <div class="media-lightbox-panel">
+  <div class="media-lightbox-panel" role="dialog" aria-modal="true" aria-labelledby="media-lightbox-title" tabindex="-1">
     <div class="media-lightbox-header"><span id="media-lightbox-title">观测资料</span><button class="btn btn-sm" id="media-lightbox-close">关闭</button></div>
     <img id="media-lightbox-image" alt="观测资料预览">
     <div id="media-lightbox-meta" class="media-lightbox-meta"></div>
@@ -339,9 +346,9 @@
 
 <script src="/static/js/api/platform-api.js?v=20260817d"></script>
 <script src="/static/js/map/tactical-symbols.js?v=20260825b"></script>
-<script src="/static/js/map/platform-map.js?v=20260825d"></script>
-<script src="/static/js/panels/platform-panels.js?v=20260818a"></script>
-<script src="/static/js/workflow/commander-workflow.js?v=20260820a"></script>
-<script src="/static/js/app/platform.js?v=20260825b"></script>
+  <script src="/static/js/map/platform-map.js?v=20260911b"></script>
+<script src="/static/js/panels/platform-panels.js?v=20260907b"></script>
+<script src="/static/js/workflow/commander-workflow.js?v=20260906b"></script>
+<script src="/static/js/app/platform.js?v=20260911b"></script>
 </body>
 </html>

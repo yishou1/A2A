@@ -7,6 +7,8 @@ from amos_platform.api.app_factory import create_app
 from amos_platform.api.dependencies import get_bridge, get_engine
 from amos_platform.data.scenario_repository import get_scenario
 from amos_platform.domain.policies.visibility import remove_truth_fields
+from amos_platform.frontend_state.agent_state import build_agent_visible_state
+from amos_platform.frontend_state.operator_state import build_operator_state
 from amos_platform.simulation.asset_motion import WaypointNav
 from amos_platform.runtime.platform_runtime import PlatformRuntime
 
@@ -26,13 +28,16 @@ def test_new_runtime_bootstraps_a_consistent_ready_scene() -> None:
     assert state["fused_tracks"] == []
 
 
-def test_catalog_exposes_only_the_active_scenario_and_no_legacy_routes() -> None:
+def test_catalog_exposes_formal_scenarios_and_no_legacy_routes() -> None:
     app = create_app()
     app.testing = True
     client = app.test_client()
 
     scenarios = client.get("/api/v1/scenarios").get_json()["data"]["scenarios"]
-    assert [item["id"] for item in scenarios] == ["maritime-convoy-air-defense"]
+    assert [item["id"] for item in scenarios] == [
+        "maritime-convoy-air-defense", "coastal-joint-recon-strike",
+        "air-space-sea-carrier-strike",
+    ]
     assert scenarios[0]["name"] == "海上编队护航与要地防空"
     assert all(item["schema_version"] == "amos.scenario.v2" for item in scenarios)
     assert client.get("/api/v1/scenarios/scenario-1").status_code == 404
@@ -152,6 +157,11 @@ def test_maritime_warning_stage_opens_fire_gate_after_three_hundred_sim_seconds(
     )
     engine = runtime.get_engine()
     engine.clock["elapsed_sec"] = 4560.0
+    director._state["current_checkpoint"] = {
+        "checkpoint_id": "MAR-CP-ENGAGE-TEST",
+        "reached_at_sec": 4560.0,
+        "requires_operator_action": True,
+    }
 
     assert director._authorization_stage() == "warning"
 
@@ -202,6 +212,19 @@ def test_sse_response_uses_wsgi_safe_headers(monkeypatch) -> None:
     assert response.headers["Cache-Control"] == "no-cache"
     assert "Connection" not in response.headers
     response.close()
+
+
+def test_browser_state_omits_network_history_but_agent_snapshot_retains_it() -> None:
+    runtime = PlatformRuntime()
+    internal = runtime.get_engine().get_state()
+    history = [{"sim_time": 1.0, "links": [{"source": "A", "target": "B"}]}]
+    internal.setdefault("network", {})["history_records"] = history
+
+    operator = build_operator_state(internal)
+    agent = build_agent_visible_state(internal)
+
+    assert "history_records" not in operator["network"]
+    assert agent["network"]["history_records"] == history
 
 
 def test_reset_returns_backend_and_frontend_to_t_zero() -> None:
@@ -319,6 +342,18 @@ def test_frontend_keeps_director_stream_and_interpolates_live_markers() -> None:
     assert "if (pollTimer || sseAbortController) return" in controller
 
 
+def test_frontend_fails_closed_after_analysis_error_and_uses_panel_width() -> None:
+    controller = (ROOT / "static/js/app/platform.js").read_text(encoding="utf-8")
+    styles = (ROOT / "static/css/platform.css").read_text(encoding="utf-8")
+
+    assert "directorAnalysisFailure" in controller
+    assert 'startButton.textContent = analysisFailed ? "分析失败"' in controller
+    assert "running || directorBusy || analysisFailed" in controller
+    assert "请重置场景后重试" in controller
+    assert "container-type:inline-size" in styles
+    assert "@container workspace (max-width:760px)" in styles
+
+
 def test_frontend_authorization_is_non_blocking_and_backend_driven() -> None:
     html = (ROOT / "templates/dashboard.html").read_text(encoding="utf-8")
     controller = (ROOT / "static/js/app/platform.js").read_text(encoding="utf-8")
@@ -352,7 +387,8 @@ def test_frontend_authorization_is_non_blocking_and_backend_driven() -> None:
     assert "!Array.isArray(state.fused_tracks)" in controller
     assert ".authorization-dialog{position:fixed;inset:0" in styles
     assert "padding:24px;background:transparent" in styles
-    assert "海面接触 " in panels
+    assert '"海面接触"' in panels
+    assert '"地面接触"' in panels
     assert "高速攻击艇" in panels
     assert "民用渔船" in panels
 
@@ -392,7 +428,9 @@ def test_story_animation_is_incremental_and_speed_ui_tracks_backend_state() -> N
     assert "syncStoryMedia" in controller
     assert "syncStoryTimeline" in controller
     assert "updateStoryHero" in controller
-    assert "scrollIntoView" in controller
+    # Follow the event inside its own list without pulling the workspace down.
+    assert "root.scrollTo" in controller
+    assert "activeElement.scrollIntoView" not in controller
     assert "prefers-reduced-motion" in controller + styles
     assert "speedRequestQueue" in controller
     assert "syncSpeedFromClock" in controller

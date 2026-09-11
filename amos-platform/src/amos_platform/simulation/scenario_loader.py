@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 from amos_platform.fusion.track_fusion import SensorFusionEngine
@@ -31,10 +32,23 @@ def load_scenario_into_engine(engine: Any, scenario: dict[str, Any], now_iso: An
         dict(task) for task in scenario.get("asset_follow_tasks") or []
         if isinstance(task, dict)
     ]
+    engine._scenario_coordination_links = [
+        dict(link) for link in scenario.get("coordination_links") or []
+        if isinstance(link, dict)
+    ]
+    engine._scenario_protected_assets = [
+        dict(asset) for asset in scenario.get("protected_assets") or []
+        if isinstance(asset, dict)
+    ]
     engine._scenario_capture_plans = [
         dict(capture) for capture in scenario.get("capture_plans") or []
         if isinstance(capture, dict)
     ]
+    engine._scenario_identification_rules = [
+        dict(rule) for rule in scenario.get("evidence_classification_rules") or []
+        if isinstance(rule, dict)
+    ]
+    engine._evidence_classification_applied.clear()
     engine._engagement_policy = dict(scenario.get("engagement_policy") or {})
     engine._operator_contact_labels.clear()
     engine.exchange.reset()
@@ -76,6 +90,9 @@ def load_scenario_into_engine(engine: Any, scenario: dict[str, Any], now_iso: An
     scenario_routes = scenario.get("asset_routes") or {}
     route_modes = scenario.get("asset_route_modes") or {}
     motion_windows = scenario.get("asset_motion_windows") or {}
+    visibility_windows = scenario.get("asset_visibility_windows") or {}
+    asset_ammo = scenario.get("asset_ammo") or {}
+    behavior_phases = scenario.get("asset_behavior_phases") or {}
     follow_tasks_by_asset = {
         str(task.get("asset_id")): task
         for task in engine._scenario_asset_follow_tasks
@@ -102,6 +119,21 @@ def load_scenario_into_engine(engine: Any, scenario: dict[str, Any], now_iso: An
         domain = raw.get("domain", "air")
 
         motion_window = motion_windows.get(aid) if isinstance(motion_windows.get(aid), dict) else {}
+        visibility_window = (
+            visibility_windows.get(aid)
+            if isinstance(visibility_windows.get(aid), dict)
+            else {}
+        )
+        phases = (
+            deepcopy(behavior_phases.get(aid))
+            if isinstance(behavior_phases.get(aid), list)
+            else []
+        )
+        initial_phases = [
+            phase for phase in phases
+            if isinstance(phase, dict) and float(phase.get("at_sec", 0) or 0) <= 0
+        ]
+        initial_phase = initial_phases[-1] if initial_phases else {}
         follow_task = follow_tasks_by_asset.get(str(aid), {})
         cruise_speed = float(raw.get("speed_kts", 30) or 0)
         starts_at = float(motion_window.get("start_sec", 0) or 0)
@@ -117,20 +149,42 @@ def load_scenario_into_engine(engine: Any, scenario: dict[str, Any], now_iso: An
             "position": {
                 "lat": pos.get("lat", 0),
                 "lng": pos.get("lng", 0),
-                "alt_ft": pos.get("alt_ft", 0) if domain == "air" else 0,
+                "alt_ft": pos.get("alt_ft", 0) if domain in {"air", "space"} else 0,
             },
-            "status": "staged" if starts_at > 0 and configured_status in {"active", "operational"} else configured_status,
+            "status": str(initial_phase.get("status") or (
+                "staged" if starts_at > 0 and configured_status in {"active", "operational"}
+                else configured_status
+            )),
             "_configured_status": configured_status,
             "heading_deg": raw.get("heading", raw.get("heading_deg", 0)),
-            "speed_kts": 0.0 if starts_at > 0 else cruise_speed,
+            "speed_kts": float(initial_phase.get(
+                "speed_kts", 0.0 if starts_at > 0 else cruise_speed
+            ) or 0),
             "_cruise_speed_kts": cruise_speed,
             "_motion_window": dict(motion_window),
+            "_behavior_phases": phases,
+            "_next_behavior_phase_index": len(initial_phases),
+            "_current_behavior": str(initial_phase.get("behavior") or ""),
+            "_current_behavior_label": str(initial_phase.get("label") or ""),
+            "_behavior_phase_started_at": float(initial_phase.get("at_sec", 0) or 0),
             "_operator_hidden_until_follow": bool(follow_task.get("hide_until_follow")),
+            "_operator_visible_from_sec": max(
+                0.0, float(visibility_window.get("visible_from_sec", 0) or 0),
+            ),
+            "_operator_visible_until_sec": (
+                float(visibility_window["visible_until_sec"])
+                if visibility_window.get("visible_until_sec") is not None
+                else None
+            ),
+            "_operator_hidden_after_launch": False,
             "max_turn_rate_dps": float(motion_profile.get("max_turn_rate_dps", default_turn_rate)),
             "sensors": raw.get("sensors", []),
             "weapons": raw.get("weapons", []),
             "autonomy_tier": raw.get("autonomy_tier", 2),
             "endurance_hr": raw.get("endurance_hr", 0),
+            "member_count": int(raw.get("member_count", raw.get("swarm_size", 1)) or 1),
+            "formation_role": str(raw.get("formation_role") or ""),
+            "network_role": str(raw.get("network_role") or ""),
             "health": raw.get("health", {
                 "battery_pct": engine._rng.randint(85, 100),
                 "comms_strength": engine._rng.randint(75, 100),
@@ -143,6 +197,14 @@ def load_scenario_into_engine(engine: Any, scenario: dict[str, Any], now_iso: An
                 "sim_time": 0.0,
             }],
             "_profile": profile,
+            "_ammo": {
+                str(name): max(0, int(count))
+                for name, count in (
+                    asset_ammo.get(aid)
+                    if isinstance(asset_ammo.get(aid), dict)
+                    else {}
+                ).items()
+            },
         }
         communications = profile.get("communications") if isinstance(profile, dict) else []
         comm_profile = communications[0] if isinstance(communications, list) and communications else None
@@ -152,11 +214,19 @@ def load_scenario_into_engine(engine: Any, scenario: dict[str, Any], now_iso: An
             pos.get("lng", 0),
             node_type="asset",
             comm_profile=comm_profile,
+            altitude_km=float(pos.get("alt_ft", 0) or 0) * 0.0003048,
         )
-        if aid in scenario_routes:
+        initial_route = initial_phase.get("route") if isinstance(initial_phase.get("route"), list) else None
+        if initial_route is not None:
             engine.waypoint_nav.set_route(
                 aid,
-                scenario_routes[aid] or [],
+                deepcopy(initial_route),
+                mode=str(initial_phase.get("mode") or route_modes.get(aid) or "hold"),
+            )
+        elif aid in scenario_routes:
+            engine.waypoint_nav.set_route(
+                aid,
+                deepcopy(scenario_routes[aid] or []),
                 mode=str(route_modes.get(aid) or "hold"),
             )
         elif engine.assets[aid]["status"] in ("operational", "active"):

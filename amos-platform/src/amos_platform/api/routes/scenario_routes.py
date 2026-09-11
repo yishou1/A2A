@@ -25,7 +25,17 @@ def register_scenario_routes(bp: Any) -> None:
         engine = get_engine()
         active = engine.clock.get("scenario_id") == scenario_id
         elapsed = float(engine.clock.get("elapsed_sec", 0) or 0) if active else -1.0
-        temporal_story = project_story_at_time(build_internal_story(scenario), elapsed)
+        story = engine.scenario_story if active else build_internal_story(scenario)
+        branch = (
+            (str(engine.clock.get("scenario_branch") or "") or None)
+            if active
+            else (str(scenario.get("default_branch") or "") or None)
+        )
+        temporal_story = project_story_at_time(
+            story,
+            elapsed,
+            branch=branch,
+        )
         excluded = {
             "threats", "events", "timeline", "media_cues", "asset_routes", "asset_route_modes",
             "asset_motion_windows", "threat_observation_windows", "asset_task_schedule",

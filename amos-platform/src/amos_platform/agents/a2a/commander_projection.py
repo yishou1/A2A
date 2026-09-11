@@ -188,7 +188,12 @@ def _associate_backend_track(
         }
     object_type = str(backend_track.get("object_type") or backend_track.get("entity_type") or "unknown").lower()
     expected_domain = "air" if object_type in {"uav", "drone", "aircraft", "airplane", "air"} else (
-        "maritime" if object_type in {"ship", "boat", "vessel", "surface"} else None
+        "maritime" if object_type in {"ship", "boat", "vessel", "surface"} else (
+            "ground" if object_type in {
+                "ground", "ground_installation", "coastal_missile_site",
+                "missile_site", "missile_battery",
+            } else None
+        )
     )
     candidates = [
         track for track in available

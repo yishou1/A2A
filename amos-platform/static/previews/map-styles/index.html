@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AMOS · 地图样式对比</title>
+<link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+<style>
+*{box-sizing:border-box}body{margin:0;background:#0d171e;color:#dce5e9;font-family:"Microsoft YaHei","PingFang SC",sans-serif}header{padding:27px 32px 23px;border-bottom:1px solid #29373f;display:flex;justify-content:space-between;align-items:center;gap:24px}h1{margin:7px 0 9px;font-size:23px;font-weight:500;letter-spacing:.03em}.eyebrow{font-size:10px;color:#7fa0ae;letter-spacing:.18em}header p{margin:0;color:#92a4af;font-size:12px;line-height:1.8}nav{display:flex;gap:7px;flex-shrink:0}nav a,button{border:1px solid #40515d;border-radius:4px;padding:9px 13px;color:#b8cbd3;text-decoration:none;font:12px inherit;background:#14232c;cursor:pointer}nav a:hover,nav a.active{color:#eff9fa;border-color:#85a9b5;background:#253c47}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;padding:24px 28px}article{border:1px solid #33444f;border-radius:7px;overflow:hidden;background:#111f28}article>header{padding:17px 18px;display:block;border:0;height:110px}.card-title{display:flex;align-items:center;gap:9px}h2{font-size:17px;margin:0;font-weight:500}.letter{width:28px;height:28px;display:grid;place-items:center;border:1px solid #55737e;border-radius:4px;color:#c8e1e6;font-size:13px}.badge{margin-left:auto;color:#b0ccbb;font-size:10px;border:1px solid #4b6657;border-radius:3px;padding:3px 7px}article p{margin:10px 0 0;line-height:1.7;color:#96aab4;font-size:11px}.map{height:620px;background:#304651;position:relative}.map .leaflet-control-attribution{font-size:8px;background:rgba(12,25,34,.75);color:#8399a4}.map .leaflet-control-attribution a{color:#a5bac3}.map .leaflet-control-scale-line{background:#152731bb;color:#c6d7de;border-color:#748e99;font-size:9px;text-shadow:none}.north{position:absolute;top:18px;left:19px;z-index:700;font-size:11px;color:#ccdbe0;pointer-events:none;line-height:1.5;text-align:center}.north span{display:block;font-size:16px}.resource-icon{border:0;background:none}.resource-icon svg{width:32px;height:32px}.resource-label{background:#101f29ed;color:#dfedf0;border:1px solid #547480;border-radius:3px;box-shadow:none;padding:4px 7px;font-size:10px;letter-spacing:.02em}.leaflet-tooltip-left.resource-label:before{border-left-color:#547480}.resource-label:before{display:none}.terrain-gray{filter:grayscale(1)}.card-footer{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;font-size:10px;color:#92a8b2}.swatches{display:flex;gap:6px}.swatch{height:12px;width:25px;border-radius:2px;border:1px solid #ffffff20}footer.page-note{padding:0 30px 24px;color:#7e959f;font-size:11px;line-height:1.8}body.single .grid{grid-template-columns:minmax(0,1fr);max-width:1280px;margin:auto}body.single article>header{height:auto;min-height:94px}body.single .map{height:680px}.hidden{display:none!important}@media(max-width:900px){header{display:block;padding:18px}nav{margin-top:16px;flex-wrap:wrap}.grid{grid-template-columns:1fr;padding:16px}.map{height:560px}}
+</style>
+<style>
+.layers{padding:16px 30px;background:#14232c;border-bottom:1px solid #33444f}.steps,.toggles{display:flex;gap:10px;flex-wrap:wrap}.steps button.active{border-color:#91c4d1;background:#2e4b58;color:white}.toggles{margin-top:14px;font-size:12px;color:#b8cbd3}.toggles label{cursor:pointer}.layers p{font-size:12px;color:#92a4af;margin-bottom:0}
+</style>
+<script src="/static/vendor/leaflet/leaflet.js"></script>
+<script src="/static/vendor/protomaps/protomaps-leaflet.js"></script>
+<script src="/static/js/map/tactical-symbols.js"></script>
+</head>
+<body>
+<header><div><div class="eyebrow">AMOS / BASEMAP STUDY</div><h1>先选视觉风格，再替换底图</h1><p>同一区域 · 同一缩放 · 同一批资源图标。拖动任一地图可同步比较。</p></div><nav><a href="?">并排比较</a><a href="?view=A">A 简洁蓝灰</a><a href="?view=B">B 冷色地形</a><a href="?view=C">C 柔和自然</a><button id="reset">恢复视角</button></nav></header>
+<section class="layers" aria-label="图层效果控制"><div class="steps" id="steps"></div><div class="toggles" id="toggles"></div><p id="layer-note"></p></section>
+<main class="grid">
+<article data-style="A"><header><div class="card-title"><span class="letter">A</span><h2>简洁蓝灰</h2><span class="badge">优先推荐</span></div><p>干净的海陆分区，突出资源与任务信息。<br>不显示山体纹理，适合大屏讲解。</p></header><div class="map" id="map-A"><div class="north">N<span>▲</span></div></div><div class="card-footer"><span>信息优先 / 平面底图</span><div class="swatches"><i class="swatch" style="background:#2c424f"></i><i class="swatch" style="background:#657774"></i><i class="swatch" style="background:#67ddff"></i></div></div></article>
+<article data-style="B"><header><div class="card-title"><span class="letter">B</span><h2>冷色地形</h2></div><p>蓝灰海面、石板灰陆地，保留极轻地形。<br>整体冷静，山体不抢资源图标的注意力。</p></header><div class="map" id="map-B"><div class="north">N<span>▲</span></div></div><div class="card-footer"><span>冷灰色 / 轻地形层次</span><div class="swatches"><i class="swatch" style="background:#344e61"></i><i class="swatch" style="background:#899699"></i><i class="swatch" style="background:#67ddff"></i></div></div></article>
+<article data-style="C"><header><div class="card-title"><span class="letter">C</span><h2>柔和自然</h2></div><p>低饱和灰绿陆地，温和的自然地形层次。<br>去掉黄褐色山体和密集等高线。</p></header><div class="map" id="map-C"><div class="north">N<span>▲</span></div></div><div class="card-footer"><span>灰绿色 / 柔和地形层次</span><div class="swatches"><i class="swatch" style="background:#365362"></i><i class="swatch" style="background:#84917c"></i><i class="swatch" style="background:#67ddff"></i></div></div></article>
+</main>
+<footer class="page-note">独立样式预览，当前演示系统未切换。地理数据与图标均来自本地资源；预览不启动仿真、不修改剧本。<br>所有版本都可离线实现。底图颜色用于视觉区分，不作为海拔或水深的定量读数。</footer>
+<script>
+const palette={
+ A:{sea:'#2c424f',land:'#657774',coast:'#a0b1ad',road:'#a7b4ab',alpha:1},
+ B:{sea:'#344e61',land:'#899699',coast:'#b1bec0',road:'#b9c6c7',alpha:.80},
+ C:{sea:'#365362',land:'#84917c',coast:'#b2bca7',road:'#b6bfa8',alpha:.77},
+};
+const selected=new URLSearchParams(location.search).get('view');
+const names=['纯海陆底图','地形明暗','主要道路','地名标注','场景边界','资源与名称'];
+let stage=Number(new URLSearchParams(location.search).get('stage')||6);
+if(!Number.isInteger(stage)||stage<1||stage>6)stage=6;
+const enabled=names.map((_,i)=>i<stage),states=[];
+document.getElementById('steps').innerHTML=names.map((name,i)=>`<button data-stage="${i+1}">${i+1}. ${i?'+ ':''}${name}</button>`).join('');
+document.getElementById('toggles').innerHTML=names.slice(1).map((name,i)=>`<label><input type="checkbox" data-layer="${i+1}"> ${name}</label>`).join('');
+if(palette[selected]){document.body.classList.add('single');document.querySelectorAll('article').forEach(a=>a.classList.toggle('hidden',a.dataset.style!==selected));}
+document.querySelectorAll('nav a').forEach(a=>a.classList.toggle('active',new URL(a.href).searchParams.get('view')===(selected||null)));
+const maps=[];let synchronizing=false;
+const center=[18.25,122.28], zoom=9;
+const ships=[{id:'CV-01',role:'航母一号',lat:18.18,lng:122.85,kind:'aircraftCarrier'}, {id:'DDG-01',role:'防空驱逐舰一号',lat:18.42,lng:122.95,kind:'escort'}, {id:'FFG-01',role:'反潜护卫舰一号',lat:17.95,lng:122.78,kind:'escort'}];
+for(const [key,p] of Object.entries(palette)){
+ if(palette[selected]&&selected!==key)continue;
+ const map=L.map('map-'+key,{zoomControl:false,attributionControl:true,minZoom:8,maxZoom:11,zoomAnimation:false,fadeAnimation:false,maxBounds:[[17,119],[25,124]],maxBoundsViscosity:1}).setView(center,zoom);maps.push(map);
+ map.getContainer().style.background=p.sea;
+ // Render the same high-resolution terrain shoreline in all three variants.
+ // The OSM archive is used only for roads and place names, not a second coast.
+ const TerrainPreview=L.GridLayer.extend({createTile:function(coords,done){
+  const canvas=document.createElement('canvas');canvas.width=canvas.height=256;
+  const ctx=canvas.getContext('2d'),img=new Image();
+  img.onload=()=>{ctx.drawImage(img,0,0);const pixels=ctx.getImageData(0,0,256,256),data=pixels.data;
+   const rgb=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16)),sea=rgb(p.sea),land=rgb(p.land);
+   for(let i=0;i<data.length;i+=4){const r=data[i],g=data[i+1],b=data[i+2],water=b>r+12&&g>r+7;
+    const shade=!enabled[1]||key==='A'?1:(key==='B'?.90+.20*((r+g+b)/765):.83+.34*((r+g+b)/765));
+    for(let c=0;c<3;c++)data[i+c]=water?sea[c]:Math.min(255,Math.round(land[c]*shade));
+   }ctx.putImageData(pixels,0,0);done(null,canvas);
+  };img.onerror=()=>done(new Error('Offline terrain unavailable'),canvas);
+  img.src='/static/tiles/natural-terrain/detail/'+coords.z+'/'+coords.x+'/'+coords.y+'.webp';return canvas;
+ }});
+ const terrain=new TerrainPreview({minZoom:8,maxZoom:11,noWrap:true,bounds:[[17,119],[25,124]],attribution:'Mapzen Terrain · USGS · NOAA',zIndex:1}).addTo(map);
+ const vectorOptions={url:'/static/tiles/taiwan-southeast-tactical.pmtiles',maxDataZoom:9,levelDiff:0,minZoom:8,maxZoom:11,noWrap:true,attribution:'© OpenStreetMap contributors'};
+ const roads=protomapsL.leafletLayer({...vectorOptions,zIndex:2,
+  paintRules:[
+   {dataLayer:'roads',minzoom:9,symbolizer:new protomapsL.LineSymbolizer({color:p.road,width:.6,opacity:.26}),filter:(z,f)=>['highway','major_road','medium_road'].includes(f.props.kind)},
+  ],
+  labelRules:[],
+ });
+ const labels=protomapsL.leafletLayer({...vectorOptions,zIndex:3,paintRules:[],labelRules:[{dataLayer:'places',symbolizer:new protomapsL.CenteredTextSymbolizer({labelProps:['name:zh','name'],font:'400 11px "Microsoft YaHei", sans-serif',fill:'#e0e7e4',stroke:'#34474b',width:1.5})}]});
+ const boundary=L.rectangle([[17.45,121.3],[19.15,123.35]],{color:'#8fb4c1',weight:1,dashArray:'7 7',opacity:.65,fill:false,interactive:false});
+ const resources=L.layerGroup();
+ for(const ship of ships){
+  L.marker([ship.lat,ship.lng],{icon:L.divIcon({className:'resource-icon',html:TacticalSymbols.svg(ship.kind,285),iconSize:[32,32],iconAnchor:[16,16]})}).addTo(resources).bindTooltip(ship.role,{permanent:true,direction:'left',offset:[-18,0],className:'resource-label'});
+ }
+ states.push({map,terrain,overlays:[roads,labels,boundary,resources]});
+ L.control.scale({position:'bottomleft',imperial:false,maxWidth:90}).addTo(map);
+ map.on('moveend',()=>{if(synchronizing)return;synchronizing=true;for(const other of maps)if(other!==map)other.setView(map.getCenter(),map.getZoom(),{animate:false});synchronizing=false;});
+}
+document.getElementById('reset').onclick=()=>{synchronizing=true;for(const map of maps)map.setView(center,zoom,{animate:false});synchronizing=false;};
+window.previewMaps=maps;
+function refresh(redrawTerrain=false){
+ for(const state of states){
+  if(redrawTerrain)state.terrain.redraw();
+  state.overlays.forEach((layer,i)=>{if(enabled[i+2]){if(!state.map.hasLayer(layer))layer.addTo(state.map);}else if(state.map.hasLayer(layer))state.map.removeLayer(layer);});
+ }
+ document.querySelectorAll('[data-stage]').forEach(button=>button.classList.toggle('active',Number(button.dataset.stage)===stage));
+ document.querySelectorAll('[data-layer]').forEach(input=>input.checked=enabled[Number(input.dataset.layer)]);
+ document.getElementById('layer-note').textContent=(stage?`当前为第 ${stage} 步：${names.slice(0,stage).join(' → ')}。`:'当前为自定义图层组合。')+' A 保持平面风格，地形明暗仅在 B / C 中可见；边界为剧本区域，缩小地图可查看完整范围。';
+ for(const link of document.querySelectorAll('nav a')){const url=new URL(link.href);if(stage)url.searchParams.set('stage',stage);else url.searchParams.delete('stage');link.href=url.pathname+url.search;}
+}
+document.getElementById('steps').onclick=event=>{const button=event.target.closest('[data-stage]');if(!button)return;stage=Number(button.dataset.stage);enabled.forEach((_,i)=>enabled[i]=i<stage);const url=new URL(location.href);url.searchParams.set('stage',stage);history.replaceState(null,'',url);refresh(true);};
+document.getElementById('toggles').onchange=event=>{if(!event.target.matches('[data-layer]'))return;const index=Number(event.target.dataset.layer);enabled[index]=event.target.checked;stage=0;const url=new URL(location.href);url.searchParams.delete('stage');history.replaceState(null,'',url);refresh(index===1);};
+refresh();
+</script>
+</body></html>

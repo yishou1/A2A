@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs>
+    <linearGradient id="sea" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#061927"/><stop offset="1" stop-color="#123d50"/></linearGradient>
+    <linearGradient id="land" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#334b35"/><stop offset="1" stop-color="#182d25"/></linearGradient>
+    <filter id="glow"><feGaussianBlur stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect width="1600" height="900" fill="url(#sea)"/>
+  <path d="M1100 0H1600V900H1230c-75-105-67-215-25-320 38-94 15-178-63-251-70-66-85-176-42-329Z" fill="url(#land)" stroke="#7a9b74" stroke-width="4"/>
+  <path d="M1290 238l215 180-125 185-254-144Z" fill="#1d2d27" stroke="#92a788" stroke-dasharray="12 8" stroke-width="3"/>
+  <path d="M1260 421l201-103" stroke="#d9ddc8" stroke-width="14"/><path d="M1260 421l201-103" stroke="#515e57" stroke-width="7"/>
+  <g fill="none" stroke="#59dcff" stroke-width="3" filter="url(#glow)">
+    <path d="M300 622C520 576 742 570 967 467"/><path d="M318 672C555 654 787 600 1027 488"/>
+    <path d="M687 570C805 496 934 441 1098 405" stroke-dasharray="14 10"/>
+  </g>
+  <g fill="#061c28" stroke="#6fe5ff" stroke-width="4">
+    <path d="M303 520l54 127-30 38-40-28-26-124Z"/><path d="M210 620l35 82-24 28-31-19-18-76Z"/><path d="M386 649l33 79-23 27-29-18-19-73Z"/>
+  </g>
+  <g fill="#ff6657" stroke="#ffd3cd" stroke-width="3"><circle cx="1370" cy="355" r="14"/><circle cx="1250" cy="470" r="14"/></g><g fill="#ffe3a1" stroke="#fff2c5" stroke-width="3"><circle cx="1430" cy="520" r="14"/></g>
+  <g fill="#e8f9ff" font-family="sans-serif"><text x="70" y="80" font-size="38" font-weight="700">空天海舰载无人航空联合演示</text><text x="70" y="124" font-size="22" fill="#9bc6d4">公开能力启发的近未来训练 · 有人预警指挥 + 少量舰载无人机</text><text x="220" y="775" font-size="25">CV-01 航母特遣群与航空作业区</text><text x="1180" y="680" font-size="25">机场 / 机动岸防 / 民用港区（保护）</text></g>
+  <g fill="#65dfff"><circle cx="575" cy="204" r="12"/><path d="M490 204h170M575 120v170" stroke="#65dfff" stroke-width="3" stroke-dasharray="9 8"/><text x="605" y="186" fill="#dffaff" font-family="sans-serif" font-size="22">SAT-A2S-01 星下点</text></g>
+</svg>

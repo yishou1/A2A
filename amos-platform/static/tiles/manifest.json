@@ -4,6 +4,9 @@
   "path": "/static/tiles/taiwan-southeast-tactical.pmtiles",
   "format": "pmtiles-mvt",
   "style": "dark",
+  "runtime_role": "place_name_overlay",
+  "active_basemap_manifest": "/static/tiles/natural-terrain/manifest.json",
+  "active_detail_manifest": "/static/tiles/natural-terrain/detail/manifest.json",
   "min_zoom": 0,
   "max_zoom": 9,
   "bounds": {

@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AMOS · 逐层叠加效果</title>
+<style>
+*{box-sizing:border-box}body{margin:0;padding:28px;background:#101c24;color:#dce5e9;font-family:"Microsoft YaHei",sans-serif}h1{font-size:24px;font-weight:500;margin:0 0 12px}p{color:#9eafb8;font-size:13px}a{color:#a9d5e4}main{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:24px}article{background:#172832;border:1px solid #3a505d;border-radius:6px;overflow:hidden}h2{font-size:17px;font-weight:500;margin:15px 18px 8px}article p{margin:0 18px 15px;line-height:1.6}article a{display:block;overflow:hidden;aspect-ratio:1222/680;position:relative}img{position:absolute;width:117.84%;max-width:none;left:-8.92%;top:-49.2%}footer{margin-top:20px;font-size:12px;color:#99aeb9}@media(max-width:900px){main{grid-template-columns:1fr}}
+img{top:-59.706%}
+</style>
+<h1>同一张地图，逐层加上后的效果</h1>
+<p>B 冷色地形示例 · 每一步保留前面的图层 · <a href="index.html?view=B&stage=1">打开交互预览，逐层切换 / 单独开关</a></p>
+<main>
+<article><h2>01 · 纯海陆底图</h2><p>只保留海岸轮廓和海陆配色。</p><a href="index.html?view=B&stage=1"><img src="layer-1.png" alt="纯海陆底图"></a></article>
+<article><h2>02 · 加地形明暗</h2><p>陆地增加轻微起伏感，海面保持干净。</p><a href="index.html?view=B&stage=2"><img src="layer-2.png" alt="增加地形明暗"></a></article>
+<article><h2>03 · 加主要道路</h2><p>低透明度细线，不显示密集支路。</p><a href="index.html?view=B&stage=3"><img src="layer-3.png" alt="增加主要道路"></a></article>
+<article><h2>04 · 加地名标注</h2><p>提供地理参照，观察文字密度。</p><a href="index.html?view=B&stage=4"><img src="layer-4.png" alt="增加地名标注"></a></article>
+<article><h2>05 · 加场景边界</h2><p>仅加浅色虚线，不用色块遮盖底图。</p><a href="index.html?view=B&stage=5"><img src="layer-5.png" alt="增加场景边界"></a></article>
+<article><h2>06 · 加资源与名称</h2><p>叠加三艘舰船，检查图标与背景对比。</p><a href="index.html?view=B&stage=6"><img src="layer-6.png" alt="增加资源与名称"></a></article>
+</main>
+<footer>独立静态预览：不修改正式地图或剧本。A / B / C 均支持逐层开关；A 为平面风格，无地形明暗。点击任一画面查看完整地图。</footer>
+</html>

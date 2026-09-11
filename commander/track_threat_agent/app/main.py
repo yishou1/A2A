@@ -1471,13 +1471,20 @@ def _perception_from_a2a_task(task_payload: Dict[str, Any]) -> PerceptionResultR
                     metadata["source_track_id"] = stable_track_id
                 if classification not in {"", "unknown", "ship"}:
                     metadata["source_class"] = classification
-                    if classification == "fishing_vessel":
+                    if classification in {"fishing_vessel", "civilian_port"}:
                         metadata.update({
                             "label": "neutral",
                             "affiliation": "unknown",
                             "threat_level": "low",
                         })
-                    elif classification == "fast_attack_craft":
+                    elif classification in {
+                        "fast_attack_craft",
+                        "coastal_missile_site",
+                        "airfield_runway",
+                        "airfield",
+                        "mobile_coastal_air_defense",
+                        "coastal_air_defense",
+                    }:
                         metadata.update({
                             "label": "hostile",
                             "affiliation": "red",

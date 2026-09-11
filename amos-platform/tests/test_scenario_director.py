@@ -3,7 +3,10 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+import pytest
+
 from amos_platform.api.app_factory import create_app
+from amos_platform.api.dependencies import get_engine
 from amos_platform.data.scenario_capabilities import (
     FUNCTIONAL_AGENT_CATALOG,
     FUNCTION_POINT_CATALOG,
@@ -11,19 +14,21 @@ from amos_platform.data.scenario_capabilities import (
 )
 from amos_platform.data.scenario_repository import get_scenario, list_scenarios
 from amos_platform.runtime.platform_runtime import PlatformRuntime
-from amos_platform.simulation.director import DirectorService
+from amos_platform.simulation.director import DirectorError, DirectorService
 from amos_platform.simulation.engine import SimEngine
 
 
 SCENARIO_IDS = [
     "maritime-convoy-air-defense",
+    "coastal-joint-recon-strike",
+    "air-space-sea-carrier-strike",
 ]
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_midterm_catalog_exposes_maritime_scenario_and_builders_keep_v2_contract() -> None:
     summaries = list_scenarios()
-    assert [item["id"] for item in summaries] == ["maritime-convoy-air-defense"]
+    assert [item["id"] for item in summaries] == SCENARIO_IDS
     assert summaries[0]["name"] == "海上编队护航与要地防空"
 
     declared_algorithms: set[str] = set()
@@ -97,6 +102,8 @@ def test_document_requirement_ids_and_coverage_tiers_are_not_conflated() -> None
 def test_each_formal_scenario_has_the_documented_model_coverage() -> None:
     expected_core = {
         "maritime-convoy-air-defense": ({"M08"}, 15),
+        "coastal-joint-recon-strike": ({"M08"}, 15),
+        "air-space-sea-carrier-strike": ({"M08"}, 15),
     }
     for scenario_id, (missing, expected_count) in expected_core.items():
         scenario = get_scenario(scenario_id)
@@ -155,6 +162,25 @@ def test_scenario_detail_does_not_publish_future_director_truth() -> None:
     assert "demo_checkpoints" not in data
     assert "fault_injections" not in data
     assert "comm_degraded" not in data
+
+
+def test_active_scenario_detail_reuses_engine_story_media() -> None:
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+    scenario_id = "coastal-joint-recon-strike"
+    client.post("/api/v1/sim/reset", json={"scenario_id": scenario_id})
+    engine = get_engine()
+    with engine._lock:
+        engine._tick(945.0)
+
+    detail = client.get(f"/api/v1/scenarios/{scenario_id}").get_json()["data"]
+    live = client.get("/api/v1/sim/state").get_json()["data"]["scenario_story"]
+
+    assert detail["media_cues"]
+    assert [item["media_id"] for item in detail["media_cues"]] == [
+        item["media_id"] for item in live["media_cues"]
+    ]
 
 
 def test_new_scenario_media_routes_enforce_time_and_active_run_boundaries() -> None:
@@ -293,10 +319,40 @@ def test_director_reports_unavailable_submission_without_a_backend_callback() ->
     assert reached["simulation_lifecycle"] == "paused"
 
 
+def test_failed_checkpoint_cannot_be_advanced_or_restarted() -> None:
+    runtime = PlatformRuntime()
+    director = DirectorService(runtime)
+    director.configure(
+        scenario_id="maritime-convoy-air-defense",
+        mode="demonstration",
+        branch="standard",
+        seed=23,
+    )
+    failed = director.action("advance_checkpoint")
+    elapsed = failed["elapsed_sec"]
+
+    for action in ("start", "step_tick", "advance_checkpoint", "start_auto"):
+        with pytest.raises(DirectorError, match="重置场景后重试"):
+            director.action(action)
+
+    assert runtime.get_engine().clock["elapsed_sec"] == elapsed
+    assert runtime.get_engine().clock["running"] is False
+
+
 def test_each_scenario_can_reach_all_unconditional_declared_checkpoints() -> None:
     for scenario_id in SCENARIO_IDS:
         runtime = PlatformRuntime()
-        director = DirectorService(runtime)
+        director = DirectorService(
+            runtime,
+            checkpoint_callback=lambda context: {"workflow_id": f"wf-{context['checkpoint_id']}"},
+            workflow_state_callback=lambda workflow_id: {
+                "status": "completed",
+                "terminal": True,
+                "run": {"current": True},
+                "orchestration": {"counts": {"total": 1, "completed": 1, "failed": 0}},
+                "result": {"projection_status": "completed"},
+            },
+        )
         scenario = get_scenario(scenario_id)
         assert scenario is not None
         director.configure(
@@ -349,6 +405,7 @@ def test_each_scenario_can_reach_all_unconditional_declared_checkpoints() -> Non
                     authorized=True,
                 )
                 assert launched["status"] == "launched"
+            director.action("refresh_analysis")
         assert reached == [item["checkpoint_id"] for item in expected]
 
 
@@ -369,6 +426,49 @@ def test_director_supports_all_manual_and_automatic_control_actions() -> None:
     stopped = director.action("stop_auto")
     assert stopped["director_status"] == "paused"
     assert stopped["auto_running"] is False
+
+
+def test_authorization_wait_starts_only_at_reached_operator_checkpoint_and_is_wave_scoped() -> None:
+    runtime = PlatformRuntime()
+    director = DirectorService(runtime)
+    director.configure(
+        scenario_id="air-space-sea-carrier-strike",
+        mode="demonstration",
+        branch="standard",
+        seed=76091,
+    )
+    engine = runtime.get_engine()
+
+    engine.clock["elapsed_sec"] = 3360
+    director._state["current_checkpoint"] = {
+        "checkpoint_id": "ASC-CP-PLAN",
+        "reached_at_sec": 2730,
+        "requires_operator_action": False,
+    }
+    assert director._authorization_stage() is None
+
+    director._state["current_checkpoint"] = {
+        "checkpoint_id": "ASC-CP-WAVE1",
+        "reached_at_sec": 3390,
+        "requires_operator_action": True,
+    }
+    engine.clock["elapsed_sec"] = 3390
+    assert director._authorization_stage() == "fire"
+
+    engine.events.append({
+        "type": "authorized_fire_command",
+        "command_source": "operator",
+        "sim_time": 3391,
+    })
+    assert director._authorization_stage() is None
+
+    director._state["current_checkpoint"] = {
+        "checkpoint_id": "ASC-CP-WAVE2",
+        "reached_at_sec": 4230,
+        "requires_operator_action": True,
+    }
+    engine.clock["elapsed_sec"] = 4380
+    assert director._authorization_stage() == "fire"
 
 
 def test_checkpoint_callback_is_the_only_source_of_submitted_status() -> None:

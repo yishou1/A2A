@@ -2,6 +2,10 @@
 
 window.PlatformMap = (function () {
   var map = null;
+  var baseMapLayer = null;
+  var terrainDetailLayer = null;
+  var mapDetailLayer = null;
+  var mapLabelsVisible = readStoredMapLabels();
   var ownMarkers = {};
   var weaponMarkers = {};
   var weaponImpactLayers = {};
@@ -11,6 +15,10 @@ window.PlatformMap = (function () {
   var ownTrails = {};
   var trackTrails = {};
   var sensorLayers = {};
+  var coordinationLayers = {};
+  var protectedLayers = [];
+  var spaceGroundTrackLayers = [];
+  var spaceOperationsElement = null;
   var sensorLayerSignatures = {};
   var sensorPoseSignatures = {};
   var sensorModels = {};
@@ -19,7 +27,7 @@ window.PlatformMap = (function () {
   var scenarioView = null;
   var scenarioSurface = "maritime";
   var layerState = {
-    terrain: true, hillshade: true, contours: true, sensors: false, ao: true,
+    terrain: true, hillshade: true, contours: true, sensors: false, coordination: true, ao: true,
   };
   var reliefLayers = {};
   var reliefManifest = null;
@@ -28,6 +36,77 @@ window.PlatformMap = (function () {
   var ownLabelLayoutFrame = null;
   var SymbolLibrary = window.TacticalSymbols;
 
+  function readStoredMapLabels() {
+    try {
+      return window.localStorage.getItem("amos.map.labels") !== "hidden";
+    } catch (error) {
+      return true;
+    }
+  }
+
+  function createBaseMapLayer() {
+    if (!map) return;
+    if (baseMapLayer) map.removeLayer(baseMapLayer);
+    if (mapDetailLayer) map.removeLayer(mapDetailLayer);
+    var options = {
+      url: "/static/tiles/taiwan-southeast-tactical.pmtiles",
+      lang: "zh",
+      minZoom: 5,
+      // Fetch only bundled z9 data, but redraw vectors at the display zoom.
+      // Leaflet maxNativeZoom would enlarge rasterized labels as well.
+      maxDataZoom: 9,
+      maxZoom: 14,
+      noWrap: true,
+      attribution: 'Protomaps · © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    };
+    baseMapLayer = L.tileLayer("/static/tiles/natural-terrain/{z}/{x}/{y}.webp?v=20260911a", {
+      minZoom: 5, maxNativeZoom: 9, maxZoom: 14,
+      bounds: [[8, 105], [35, 135]], noWrap: true,
+      attribution: '<a href="https://www.naturalearthdata.com/">Natural Earth II</a>',
+    }).addTo(map);
+    if (terrainDetailLayer) map.removeLayer(terrainDetailLayer);
+    terrainDetailLayer = L.tileLayer("/static/tiles/natural-terrain/detail/{z}/{x}/{y}.webp?v=20260911a", {
+      minZoom: 8, maxNativeZoom: 11, maxZoom: 14,
+      bounds: [[17, 119], [25, 124]], noWrap: true,
+      attribution: '<a href="https://registry.opendata.aws/terrain-tiles/">Mapzen Terrain</a> · USGS · NOAA/NCEI',
+    });
+    mapDetailLayer = protomapsL.leafletLayer(Object.assign({}, options, {
+      pane: "mapDetailPane",
+      paintRules: [], labelRules: [{
+        dataLayer: "places",
+        symbolizer: new protomapsL.CenteredTextSymbolizer({
+          labelProps: ["name:zh", "name"], font: '500 11px "Microsoft YaHei", sans-serif',
+          fill: "#e0e6db", stroke: "#2b403f", width: 2,
+        }),
+      }],
+    }));
+    if (mapLabelsVisible) mapDetailLayer.addTo(map);
+    if (baseMapLayer.bringToBack) baseMapLayer.bringToBack();
+    var container = map.getContainer();
+    container.classList.add("map-style-natural");
+    document.documentElement.setAttribute("data-map-style", "natural");
+    updateNaturalTerrain();
+  }
+
+  function updateNaturalTerrain() {
+    if (!map || !terrainDetailLayer) return;
+    // Switch only when the complete viewport fits inside the detailed pack.
+    // This avoids partially covered rectangles or missing tiles at its edge.
+    var detailed = map.getZoom() >= 8 && L.latLngBounds([[17, 119], [25, 124]]).contains(map.getBounds());
+    if (detailed && !map.hasLayer(terrainDetailLayer)) terrainDetailLayer.addTo(map);
+    else if (!detailed && map.hasLayer(terrainDetailLayer)) map.removeLayer(terrainDetailLayer);
+  }
+
+  function toggleMapLabels() {
+    mapLabelsVisible = !mapLabelsVisible;
+    try { window.localStorage.setItem("amos.map.labels", mapLabelsVisible ? "visible" : "hidden"); } catch (error) {}
+    if (mapDetailLayer && map) {
+      if (mapLabelsVisible) mapDetailLayer.addTo(map);
+      else map.removeLayer(mapDetailLayer);
+    }
+    return mapLabelsVisible;
+  }
+
   function escapeHtml(value) {
     return String(value == null ? "" : value)
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -35,7 +114,7 @@ window.PlatformMap = (function () {
   }
 
   function icon(kind, heading, size) {
-    var actualSize = size || 34;
+    var actualSize = size || 26;
     return L.divIcon({
       className: "rotating-marker marker-" + SymbolLibrary.affiliation(kind),
       html: '<div class="marker-rotator" style="width:' + actualSize + "px;height:" + actualSize + 'px">' +
@@ -52,6 +131,7 @@ window.PlatformMap = (function () {
   function trackKind(track) {
     var assessment = track.agent_assessment || {};
     var classification = String(track.classification || "").toUpperCase();
+    var domain = String(track.domain_hint || track.domain || "").toLowerCase();
     if (assessment.damage_state === "destroyed" || assessment.engagement_status === "destroyed") {
       return "destroyed";
     }
@@ -59,8 +139,13 @@ window.PlatformMap = (function () {
       return "impact";
     }
     if (assessment.source && /FISHING|CIVILIAN|MERCHANT/.test(classification)) return "civilianSurface";
-    return assessment.status === "confirmed" && /high|hostile|threat/i.test(String(assessment.level || assessment.label || ""))
-      ? "hostileSurface" : "unknownSurface";
+    var prefix = assessment.status === "confirmed" && /high|hostile|threat|威胁|敌/i.test(
+      String(assessment.level || assessment.label || "")
+    ) ? "hostile" : "unknown";
+    if (/COASTAL_MISSILE_SITE|MISSILE_SITE|MISSILE_BATTERY/.test(classification)) return prefix + "MissileSite";
+    if (/ground|land/.test(domain)) return prefix + "Ground";
+    if (/air|aviation/.test(domain)) return prefix + "Air";
+    return prefix + "Surface";
   }
 
   function trackAssessmentLabel(track) {
@@ -87,13 +172,13 @@ window.PlatformMap = (function () {
     return "unknown-label";
   }
 
-  function trackTrailColor(kind) {
-    if (kind === "destroyed") return "#87969d";
-    if (kind === "impact") return "#ffb24a";
+  function trackTrailStyle(kind) {
+    if (kind === "destroyed") return {color: "#9aa7ad", opacity: 0.20, weight: 1.1, dashArray: "2 6"};
+    if (kind === "impact") return {color: "#d2ad76", opacity: 0.30, weight: 1.25, dashArray: "3 5"};
     var affiliation = SymbolLibrary.affiliation(kind);
-    if (affiliation === "hostile") return "#ff5544";
-    if (affiliation === "civilian") return "#55dfb5";
-    return "#ffbf47";
+    if (affiliation === "hostile") return {color: "#c58f89", opacity: 0.28, weight: 1.2, dashArray: "3 6"};
+    if (affiliation === "civilian") return {color: "#8db7ab", opacity: 0.22, weight: 1.1, dashArray: "2 7"};
+    return {color: "#b9aa7d", opacity: 0.24, weight: 1.15, dashArray: "3 7"};
   }
 
   function sensorCapabilityHtml(asset) {
@@ -110,13 +195,142 @@ window.PlatformMap = (function () {
   function assetPopupHtml(asset) {
     var id = asset.asset_id || asset.id;
     var memberCount = Number(asset.swarm_size || asset.member_count || 0);
+    var kind = ownKind(asset);
+    var memberUnit = asset.domain === "maritime" ? "艘" : "架";
+    var formationLabel = kind === "uavSwarm" ? "蜂群规模" : "编队规模";
     return "<b>" + escapeHtml(id) + "</b><br>" + escapeHtml(asset.role || "") +
+      (asset.behavior_label ? "<br>行为 " + escapeHtml(asset.behavior_label) : "") +
       "<br>航向 " + escapeHtml(Math.round(Number(asset.heading || asset.heading_deg || 0))) + "° · " +
       escapeHtml(Math.round(Number(asset.speed_kts || 0))) + " kt" +
       (/^(air|space)$/.test(String(asset.domain || "")) ? "<br>高度 " +
         escapeHtml(Math.round(Number((asset.position || {}).alt_ft || asset.alt_ft || 0))) + " ft" : "") +
-      (memberCount > 1 ? "<br>蜂群规模 " + escapeHtml(memberCount) + " 架" : "") +
+      (memberCount > 1 ? "<br>" + formationLabel + " " + escapeHtml(memberCount) + " " + memberUnit : "") +
       sensorCapabilityHtml(asset);
+  }
+
+  function renderProtectedAssets(protectedAssets, policyBufferM) {
+    protectedLayers.forEach(removeLayer);
+    protectedLayers = [];
+    (protectedAssets || []).forEach(function (asset) {
+      var lat = Number(asset.lat == null ? (asset.position || {}).lat : asset.lat);
+      var lng = Number(asset.lng == null ? (asset.lon == null ? (asset.position || {}).lng : asset.lon) : asset.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      var coreRadius = Math.max(250, Number(asset.protection_radius_m || 0));
+      var radius = coreRadius + Number(policyBufferM || 0);
+      var zone = L.circle([lat, lng], {
+        radius: radius, color: "#65d6a1", weight: 1.5, opacity: 0.75,
+        fillColor: "#1f6b50", fillOpacity: 0.12, dashArray: "7 5",
+        interactive: true,
+      }).addTo(map);
+      zone.bindTooltip(escapeHtml(asset.asset_name || "民用保护区") + " · 保护半径及武器安全缓冲", {sticky: true});
+      var coreZone = L.circle([lat, lng], {
+        radius: coreRadius, color: "#8af0bd", weight: 1.2, opacity: 0.9,
+        fillColor: "#2b8a64", fillOpacity: 0.08, interactive: false,
+      }).addTo(map);
+      var center = L.circleMarker([lat, lng], {
+        radius: 4, color: "#8af0bd", weight: 2, fillColor: "#173b2d", fillOpacity: 1,
+      }).addTo(map);
+      center.bindTooltip(escapeHtml(asset.asset_name || "民用保护区"), {
+        permanent: true, direction: "left", className: "map-resource-label civilian-label",
+      });
+      protectedLayers.push(zone, coreZone, center);
+    });
+  }
+
+  function formatSpaceTime(value) {
+    var total = Math.max(0, Math.round(Number(value || 0)));
+    var hours = Math.floor(total / 3600);
+    var minutes = Math.floor((total % 3600) / 60);
+    var seconds = total % 60;
+    return (hours ? String(hours).padStart(2, "0") + ":" : "") +
+      String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0");
+  }
+
+  function spacePassState(pass, elapsedSec) {
+    var start = Number(pass.access_start_sec || 0);
+    var end = Number(pass.access_end_sec || start);
+    if (elapsedSec < start) return {label: "预计 T+" + formatSpaceTime(start), phase: "scheduled"};
+    if (elapsedSec <= end) return {label: "过境中 · 剩余 " + formatSpaceTime(end - elapsedSec), phase: "active"};
+    return {label: "已离场 · 产品已下传", phase: "complete"};
+  }
+
+  function renderSpaceOperations(elapsedSec) {
+    if (!spaceOperationsElement) spaceOperationsElement = document.getElementById("space-operations-strip");
+    if (!spaceOperationsElement) return;
+    var operations = scenarioView && scenarioView.spaceOperations;
+    if (!operations) {
+      spaceOperationsElement.hidden = true;
+      spaceOperationsElement.replaceChildren();
+      return;
+    }
+    var elapsed = Math.max(0, Number(elapsedSec || 0));
+    var passes = operations.passes || [];
+    var selectedPass = passes.find(function (item) {
+      return elapsed >= Number(item.access_start_sec || 0) && elapsed <= Number(item.access_end_sec || 0);
+    }) || passes.find(function (item) {
+      return elapsed < Number(item.access_start_sec || 0);
+    }) || passes[passes.length - 1];
+    var passState = selectedPass ? spacePassState(selectedPass, elapsed) : {label: "无计划过境", phase: "idle"};
+    var products = operations.intelligence_products || [];
+    var selectedProduct = products.filter(function (item) {
+      return elapsed >= Number(item.captured_at_sec || 0);
+    }).slice(-1)[0] || products[0];
+    var productState = "待获取";
+    if (selectedProduct && elapsed >= Number(selectedProduct.received_at_sec || selectedProduct.captured_at_sec || 0)) {
+      var remaining = Number(selectedProduct.valid_until_sec || 0) - elapsed;
+      productState = remaining > 0 ? "有效 · " + formatSpaceTime(remaining) : "需空基复核";
+    } else if (selectedProduct && elapsed >= Number(selectedProduct.captured_at_sec || 0)) {
+      productState = "处理中/下传";
+    }
+    var relay = operations.relay || {};
+    spaceOperationsElement.innerHTML =
+      '<div class="space-ops-head"><b>' + escapeHtml(operations.title || "空天支援") +
+      '</b><span>' + escapeHtml(relay.label || "中继链路在线") + '</span></div>' +
+      '<div class="space-ops-row"><strong>' + escapeHtml((selectedPass || {}).label || "侦察星过境") +
+      '</strong><em>' + escapeHtml(passState.label) + '</em></div>' +
+      '<div class="space-ops-row space-product"><strong>' + escapeHtml((selectedProduct || {}).label || "情报产品") +
+      '</strong><em>' + escapeHtml(productState) + '</em></div>' +
+      '<p class="space-ops-note">' + escapeHtml(operations.note || "卫星离场不删除已下传产品；超出有效期后必须由其他传感器复核。") + '</p>';
+    spaceOperationsElement.hidden = false;
+  }
+
+  function renderSpaceGroundTracks(tracks) {
+    spaceGroundTrackLayers.forEach(removeLayer);
+    spaceGroundTrackLayers = [];
+    (tracks || []).forEach(function (track) {
+      var points = (track.points || []).map(function (point) {
+        return [Number(point.lat), Number(point.lng == null ? point.lon : point.lng)];
+      }).filter(function (point) {
+        return Number.isFinite(point[0]) && Number.isFinite(point[1]);
+      });
+      if (points.length < 2) return;
+      var line = L.polyline(points, {
+        color: track.color || "#ad9fc5",
+        weight: Number(track.weight || 1.1),
+        opacity: Number(track.opacity == null ? 0.30 : track.opacity),
+        dashArray: track.dash_array || "5 9",
+        interactive: true,
+      }).addTo(map);
+      line.bindTooltip(escapeHtml(track.label || "卫星预测星下轨迹"), {sticky: true});
+      line._amosTrackConfig = track;
+      spaceGroundTrackLayers.push(line);
+    });
+  }
+
+  function updateSpaceGroundTracks(elapsedSec) {
+    var elapsed = Math.max(0, Number(elapsedSec || 0));
+    spaceGroundTrackLayers.forEach(function (line) {
+      var track = line._amosTrackConfig || {};
+      var state = spacePassState(track, elapsed);
+      var active = state.phase === "active";
+      line.setStyle({
+        color: track.color || "#9bacc2",
+        weight: active ? Number(track.active_weight || 1.8) : Number(track.weight || 1.0),
+        opacity: active ? Number(track.active_opacity || 0.48) : Number(track.opacity == null ? 0.16 : track.opacity),
+        dashArray: active ? (track.active_dash_array || "5 7") : (track.dash_array || "3 10"),
+      });
+      line.setTooltipContent(escapeHtml(track.label || "卫星预测星下轨迹") + " · " + escapeHtml(state.label));
+    });
   }
 
   function position(item) {
@@ -127,13 +341,13 @@ window.PlatformMap = (function () {
   function ownLabel(asset) {
     var role = asset.role || asset.type || asset.id || "己方平台";
     var memberCount = Number(asset.swarm_size || asset.member_count || 0);
-    var formation = memberCount > 1 ? " · " + memberCount + "机" : "";
+    var formation = memberCount > 1 ? " · " + memberCount + (asset.domain === "maritime" ? "舰" : "机") : "";
     var status = String(asset.status || "").toLowerCase();
     if (status === "staged") return role + formation + " · 待命";
     if (status === "holding") return role + formation + " · 保持";
     if (status === "unavailable") return role + formation + " · 不可用";
     if (status === "degraded") return role + formation + " · 降级";
-    if (asset.domain === "space") return role + formation + " · 星下点";
+    if (asset.domain === "space") return role + formation + " · 轨道过境";
     var speed = Number(asset.speed_kts || 0);
     if (speed <= 0) return role + formation + (asset.domain === "ground" ? " · 固定" : " · 静止");
     if (asset.domain === "ground") return role + formation + " · " + Math.round(speed * 1.852) + " km/h";
@@ -142,9 +356,62 @@ window.PlatformMap = (function () {
 
   function ownTrailStyle(asset) {
     var kind = ownKind(asset);
-    if (kind === "satellite") return {color: "#b98cff", points: 360, smooth: true};
-    if (kind === "uavSwarm") return {color: "#81e6ff", points: 180, smooth: true};
-    return {color: "#42d7ff", points: asset.domain === "air" ? 90 : 180, smooth: asset.domain === "air"};
+    if (kind === "satellite") return {color: "#b8a7cf", opacity: 0.20, weight: 1.1, dashArray: "4 8", points: 36, smooth: true};
+    if (kind === "uavSwarm" || kind === "loiterUav") return {color: "#9bbdc7", opacity: 0.32, weight: 1.25, dashArray: "3 5", points: 48, smooth: true};
+    if (asset.domain === "air") return {color: "#9fb9c1", opacity: 0.30, weight: 1.25, dashArray: "4 6", points: 54, smooth: true};
+    return {color: "#8eabb3", opacity: 0.25, weight: 1.15, dashArray: "2 6", points: 60, smooth: false};
+  }
+
+  function visualAssetPosition(marker, asset, actual) {
+    if (!marker || String(asset.domain || "") !== "space") return actual;
+    var factor = Number(scenarioView && scenarioView.spaceVisualSpeedFactor);
+    if (!Number.isFinite(factor)) factor = 1;
+    factor = Math.max(0.01, Math.min(1, factor));
+    marker._amosActualPosition = {lat: actual.lat, lng: actual.lng};
+    if (factor >= 0.999) return actual;
+    var displayed = marker.getLatLng();
+    var deltaLat = actual.lat - displayed.lat;
+    var deltaLng = actual.lng - displayed.lng;
+    if (deltaLng > 180) deltaLng -= 360;
+    if (deltaLng < -180) deltaLng += 360;
+    return {
+      lat: displayed.lat + deltaLat * factor,
+      lng: displayed.lng + deltaLng * factor,
+    };
+  }
+
+  function isPresentationAssetListed(key, asset) {
+    if (!scenarioView || !Array.isArray(scenarioView[key])) return true;
+    var id = String(asset.id || asset.asset_id || "");
+    return scenarioView[key].indexOf(id) !== -1;
+  }
+
+  function syncOwnLabel(marker, asset) {
+    if (!marker) return;
+    if (!isPresentationAssetListed("labelAssetIds", asset)) {
+      if (marker.getTooltip && marker.getTooltip()) marker.unbindTooltip();
+      marker._amosTooltipContent = "";
+      return;
+    }
+    var label = ownLabel(asset);
+    if (!marker.getTooltip || !marker.getTooltip()) {
+      bindLabel(marker, label, "own-label", "center");
+    } else {
+      updateMarkerLabel(marker, label);
+    }
+  }
+
+  function ownIconSize(asset) {
+    var kind = ownKind(asset);
+    if (kind === "satellite") return 22;
+    if (kind === "commandShip" || kind === "aircraftCarrier") return 30;
+    if (kind === "j16" || kind === "wz10") return 27;
+    if (kind === "uavSwarm" || kind === "loiterUav") return 25;
+    return 26;
+  }
+
+  function trackIconSize(kind) {
+    return /MissileSite|destroyed|impact/.test(String(kind)) ? 29 : 26;
   }
 
   function trackLabel(track) {
@@ -241,7 +508,8 @@ window.PlatformMap = (function () {
     var mapSize = map.getSize();
     var iconRects = markers.map(function (marker) {
       var point = map.latLngToContainerPoint(marker.getLatLng());
-      return {left: point.x - 21, top: point.y - 21, right: point.x + 21, bottom: point.y + 21};
+      var radius = Math.max(12, Number(marker._amosIconSize || 26) / 2 + 4);
+      return {left: point.x - radius, top: point.y - radius, right: point.x + radius, bottom: point.y + radius};
     });
     var occupied = [];
     markers.sort(function (first, second) {
@@ -434,13 +702,14 @@ window.PlatformMap = (function () {
     var control = L.control({position: "bottomleft"});
     control.onAdd = function () {
       var div = L.DomUtil.create("div", "map-coordinate-control");
-      div.textContent = "22.2800°N  121.3200°E";
+      div.textContent = "鼠标坐标：—";
       map.on("mousemove", function (event) {
         var lat = event.latlng.lat;
         var lng = event.latlng.lng;
-        div.textContent = Math.abs(lat).toFixed(4) + "°" + (lat >= 0 ? "N" : "S") + "  " +
+        div.textContent = "鼠标坐标：" + Math.abs(lat).toFixed(4) + "°" + (lat >= 0 ? "N" : "S") + "  " +
           Math.abs(lng).toFixed(4) + "°" + (lng >= 0 ? "E" : "W");
       });
+      map.on("mouseout movestart", function () { div.textContent = "鼠标坐标：—"; });
       return div;
     };
     control.addTo(map);
@@ -486,6 +755,7 @@ window.PlatformMap = (function () {
         reliefLayers[name]._amosReliefKind = kind;
         reliefLayers[name]._amosMinZoom = Number(config.min_zoom == null ? -Infinity : config.min_zoom);
         reliefLayers[name]._amosMaxZoom = Number(config.max_zoom == null ? Infinity : config.max_zoom);
+        reliefLayers[name]._amosBounds = L.latLngBounds(imageBounds);
       });
       addReliefLegend();
       applyLayerVisibility();
@@ -505,22 +775,17 @@ window.PlatformMap = (function () {
       minZoom: 5,
       maxZoom: 14,
       preferCanvas: false,
+      maxBounds: [[8, 105], [35, 135]],
+      maxBoundsViscosity: 1,
     }).setView([23.50, 121.00], 8);
-    map.on("zoomend", function () { applyLayerVisibility(); scheduleOwnLabelLayout(); });
-    map.on("moveend resize", scheduleOwnLabelLayout);
+    map.on("zoomend", function () { applyLayerVisibility(); updateNaturalTerrain(); scheduleOwnLabelLayout(); });
+    map.on("moveend", function () { applyLayerVisibility(); updateNaturalTerrain(); scheduleOwnLabelLayout(); });
+    map.on("resize", scheduleOwnLabelLayout);
     createPane("terrainPane", 205);
     createPane("hillshadePane", 210);
     createPane("contourPane", 215);
-    protomapsL.leafletLayer({
-      url: "/static/tiles/taiwan-southeast-tactical.pmtiles",
-      flavor: "dark",
-      lang: "zh",
-      minZoom: 5,
-      maxNativeZoom: 12,
-      maxZoom: 14,
-      noWrap: true,
-      attribution: 'Protomaps · © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-    }).addTo(map);
+    createPane("mapDetailPane", 220);
+    createBaseMapLayer();
     L.control.scale({metric: true, imperial: true, maxWidth: 150, position: "bottomleft"}).addTo(map);
     addCoordinateControl();
     addNorthControl();
@@ -671,6 +936,9 @@ window.PlatformMap = (function () {
     removeCollection(trackMarkers);
     removeCollection(ownTrails);
     removeCollection(trackTrails);
+    removeCollection(coordinationLayers);
+    protectedLayers.forEach(removeLayer);
+    spaceGroundTrackLayers.forEach(removeLayer);
     clearSensors();
     ownMarkers = {};
     weaponMarkers = {};
@@ -680,6 +948,9 @@ window.PlatformMap = (function () {
     trackMarkers = {};
     ownTrails = {};
     trackTrails = {};
+    coordinationLayers = {};
+    protectedLayers = [];
+    spaceGroundTrackLayers = [];
   }
 
   function loadScenario(scenario) {
@@ -688,20 +959,29 @@ window.PlatformMap = (function () {
     var theaterRelief = theaterId === "taiwan_southeast_convoy_corridor"
       ? "/static/assets/maps/taiwan-se-relief/manifest.json" : null;
     var configuredRelief = (scenario.map_display || {}).relief_manifest || theaterRelief;
-    if (configuredRelief && configuredRelief !== reliefManifestPath) loadRelief(configuredRelief);
+    // The new XYZ pack already contains shaded terrain and ocean relief.
+    // Do not reload the previous ETOPO overlays when changing scenarios.
     layerState = Object.assign({
       terrain: Boolean(configuredRelief),
       hillshade: Boolean(configuredRelief),
       contours: Boolean(configuredRelief),
       sensors: false,
+      coordination: true,
       ao: true,
     },
       (scenario.map_display || {}).default_layers || {});
+    layerState.terrain = false;
+    layerState.hillshade = false;
+    layerState.contours = false;
     scenarioSurface = (scenario.map_display || {}).base_surface || "maritime";
     var theater = scenario.theater || {};
     var center = theater.center || {lat: 23.50, lng: 121.00};
     var ao = theater.ao || null;
-    var focusPoints = (scenario.assets || []).map(function (asset) {
+    var mapDisplay = scenario.map_display || {};
+    var excludedDomains = mapDisplay.exclude_domains_from_focus || [];
+    var focusPoints = (scenario.assets || []).filter(function (asset) {
+      return excludedDomains.indexOf(String(asset.domain || "")) === -1;
+    }).map(function (asset) {
       var point = position(asset);
       return [point.lat, point.lng];
     }).filter(function (point) { return Number.isFinite(point[0]) && Number.isFinite(point[1]); });
@@ -710,24 +990,49 @@ window.PlatformMap = (function () {
       var padded = L.latLngBounds(focusPoints).pad(0.16);
       operationalBounds = [[padded.getSouth(), padded.getWest()], [padded.getNorth(), padded.getEast()]];
     }
+    var configuredFocus = mapDisplay.focus_bounds;
+    if (configuredFocus) {
+      operationalBounds = [[configuredFocus.south, configuredFocus.west], [configuredFocus.north, configuredFocus.east]];
+    }
     scenarioView = {
       center: [center.lat, center.lng],
       zoom: Number(theater.zoom || 12),
+      excludeDomains: excludedDomains.slice(),
+      fixedBounds: Boolean(configuredFocus),
+      labelAssetIds: Array.isArray(mapDisplay.label_asset_ids) ? mapDisplay.label_asset_ids.slice() : null,
+      trailAssetIds: Array.isArray(mapDisplay.trail_asset_ids) ? mapDisplay.trail_asset_ids.slice() : null,
+      trailWindowSec: Math.max(60, Number(mapDisplay.trail_window_sec || 480)),
+      trackTrailWindowSec: Math.max(60, Number(mapDisplay.track_trail_window_sec || 600)),
+      spaceVisualSpeedFactor: Number(mapDisplay.space_visual_speed_factor == null ? 1 : mapDisplay.space_visual_speed_factor),
+      spaceOperations: scenario.space_operations || null,
+      spaceNodeAssetIds: Array.isArray(mapDisplay.space_node_asset_ids) ? mapDisplay.space_node_asset_ids.slice() : [],
       // The AO remains visible as a layer, while reset/focus frames the
       // currently deployed own-force envelope so movement is legible.
       bounds: operationalBounds || (ao ? [[ao.south, ao.west], [ao.north, ao.east]] : null),
     };
     renderTheaterAO(theater);
+    renderSpaceGroundTracks(mapDisplay.space_ground_tracks || []);
+    updateSpaceGroundTracks(0);
+    renderSpaceOperations(0);
+    renderProtectedAssets(
+      scenario.protected_assets || [],
+      Number(((scenario.engagement_policy || {}).protected_asset_buffer_nm) || 0) * 1852
+    );
     (scenario.assets || []).forEach(function (asset, assetIndex) {
+      // Spacecraft are time-windowed operational resources.  Their static
+      // pre-run coordinates are not a live position and must not flash on map.
+      if (String(asset.domain || "") === "space") return;
       var id = asset.asset_id || asset.id;
       var pos = position(asset);
+      var assetIconSize = ownIconSize(asset);
       var marker = L.marker([pos.lat, pos.lng], {
-        icon: icon(ownKind(asset), asset.heading || asset.heading_deg, 34),
+        icon: icon(ownKind(asset), asset.heading || asset.heading_deg, assetIconSize),
       }).addTo(map);
       marker._amosIconKind = ownKind(asset);
-      marker._amosIconSize = 34;
+      marker._amosIconSize = assetIconSize;
       marker._amosLabelSlot = assetIndex;
-      bindLabel(marker, ownLabel(asset), "own-label", "center");
+      marker._amosActualPosition = {lat: pos.lat, lng: pos.lng};
+      syncOwnLabel(marker, asset);
       updateMarkerPopup(marker, assetPopupHtml(asset));
       ownMarkers[id] = marker;
     });
@@ -780,10 +1085,22 @@ window.PlatformMap = (function () {
     return segment;
   }
 
-  function renderTrail(store, id, rawPoints, color, maxPoints, smooth) {
-    var points = (rawPoints || []).filter(function (item) {
+  function renderTrail(store, id, rawPoints, style, maxPoints, smooth, windowSec) {
+    var visualStyle = typeof style === "string" ? {color: style} : (style || {});
+    var sourcePoints = (rawPoints || []).filter(function (item) {
       return item && item.lat != null && (item.lng != null || item.lon != null);
-    }).slice(-(maxPoints || 120)).map(function (item) {
+    });
+    var latestTime = sourcePoints.reduce(function (result, item) {
+      var value = Number(item.sim_time);
+      return Number.isFinite(value) ? Math.max(result, value) : result;
+    }, -Infinity);
+    if (Number.isFinite(latestTime) && Number.isFinite(Number(windowSec))) {
+      var cutoff = latestTime - Number(windowSec);
+      sourcePoints = sourcePoints.filter(function (item) {
+        return !Number.isFinite(Number(item.sim_time)) || Number(item.sim_time) >= cutoff;
+      });
+    }
+    var points = sourcePoints.slice(-(maxPoints || 120)).map(function (item) {
       return [Number(item.lat), Number(item.lng == null ? item.lon : item.lng)];
     }).filter(function (item, index, rows) {
       if (!Number.isFinite(item[0]) || !Number.isFinite(item[1])) return false;
@@ -791,14 +1108,22 @@ window.PlatformMap = (function () {
     });
     points = latestContinuousTrail(points, smooth ? 12 : 6);
     if (smooth) points = smoothTrailPoints(points, 2);
-    var geometrySignature = color + ":" + JSON.stringify(points);
+    var lineStyle = {
+      color: visualStyle.color || "#9fb9c1",
+      weight: Number(visualStyle.weight || 1.2),
+      opacity: Number(visualStyle.opacity == null ? 0.28 : visualStyle.opacity),
+      dashArray: visualStyle.dashArray || null,
+      lineCap: "round",
+      lineJoin: "round",
+    };
+    var geometrySignature = JSON.stringify(lineStyle) + ":" + JSON.stringify(points);
     if (points.length > 1) {
       if (store[id]) {
         if (store[id]._amosGeometrySignature === geometrySignature) return;
         store[id].setLatLngs(points);
-        store[id].setStyle({color: color});
+        store[id].setStyle(lineStyle);
       } else {
-        store[id] = L.polyline(points, {color: color, weight: 2, opacity: 0.65}).addTo(map);
+        store[id] = L.polyline(points, lineStyle).addTo(map);
         store[id].bindTooltip("历史航迹");
       }
       store[id]._amosGeometrySignature = geometrySignature;
@@ -808,12 +1133,72 @@ window.PlatformMap = (function () {
     }
   }
 
-  function updateLiveState(assets, weapons, tracks, elapsedSec, events) {
-    var liveFocusPoints = (assets || []).filter(sensorOperational).map(function (asset) {
+  function renderCoordinationLinks(links) {
+    var styles = {
+      intelligence: {color: "#b88cff", dashArray: "7 6", weight: 2.2},
+      command: {color: "#ffe178", dashArray: "3 5", weight: 2.3},
+      weapon: {color: "#ff695c", dashArray: "10 5", weight: 2.8},
+    };
+    var labels = {intelligence: "情报共享链", command: "指挥控制链", weapon: "协同武器链"};
+    var seen = {};
+    (links || []).forEach(function (link) {
+      var id = String(link.link_id || "");
+      var source = position(link.source_position || {});
+      var target = position(link.target_position || {});
+      if (!id || !Number.isFinite(source.lat) || !Number.isFinite(source.lng) ||
+          !Number.isFinite(target.lat) || !Number.isFinite(target.lng)) return;
+      seen[id] = true;
+      var type = String(link.link_type || "coordination");
+      var style = styles[type] || {color: "#78dce8", dashArray: "6 6", weight: 2};
+      var opacity = layerState.coordination ? (link.status === "degraded" ? 0.35 : 0.78) : 0;
+      var points = [[source.lat, source.lng], [target.lat, target.lng]];
+      var signature = JSON.stringify(points) + ":" + type + ":" + link.status;
+      if (!coordinationLayers[id]) {
+        coordinationLayers[id] = L.polyline(points, {
+          color: style.color,
+          weight: style.weight,
+          opacity: opacity,
+          dashArray: style.dashArray,
+          className: "coordination-link coordination-" + type,
+          interactive: true,
+        }).addTo(map);
+        coordinationLayers[id].bindTooltip(
+          escapeHtml(link.label || labels[type] || "协同链路") + " · " + escapeHtml(link.status || "active"),
+          {sticky: true}
+        );
+      } else if (coordinationLayers[id]._amosSignature !== signature) {
+        coordinationLayers[id].setLatLngs(points);
+        coordinationLayers[id].setStyle({
+          color: style.color, weight: style.weight, opacity: opacity, dashArray: style.dashArray,
+        });
+        coordinationLayers[id].setTooltipContent(
+          escapeHtml(link.label || labels[type] || "协同链路") + " · " + escapeHtml(link.status || "active")
+        );
+      } else {
+        coordinationLayers[id].setStyle({opacity: opacity});
+      }
+      coordinationLayers[id]._amosBaseOpacity = link.status === "degraded" ? 0.35 : 0.78;
+      coordinationLayers[id]._amosSignature = signature;
+    });
+    Object.keys(coordinationLayers).forEach(function (id) {
+      if (!seen[id]) {
+        removeLayer(coordinationLayers[id]);
+        delete coordinationLayers[id];
+      }
+    });
+  }
+
+  function updateLiveState(assets, weapons, tracks, elapsedSec, events, coordinationLinks) {
+    updateSpaceGroundTracks(elapsedSec);
+    renderSpaceOperations(elapsedSec);
+    var liveExcludedDomains = scenarioView && scenarioView.excludeDomains || [];
+    var liveFocusPoints = (assets || []).filter(sensorOperational).filter(function (asset) {
+      return liveExcludedDomains.indexOf(String(asset.domain || "")) === -1;
+    }).map(function (asset) {
       var point = position(asset);
       return [point.lat, point.lng];
     }).filter(function (point) { return Number.isFinite(point[0]) && Number.isFinite(point[1]); });
-    if (scenarioView) {
+    if (scenarioView && !scenarioView.fixedBounds) {
       if (liveFocusPoints.length > 1) {
         var liveBounds = L.latLngBounds(liveFocusPoints).pad(0.16);
         scenarioView.liveBounds = [
@@ -828,23 +1213,42 @@ window.PlatformMap = (function () {
     var seenAssets = {};
     (assets || []).forEach(function (asset, assetIndex) {
       var id = asset.id || asset.asset_id;
+      if (scenarioView && scenarioView.spaceNodeAssetIds.indexOf(String(id)) !== -1) {
+        if (ownMarkers[id]) {
+          removeLayer(ownMarkers[id]);
+          removeLayer(ownTrails[id]);
+          delete ownMarkers[id];
+          delete ownTrails[id];
+        }
+        return;
+      }
       var pos = position(asset);
       seenAssets[id] = true;
       if (!ownMarkers[id]) {
-        ownMarkers[id] = L.marker([pos.lat, pos.lng], {icon: icon(ownKind(asset), asset.heading, 34)}).addTo(map);
+        var assetIconSize = ownIconSize(asset);
+        ownMarkers[id] = L.marker([pos.lat, pos.lng], {icon: icon(ownKind(asset), asset.heading, assetIconSize)}).addTo(map);
         ownMarkers[id]._amosIconKind = ownKind(asset);
-        ownMarkers[id]._amosIconSize = 34;
+        ownMarkers[id]._amosIconSize = assetIconSize;
         ownMarkers[id]._amosLabelSlot = assetIndex;
-        bindLabel(ownMarkers[id], ownLabel(asset), "own-label", "center");
+        ownMarkers[id]._amosActualPosition = {lat: pos.lat, lng: pos.lng};
+        syncOwnLabel(ownMarkers[id], asset);
       } else {
         ownMarkers[id]._amosLabelSlot = assetIndex;
-        moveMarker(ownMarkers[id], pos);
-        updateMarkerIcon(ownMarkers[id], ownKind(asset), asset.heading, 34);
-        updateMarkerLabel(ownMarkers[id], ownLabel(asset));
+        moveMarker(ownMarkers[id], visualAssetPosition(ownMarkers[id], asset, pos));
+        updateMarkerIcon(ownMarkers[id], ownKind(asset), asset.heading, ownIconSize(asset));
+        syncOwnLabel(ownMarkers[id], asset);
       }
       updateMarkerPopup(ownMarkers[id], assetPopupHtml(asset));
-      var trailStyle = ownTrailStyle(asset);
-      renderTrail(ownTrails, id, asset.history_path, trailStyle.color, trailStyle.points, trailStyle.smooth);
+      if (isPresentationAssetListed("trailAssetIds", asset)) {
+        var trailStyle = ownTrailStyle(asset);
+        renderTrail(
+          ownTrails, id, asset.history_path, trailStyle, trailStyle.points,
+          trailStyle.smooth, scenarioView && scenarioView.trailWindowSec
+        );
+      } else if (ownTrails[id]) {
+        removeLayer(ownTrails[id]);
+        delete ownTrails[id];
+      }
       updateSensorFootprints(asset);
     });
     Object.keys(ownMarkers).forEach(function (id) {
@@ -879,6 +1283,9 @@ window.PlatformMap = (function () {
         return;
       }
       if (status === "aborted") return;
+      // A time-on-target member remains a plan until its scheduled release;
+      // do not place a live weapon symbol at the carrier's position early.
+      if (status === "scheduled") return;
       seenWeapons[id] = true;
       if (!weaponMarkers[id]) {
         weaponMarkers[id] = L.marker([pos.lat, pos.lng], {
@@ -915,9 +1322,10 @@ window.PlatformMap = (function () {
       if (kind === "destroyed") destroyedTrackIds[id] = true;
       seenTracks[id] = true;
       if (!trackMarkers[id]) {
-        trackMarkers[id] = L.marker([pos.lat, pos.lng], {icon: icon(kind, heading, 34)}).addTo(map);
+        var currentTrackIconSize = trackIconSize(kind);
+        trackMarkers[id] = L.marker([pos.lat, pos.lng], {icon: icon(kind, heading, currentTrackIconSize)}).addTo(map);
         trackMarkers[id]._amosIconKind = kind;
-        trackMarkers[id]._amosIconSize = 34;
+        trackMarkers[id]._amosIconSize = currentTrackIconSize;
         trackMarkers[id]._amosTrackKind = kind;
         trackMarkers[id]._amosLabelDirection = trackIndex % 2 === 0 ? "right" : "left";
         bindLabel(
@@ -928,7 +1336,7 @@ window.PlatformMap = (function () {
       } else {
         moveMarker(trackMarkers[id], pos);
         if (trackMarkers[id]._amosTrackKind !== kind) {
-          updateMarkerIcon(trackMarkers[id], kind, heading, 34);
+          updateMarkerIcon(trackMarkers[id], kind, heading, trackIconSize(kind));
           trackMarkers[id].unbindTooltip();
           bindLabel(
             trackMarkers[id], trackLabel(track),
@@ -937,7 +1345,7 @@ window.PlatformMap = (function () {
           );
           trackMarkers[id]._amosTrackKind = kind;
         } else {
-          updateMarkerIcon(trackMarkers[id], kind, heading, 34);
+          updateMarkerIcon(trackMarkers[id], kind, heading, trackIconSize(kind));
           updateMarkerLabel(trackMarkers[id], trackLabel(track));
         }
       }
@@ -945,7 +1353,10 @@ window.PlatformMap = (function () {
         escapeHtml(id) + "<br>融合置信度 " +
         escapeHtml(track.confidence == null ? "—" : track.confidence) + "<br>分析状态 " +
         escapeHtml(trackAssessmentLabel(track)));
-      renderTrail(trackTrails, id, track.history_path, trackTrailColor(kind), 120);
+      renderTrail(
+        trackTrails, id, track.history_path, trackTrailStyle(kind), 48, true,
+        scenarioView && scenarioView.trackTrailWindowSec
+      );
     });
     Object.keys(trackMarkers).forEach(function (id) {
       if (!seenTracks[id]) {
@@ -954,6 +1365,7 @@ window.PlatformMap = (function () {
       }
     });
     updateDestroyedImpactMarkers(events, destroyedTrackIds);
+    renderCoordinationLinks(coordinationLinks);
   }
 
   function focusScenarioView() {
@@ -982,13 +1394,36 @@ window.PlatformMap = (function () {
 
   function applyLayerVisibility(name) {
     if (!name || name === "terrain" || name === "hillshade" || name === "contours") {
-      var reliefOpacity = {terrain: 0.48, hillshade: 0.58, contours: 0.74};
+      var reliefOpacity = {terrain: 0, hillshade: 0, contours: 0};
       var zoom = map ? map.getZoom() : 0;
+      // Fine raster contours compete with symbols at theater scale.
+      reliefOpacity.contours *= Math.max(0, Math.min(1, (zoom - 8) / 3));
+      var viewBounds = map ? map.getBounds() : null;
+      var layersByKind = {};
       Object.keys(reliefLayers).forEach(function (layerName) {
         var layer = reliefLayers[layerName];
         var kind = layer._amosReliefKind || layerName;
-        var inZoomRange = zoom >= layer._amosMinZoom && zoom <= layer._amosMaxZoom;
-        layer.setOpacity(layerState[kind] && inZoomRange ? reliefOpacity[kind] : 0);
+        if (!layersByKind[kind]) layersByKind[kind] = [];
+        layersByKind[kind].push(layer);
+      });
+      Object.keys(layersByKind).forEach(function (kind) {
+        var candidates = layersByKind[kind].filter(function (layer) {
+          return !viewBounds || !layer._amosBounds || layer._amosBounds.contains(viewBounds);
+        });
+        candidates.sort(function (left, right) {
+          function zoomDistance(layer) {
+            if (zoom < layer._amosMinZoom) return layer._amosMinZoom - zoom;
+            if (zoom > layer._amosMaxZoom) return zoom - layer._amosMaxZoom;
+            return 0;
+          }
+          var distanceDelta = zoomDistance(left) - zoomDistance(right);
+          if (distanceDelta) return distanceDelta;
+          return right._amosMinZoom - left._amosMinZoom;
+        });
+        var selected = candidates[0] || null;
+        layersByKind[kind].forEach(function (layer) {
+          layer.setOpacity(layerState[kind] && layer === selected ? reliefOpacity[kind] : 0);
+        });
       });
       if (reliefLegend && reliefLegend.getContainer()) {
         reliefLegend.getContainer().style.display = layerState.terrain ? "block" : "none";
@@ -1008,6 +1443,13 @@ window.PlatformMap = (function () {
         });
       });
     }
+    if (!name || name === "coordination") {
+      Object.keys(coordinationLayers).forEach(function (id) {
+        coordinationLayers[id].setStyle({
+          opacity: layerState.coordination ? coordinationLayers[id]._amosBaseOpacity || 0.78 : 0,
+        });
+      });
+    }
   }
 
   return {
@@ -1020,6 +1462,8 @@ window.PlatformMap = (function () {
     focusScenarioView: focusScenarioView,
     invalidateSize: invalidateSize,
     toggleLayer: toggleLayer,
+    toggleMapLabels: toggleMapLabels,
+    getMapLabelsVisible: function () { return mapLabelsVisible; },
     getLayerState: function () { return Object.assign({}, layerState); },
     applyLayerVisibility: applyLayerVisibility,
     loadRelief: loadRelief,

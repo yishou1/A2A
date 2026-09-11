@@ -1128,6 +1128,52 @@ def test_submit_route_summarizes_verified_gateway_package(monkeypatch) -> None:
     assert submission["package"]["verified"] is True
 
 
+def test_gateway_submission_rejects_an_unverified_package(monkeypatch) -> None:
+    from amos_platform.api.routes import a2a_routes
+
+    class UnverifiedGateway:
+        mode = "gateway"
+
+        def build_workflow_payload(self, *_args, **_kwargs):
+            return sample_payload()
+
+        def build_backend_submission(self, _mission, *, engine, overrides):
+            return {
+                "schema_version": "amos.commander.gateway.submit.v1",
+                "run_id": engine.clock["run_id"],
+                "chain_id": "maritime-convoy-air-defense:situation-analysis",
+                "workflow": overrides.get("workflow", "bpel"),
+            }
+
+        def submit_workflow(self, _payload):
+            return {
+                "workflow_id": "wf-unverified-package",
+                "status": "queued",
+                "package_id": "pkg-unverified",
+                "package_checksum": "0" * 64,
+            }
+
+        def get_submission_package(self, _package_id, _checksum):
+            return {}, False
+
+    monkeypatch.setattr(a2a_routes, "get_bridge", lambda: UnverifiedGateway())
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+    client.post("/api/v1/sim/reset", json={"scenario_id": "maritime-convoy-air-defense"})
+
+    response = client.post(
+        "/api/v1/a2a/workflows/submit",
+        json={"scenario_id": "maritime-convoy-air-defense", "sim_context": True},
+    )
+    payload = response.get_json()
+
+    assert response.status_code == 502
+    assert "完整性校验失败" in payload["error"]
+    assert payload["data"]["amos_submission"]["accepted"] is False
+    assert payload["data"]["amos_submission"]["package"]["verified"] is False
+
+
 def test_ambiguous_backend_track_is_not_silently_applied() -> None:
     from amos_platform.agents.a2a.commander_projection import apply_commander_assessments
     from amos_platform.fusion.track_fusion import FusedTrack

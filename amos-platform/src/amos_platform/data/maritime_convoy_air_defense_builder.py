@@ -230,7 +230,7 @@ def build_maritime_convoy_air_defense_scenario() -> dict[str, Any]:
         "description": "验证两个未知海面目标从发现、定位、跟踪、识别、目标选择、授权攻击到毁伤评估的完整 F2T2EA 杀伤链，并以渔船目标检验交战规则和附带风险控制。",
         "scenario_type": "scripted_agent_demo",
         "theater": {"theater_id": "taiwan_southeast_convoy_corridor", "name": "台湾东南外海护航仿真区", "location_profile": "fictional_training_area", "center": {"lat": 22.28, "lng": 121.32}, "zoom": 10, "ao": {"north": 22.75, "south": 21.85, "east": 121.78, "west": 120.84}},
-        "map_display": {"default_layers": {"sensors": False, "ao": True}, "track_style": "tactical_local", "base_surface": "coastal"},
+        "map_display": {"default_layers": {"sensors": False, "ao": True, "coordination": False}, "track_style": "tactical_local", "base_surface": "coastal", "trail_window_sec": 600, "track_trail_window_sec": 720, "trail_asset_ids": ["MERCHANT-01", "MERCHANT-02", "ESCORT-01", "AEW-01"]},
         "environment": {"weather": "partly_cloudy", "visibility_nm": 20, "wind_speed_kts": 16, "wind_direction_deg": 85, "sea_state": 3, "precipitation": "none", "intermittent_jamming": True, "shipping_channel": "SIM-TAIWAN-SE-A", "restricted_area": "SIM-NO-GO-01"},
         "asset_routes": routes, "asset_route_modes": route_modes,
         "asset_motion_windows": motion_windows,

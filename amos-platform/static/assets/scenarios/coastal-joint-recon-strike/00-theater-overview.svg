@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif">
+  <rect width="960" height="540" fill="#09151f" />
+  <path d="M0 0h360l58 80-28 90 45 82-36 95 38 93-42 100H0Z" fill="#1c3430" />
+  <path d="M360 0c70 86-14 145 62 230s-23 189 40 310" fill="none" stroke="#658e83" stroke-width="2" />
+  <g fill="none" stroke="#dc8c80" stroke-width="1.6" stroke-dasharray="10 8">
+    <path d="M628 440 410 232" />
+    <path d="M674 124 420 202" />
+    <path d="M570 326 405 238" />
+    <path d="M630 373 414 245" />
+    <path d="M610 408 408 250" />
+  </g>
+  <g stroke="#21485b" opacity=".55">
+    <path d="M0 90h960M0 180h960M0 270h960M0 360h960M0 450h960" />
+    <path d="M120 0v540M240 0v540M360 0v540M480 0v540M600 0v540M720 0v540M840 0v540" />
+  </g>
+  <rect x="245" y="88" width="190" height="164" rx="12" fill="#20140d" stroke="#dc8c80" stroke-width="1.6" stroke-dasharray="9 6" />
+  <text x="265" y="135" fill="#ffd2ca" font-size="16" stroke="none">待识别陆上阵地区域</text>
+  <path d="M303 174h72v36h-72zM315 158h48v16" fill="none" stroke="#ff927f" stroke-width="1.6" />
+  <g fill="#96cbdc" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif">
+    <circle cx="676" cy="112" r="11" />
+    <text x="698" y="120" font-size="16" stroke="none">歼-16 01 待命空域</text>
+    <circle cx="580" cy="310" r="11" />
+    <text x="602" y="318" font-size="16" stroke="none">无侦-10 01 侦察航线</text>
+    <rect x="602" y="410" width="14" height="10" rx="2" fill="#d8b36a" />
+    <rect x="622" y="410" width="14" height="10" rx="2" fill="#d8b36a" />
+    <text x="650" y="417" font-size="14" stroke="none">攻击无人机 01 / 02 · 舰载待命</text>
+    <path d="M610 442h58l-14 24h-30Z" fill="#0d303c" stroke="#75c9ad" stroke-width="1.6" />
+    <text x="690" y="462" font-size="16" stroke="none">海上联合指挥舰 01</text>
+  </g>
+  <rect x="0" y="0" width="960" height="66" fill="#09151f" opacity=".94" />
+  <text x="32" y="43" fill="#e2edf4" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="600" stroke="none">海上对陆协同任务 · 初始态势</text>
+</svg>

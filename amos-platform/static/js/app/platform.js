@@ -36,6 +36,7 @@ window.Platform = (function () {
   var authorizationTrackId = null;
   var authorizationMode = "fire";
   var authorizationAssetId = null;
+  var authorizationWeaponName = null;
   var authorizationSubmitting = false;
   var authorizationPreviousFocus = null;
   var storyHeroGeneration = 0;
@@ -46,6 +47,7 @@ window.Platform = (function () {
   var pendingSpeedRequests = 0;
   var speedControlLocked = false;
   var speedResumeValue = 1;
+  var mediaPreviousFocus = null;
 
   function escapeHtml(value) {
     return String(value == null ? "" : value)
@@ -122,7 +124,7 @@ window.Platform = (function () {
         button.type = "button";
         button.className = "story-media-item available story-item-enter";
         button.dataset.storyMediaId = mediaId;
-        button.innerHTML = '<img alt=""><span></span>';
+        button.innerHTML = '<img alt=""><b class="story-media-title"></b><span></span>';
         button.addEventListener("animationend", function () {
           button.classList.remove("story-item-enter");
         }, {once: true});
@@ -133,6 +135,8 @@ window.Platform = (function () {
       var uri = mediaUri(item);
       if (image.getAttribute("src") !== uri) image.setAttribute("src", uri);
       image.alt = item.title || mediaId;
+      button.querySelector(".story-media-title").textContent = item.title || mediaId;
+      button.title = item.title || mediaId;
       var labels = {sar: "SAR", eo_ir: "EO / IR", ir: "IR", telemetry: "数据产品", radar: "RADAR"};
       button.querySelector("span").textContent =
         (labels[item.modality] || String(item.modality || "INPUT").toUpperCase()) +
@@ -189,8 +193,9 @@ window.Platform = (function () {
       var activeElement = existing[nextActiveId] || Array.from(
         root.querySelectorAll("[data-story-cue-id]")
       ).find(function (element) { return element.dataset.storyCueId === nextActiveId; });
-      if (activeElement) activeElement.scrollIntoView({
-        block: "nearest", behavior: prefersReducedMotion() ? "auto" : "smooth"
+      if (activeElement) root.scrollTo({
+        top: root.scrollTop + activeElement.getBoundingClientRect().top - root.getBoundingClientRect().top,
+        behavior: prefersReducedMotion() ? "auto" : "smooth"
       });
     }
     activeStoryCueId = nextActiveId;
@@ -214,6 +219,25 @@ window.Platform = (function () {
   function errorMessage(error) {
     if (!error) return "操作失败";
     return error.message || error.detail || String(error);
+  }
+
+  function directorAnalysisFailure(state) {
+    var checkpoint = state && state.current_checkpoint;
+    var analysisStatus = checkpoint && String(checkpoint.analysis_status || "").toLowerCase();
+    if ([
+      "submission_failed", "submission_unavailable", "submission_unverified", "failed"
+    ].indexOf(analysisStatus) < 0) return null;
+    var submission = checkpoint && checkpoint.submission;
+    return checkpoint.analysis_error || (submission && submission.error) || state.last_error || "当前检查点分析失败";
+  }
+
+  function renderDirectorFeedback(state) {
+    var failure = directorAnalysisFailure(state);
+    if (!failure) return;
+    document.getElementById("status-text").textContent = "分析失败：" + failure + "；请重置场景后重试";
+    document.getElementById("mode-tag").textContent = "分析失败";
+    var storyStatus = document.getElementById("story-agent-status");
+    if (storyStatus) storyStatus.textContent = "分析失败";
   }
 
   function directorOwnsLiveUpdates(state) {
@@ -303,8 +327,9 @@ window.Platform = (function () {
   function formatSummary(value, suffix) {
     if (value == null || value === "") return "未提供";
     if (Array.isArray(value)) {
-      return value.length ? value.map(function (entry) { return String(entry); }).join("–") + suffix : "未提供";
+      return value.length ? value.map(function (entry) { return formatSummary(entry, ""); }).join("–") + suffix : "未提供";
     }
+    if (typeof value === "number") return Number.isFinite(value) ? String(Math.round(value * 100) / 100) + suffix : "未提供";
     return String(value) + suffix;
   }
 
@@ -417,7 +442,7 @@ window.Platform = (function () {
     var activeMedia = cueMedia[cueMedia.length - 1] || availableMedia[availableMedia.length - 1] || null;
     currentMediaId = activeMedia && activeMedia.media_id;
 
-    document.getElementById("story-title").textContent = "场景态势";
+    document.getElementById("story-title").textContent = "当前资料";
     document.getElementById("story-phase-badge").textContent = cue && cue.phase || "READY";
     document.getElementById("story-current-title").textContent = activeMedia && activeMedia.title ||
       (cue && cue.title || "等待观测数据");
@@ -444,9 +469,9 @@ window.Platform = (function () {
     if (!item || Number(item.at_sec || 0) > elapsed) return;
     var source = sourceMetadata(item);
     var sourceLabels = {
-      asset: "平台载荷", external_source: "外部预采集资料",
+      asset: "仿真平台资料", external_source: "外部预采集资料",
       simulation_processor: "Simulation 当前状态派生", command_system: "Commander 工作流",
-      sensor_observation: "平台载荷", derived_current_state: "Simulation 当前状态派生",
+      sensor_observation: "仿真观测资料", derived_current_state: "仿真状态派生资料",
       external_precollected: "外部预采集资料", commander_workflow: "Commander 工作流"
     };
     var pose = source.platformPose || {};
@@ -463,6 +488,7 @@ window.Platform = (function () {
       "<b>产品来源：</b>" + escapeHtml(sourceLabels[source.sourceKind] || source.sourceKind) + "　" +
       "<b>观测记录：</b>" + escapeHtml(source.observationCount) + "　" +
       "<b>Capture ID：</b>" + escapeHtml(source.captureId || "未提供") + "<br>" +
+      '<details class="presentation-details"><summary>采集参数与消费关系</summary>' +
       "<b>平台位置：</b>" + escapeHtml(location) + "　" +
       "<b>高度：</b>" + escapeHtml(formatSummary(pose.alt_ft, " ft")) + "　" +
       "<b>航向：</b>" + escapeHtml(formatSummary(pose.heading_deg, "°")) + "　" +
@@ -475,19 +501,23 @@ window.Platform = (function () {
       escapeHtml(formatSummary(sensorConfig.vertical_fov_deg, "°")) + "　" +
       "<b>量程：</b>" + escapeHtml(formatSummary(sensorConfig.range_nm, " NM")) + "　" +
       "<b>产品分辨率：</b>" + escapeHtml(formatResolution(sensorConfig.resolution)) + "<br>" +
-      "<b>计划消费角色：</b>" + escapeHtml(source.plannedRoles.join(" / ") || "未声明") + "　" +
-      "<b>计划模型需求：</b>" + escapeHtml(source.plannedModels.join(" / ") || "未声明") + "　" +
+      "<b>计划消费角色：</b>" + escapeHtml(source.plannedRoles.join(" / ") || "未配置") + "　" +
+      "<b>计划模型需求：</b>" + escapeHtml(source.plannedModels.join(" / ") || "未配置") + "　" +
       "<b>执行状态：</b>" + escapeHtml(source.executionEvidence === "backend_trace_required" ? "等待后端 trace 验证" : "未提供") + "<br>" +
-      escapeHtml(item.caption || item.text || "");
+      '</details>';
     var lightbox = document.getElementById("media-lightbox");
+    mediaPreviousFocus = document.activeElement;
     lightbox.classList.add("open");
     lightbox.setAttribute("aria-hidden", "false");
+    document.getElementById("media-lightbox-close").focus();
   }
 
   function closeMedia() {
     var lightbox = document.getElementById("media-lightbox");
     lightbox.classList.remove("open");
     lightbox.setAttribute("aria-hidden", "true");
+    if (mediaPreviousFocus && mediaPreviousFocus.isConnected) mediaPreviousFocus.focus();
+    mediaPreviousFocus = null;
   }
 
   function openKnowledgeGraph() {
@@ -554,7 +584,7 @@ window.Platform = (function () {
       }
       document.getElementById("status-text").textContent = "场景就绪";
       var layerState = Map.getLayerState();
-      ["terrain", "hillshade", "contours", "sensors", "ao"].forEach(function (name) {
+      ["terrain", "hillshade", "contours", "sensors", "coordination", "ao"].forEach(function (name) {
         document.getElementById("btn-toggle-" + name).classList.toggle("layer-active", Boolean(layerState[name]));
       });
       refreshDirectorState();
@@ -582,14 +612,16 @@ window.Platform = (function () {
     var startButton = document.getElementById("btn-start");
     var directorStatus = currentDirectorState && currentDirectorState.director_status;
     var directorBusy = ["auto_running", "awaiting_analysis", "awaiting_authorization"].indexOf(directorStatus) >= 0;
+    var analysisFailed = Boolean(directorAnalysisFailure(currentDirectorState));
     var clock = latestState && latestState.clock || {};
     var speedLocked = speedControlLocked || Boolean(clock.speed_locked_reason) ||
       directorStatus === "awaiting_authorization";
-    startButton.disabled = running || directorBusy || !currentScenarioId;
-    startButton.textContent = directorStatus === "awaiting_analysis" ? "等待分析" :
-      (directorStatus === "awaiting_authorization" ? "等待授权" : (paused ? "继续" : "启动"));
+    startButton.disabled = running || directorBusy || analysisFailed || !currentScenarioId;
+    startButton.textContent = analysisFailed ? "分析失败" :
+      (directorStatus === "awaiting_analysis" ? "等待分析" :
+        (directorStatus === "awaiting_authorization" ? "等待授权" : (paused ? "继续" : "启动")));
     document.getElementById("btn-pause").disabled = !running;
-    document.getElementById("btn-stop").disabled = !running && !directorBusy;
+    document.getElementById("btn-stop").disabled = !running && !directorBusy && !analysisFailed;
     document.querySelectorAll(".speed-btn").forEach(function (button) {
       button.disabled = !running || speedLocked;
     });
@@ -727,6 +759,27 @@ window.Platform = (function () {
     return Number.isFinite(delay) && delay > 0 ? Math.round(delay) : 300;
   }
 
+  function engagementAction(track) {
+    var fallback = latestState && latestState.engagement_action || {};
+    var action = track && track.engagement_action || fallback;
+    var policy = currentScenario && currentScenario.engagement_policy || {};
+    var actionParticipants = Array.isArray(action.participants) ? action.participants : [];
+    var fallbackParticipants = Array.isArray(fallback.participants) ? fallback.participants : [];
+    var participants = actionParticipants.length || action.wave != null
+      ? actionParticipants : fallbackParticipants;
+    return {
+      assetId: action.asset_id || (policy.authorized_asset_ids || [])[0] || "ESCORT-01",
+      weaponName: action.weapon_name || (policy.authorized_weapons || [])[0] || "舰载反舰导弹",
+      actionLabel: action.action_label || policy.action_label || action.weapon_name ||
+        (policy.authorized_weapons || [])[0] || "舰载反舰导弹",
+      authorizationMessage: action.authorization_message || policy.authorization_message || "",
+      coordinated: Boolean(action.coordinated || (action.wave == null && fallback.coordinated)),
+      participants: participants,
+      wave: action.wave == null ? null : Number(action.wave),
+      coordinationChainId: action.coordination_chain_id || fallback.coordination_chain_id || null,
+    };
+  }
+
   function closeAuthorizationDialog() {
     var dialog = document.getElementById("authorization-dialog");
     if (!dialog || authorizationSubmitting) return;
@@ -735,6 +788,7 @@ window.Platform = (function () {
     dialog.setAttribute("aria-hidden", "true");
     authorizationTrackId = null;
     authorizationAssetId = null;
+    authorizationWeaponName = null;
     authorizationMode = "fire";
     if (authorizationPreviousFocus && document.contains(authorizationPreviousFocus)) {
       authorizationPreviousFocus.focus();
@@ -752,6 +806,7 @@ window.Platform = (function () {
     authorizationMode = options.mode || "fire";
     authorizationTrackId = String(track.id || track.track_id);
     authorizationAssetId = options.assetId || null;
+    authorizationWeaponName = options.weaponName || null;
     authorizationPreviousFocus = document.activeElement;
     document.getElementById("authorization-title").textContent =
       options.title || "武器攻击授权";
@@ -820,16 +875,37 @@ window.Platform = (function () {
       return;
     }
     var followsWarning = directorState.authorization_not_before_sec != null;
+    var action = engagementAction(target);
+    var authorizationMessage = action.authorizationMessage || (action.coordinated
+      ? "是否授权多平台组成武器链，对目标实施协同打击？"
+      : "是否授权对该目标实施武器打击？");
+    var waveLabel = Number.isFinite(action.wave) && action.wave > 0
+      ? "第" + action.wave + "波" : "";
+    var dialogTitle = waveLabel
+      ? waveLabel + "攻击授权"
+      : (action.coordinated ? "协同武器链授权" : "武器打击确认");
+    var phaseLabel = waveLabel || (action.coordinated ? "协同打击" : "打击");
     if (showAuthorizationDialog(target.id || target.track_id, followsWarning ? {
       mode: "fire",
-      title: "武器打击确认",
-      phase: "打击",
-      message: "目标未回应警告，是否授权实施武器打击？",
-      actionLabel: "拟用武器",
-      actionValue: "舰载反舰导弹",
+      assetId: action.assetId,
+      weaponName: action.weaponName,
+      title: dialogTitle,
+      phase: phaseLabel,
+      message: action.coordinated ? authorizationMessage : "目标未回应警告，是否授权实施武器打击？",
+      actionLabel: action.coordinated ? "协同武器链" : "拟用武器",
+      actionValue: action.actionLabel,
       confirmText: "确认打击",
       cancelText: "暂不打击"
-    } : {mode: "fire"})) authorizationPromptKey = key;
+    } : {
+      mode: "fire",
+      assetId: action.assetId,
+      weaponName: action.weaponName,
+      title: dialogTitle,
+      phase: phaseLabel,
+      message: authorizationMessage,
+      actionLabel: action.coordinated ? "协同武器链" : "拟用武器",
+      actionValue: action.actionLabel,
+    })) authorizationPromptKey = key;
   }
 
   function followLaunchPrompt() {
@@ -881,8 +957,8 @@ window.Platform = (function () {
         command_type: "fire",
         params: {
           track_id: trackId,
-          asset_id: "ESCORT-01",
-          weapon_name: "舰载反舰导弹",
+          asset_id: authorizationAssetId || engagementAction().assetId,
+          weapon_name: authorizationWeaponName || engagementAction().weaponName,
         },
         authorization: {approved: true, authority: "operator"},
       });
@@ -998,7 +1074,8 @@ window.Platform = (function () {
     Panels.updateWorkspace(state, currentScenario);
     Map.updateLiveState(
       state.assets || [], state.weapons || [], state.fused_tracks || [],
-      Number(clock.elapsed_sec || 0), state.kill_chain_events || []
+      Number(clock.elapsed_sec || 0), state.kill_chain_events || [],
+      state.coordination_links || []
     );
     renderStory(state.scenario_story, state);
     refreshEvidenceProducts(state);
@@ -1028,6 +1105,9 @@ window.Platform = (function () {
         ? "后端分析中，本阶段仿真继续"
         : "后端分析中，仿真保持在阶段边界";
       modeText = "分析中";
+    } else if (directorAnalysisFailure(currentDirectorState)) {
+      statusText = "分析失败：" + directorAnalysisFailure(currentDirectorState) + "；请重置场景后重试";
+      modeText = "分析失败";
     }
     document.getElementById("status-text").textContent = statusText;
     document.getElementById("mode-tag").textContent = modeText;
@@ -1114,6 +1194,19 @@ window.Platform = (function () {
     document.getElementById("btn-toggle-" + name).classList.toggle("layer-active", visible);
   }
 
+  function updateMapStyleButton(visible) {
+    var button = document.getElementById("btn-toggle-map-style");
+    if (!button) return;
+    button.classList.toggle("layer-active", visible);
+    button.setAttribute("aria-pressed", visible ? "true" : "false");
+    button.textContent = "地名";
+    button.title = visible ? "隐藏地名标注" : "显示地名标注";
+  }
+
+  function toggleMapStyle() {
+    updateMapStyleButton(Map.toggleMapLabels());
+  }
+
   function setMapExpanded(expanded) {
     var layout = document.getElementById("main-layout");
     var button = document.getElementById("btn-toggle-map-expanded");
@@ -1189,6 +1282,7 @@ window.Platform = (function () {
   function renderDirectorState(state) {
     currentDirectorState = state && Object.keys(state).length ? state : null;
     updateButtons();
+    renderDirectorFeedback(currentDirectorState);
   }
 
   function handleDirectorSubmission(state) {
@@ -1296,10 +1390,17 @@ window.Platform = (function () {
       switchScenario(this.value, {reset: true}).catch(function () {});
     });
     document.getElementById("btn-focus-map").addEventListener("click", Map.focusScenarioView);
+    document.getElementById("btn-toggle-map-style").addEventListener("click", toggleMapStyle);
+    document.getElementById("btn-expand-workspace").addEventListener("click", function () {
+      var expanded = document.getElementById("main-layout").classList.toggle("workspace-expanded");
+      this.setAttribute("aria-pressed", expanded ? "true" : "false");
+      this.textContent = expanded ? "恢复双栏" : "展开工作区";
+      window.setTimeout(function () { Map.invalidateSize(); }, 0);
+    });
     document.getElementById("btn-toggle-map-expanded").addEventListener("click", function () {
       setMapExpanded(!document.getElementById("main-layout").classList.contains("map-expanded"));
     });
-    ["terrain", "hillshade", "contours", "sensors", "ao"].forEach(function (name) {
+    ["terrain", "hillshade", "contours", "sensors", "coordination", "ao"].forEach(function (name) {
       document.getElementById("btn-toggle-" + name).addEventListener("click", function () { toggleLayer(name); });
     });
     document.getElementById("media-lightbox-close").addEventListener("click", closeMedia);
@@ -1325,6 +1426,16 @@ window.Platform = (function () {
       }
     });
     document.addEventListener("keydown", function (event) {
+      var mediaDialog = document.getElementById("media-lightbox");
+      if (mediaDialog.classList.contains("open")) {
+        if (event.key === "Escape") { event.preventDefault(); closeMedia(); return; }
+        if (event.key === "Tab") {
+          var controls = Array.from(mediaDialog.querySelectorAll("button, summary"));
+          var first = controls[0], last = controls[controls.length - 1];
+          if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+          else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+        }
+      }
       if (event.key === "Escape" && document.getElementById("knowledge-graph-dialog").classList.contains("open")) {
         closeKnowledgeGraph();
       }
@@ -1351,6 +1462,7 @@ window.Platform = (function () {
   async function init() {
     var query = new URLSearchParams(window.location.search);
     Map.init();
+    updateMapStyleButton(Map.getMapLabelsVisible());
     Panels.updateAll({});
     initWorkspaceResize();
     selectWorkspace(query.get("tab") || sessionStorage.getItem("amos.workspace.tab") || "situation");

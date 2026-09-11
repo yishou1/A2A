@@ -10,8 +10,22 @@ from amos_platform.domain.models import AssetSnapshot, ThreatSnapshot
 from amos_platform.domain.models.asset import WeaponSpec
 
 
-OPERATOR_SCENARIO_IDS = ("maritime-convoy-air-defense",)
+OPERATOR_SCENARIO_IDS = (
+    "maritime-convoy-air-defense",
+    "coastal-joint-recon-strike",
+    "air-space-sea-carrier-strike",
+)
 WEAPON_CATALOG = {
+    "舰载对陆巡航导弹": WeaponSpec(
+        weapon_id="SIM-LACM-01",
+        weapon_type="舰载对陆巡航导弹",
+        category="anti-ground",
+        range_nm=120,
+        speed_kts=600,
+        p_kill=0.76,
+        warhead="simulation",
+        guidance="terrain_contour_satellite",
+    ),
     "舰载反舰导弹": WeaponSpec(
         weapon_id="SIM-ASHM-01",
         weapon_type="舰载反舰导弹",
@@ -21,6 +35,46 @@ WEAPON_CATALOG = {
         p_kill=0.78,
         warhead="simulation",
         guidance="active_radar",
+    ),
+    "空地防区外弹药": WeaponSpec(
+        weapon_id="SIM-AGM-01",
+        weapon_type="空地防区外弹药",
+        category="anti-ground",
+        range_nm=60,
+        speed_kts=540,
+        p_kill=0.82,
+        warhead="simulation",
+        guidance="multi_mode",
+    ),
+    "无人机协同攻击弹药": WeaponSpec(
+        weapon_id="SIM-SWARM-01",
+        weapon_type="无人机协同攻击弹药",
+        category="anti-ground",
+        range_nm=30,
+        speed_kts=240,
+        p_kill=0.68,
+        warhead="simulation",
+        guidance="cooperative_network",
+    ),
+    "舰载无人机空地导弹": WeaponSpec(
+        weapon_id="SIM-CARRIER-AGM-01",
+        weapon_type="舰载无人机空地导弹",
+        category="anti-ground",
+        range_nm=70,
+        speed_kts=520,
+        p_kill=0.82,
+        warhead="simulation",
+        guidance="multi_mode_standoff",
+    ),
+    "巡飞攻击载荷": WeaponSpec(
+        weapon_id="SIM-LOITER-01",
+        weapon_type="巡飞攻击载荷",
+        category="anti-ground",
+        range_nm=45,
+        speed_kts=150,
+        p_kill=0.72,
+        warhead="simulation",
+        guidance="operator_authorized_eo_terminal",
     ),
 }
 

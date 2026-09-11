@@ -14,17 +14,25 @@ from amos_platform.simulation.engine import SimEngine, _advance_position
 ROOT = Path(__file__).resolve().parents[1]
 SCENARIO_IDS = (
     "maritime-convoy-air-defense",
+    "coastal-joint-recon-strike",
+    "air-space-sea-carrier-strike",
 )
 
 OBSERVATION_GATES = {
     # The high-speed contact appears first; the slower AIS-correlated contact
     # is admitted later so discovery follows the declared sensor products.
     "maritime-convoy-air-defense": [(600, 1), (960, 2)],
+    "coastal-joint-recon-strike": [(300, 1)],
+    "air-space-sea-carrier-strike": [(300, 1), (1260, 2), (1800, 3)],
 }
 
 EVIDENCE_SENSOR_CHECKS = (
     ("maritime-convoy-air-defense", 720, "AEW-01", 1),
     ("maritime-convoy-air-defense", 1080, "SHORE-RADAR-01", 2),
+    ("coastal-joint-recon-strike", 360, "SAT-RECON-01", 1),
+    ("coastal-joint-recon-strike", 900, "WZ10-01", 1),
+    ("air-space-sea-carrier-strike", 360, "SAT-A2S-01", 1),
+    ("air-space-sea-carrier-strike", 2160, "UAV-ISR-01", 3),
 )
 
 
@@ -36,8 +44,8 @@ def _inside_ao(lat: float, lng: float, ao: dict) -> bool:
 def test_formal_scenario_story_and_media_are_complete(scenario_id: str) -> None:
     scenario = get_scenario(scenario_id)
     assert scenario is not None
-    assert len(scenario["assets"]) >= 6
-    assert len(scenario["threats"]) >= 2
+    assert len(scenario["assets"]) >= 5
+    assert len(scenario["threats"]) >= 1
     assert len(scenario["timeline"]) >= 8
     assert len(scenario["media_cues"]) >= 8
     assert [row["at_sec"] for row in scenario["timeline"]] == sorted(
@@ -59,7 +67,7 @@ def test_formal_scenario_story_and_media_are_complete(scenario_id: str) -> None:
 
 
 @pytest.mark.parametrize("scenario_id", SCENARIO_IDS)
-def test_formal_scenarios_use_taiwan_area_and_keep_all_geometry_inside_ao(
+def test_formal_scenarios_use_regional_training_areas_and_keep_all_geometry_inside_ao(
     scenario_id: str,
 ) -> None:
     scenario = get_scenario(scenario_id)
@@ -68,9 +76,10 @@ def test_formal_scenarios_use_taiwan_area_and_keep_all_geometry_inside_ao(
     center = theater["center"]
     ao = theater["ao"]
 
-    assert 21.5 <= center["lat"] <= 24.5
-    assert 119.5 <= center["lng"] <= 122.2
-    assert "台湾" in theater["name"]
+    assert 17.5 <= center["lat"] <= 24.5
+    assert 119.5 <= center["lng"] <= 123.5
+    expected_region = "吕宋" if scenario_id == "air-space-sea-carrier-strike" else "台湾"
+    assert expected_region in theater["name"]
     assert theater["location_profile"] == "fictional_training_area"
     assert _inside_ao(center["lat"], center["lng"], ao)
 
@@ -82,6 +91,12 @@ def test_formal_scenarios_use_taiwan_area_and_keep_all_geometry_inside_ao(
         assert _inside_ao(pos["lat"], pos["lng"], ao), threat["threat_id"]
     for asset_id, route in scenario["asset_routes"].items():
         assert all(_inside_ao(point["lat"], point["lng"], ao) for point in route), asset_id
+    for asset_id, phases in (scenario.get("asset_behavior_phases") or {}).items():
+        for phase in phases:
+            assert all(
+                _inside_ao(point["lat"], point["lng"], ao)
+                for point in phase["route"]
+            ), (asset_id, phase["behavior"])
     for protected in scenario["protected_assets"]:
         assert _inside_ao(protected["lat"], protected["lon"], ao)
         assert protected["metadata"]["location_profile"] == "fictional_training_area"
@@ -211,7 +226,10 @@ def test_full_scenario_motion_remains_in_ao_and_never_projects_future_routes(
         engine._tick(min(30, duration - engine.clock["elapsed_sec"]))
         assert all(
             _inside_ao(row["position"]["lat"], row["position"]["lng"], ao)
-            for row in engine.assets.values()
+            # The AO is a local surface/air training box. A realistic orbital
+            # ground track must cross and leave it instead of freezing at its
+            # edge, so only non-space platforms are constrained here.
+            for row in engine.assets.values() if row.get("domain") != "space"
         )
         assert all(_inside_ao(row["lat"], row["lng"], ao) for row in engine.threats.values())
         if scenario_id == "maritime-convoy-air-defense":

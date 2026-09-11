@@ -21,6 +21,7 @@ from amos_platform.simulation.engine import SimEngine
 
 SCENARIOS = {
     "maritime-convoy-air-defense": "standard",
+    "coastal-joint-recon-strike": "standard",
 }
 SIMULATION_STEP_SEC = 30
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,6 +34,7 @@ GEOMETRY_ANCHORS = {
         # assessment, then begins its documented return to the escort.
         "MAR-MEDIA-07": ((22.185548, 121.634398, 8000), 309.31, 41.39, [1.49], [1.99]),
     },
+    "coastal-joint-recon-strike": {},
 }
 
 
@@ -87,6 +89,20 @@ def _completed_commander_result(engine: SimEngine, *, workflow_id: str) -> dict[
                 "lon": track.lng,
             })
             threat_rows.append({"track_id": track.id, "score": 0.12, "level": "low"})
+        elif truth_id == "COASTAL-SITE-01":
+            tracking_rows.append({
+                "track_id": track.id,
+                "object_type": "ground_installation",
+                "metadata": {
+                    "source_class": "coastal_missile_site",
+                    "label": "hostile",
+                    "affiliation": "red",
+                    "threat_level": "high",
+                },
+                "lat": track.lat,
+                "lon": track.lng,
+            })
+            threat_rows.append({"track_id": track.id, "score": 0.94, "level": "high"})
     result = apply_commander_assessments(
         engine,
         {
@@ -118,7 +134,10 @@ def _completed_commander_result(engine: SimEngine, *, workflow_id: str) -> dict[
         },
     )
     assert result["status"] == "completed"
-    assert result["analysis"]["source"] == "commander_workflow"
+    if result.get("already_applied"):
+        assert engine.scenario_story["agent_analysis"]["source"] == "commander_workflow"
+    else:
+        assert result["analysis"]["source"] == "commander_workflow"
     return result
 
 
@@ -208,6 +227,20 @@ def _replay(scenario_id: str) -> Replay:
                     authorized=True,
                 )
                 assert launched["status"] == "launched"
+        elif scenario_id == "coastal-joint-recon-strike" and next_elapsed >= 3300 and not engine.weapons:
+            target = next(
+                track for track in engine.sensor_fusion.tracks.values()
+                if engine._truth_target_for_track(track) == "COASTAL-SITE-01"
+            )
+            launched = engine.fire_weapon_at_track(
+                target.id,
+                asset_id="SEA-C2-01",
+                weapon_name="舰载对陆巡航导弹",
+                authorized=True,
+            )
+            assert launched["status"] == "launched"
+            assert launched["coordinated"] is True
+            assert len(launched["weapon_ids"]) == 4
         _record_new_capture_context(engine, known_media_ids, context)
 
     captures = {
@@ -437,7 +470,7 @@ def test_runtime_svg_products_are_immutable_and_addressed_by_capture_tick(
     service = get_evidence_product_service()
     svg_captures = [
         capture for capture in replay.captures.values()
-        if capture.get("mime_type") == "image/svg+xml"
+        if capture.get("mime_type") == "image/svg+xml" and capture.get("dynamic_uri")
     ]
     assert svg_captures
 

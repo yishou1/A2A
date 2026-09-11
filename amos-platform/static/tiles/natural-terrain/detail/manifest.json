@@ -1,0 +1,22 @@
+{
+  "tile_pack_id": "mapzen-natural-terrain-detail-v1",
+  "bounds": {
+    "west": 119,
+    "south": 17,
+    "east": 124,
+    "north": 25
+  },
+  "projection": "EPSG:3857",
+  "format": "xyz-webp",
+  "tile_count": 1984,
+  "min_zoom": 8,
+  "max_zoom": 11,
+  "runtime_network_required": false,
+  "source": {
+    "name": "Mapzen Terrain Tiles / AWS Open Data",
+    "url": "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png",
+    "attribution": "Mapzen; SRTM and GMTED2010 courtesy of USGS; ETOPO1 by NOAA/NCEI",
+    "license_url": "https://github.com/tilezen/joerd/blob/master/docs/attribution.md"
+  },
+  "processing": "Terrarium elevations decoded in meters; natural hypsometric colors and metric hillshade baked into XYZ WebP tiles. Native data resolution varies by source; z11 display grid is approximately 70m at 21N."
+}

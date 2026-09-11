@@ -36,6 +36,12 @@ class DirectorService:
         "start_auto",
         "stop_auto",
     }
+    FAILED_ANALYSIS_STATUSES = {
+        "submission_failed",
+        "submission_unavailable",
+        "submission_unverified",
+        "failed",
+    }
 
     def __init__(
         self,
@@ -157,6 +163,21 @@ class DirectorService:
             seed=scenario.get("default_seed"),
         )
 
+    def _ensure_checkpoint_can_advance(self) -> None:
+        """Fail closed when the current checkpoint has no trusted analysis."""
+        checkpoint = self._state.get("current_checkpoint")
+        if not isinstance(checkpoint, dict):
+            return
+        analysis_status = str(checkpoint.get("analysis_status") or "").lower()
+        if analysis_status not in self.FAILED_ANALYSIS_STATUSES:
+            return
+        detail = checkpoint.get("analysis_error")
+        submission = checkpoint.get("submission")
+        if not detail and isinstance(submission, dict):
+            detail = submission.get("error")
+        message = str(detail or "当前检查点分析失败")
+        raise DirectorError(f"{message}；请重置场景后重试")
+
     def _next_checkpoint(self) -> dict[str, Any] | None:
         branch = str(self._state.get("branch") or "")
         checkpoints = [
@@ -236,6 +257,10 @@ class DirectorService:
             "title": checkpoint.get("title"),
             "reached_at_sec": round(float(engine.clock.get("elapsed_sec", 0) or 0), 3),
             "analysis_status": analysis_status,
+            # Authorization belongs to a concrete reached checkpoint.  Do not
+            # start an operator gate merely because the timeline entered the
+            # ENGAGE phase before the evidence/analysis checkpoint was ready.
+            "requires_operator_action": bool(checkpoint.get("requires_operator_action")),
         }
         if callback_result:
             reached["submission"] = deepcopy(callback_result)
@@ -264,11 +289,12 @@ class DirectorService:
         ]
         return reached[-1] if reached else None
 
-    def _has_authorized_engagement(self) -> bool:
+    def _has_authorized_engagement(self, *, since_sec: float = 0.0) -> bool:
         return any(
             isinstance(event, dict)
             and event.get("type") == "authorized_fire_command"
             and event.get("command_source") == "operator"
+            and float(event.get("sim_time", 0) or 0) >= float(since_sec)
             for event in self.runtime.get_engine().events
         )
 
@@ -277,10 +303,15 @@ class DirectorService:
 
     def _authorization_stage(self) -> str | None:
         policy = (self._scenario or {}).get("engagement_policy") or {}
+        checkpoint = self._state.get("current_checkpoint")
         if (
             not policy.get("requires_explicit_authorization")
             or self._current_phase() != "ENGAGE"
-            or self._has_authorized_engagement()
+            or not isinstance(checkpoint, dict)
+            or not checkpoint.get("requires_operator_action")
+            or self._has_authorized_engagement(
+                since_sec=float(checkpoint.get("reached_at_sec", 0) or 0),
+            )
         ):
             return None
         if not policy.get("requires_prior_warning"):
@@ -623,6 +654,8 @@ class DirectorService:
             raise DirectorError(f"unsupported director action: {action}")
         self._ensure_configured()
         engine = self.runtime.get_engine()
+        if action in {"start", "step_tick", "advance_checkpoint", "start_auto"}:
+            self._ensure_checkpoint_can_advance()
         with self._lock:
             self._state["last_error"] = None
         if action == "start":

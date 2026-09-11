@@ -90,10 +90,7 @@ class CognitionSkill:
         for target_id, observable in features.items():
             if not isinstance(observable, dict):
                 continue
-            if str(observable.get("domain_hint") or "").casefold() not in {
-                "maritime", "surface", "sea"
-            }:
-                continue
+            domain = str(observable.get("domain_hint") or "").casefold()
             try:
                 speed_kts = float(observable.get("speed_kts"))
             except (TypeError, ValueError):
@@ -108,7 +105,32 @@ class CognitionSkill:
                 classifications.append(classification)
                 by_id[str(target_id)] = classification
             prior_classification = str(observable.get("prior_classification") or "").casefold()
-            if prior_classification == "fishing_vessel":
+            if prior_classification in {"coastal_missile_site", "missile_site", "missile_battery"}:
+                classification.update({
+                    "label": "hostile",
+                    "affiliation": "red",
+                    "object_class": "coastal_missile_site",
+                    "confidence": max(float(classification.get("confidence", 0.5)), 0.9),
+                    "classification_basis": "prior_verified_backend_classification",
+                })
+            elif (
+                domain in {"ground", "land"}
+                and phase in {"TRACK", "TARGET", "ENGAGE", "ASSESS"}
+                and speed_kts <= 5.0
+                and "sar" in sources
+                and bool(sources.intersection({"eo/ir", "eo-ir"}))
+                and bool(sources.intersection({"elint", "esm"}))
+            ):
+                classification.update({
+                    "label": "hostile",
+                    "affiliation": "red",
+                    "object_class": "coastal_missile_site",
+                    "confidence": max(float(classification.get("confidence", 0.5)), 0.88),
+                    "classification_basis": "stationary_multisensor_ground_site_evidence",
+                })
+            elif domain not in {"maritime", "surface", "sea"}:
+                continue
+            elif prior_classification == "fishing_vessel":
                 classification.update({
                     "label": "neutral",
                     "affiliation": "unknown",

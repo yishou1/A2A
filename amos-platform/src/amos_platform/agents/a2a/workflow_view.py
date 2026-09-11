@@ -103,7 +103,7 @@ IO_FIELD_LABELS = {
     "authorization": "授权状态",
     "plan_status": "方案状态",
     "decision": "授权决策",
-    "approved_for_demo_handoff": "演示移交批准",
+    "approved_for_demo_handoff": "移交批准",
     "requires_human_approval": "是否需要人工授权",
     "violations": "违规项",
     "blocked_items": "阻断项",

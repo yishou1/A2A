@@ -848,6 +848,17 @@ class MediaCaptureRuntime:
             due_at = _number(plan.get("at_sec", cue.get("at_sec", 0)))
             if elapsed < due_at or not self._branch_ready(plan, branch):
                 continue
+            parameters = (
+                plan.get("capture_parameters")
+                if isinstance(plan.get("capture_parameters"), dict) else {}
+            )
+            required_source_media_ids = {
+                str(value)
+                for value in parameters.get("required_source_media_ids") or []
+                if value
+            }
+            if required_source_media_ids - set(self._captures):
+                continue
             if not self._task_ready(plan, engine.tasks, elapsed, branch):
                 continue
             product_type = _product_type(plan)

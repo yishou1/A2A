@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <rect width="1600" height="900" fill="#07131d"/><text x="70" y="80" fill="#e9fbff" font-family="sans-serif" font-size="38" font-weight="700">多源情报共享与时标对齐</text>
+  <g font-family="sans-serif" text-anchor="middle"><g fill="#102a38" stroke="#63dcff" stroke-width="3"><rect x="90" y="190" width="290" height="150" rx="20"/><rect x="90" y="560" width="290" height="150" rx="20"/><rect x="655" y="350" width="310" height="180" rx="24"/><rect x="1220" y="170" width="290" height="150" rx="20"/><rect x="1220" y="580" width="290" height="150" rx="20"/></g>
+  <g fill="#e9fbff" font-size="25"><text x="235" y="250">双低轨侦察卫星</text><text x="235" y="290" fill="#9ed8e8">短时 SAR 接力过境</text><text x="235" y="620">UAV-ISR-01</text><text x="235" y="660" fill="#9ed8e8">EO/IR / SAR 复核</text><text x="810" y="420">CV-01 航母任务节点</text><text x="810" y="466" fill="#9ed8e8">融合 · 校验 · 任务决策</text><text x="1365" y="230">AEW-01</text><text x="1365" y="270" fill="#9ed8e8">有人预警与战术协同</text><text x="1365" y="640">UAV-TANKER-01</text><text x="1365" y="680" fill="#9ed8e8">加油保障 / 链路中继</text></g></g>
+  <g fill="none" stroke="#55ddff" stroke-width="5"><path d="M380 265C515 270 552 355 655 405"/><path d="M380 635C520 615 552 520 655 478"/><path d="M965 405C1080 337 1122 255 1220 245"/><path d="M965 475C1085 548 1120 645 1220 655"/></g>
+  <g fill="#8beaff"><circle cx="495" cy="302" r="8"/><circle cx="540" cy="574" r="8"/><circle cx="1090" cy="327" r="8"/><circle cx="1094" cy="570" r="8"/></g>
+  <g fill="#aac8d2" font-family="monospace" font-size="21"><text x="492" y="250">UTC+0.02s / CRC OK</text><text x="455" y="684">TRACK QUALITY 0.91</text><text x="1000" y="752">任务权在舰 · 协同在空 · 保障链独立</text></g>
+</svg>

@@ -292,7 +292,11 @@ def asset_profiles(assets: list[Any]) -> list[dict[str, Any]]:
         role = str(asset.get("role") or "")
         speed = float(asset.get("speed_kts", 0) or 0)
         position = asset.get("position") or {}
-        if domain == "air":
+        if domain == "space":
+            constraint = "orbital_ground_track"
+            turn_rate = 0.15
+            link_range_km = 2000
+        elif domain == "air":
             constraint = "air_corridor"
             turn_rate = 3.0
             link_range_km = 180
@@ -304,16 +308,23 @@ def asset_profiles(assets: list[Any]) -> list[dict[str, Any]]:
             constraint = "fixed_site" if speed <= 0 else "road_network"
             turn_rate = 12.0 if speed > 0 else 0.0
             link_range_km = 45
-        is_relay = "中继" in role or "DATALINK" in set(asset.get("sensors") or [])
+        sensor_list = list(asset.get("sensors") or [])
+        sensors = set(sensor_list)
+        is_relay = "中继" in role or "DATALINK" in sensors
         is_command = "指挥" in role or "C2" in platform_id
+        is_satcom = domain == "space" or "SATCOM" in sensors
         communications = [{
-            "band": "SIM-LINK-L",
-            "range_km": 220 if is_relay else link_range_km,
+            "band": "SATCOM" if is_satcom else "SIM-LINK-L",
+            # SATCOM range models slant-range access to relay spacecraft, not
+            # a local line-of-sight radio.  The previous 2,000 km cap made a
+            # geosynchronous relay impossible even when both endpoints
+            # explicitly carried SATCOM terminals.
+            "range_km": 45000 if is_satcom else (max(link_range_km, 220) if is_relay else link_range_km),
             "bandwidth_mbps": 24 if is_relay or is_command else 8,
             "role": "relay" if is_relay else ("network_hub" if is_command else "mesh_member"),
             "simulation_value": True,
         }]
-        supported_tasks = [f"sense:{sensor}" for sensor in asset.get("sensors") or []]
+        supported_tasks = [f"sense:{sensor}" for sensor in sensor_list]
         if speed > 0:
             supported_tasks.append(f"move:{domain}")
         if asset.get("weapons"):

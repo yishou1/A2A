@@ -273,7 +273,7 @@ def build_commander_workflow_payload(
     mission_input = {
         "scenario_id": scenario_id,
         "scenario_name": scenario.get("name") or scenario_id,
-        "mission_type": "multimodal_tracking_and_assessment",
+        "mission_type": options.get("mission_type") or "multimodal_tracking_and_assessment",
         "objective": options.get("task_goal") or "识别模拟接触、更新航迹、评估风险并生成安全处置建议",
         "intelligence_text": situation_summary(live_snapshot, scenario),
         "contacts": contacts,
@@ -289,7 +289,7 @@ def build_commander_workflow_payload(
             "do_not_infer_future_events": True,
         },
         "scene": scene,
-        "analysis_guidance": (
+        "analysis_guidance": options.get("analysis_guidance") or (
             "仅依据当前仿真时刻已经产生的观测和附件进行关联、分类与风险评估；"
             "不得假设后续事件、未来航路或未观测目标。"
         ),
@@ -299,6 +299,7 @@ def build_commander_workflow_payload(
             "jamming_level": jamming_level,
             "area_of_operations": area_of_operations,
             "network": dict(live_snapshot.get("network") or {}),
+            "coordination_links": list(live_snapshot.get("coordination_links") or []),
         },
         "simulation_time_sec": elapsed,
         "simulation_mode": "safe",

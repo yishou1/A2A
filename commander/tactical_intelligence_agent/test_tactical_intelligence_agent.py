@@ -183,6 +183,41 @@ class PayloadAdapterTest(unittest.TestCase):
         self.assertEqual(by_id["TRK-FISHING"]["label"], "neutral")
         self.assertEqual(by_id["TRK-FISHING"]["object_class"], "fishing_vessel")
 
+    def test_current_multisensor_ground_observables_classify_coastal_missile_site(self):
+        batch = commander_payload_to_batch({
+            "workflow_id": "wf-coastal-joint",
+            "input": {
+                "mission_input": {
+                    "stage_transfer": {
+                        "checkpoint_id": "CJR-CP-IDENTIFY",
+                        "phase": "TRACK",
+                    },
+                    "contacts": [{
+                        "track_id": "TRK-GROUND-01",
+                        "geo": {"lat": 22.34, "lon": 120.93},
+                        "metadata": {
+                            "domain_hint": "ground",
+                            "speed_kts": 0.0,
+                            "sensor_sources": ["SAR", "EO/IR", "ELINT"],
+                        },
+                    }],
+                },
+            },
+        })
+
+        classifications = CognitionSkill._apply_observable_classification_evidence(
+            batch,
+            [{"target_id": "TRK-GROUND-01", "label": "unknown", "confidence": 0.6}],
+        )
+
+        self.assertEqual(classifications[0]["label"], "hostile")
+        self.assertEqual(classifications[0]["affiliation"], "red")
+        self.assertEqual(classifications[0]["object_class"], "coastal_missile_site")
+        self.assertEqual(
+            classifications[0]["classification_basis"],
+            "stationary_multisensor_ground_site_evidence",
+        )
+
     def test_find_phase_does_not_identify_contacts_early(self):
         batch = commander_payload_to_batch({
             "workflow_id": "wf-find",
@@ -486,8 +521,9 @@ class CommunicationSkillTest(unittest.TestCase):
                 self.detections = [_StubDet()]
                 self.task_schedule = None
                 self.algorithm_trace = {"perception": "ok"}
+                self.algorithm_invocations = []
 
-            def model_dump(self):
+            def model_dump(self, **_kwargs):
                 return {}
 
         skill = CommunicationSkill(use_mock=True, config={})
@@ -502,10 +538,16 @@ class CommunicationSkillTest(unittest.TestCase):
         cognition = type(
             "StubCognition",
             (),
-            {"algorithm_trace": {"cognition": "ok"}, "model_dump": lambda self: {}},
+            {
+                "algorithm_trace": {"cognition": "ok"},
+                "algorithm_invocations": [],
+                "model_dump": lambda self, **_kwargs: {},
+            },
         )()
         plan = mock.Mock()
         plan.is_enabled.side_effect = lambda aid: aid != "knowledge_semantic_comm"
+        plan.algorithm_calls = []
+        plan.params_for.return_value = {}
 
         packet = skill.execute(
             "wf-comm-test",

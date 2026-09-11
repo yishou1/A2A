@@ -194,10 +194,15 @@ def sanitize_asset(asset: dict[str, Any]) -> dict[str, Any]:
         "position": _position(asset),
         "heading": asset.get("heading", asset.get("heading_deg", 0)),
         "speed_kts": asset.get("speed_kts", 0),
+        "behavior": asset.get("behavior", ""),
+        "behavior_label": asset.get("behavior_label", ""),
         "sensors": list(asset.get("sensors") or []),
         "weapons": list(asset.get("weapons") or []),
         "autonomy_tier": asset.get("autonomy_tier"),
         "endurance_hr": asset.get("endurance_hr"),
+        "member_count": int(asset.get("member_count", asset.get("swarm_size", 1)) or 1),
+        "formation_role": asset.get("formation_role", ""),
+        "network_role": asset.get("network_role", ""),
         "battery_pct": asset.get("battery_pct"),
         "fuel_pct": asset.get("fuel_pct"),
         "comms_strength": asset.get("comms_strength"),
@@ -302,7 +307,9 @@ def build_operator_state(internal_state: dict[str, Any]) -> dict[str, Any]:
     tracks = []
     for index, track in enumerate(internal_state.get("fused_tracks") or [], start=1):
         safe_track = sanitize_fused_track(track)
-        safe_track["display_label"] = f"海面接触 {index:02d}"
+        domain = str(track.get("domain_hint") or "").casefold()
+        prefix = "空中接触" if domain == "air" else ("地面接触" if domain == "ground" else "海面接触")
+        safe_track["display_label"] = f"{prefix} {index:02d}"
         tracks.append(safe_track)
     return sanitize_operator_payload({
         "visibility": "operator-visible",

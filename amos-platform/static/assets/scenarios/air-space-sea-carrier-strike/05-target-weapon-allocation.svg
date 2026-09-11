@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <rect width="1600" height="900" fill="#09141c"/>
+  <text x="65" y="72" fill="#effbff" font-family="sans-serif" font-size="36" font-weight="700">目标—武器差异化分配矩阵</text>
+  <text x="65" y="112" fill="#9fc8d5" font-family="sans-serif" font-size="22">仅两个敌方交战目标；民用港区仅作识别、间隔校验与禁射保护</text>
+  <g font-family="sans-serif" font-size="26">
+    <rect x="90" y="175" width="390" height="190" rx="20" fill="#102938" stroke="#59dfff" stroke-width="3"/>
+    <text x="125" y="235" fill="#e8f8ff">01 · 滨海机场跑道</text><text x="125" y="280" fill="#9fc8d5">固定目标 · 跑道拒止</text><text x="125" y="325" fill="#9fc8d5">SAR + EO 复核后进入授权队列</text>
+    <rect x="90" y="470" width="390" height="190" rx="20" fill="#102938" stroke="#ffad5d" stroke-width="3"/>
+    <text x="125" y="530" fill="#e8f8ff">02 · 机动岸防雷达/防空单元</text><text x="125" y="575" fill="#9fc8d5">机动目标 · 持续跟踪</text><text x="125" y="620" fill="#9fc8d5">仅第一波 BDA 合格后进入授权队列</text>
+    <rect x="1110" y="175" width="400" height="190" rx="20" fill="#2c1c13" stroke="#ffad5d" stroke-width="3"/>
+    <text x="1145" y="235" fill="#fff3e7">UAV-STRIKE-01 · AGM-01</text><text x="1145" y="280" fill="#ffd39d">一架舰载固定翼攻击无人机</text><text x="1145" y="325" fill="#ffd39d">第一波：跑道拒止</text>
+    <rect x="1110" y="470" width="400" height="190" rx="20" fill="#2c1c13" stroke="#ffad5d" stroke-width="3"/>
+    <text x="1145" y="530" fill="#fff3e7">LOITER-UAV-01</text><text x="1145" y="575" fill="#ffd39d">攻击无人机携带的空射巡飞载荷</text><text x="1145" y="620" fill="#ffd39d">第二波：条件末端攻击</text>
+  </g>
+  <g fill="none" stroke-width="6"><path d="M480 270H1110" stroke="#59dfff"/><path d="M480 565H1110" stroke="#ffad5d" stroke-dasharray="14 10"/></g>
+  <rect x="365" y="735" width="870" height="95" rx="18" fill="#173c2b" stroke="#78e7aa" stroke-width="3"/>
+  <text x="800" y="792" fill="#dffff0" font-family="sans-serif" font-size="27" text-anchor="middle">民用港区：保护圈检查 → 不分配武器 → 禁止进入交战目标集合</text>
+</svg>

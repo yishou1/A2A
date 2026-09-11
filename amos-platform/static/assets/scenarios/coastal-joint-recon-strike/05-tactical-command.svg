@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif">
+  <rect width="960" height="540" fill="#09151f" />
+  <text x="32" y="43" fill="#e2edf4" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="600" stroke="none">海空分级指挥与单机航路分配方案</text>
+  <g fill="none" stroke-width="2">
+    <path d="M265 260 335 132" stroke="#75c9ad" />
+    <path d="M440 182v38M440 310v38" stroke="#d8b36a" />
+    <path d="M545 132 685 226M545 265 685 260M545 393 685 294" stroke="#dc8c80" />
+  </g>
+  <g stroke-width="1.6" fill="#132530">
+    <rect x="45" y="205" width="220" height="110" rx="14" stroke="#75c9ad" />
+    <rect x="335" y="82" width="210" height="100" rx="14" stroke="#69c4df" />
+    <rect x="335" y="220" width="210" height="90" rx="14" stroke="#69c4df" />
+    <rect x="335" y="348" width="210" height="90" rx="14" stroke="#69c4df" />
+    <rect x="685" y="205" width="225" height="110" rx="14" stroke="#dc8c80" />
+  </g>
+  <g fill="#e9fbff" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="16" text-anchor="middle">
+    <text x="155" y="248" stroke="none">海上联合指挥舰 01</text>
+    <text x="155" y="278" stroke="none">任务指挥 / 无人机起飞保障</text>
+    <text x="440" y="122" stroke="none">歼-16 01</text>
+    <text x="440" y="151" stroke="none">空中战术指挥 / 打击</text>
+    <text x="440" y="257" stroke="none">攻击无人机 01</text>
+    <text x="440" y="284" stroke="none">由舰面顺序起飞 / 北路突入</text>
+    <text x="440" y="385" stroke="none">攻击无人机 02</text>
+    <text x="440" y="412" stroke="none">由舰面顺序起飞 / 南路突入</text>
+    <text x="798" y="248" stroke="none">待识别陆上航迹</text>
+    <text x="798" y="278" stroke="none">攻击前规则审查</text>
+  </g>
+  <g fill="#d8b36a" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="14">
+    <text x="460" y="205" stroke="none">分别下达航路</text>
+    <text x="460" y="334" stroke="none">保持安全间隔</text>
+  </g>
+  <text x="480" y="500" text-anchor="middle" fill="#9fc4cf" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="14" stroke="none">此产品仅为候选方案；每个攻击节点仍需操作员统一明确授权</text>
+</svg>

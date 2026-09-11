@@ -31,12 +31,13 @@ class MeshNetwork:
 
     def register_node(self, node_id: str, lat: float, lng: float,
                       node_type: str = "asset", band: str | None = None,
-                      comm_profile: dict | None = None):
+                      comm_profile: dict | None = None, altitude_km: float = 0.0):
         comm_profile = comm_profile or {}
         self.nodes[node_id] = {
             "id": node_id,
             "type": node_type,
             "lat": lat, "lng": lng,
+            "altitude_km": max(0.0, float(altitude_km or 0)),
             "band": str(comm_profile.get("band") or band or self.default_band),
             "range_km": float(comm_profile.get("range_km", 0) or 0) or None,
             "bandwidth_mbps": float(comm_profile.get("bandwidth_mbps", 0) or 0) or None,
@@ -85,6 +86,9 @@ class MeshNetwork:
                 pos = asset.get("position", asset)
                 self.nodes[aid]["lat"] = pos.get("lat", 0)
                 self.nodes[aid]["lng"] = pos.get("lng", 0)
+                self.nodes[aid]["altitude_km"] = max(
+                    0.0, float(pos.get("alt_ft", 0) or 0) * 0.0003048,
+                )
                 health = asset.get("health", {})
                 self.nodes[aid]["comms_strength"] = health.get("comms_strength",
                     asset.get("comms_strength", 100))
@@ -108,6 +112,9 @@ class MeshNetwork:
 
                 dist_km = self._distance_km(
                     na["lat"], na["lng"], nb["lat"], nb["lng"])
+                if na["band"] == "SATCOM" or nb["band"] == "SATCOM":
+                    altitude_delta = float(na.get("altitude_km", 0)) - float(nb.get("altitude_km", 0))
+                    dist_km = math.hypot(dist_km, altitude_delta)
                 band_a = FREQUENCY_BANDS.get(na["band"], {"range_km": 50, "bandwidth_mbps": 5})
                 band_b = FREQUENCY_BANDS.get(nb["band"], {"range_km": 50, "bandwidth_mbps": 5})
                 max_range = min(

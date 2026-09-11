@@ -13,12 +13,20 @@ from typing import Any
 from amos_platform.data.maritime_convoy_air_defense_builder import (
     build_maritime_convoy_air_defense_scenario,
 )
+from amos_platform.data.coastal_joint_recon_strike_builder import (
+    build_coastal_joint_recon_strike_scenario,
+)
+from amos_platform.data.air_space_sea_carrier_strike_builder import (
+    build_air_space_sea_carrier_strike_scenario,
+)
 
 
 ScenarioBuilder = Callable[[], dict[str, Any]]
 
 SCRIPTED_SCENARIO_BUILDERS: tuple[ScenarioBuilder, ...] = (
     build_maritime_convoy_air_defense_scenario,
+    build_coastal_joint_recon_strike_scenario,
+    build_air_space_sea_carrier_strike_scenario,
 )
 
 

@@ -5,6 +5,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/common.sh"
+load_root_env
+NACOS_ADDR="${NACOS_ADDR:-127.0.0.1:${NACOS_PORT:-8848}}"
 
 printf '%-38s %-10s %s\n' SERVICE STATUS PID
 printf '%-38s %-10s %s\n' '--------------------------------------' '----------' '--------'
@@ -34,7 +36,7 @@ for endpoint in \
   'Gateway|http://127.0.0.1:8030/gateway/v1/health' \
   'AlgoLib|http://127.0.0.1:8088/health' \
   'A2A auth|http://127.0.0.1:8080/get' \
-  'Nacos|http://127.0.0.1:8848/nacos/v1/console/health/readiness'; do
+  "Nacos|http://${NACOS_ADDR}/nacos/v1/console/health/readiness"; do
   label="${endpoint%%|*}"
   url="${endpoint#*|}"
   if curl --noproxy '*' -fsS --max-time 2 "$url" >/dev/null 2>&1; then

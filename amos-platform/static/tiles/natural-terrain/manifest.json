@@ -1,0 +1,29 @@
+{
+  "tile_pack_id": "natural-earth-ii-western-pacific-v1",
+  "format": "xyz-webp",
+  "projection": "EPSG:3857",
+  "bounds": {
+    "west": 105,
+    "south": 8,
+    "east": 135,
+    "north": 35
+  },
+  "min_zoom": 5,
+  "max_zoom": 9,
+  "tile_count": 2513,
+  "url": "/static/tiles/natural-terrain/{z}/{x}/{y}.webp",
+  "runtime_network_required": false,
+  "cartography": "Natural land colors; blue-grey water palette retaining source relief shading. Colors do not encode numerical depths.",
+  "source": {
+    "name": "Natural Earth II with Shaded Relief and Water",
+    "version": "3.2.0",
+    "url": "https://naciscdn.org/naturalearth/10m/raster/NE2_HR_LC_SR_W.zip",
+    "license": "Public domain",
+    "sha256": "ed4a69ab9e7cc8514032d113da7a31986c42fa2754202d330c472928ffbbb1b6",
+    "dimensions": [
+      21600,
+      10800
+    ],
+    "resolution_note": "Regional overview cartography, approximately 1.85 km per source pixel at equator; display zoom does not add source detail."
+  }
+}

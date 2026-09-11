@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif">
+  <defs>
+    <linearGradient id="waterfall" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#102d37" />
+      <stop offset="0.52" stop-color="#123944" />
+      <stop offset="1" stop-color="#07151d" />
+    </linearGradient>
+    <pattern id="noise" width="31" height="17" patternUnits="userSpaceOnUse">
+      <circle cx="4" cy="5" r="1" fill="#66d8ee" opacity=".18" />
+      <circle cx="19" cy="12" r="1" fill="#9ef4d4" opacity=".13" />
+      <path d="M8 15h4M25 4h3" stroke="#5fb6c8" opacity=".14" />
+    </pattern>
+  </defs>
+  <rect width="960" height="540" fill="#09151f" />
+  <text x="32" y="43" fill="#e2edf4" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="600" stroke="none">无侦-10 被动电子侦察频谱帧</text>
+  <text x="918" y="69" text-anchor="end" fill="#8fb3c1" font-family="Consolas, monospace" font-size="12" stroke="none">WZ10-01 / ELINT / T+00:28:00</text>
+  <rect x="70" y="82" width="820" height="328" rx="8" fill="url(#waterfall)" stroke="#3e7180" stroke-width="2" />
+  <rect x="70" y="82" width="820" height="328" fill="url(#noise)" />
+  <g fill="none" stroke="#6de2f2" stroke-width="1.6">
+    <path d="M70 135 160 139 220 132 295 141 360 134 430 139 495 130 560 137 625 136 690 142 760 134 825 140 890 136" opacity=".65" />
+    <path d="M70 329 155 326 225 332 310 324 385 328 455 321 525 329 604 326 680 330 755 323 822 329 890 325" opacity=".38" />
+  </g>
+  <g stroke="#376270" stroke-width="1" opacity=".65">
+    <path d="M70 148h820M70 214h820M70 280h820M70 346h820" />
+    <path d="M234 82v328M398 82v328M562 82v328M726 82v328" />
+  </g>
+  <g stroke="#d8b36a" fill="none">
+    <path d="M535 95v302" stroke-width="2" opacity=".82" />
+    <path d="M521 112h28M521 382h28" stroke-width="1.6" />
+  </g>
+  <path d="M535 102c-7 34 9 59-4 94 13 40-8 78 5 115-10 29 7 51-1 83" fill="none" stroke="#fff0a8" stroke-width="2" opacity=".45" />
+  <g fill="#9dc0cb" font-family="Consolas, monospace" font-size="14">
+    <text x="70" y="438" stroke="none">5.20 GHz</text>
+    <text x="234" y="438" stroke="none">5.30</text>
+    <text x="398" y="438" stroke="none">5.40</text>
+    <text x="562" y="438" stroke="none">5.50</text>
+    <text x="726" y="438" stroke="none">5.60</text>
+    <text x="890" y="438" text-anchor="end" stroke="none">5.70 GHz</text>
+    <text x="42" y="103" text-anchor="end" stroke="none">NOW</text>
+    <text x="42" y="405" text-anchor="end" stroke="none">-30 s</text>
+  </g>
+  <g font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif">
+    <text x="70" y="486" fill="#d8f6ff" font-size="14" stroke="none">窄带脉冲辐射源：中心频率 5.45 GHz · 方位线稳定 · 身份待后端关联</text>
+    <text x="70" y="516" fill="#86aab7" font-size="14" stroke="none">原始频谱与测向结果已封装；不在传感器端预判目标类型或敌我属性</text>
+  </g>
+</svg>

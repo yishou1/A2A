@@ -88,6 +88,14 @@ window.PlatformPanels = (function () {
       CIVILIAN: "民用船只",
       MERCHANT: "商船",
       MERCHANT_VESSEL: "商船",
+      COASTAL_MISSILE_SITE: "沿海导弹阵地",
+      MISSILE_SITE: "导弹阵地",
+      MISSILE_BATTERY: "导弹阵地",
+      AIRFIELD_RUNWAY: "军用机场跑道",
+      AIRFIELD: "军用机场",
+      MOBILE_COASTAL_AIR_DEFENSE: "机动岸防雷达/防空单元",
+      COASTAL_AIR_DEFENSE: "岸防防空单元",
+      CIVILIAN_PORT: "民用渔港",
     };
     if (labels[classification]) return labels[classification];
     return classification === "UNKNOWN" ? "" : classification;
@@ -95,12 +103,14 @@ window.PlatformPanels = (function () {
 
   function contactLabel(track) {
     var id = String(track && (track.id || track.track_id) || "");
-    if (!id) return "海面接触";
+    if (!id) return "待识别接触";
     var displayLabel = String(track && track.display_label || "");
     if (displayLabel) {
       contactAliases[id] = displayLabel;
     } else if (!contactAliases[id]) {
-      contactAliases[id] = "海面接触 " + String(nextContactAlias++).padStart(2, "0");
+      var domain = String(track && (track.domain_hint || track.domain) || "").toLowerCase();
+      var prefix = domain === "ground" ? "地面接触" : (domain === "air" ? "空中接触" : "海面接触");
+      contactAliases[id] = prefix + " " + String(nextContactAlias++).padStart(2, "0");
     }
     var classification = contactClassificationLabel(track);
     return contactAliases[id] + (classification ? " · " + classification : "");
@@ -220,7 +230,7 @@ window.PlatformPanels = (function () {
 
     if (badge) badge.textContent = assets.length;
 
-    var domainLabels = {air: "AIR", maritime: "SEA", ground: "SITE"};
+    var domainLabels = {air: "空中", maritime: "海上", ground: "地面", space: "太空"};
     var statusLabels = {
       active: "正常", operational: "正常", "comm-lost": "通信中断",
       autonomous: "自主运行", staged: "待命", holding: "保持",
@@ -231,25 +241,25 @@ window.PlatformPanels = (function () {
       var usesBattery = a.battery_pct != null;
       var energy = usesBattery ? Number(a.battery_pct) :
         (a.fuel_pct == null ? null : Number(a.fuel_pct));
-      var comms = a.comms_strength == null ? 100 : Number(a.comms_strength);
+      var comms = a.comms_strength == null ? null : Number(a.comms_strength);
       var status = a.status || "operational";
-      var domainLabel = domainLabels[a.domain] || "N/A";
+      var domainLabel = domainLabels[a.domain] || "未提供";
 
       var energyColor = energy == null ? "#7d8b8e" : energy > 70 ? "#00ff41" : energy > 30 ? "#ffaa00" : "#ff4444";
-      var commsColor = comms > 70 ? "#00ff41" : comms > 30 ? "#ffaa00" : "#ff4444";
+      var commsColor = comms == null ? "#7d8b8e" : comms > 70 ? "#00ff41" : comms > 30 ? "#ffaa00" : "#ff4444";
       var statusColor = status === "active" || status === "operational" || status === "holding"
         ? "#00ff41" : status === "comm-lost" || status === "unavailable"
           ? "#ff4444" : status === "degraded" || status === "staged"
             ? "#ffaa00" : status === "autonomous" ? "#00ccff" : "#888";
-      var energyLabel = usesBattery ? "电量" : "燃油";
+      var energyLabel = usesBattery ? "电量" : a.fuel_pct != null ? "燃油" : "能源";
       var energyText = energy == null ? "未提供" : energy.toFixed(0) + "%";
 
       return '<div class="asset-health-row">' +
         '<span class="asset-icon">' + escapeHtml(domainLabel) + '</span>' +
-        '<span class="asset-id" title="' + escapeHtml(a.role || a.id) + '">' + escapeHtml((a.role || a.id || "?").substring(0, 12)) + '</span>' +
+        '<span class="asset-id" title="' + escapeHtml(a.role || a.id) + '">' + escapeHtml(a.role || a.id || "未命名平台") + '</span>' +
         '<span class="asset-status" style="color:' + statusColor + '">' + escapeHtml(statusLabels[status] || status) + '</span>' +
         '<span class="asset-batt" style="color:' + energyColor + '" title="剩余能源">' + energyLabel + ' ' + energyText + '</span>' +
-        '<span class="asset-comms" style="color:' + commsColor + '" title="通信链路质量">链路 ' + comms.toFixed(0) + '%</span>' +
+        '<span class="asset-comms" style="color:' + commsColor + '" title="通信链路质量">链路 ' + (comms == null ? "未提供" : comms.toFixed(0) + '%') + '</span>' +
         '</div>';
     }).join(""));
   }
@@ -314,20 +324,20 @@ window.PlatformPanels = (function () {
   }
 
   function compactValue(value) {
-    if (value == null || value === "") return "未声明";
+    if (value == null || value === "") return "未配置";
     if (Array.isArray(value)) {
       var items = value.map(function (item) {
         if (!item || typeof item !== "object") return String(item);
         return String(item.key || item.id || item.name || "指标") +
           (item.value == null ? "" : "=" + String(item.value));
       }).filter(Boolean);
-      return items.length ? escapeHtml(items.join("；")) : "未声明";
+      return items.length ? escapeHtml(items.join("；")) : "未配置";
     }
     if (typeof value === "object") {
       var keys = Object.keys(value).slice(0, 5);
       return keys.length ? escapeHtml(keys.map(function (key) {
         return key + "=" + String(value[key]);
-      }).join("；")) : "未声明";
+      }).join("；")) : "未配置";
     }
     return escapeHtml(value);
   }
@@ -348,7 +358,7 @@ window.PlatformPanels = (function () {
     function chips(values, className) {
       return values.length ? values.map(function (value) { return '<span class="agent-relation-chip ' + className + '">' + escapeHtml(value) + '</span>'; }).join("") : '<span class="agent-relation-empty">未绑定</span>';
     }
-    setHtmlIfChanged(root, rows.length ? rows.map(function (item) {
+    var html = rows.length ? rows.map(function (item) {
       var skillRows = (item.skills || []).map(function (skill) {
         return '<section class="agent-skill-relation"><header><b>' + escapeHtml(skill.name || skill.skill_id) + '</b><small>' + escapeHtml(skill.skill_id || "") + '</small></header>' +
           '<div><label>主算法</label><p>' + chips((skill.primary || []).map(function (id) { return algorithmLabel(id, runtimeAlgorithmCatalog); }), "primary") + '</p></div>' +
@@ -357,10 +367,16 @@ window.PlatformPanels = (function () {
       }).join("");
       return '<article class="agent-node planned"><header><b>' +
         escapeHtml((item.agent_id || "—") + " · " + (item.name || "未命名 Agent")) +
-        '</b><span>计划职责</span></header><p>' + compactValue(item.responsibilities) +
-        '</p><dl><div><dt>后端角色</dt><dd>' + compactValue(item.backend_roles) +
-        '</dd></div></dl><div class="agent-skill-relations">' + (skillRows || '<div class="agent-relation-empty">未声明技能关系</div>') + '</div></article>';
-    }).join("") : '<div class="empty-state">当前场景未声明功能 Agent</div>');
+        '</b><span>职责</span></header><p>' + compactValue(item.responsibilities) +
+        '</p><details class="presentation-details"><summary>查看角色与算法</summary><dl><div><dt>后端角色</dt><dd>' + compactValue(item.backend_roles) +
+        '</dd></div></dl><div class="agent-skill-relations">' + (skillRows || '<div class="agent-relation-empty">未配置技能关系</div>') + '</div></details></article>';
+    }).join("") : '<div class="empty-state">当前场景未配置功能 Agent</div>';
+    // Opening <details> changes innerHTML; compare generated markup so state
+    // refreshes do not collapse a section the reader is inspecting.
+    if (root._agentCatalogHtml !== html) {
+      root._agentCatalogHtml = html;
+      setHtmlIfChanged(root, html);
+    }
   }
 
   function functionNameMap(catalog) {
@@ -394,7 +410,12 @@ window.PlatformPanels = (function () {
     var nodes = asList(scenario && scenario.compute_nodes);
     var deployments = asList(scenario && scenario.agent_deployments);
     var agents = asList(scenario && scenario.functional_agents);
-    if (badge) badge.textContent = deployments.length;
+    var counts = [["平台", asList(scenario && scenario.assets).length], ["设备（含载荷）", devices.length],
+      ["算力节点", nodes.length], ["部署关系", deployments.length]];
+    setHtmlIfChanged(document.getElementById("presentation-resource-counts"), counts.map(function (row) {
+      return '<span><small>' + row[0] + '</small><b>' + row[1] + '</b></span>';
+    }).join(""));
+    if (badge) badge.textContent = deployments.length + " 条部署关系";
     var agentsById = agents.reduce(function (result, item) {
       result[item.agent_id || item.id] = item;
       return result;
@@ -432,22 +453,22 @@ window.PlatformPanels = (function () {
           var nodeDeployments = deploymentsByNode[node.node_id] || [];
           return '<section class="deployment-compute-node"><div class="deployment-node-head"><b>' +
             escapeHtml(node.name || node.node_id) + '</b><span>' + escapeHtml(node.compute_type || "compute") +
-            '</span></div><dl><div><dt>CPU</dt><dd>' + escapeHtml(node.cpu || "未声明") +
-            '</dd></div><div><dt>加速器</dt><dd>' + escapeHtml(node.accelerator || "未声明") +
-            '</dd></div><div><dt>内存</dt><dd>' + escapeHtml(node.memory_gb == null ? "未声明" : node.memory_gb + " GB") +
-            '</dd></div><div><dt>网络</dt><dd>' + escapeHtml(node.network || "未声明") +
+            '</span></div><dl><div><dt>CPU</dt><dd>' + escapeHtml(node.cpu || "未配置") +
+            '</dd></div><div><dt>加速器</dt><dd>' + escapeHtml(node.accelerator || "未配置") +
+            '</dd></div><div><dt>内存</dt><dd>' + escapeHtml(node.memory_gb == null ? "未配置" : node.memory_gb + " GB") +
+            '</dd></div><div><dt>网络</dt><dd>' + escapeHtml(node.network || "未配置") +
             '</dd></div></dl><div class="deployment-agent-list">' +
             (nodeDeployments.length ? nodeDeployments.map(function (deployment) {
               var agent = agentsById[deployment.agent_id] || {};
               return '<div class="deployment-agent"><b>' + escapeHtml(deployment.agent_id || "Agent") +
                 ' · ' + escapeHtml(agent.name || "未命名 Agent") + '</b><small>' +
-                escapeHtml(valueList(deployment.roles).join("；") || "未声明部署职责") +
+                escapeHtml(valueList(deployment.roles).join("；") || "未配置部署职责") +
                 '</small><span>' + escapeHtml(deployment.runtime_status || "planned") + '</span></div>';
             }).join("") : '<div class="deployment-empty">该算力节点暂无 Agent 部署</div>') +
             '</div></section>';
         }).join("") : '<div class="deployment-empty">该设备暂无算力节点</div>') +
         '</article>';
-    }).join("") : '<div class="empty-state">当前场景未声明 Agent—设备算力映射</div>';
+    }).join("") : '<div class="empty-state">当前场景未配置 Agent—设备算力映射</div>';
     setHtmlIfChanged(root, html);
   }
 
@@ -465,12 +486,15 @@ window.PlatformPanels = (function () {
     if (activeCount == null) activeCount = classes.length || 20;
     var activeNode = document.getElementById("backend-active-count");
     if (activeNode) activeNode.textContent = activeCount || 0;
-    document.getElementById("backend-runnable-count").textContent = catalog.algorithm_package_count == null ? allRows.length : catalog.algorithm_package_count;
-    document.getElementById("backend-unavailable-count").textContent = catalog.unavailable_count || 0;
-    document.getElementById("backend-family-count").textContent = Object.keys(families).length;
+    var runtimeKnown = catalog.status === "ready" || catalog.status === "degraded";
+    document.getElementById("backend-runnable-count").textContent = runtimeKnown ? (catalog.algorithm_package_count == null ? allRows.length : catalog.algorithm_package_count) : "未知";
+    document.getElementById("backend-unavailable-count").textContent = runtimeKnown ? (catalog.unavailable_count == null ? unavailableRows.length : catalog.unavailable_count) : "未知";
+    document.getElementById("backend-family-count").textContent = runtimeKnown ? Object.keys(families).length : "未知";
+    var plannedNode = document.getElementById("scenario-algorithm-count");
+    if (plannedNode) plannedNode.textContent = activeScenario ? asList(activeScenario.algorithm_coverage).length : "—";
     var status = document.getElementById("algorithm-runtime-status");
     if (status) {
-      status.textContent = catalog.status === "ready" ? "运行时已验证" :
+      status.textContent = catalog.status === "ready" ? "运行时目录已连接" :
         (catalog.status === "degraded" ? "部分服务不可用" : (catalog.status === "offline" ? "算法库离线" : "检查中"));
       status.className = "status-chip " + (catalog.status === "ready" ? "success" :
         (catalog.status === "degraded" ? "warning" : (catalog.status === "offline" ? "danger" : "neutral")));
@@ -560,7 +584,7 @@ window.PlatformPanels = (function () {
         return '<span class="function-relation-tag ' + className + '">' + escapeHtml(value) + '</span>';
       }).join("") + '</span>';
     }
-    var html = '<section class="function-algorithm-section"><header><div><b>28 项功能点—算法关系</b><small>能力映射，不代表本次实际调用</small></div><span>' + escapeHtml(functions.length) + '</span></header>' +
+    var html = '<section class="function-algorithm-section"><header><div><b>28 项功能点—算法关系</b></div><span>' + escapeHtml(functions.length) + '</span></header>' +
       order.filter(function (stage) { return grouped[stage]; }).map(function (stage) {
         return '<section class="function-algorithm-stage"><h3>' + escapeHtml(stageLabel(stage)) + '</h3><div class="function-algorithm-grid">' + grouped[stage].map(function (entry) {
           var primary = entry.linked.map(function (item) { return item.primary_algorithm_ids || []; }).flat();

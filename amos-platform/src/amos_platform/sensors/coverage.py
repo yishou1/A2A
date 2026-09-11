@@ -6,6 +6,7 @@ import math
 
 
 SENSOR_COVERAGE: dict[str, dict] = {
+    "ORBITAL_SAR": {"range_nm": 1000, "fov_deg": 360, "detect_air": False, "detect_ground": True, "detect_maritime": True},
     "AESA_RADAR": {"range_nm": 80, "fov_deg": 120, "detect_air": True, "detect_ground": True, "detect_maritime": True},
     "AEW_RADAR": {"range_nm": 200, "fov_deg": 360, "detect_air": True, "detect_ground": False, "detect_maritime": True},
     "EO/IR": {"range_nm": 15, "fov_deg": 60, "detect_air": True, "detect_ground": True, "detect_maritime": True},
@@ -63,6 +64,7 @@ _SENSOR_NAME_MAP: dict[str, str] = {
     "NAV-RADAR": "NAV_RADAR",
     "GROUND-RADAR": "GROUND_RADAR",
     "IRST": "EO/IR",
+    "ORBITAL-SAR": "ORBITAL_SAR",
     "HHQ-9": "AESA_RADAR",
 }
 

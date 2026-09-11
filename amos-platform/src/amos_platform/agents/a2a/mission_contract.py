@@ -39,6 +39,8 @@ def _domain_object_type(domain: Any) -> str:
         return "aircraft"
     if normalized in {"maritime", "surface", "sea"}:
         return "ship"
+    if normalized in {"ground", "land"}:
+        return "ground_installation"
     return "unknown"
 
 
@@ -48,6 +50,8 @@ def _contact_kind(domain: Any) -> str:
         return "air-contact"
     if normalized in {"maritime", "surface", "sea"}:
         return "surface-contact"
+    if normalized in {"ground", "land"}:
+        return "ground-contact"
     return "unknown-contact"
 
 
@@ -143,6 +147,9 @@ def map_friendly_platforms(assets: list[dict[str, Any]]) -> list[dict[str, Any]]
                 "status": asset.get("status"),
                 "heading_deg": asset.get("heading", asset.get("heading_deg", 0)),
                 "speed_kts": asset.get("speed_kts", 0),
+                "member_count": int(asset.get("member_count", asset.get("swarm_size", 1)) or 1),
+                "formation_role": asset.get("formation_role", ""),
+                "network_role": asset.get("network_role", ""),
                 "sensors": list(asset.get("sensors") or []),
                 "weapons": weapons,
                 "battery_pct": asset.get("battery_pct"),
@@ -156,7 +163,12 @@ def map_friendly_platforms(assets: list[dict[str, Any]]) -> list[dict[str, Any]]
 
 
 def map_fused_contacts(tracks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Use stable fused-track IDs as contacts while leaving risk unknown."""
+    """Use stable fused-track IDs and released sensor classifications.
+
+    Affiliation, intent and risk remain unknown until the backend evaluates the
+    contact.  A non-UNKNOWN classification is forwarded only when the live
+    fused track already carries an evidence-derived candidate.
+    """
     contacts = []
     for track in tracks:
         if not isinstance(track, dict):
@@ -167,6 +179,9 @@ def map_fused_contacts(tracks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not track_id or lat is None or lon is None:
             continue
         geo = {"lat": round(float(lat), 6), "lon": round(float(lon), 6)}
+        prior_classification = str(track.get("classification") or "unknown").strip().lower()
+        if not prior_classification or prior_classification == "unknown":
+            prior_classification = "unknown"
         source_refs = [
             deepcopy(ref) for ref in track.get("source_refs") or []
             if isinstance(ref, dict)
@@ -181,10 +196,12 @@ def map_fused_contacts(tracks: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "amos_track_id": track_id,
                 "geo": geo,
                 "domain_hint": track.get("domain_hint"),
-                "classification": "unknown",
+                "classification": prior_classification,
+                "prior_classification": prior_classification,
                 "affiliation": "unknown",
                 "confidence": track.get("confidence"),
                 "heading_deg": track.get("heading"),
+                "speed_kts": track.get("speed_kts", 0),
                 "uncertainty": deepcopy(track.get("uncertainty") or {}),
                 "source_observation_ids": [
                     str(ref["observation_id"])
@@ -196,7 +213,7 @@ def map_fused_contacts(tracks: list[dict[str, Any]]) -> list[dict[str, Any]]:
             # Compatibility fields retained for the current Commander branch.
             "track_id": track_id,
             "geo": geo,
-            "classification": "unknown",
+            "classification": prior_classification,
             "affiliation": "unknown",
         })
     return contacts
