@@ -29,7 +29,9 @@ from .asset_impact_analyzer import AssetImpactAnalyzer
 from .group_detector import GroupDetector
 from .intelligence_adapter import (
     convert_intelligence_to_detections,
+    extract_intelligence_packet,
     extract_scene_from_intelligence,
+    has_upstream_tracks,
     is_intelligence_format,
     reset_adapter_cache,
 )
@@ -266,7 +268,11 @@ def _agent_card_payload() -> Dict[str, Any]:
         "preferredTransport": "HTTP+JSON",
         "additionalInterfaces": [
             {"url": f"{service_url}/a2a/perception-result", "transport": "HTTP+JSON"},
-            {"url": f"{service_url}/a2a/intelligence-result", "transport": "HTTP+JSON", "note": "Accepts TacticalIntelligenceAgent format with targets array"},
+            {
+                "url": f"{service_url}/a2a/intelligence-result",
+                "transport": "HTTP+JSON",
+                "note": "Accepts TacticalIntelligenceAgent targets and preferred CMS fused tracks packets",
+            },
             {"url": f"{service_url}/sendMessage", "transport": "A2A_HTTP_JSON"},
             {"url": f"{service_url}/sendMessageStream", "transport": "A2A_SSE"},
         ],
@@ -283,7 +289,7 @@ def _agent_card_payload() -> Dict[str, Any]:
             "stateTransitionHistory": False,
         },
         "algorithm_levels": ["small", "medium", "large"],
-        "input_message_types": ["perception_result", "tactical_intelligence"],
+        "input_message_types": ["perception_result", "tactical_intelligence_result", "a2a_task"],
         "output_message_types": ["track_threat_group_artifact"],
         "downstreamContracts": {
             "riskAssessments": {
@@ -361,7 +367,7 @@ def _agent_card_payload() -> Dict[str, Any]:
             "loading_mode": "gpt_4o_mini_tool_plan_then_validated_algolib_run",
             "remote_execution": algorithm_library_runtime.settings.enabled,
             "runtime": algorithm_library_runtime.status(),
-            "contract_version": "track_threat_algorithms/v1",
+            "contract_version": "track_threat_algorithms/v2",
         },
         "algorithm_boundary": algorithm_provider.algorithm_contract()["algorithm_boundary"],
         "safety_boundary": [
@@ -395,7 +401,7 @@ def well_known_agent_json() -> Dict[str, Any]:
 
 @app.get("/models")
 def models() -> Dict[str, Any]:
-    """Report models loaded by this Agent; execution remains in-process."""
+    """Report agent-local fallback models and verified TorchScript bundles."""
     return model_registry.snapshot()
 
 
@@ -403,6 +409,14 @@ def models() -> Dict[str, Any]:
 def algorithms() -> Dict[str, Any]:
     contract = algorithm_provider.algorithm_contract()
     model_snapshots = model_registry.snapshot().get("models", [])
+    library_status = algorithm_library_runtime.status()
+    active_remote_algorithms = set(library_status.get("active_algorithms", []))
+    remote_algorithm_ids = {
+        "multimodal_feature_fuser",
+        "trajectory_predictor",
+        "graph_relation_reasoner",
+        "threat_priority_random_forest",
+    }
     capability_model_ids = {
         "trajectory_tracking": {"track_state_kalman_cv"},
         "trajectory_prediction": {
@@ -438,9 +452,18 @@ def algorithms() -> Dict[str, Any]:
                 "name": algorithm_id.replace("_", " ").title(),
                 "version": "1.0.0",
                 "status": status,
-                "backend": "torchscript" if algorithm_id == "st_gnn_dynamic_entity_tracking" else "in_process_python",
+                "backend": (
+                    "python_http_service"
+                    if algorithm_id in remote_algorithm_ids
+                    else "agent_process"
+                ),
                 "model_ids": [model["id"] for model in backing_models],
-                "tags": [capability, "local"],
+                "tags": [
+                    capability,
+                    "primary",
+                    "remote" if algorithm_id in remote_algorithm_ids else "agent_local",
+                ],
+                "remote_ready": algorithm_id in active_remote_algorithms,
             }
         )
     for model in model_snapshots:
@@ -461,11 +484,11 @@ def algorithms() -> Dict[str, Any]:
     return {
         "agent": runtime.agent_name,
         "role": runtime.role,
-        "contract_version": "track_threat_algorithms/v1",
+        "contract_version": "track_threat_algorithms/v2",
         "execution_location": "zsl_algorithm_library_with_agent_local_fallback",
         "loading_mode": "gpt_4o_mini_tool_plan_then_validated_algolib_run",
         "network_algorithm_calls": algorithm_library_runtime.settings.enabled,
-        "algorithm_library_runtime": algorithm_library_runtime.status(),
+        "algorithm_library_runtime": library_status,
         "primary_algorithms": contract["primary_algorithms"],
         "fallback_providers": contract["fallback_providers"],
         "algorithms": catalog,
@@ -477,7 +500,26 @@ def input_schema() -> Dict[str, Any]:
     return {
         "schema_version": INPUT_SCHEMA_VERSION,
         "message_type": "perception_result",
-        "required_top_level_fields": ["task_id", "message_type", "algorithm_level", "scene", "detections"],
+        "accepted_message_types": [
+            "perception_result",
+            "tactical_intelligence_result",
+            "a2a_task",
+        ],
+        "required_top_level_fields": ["task_id"],
+        "input_contracts": {
+            "raw_detections": {
+                "required": ["task_id", "message_type", "algorithm_level", "scene", "detections"],
+                "description": "Raw perception observations; this Agent performs local association only for this compatibility path.",
+            },
+            "upstream_fused_tracks": {
+                "required": ["input.intelligence_packet.tracks"],
+                "description": "Preferred CMS handoff. Stable fused tracks are synchronized without a second local association pass.",
+            },
+            "post_tracking": {
+                "required": ["input.tracking_result.tracks"],
+                "description": "Assessment-only A2A call that consumes an existing tracking artifact.",
+            },
+        },
         "scene_fields": [
             "protected_zone_lat",
             "protected_zone_lon",
@@ -519,6 +561,8 @@ def output_schema() -> Dict[str, Any]:
             "task_id",
             "artifact_schema_version",
             "trace",
+            "algorithm_calls",
+            "algorithm_invocations",
             "protected_assets",
             "tracks",
             "threats",
@@ -663,15 +707,36 @@ async def intelligence_result(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not is_intelligence_format(payload):
         raise HTTPException(
             status_code=400,
-            detail="Payload must contain a 'targets' array (TacticalIntelligenceAgent format)",
+            detail="Payload must contain a TacticalIntelligenceAgent targets or tracks array",
         )
 
-    algorithm_level = payload.get("algorithm_level", "medium")
-    scene = extract_scene_from_intelligence(payload, override_scene=payload.get("scene"))
-    detections = convert_intelligence_to_detections(payload)
+    packet = extract_intelligence_packet(payload)
+    algorithm_level = payload.get("algorithm_level", packet.get("algorithm_level", "medium"))
+    scene = extract_scene_from_intelligence(
+        packet,
+        override_scene=payload.get("scene") or packet.get("scene"),
+    )
+    detections = convert_intelligence_to_detections(packet)
+
+    if has_upstream_tracks(packet):
+        async with processing_lock:
+            result = _process_upstream_track_packet(
+                packet=packet,
+                observations=detections,
+                task_id=str(packet.get("mission_id") or f"intel-{packet.get('packet_id', 'task')}"),
+                algorithm_level=str(algorithm_level),
+                scene=scene,
+            )
+        return {
+            "status": "completed",
+            "message": "CMS fused tracks synchronized and processed without local re-association",
+            "adapted_track_count": len(detections),
+            "tracking_mode": "upstream_fused_tracks",
+            "artifact": result["artifact"],
+        }
 
     perception = PerceptionResultRequest(
-        task_id=payload.get("mission_id", f"intel-{payload.get('packet_id', 'task')}"),
+        task_id=packet.get("mission_id", f"intel-{packet.get('packet_id', 'task')}"),
         message_type="perception_result",
         algorithm_level=algorithm_level if algorithm_level in ("small", "medium", "large") else "medium",
         scene=scene,
@@ -1030,6 +1095,49 @@ def _process_payload(
     )
 
 
+def _process_upstream_track_packet(
+    *,
+    packet: Dict[str, Any],
+    observations: List[Detection],
+    task_id: str,
+    algorithm_level: str,
+    scene: Dict[str, Any],
+    requested_skills: List[str] | None = None,
+    assessment_enabled: bool = True,
+    initialize_algorithm_runtime: bool = True,
+) -> Dict[str, Any]:
+    """Consume CMS-fused tracks without repeating upstream association."""
+    _ensure_active_workflow(str(packet.get("mission_id") or task_id))
+    effective_skills = requested_skills or ["track_threat_situation_analysis"]
+    if initialize_algorithm_runtime:
+        algorithm_provider.begin_request(
+            request_id=task_id,
+            requested_skills=effective_skills,
+            request_summary={
+                "input_kind": "upstream_fused_tracks",
+                "track_count": len(observations),
+                "mission_id": packet.get("mission_id"),
+                "packet_id": packet.get("packet_id"),
+            },
+        )
+    started = time.perf_counter()
+    tracks = algorithm_provider.ingest_upstream_tracks(observations)
+    duration_ms = round((time.perf_counter() - started) * 1000, 3)
+    return _build_artifact_from_tracks(
+        task_id=task_id,
+        source_message_type="tactical_intelligence_result",
+        algorithm_level=(
+            algorithm_level if algorithm_level in {"small", "medium", "large"} else "medium"
+        ),
+        scene=scene,
+        tracks=tracks,
+        input_count=len(observations),
+        input_kind="upstream_tracks",
+        assessment_enabled=assessment_enabled,
+        algorithm_duration_ms={"upstream_track_sync_and_prediction": duration_ms},
+    )
+
+
 def _build_artifact_from_tracks(
     *,
     task_id: str,
@@ -1109,7 +1217,9 @@ def _build_artifact_from_tracks(
             "input_kind": input_kind,
             "input_count": input_count,
             "detection_count": input_count if input_kind == "detections" else 0,
-            "track_input_count": input_count if input_kind == "tracks" else 0,
+            "track_input_count": (
+                input_count if input_kind in {"tracks", "upstream_tracks"} else 0
+            ),
             "assessment_enabled": assessment_enabled,
             "processed_at": processed_at,
             "algorithm_duration_ms": timings,
@@ -1247,6 +1357,42 @@ def _process_a2a_task(
         requested_skills=requested_skills,
         request_summary=_algorithm_request_summary_from_task(task_payload),
     )
+    raw_input = task_payload.get("payload") or task_payload.get("input") or {}
+    intelligence_packet = (
+        extract_intelligence_packet(raw_input) if isinstance(raw_input, dict) else {}
+    )
+    if has_upstream_tracks(intelligence_packet):
+        context = task_payload.get("context") or {}
+        scene = (
+            intelligence_packet.get("scene")
+            or (raw_input.get("scene") if isinstance(raw_input, dict) else None)
+            or context.get("scene")
+            or {}
+        )
+        scene = extract_scene_from_intelligence(
+            intelligence_packet,
+            override_scene=scene or None,
+        )
+        algorithm_level = str(
+            intelligence_packet.get("algorithm_level")
+            or context.get("algorithm_level")
+            or task_payload.get("algorithm_level")
+            or "medium"
+        )
+        tracking_only = set(requested_skills) <= {
+            "trajectory_tracking",
+            "trajectory_prediction",
+        }
+        return _process_upstream_track_packet(
+            packet=intelligence_packet,
+            observations=convert_intelligence_to_detections(intelligence_packet),
+            task_id=request_id,
+            algorithm_level=algorithm_level,
+            scene=scene,
+            requested_skills=requested_skills,
+            assessment_enabled=not tracking_only,
+            initialize_algorithm_runtime=False,
+        )
     tracking_skills = {"trajectory_tracking", "trajectory_prediction"}
     if set(requested_skills) <= tracking_skills:
         payload = _perception_from_a2a_task(task_payload)

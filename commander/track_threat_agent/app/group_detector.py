@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Set
 from uuid import uuid4
 
@@ -10,26 +11,63 @@ from .models import ThreatAssessment, TrackGroup, TrackState
 from .utils import average_point, bounding_box, clamp, haversine_m, heading_difference_deg, meters_to_lat_lon_delta, risk_level
 
 
+@dataclass(frozen=True)
+class AssociationProfile:
+    """Configurable association gates for one homogeneous target type."""
+
+    max_distance_m: float
+    max_heading_diff_deg: float
+    max_speed_diff_mps: float
+
+
+# These are simulation association gates, not operational formation standards.
+DEFAULT_ASSOCIATION_PROFILES: Dict[str, AssociationProfile] = {
+    "aircraft": AssociationProfile(3_500.0, 25.0, 18.0),
+    "uav": AssociationProfile(1_200.0, 30.0, 10.0),
+    "ship": AssociationProfile(8_000.0, 20.0, 5.0),
+    "unknown": AssociationProfile(3_500.0, 25.0, 18.0),
+}
+
+
 class GroupDetector:
     """Detects likely simulated formations using distance, heading, and speed similarity."""
 
     def __init__(
         self,
-        max_distance_m: float = 3_500.0,
-        max_heading_diff_deg: float = 25.0,
-        max_speed_diff_mps: float = 18.0,
+        max_distance_m: float | None = None,
+        max_heading_diff_deg: float | None = None,
+        max_speed_diff_mps: float | None = None,
         confirmation_hits: int = 2,
         max_missed_frames: int = 2,
+        member_exit_misses: int = 2,
+        association_profiles: Dict[str, AssociationProfile | Dict[str, float]] | None = None,
     ) -> None:
-        self.max_distance_m = max_distance_m
-        self.max_heading_diff_deg = max_heading_diff_deg
-        self.max_speed_diff_mps = max_speed_diff_mps
+        self.association_profiles = self._build_association_profiles(
+            max_distance_m=max_distance_m,
+            max_heading_diff_deg=max_heading_diff_deg,
+            max_speed_diff_mps=max_speed_diff_mps,
+            overrides=association_profiles,
+        )
+        # Keep these attributes for compatibility with callers that configure a global profile.
+        default_profile = self.association_profiles["unknown"]
+        self.max_distance_m = default_profile.max_distance_m
+        self.max_heading_diff_deg = default_profile.max_heading_diff_deg
+        self.max_speed_diff_mps = default_profile.max_speed_diff_mps
         self.confirmation_hits = max(1, int(confirmation_hits))
         self.max_missed_frames = max(0, int(max_missed_frames))
+        self.member_exit_misses = max(1, int(member_exit_misses))
         self.groups: Dict[str, TrackGroup] = {}
+        self._last_input_track_count = 0
+        self._last_eligible_track_count = 0
+        self._last_excluded_non_active_count = 0
+        self._last_excluded_duplicate_source_count = 0
 
     def reset(self) -> None:
         self.groups.clear()
+        self._last_input_track_count = 0
+        self._last_eligible_track_count = 0
+        self._last_excluded_non_active_count = 0
+        self._last_excluded_duplicate_source_count = 0
 
     def detect(
         self,
@@ -37,14 +75,14 @@ class GroupDetector:
         threats: Iterable[ThreatAssessment] | None = None,
         scene_context: Dict[str, float] | None = None,
     ) -> List[TrackGroup]:
-        track_list = [t for t in tracks if t.metadata.get("status", "active") != "lost"]
+        track_list = self._eligible_tracks(list(tracks))
         for track in track_list:
             track.metadata.pop("physical_group_context", None)
         threat_by_track = {threat.track_id: threat for threat in threats or []}
         by_id = {track.track_id: track for track in track_list}
         components = self._complete_link_components(track_list)
         previous_groups = dict(self.groups)
-        groups: List[TrackGroup] = []
+        candidate_groups: List[tuple[str, str, List[TrackState]]] = []
         reused_group_ids: Set[str] = set()
         for component in components:
             if len(component) < 2:
@@ -52,9 +90,36 @@ class GroupDetector:
             members = [by_id[track_id] for track_id in sorted(component)]
             group_type = self._group_type(members)
             group_id = self._reuse_group_id(component, group_type, reused_group_ids)
-            group = self._build_group(members, threat_by_track, scene_context or {}, group_id, group_type)
-            self._mark_observed_group(group, previous_groups.get(group_id))
             reused_group_ids.add(group_id)
+            candidate_groups.append((group_id, group_type, members))
+
+        observed_member_ids = {
+            member.track_id
+            for _, _, members in candidate_groups
+            for member in members
+        }
+        groups: List[TrackGroup] = []
+        for group_id, group_type, members in candidate_groups:
+            previous = previous_groups.get(group_id)
+            resolved_members, held_member_ids, member_relation_misses = self._apply_member_exit_hysteresis(
+                members,
+                previous,
+                by_id,
+                observed_member_ids,
+            )
+            group = self._build_group(
+                resolved_members,
+                threat_by_track,
+                scene_context or {},
+                group_id,
+                self._group_type(resolved_members),
+            )
+            self._mark_observed_group(
+                group,
+                previous,
+                held_member_ids=held_member_ids,
+                member_relation_misses=member_relation_misses,
+            )
             groups.append(group)
 
         for group_id, previous in previous_groups.items():
@@ -78,16 +143,141 @@ class GroupDetector:
             "lifecycle_counts": lifecycle_counts,
             "confirmation_hits": self.confirmation_hits,
             "max_missed_frames": self.max_missed_frames,
+            "member_exit_misses": self.member_exit_misses,
+            "last_input_track_count": self._last_input_track_count,
+            "last_eligible_track_count": self._last_eligible_track_count,
+            "last_excluded_non_active_count": self._last_excluded_non_active_count,
+            "last_excluded_duplicate_source_count": self._last_excluded_duplicate_source_count,
+            "association_profiles": {
+                object_type: {
+                    "max_distance_m": profile.max_distance_m,
+                    "max_heading_diff_deg": profile.max_heading_diff_deg,
+                    "max_speed_diff_mps": profile.max_speed_diff_mps,
+                }
+                for object_type, profile in self.association_profiles.items()
+            },
         }
 
+    def adopt_remote_groups(
+        self,
+        candidates: Iterable[Dict[str, Any]],
+        tracks: Iterable[TrackState],
+        threats: Iterable[ThreatAssessment] | None = None,
+        scene_context: Dict[str, float] | None = None,
+    ) -> List[TrackGroup]:
+        """Apply graph-relation groups while retaining stable IDs and envelopes locally.
+
+        The graph relation algorithm is authoritative for membership.  This
+        method intentionally does not run the local complete-link inference;
+        it only enriches valid remote candidates with lifecycle, prediction
+        envelope and group-risk fields required by downstream consumers.
+        """
+        track_list = self._eligible_tracks(list(tracks))
+        by_id = {track.track_id: track for track in track_list}
+        threat_by_track = {threat.track_id: threat for threat in threats or []}
+        previous_groups = dict(self.groups)
+        groups: List[TrackGroup] = []
+        observed_group_ids: Set[str] = set()
+
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            member_ids = candidate.get("member_track_ids") or candidate.get("members") or []
+            members = [by_id[str(track_id)] for track_id in member_ids if str(track_id) in by_id]
+            if len(members) < 2:
+                continue
+            requested_type = str(candidate.get("group_type") or self._group_type(members))
+            group_type = requested_type if requested_type in {
+                "air_formation", "surface_group", "mixed_group", "unknown_group"
+            } else self._group_type(members)
+            group_id = str(candidate.get("group_id") or self._reuse_group_id(
+                {member.track_id for member in members}, group_type, observed_group_ids
+            ))
+            if group_id in observed_group_ids:
+                continue
+            group = self._build_group(members, threat_by_track, scene_context or {}, group_id, group_type)
+            remote_cohesion = candidate.get("cohesion_score")
+            if isinstance(remote_cohesion, (int, float)):
+                group.cohesion_score = round(clamp(float(remote_cohesion)), 4)
+                score, details = self._group_score(
+                    members, threat_by_track, scene_context or {}, group.cohesion_score, group_type
+                )
+                group.group_threat_score = round(score, 4)
+                group.group_threat_level = risk_level(score)
+                group.metadata["group_score_factors"] = details
+            group.evidence = [
+                *(str(item) for item in candidate.get("evidence", []) if item),
+                "成员关系由算法库图关系推理器给出；本 Agent 负责生命周期、包络和态势关注汇总。",
+            ]
+            self._mark_observed_group(group, previous_groups.get(group_id))
+            group.metadata["formation_inference"] = {
+                "algorithm": "graph_relation_reasoner",
+                "membership_source": "algorithm_library",
+                "remote_group_id": str(candidate.get("group_id") or group_id),
+            }
+            groups.append(group)
+            observed_group_ids.add(group_id)
+
+        for group_id, previous in previous_groups.items():
+            if group_id not in observed_group_ids:
+                coasting = self._coasting_group(previous)
+                if coasting is not None:
+                    groups.append(coasting)
+        self.groups = {group.group_id: group for group in groups}
+        self._write_physical_group_context(track_list, groups)
+        return groups
+
+    def _eligible_tracks(self, tracks: List[TrackState]) -> List[TrackState]:
+        """Use active tracks for new groups and enforce one candidate per trusted source identity."""
+        self._last_input_track_count = len(tracks)
+        active = [
+            track
+            for track in tracks
+            if track.metadata.get("status", "active") == "active"
+            and track.metadata.get("lifecycle_state", "tentative") in {"tentative", "confirmed"}
+        ]
+        self._last_excluded_non_active_count = len(tracks) - len(active)
+        by_identity: Dict[str, TrackState] = {}
+        unscoped: List[TrackState] = []
+        duplicate_count = 0
+        for track in active:
+            identity = str(track.metadata.get("source_identity") or "").strip()
+            if not identity:
+                source_object_id = str(track.metadata.get("source_object_id") or "").strip()
+                source_agent = str(track.metadata.get("source_agent") or "").strip()
+                if source_object_id and source_agent:
+                    identity = f"{source_agent}:{source_object_id}"
+            if not identity:
+                unscoped.append(track)
+                continue
+            previous = by_identity.get(identity)
+            if previous is None:
+                by_identity[identity] = track
+                continue
+            duplicate_count += 1
+            by_identity[identity] = max(
+                (previous, track),
+                key=lambda item: (
+                    item.track_quality,
+                    item.last_update_time,
+                    int(item.metadata.get("hit_count", 0)),
+                    item.track_id,
+                ),
+            )
+        eligible = sorted([*by_identity.values(), *unscoped], key=lambda track: track.track_id)
+        self._last_excluded_duplicate_source_count = duplicate_count
+        self._last_eligible_track_count = len(eligible)
+        return eligible
+
     def _related(self, left: TrackState, right: TrackState) -> bool:
+        profile = self._pair_profile(left, right)
         distance_m = haversine_m(left.lat, left.lon, right.lat, right.lon)
         heading_diff = heading_difference_deg(left.heading, right.heading)
         speed_diff = abs(left.speed - right.speed)
         return (
-            distance_m <= self.max_distance_m
-            and heading_diff <= self.max_heading_diff_deg
-            and speed_diff <= self.max_speed_diff_mps
+            distance_m <= profile.max_distance_m
+            and heading_diff <= profile.max_heading_diff_deg
+            and speed_diff <= profile.max_speed_diff_mps
         )
 
     def _complete_link_components(self, tracks: List[TrackState]) -> List[Set[str]]:
@@ -117,10 +307,53 @@ class GroupDetector:
         return clusters
 
     def _pair_similarity(self, left: TrackState, right: TrackState) -> float:
-        distance_score = 1.0 - haversine_m(left.lat, left.lon, right.lat, right.lon) / self.max_distance_m
-        heading_score = 1.0 - heading_difference_deg(left.heading, right.heading) / self.max_heading_diff_deg
-        speed_score = 1.0 - abs(left.speed - right.speed) / self.max_speed_diff_mps
+        profile = self._pair_profile(left, right)
+        distance_score = 1.0 - haversine_m(left.lat, left.lon, right.lat, right.lon) / profile.max_distance_m
+        heading_score = 1.0 - heading_difference_deg(left.heading, right.heading) / profile.max_heading_diff_deg
+        speed_score = 1.0 - abs(left.speed - right.speed) / profile.max_speed_diff_mps
         return clamp((distance_score + heading_score + speed_score) / 3.0)
+
+    @staticmethod
+    def _build_association_profiles(
+        max_distance_m: float | None,
+        max_heading_diff_deg: float | None,
+        max_speed_diff_mps: float | None,
+        overrides: Dict[str, AssociationProfile | Dict[str, float]] | None,
+    ) -> Dict[str, AssociationProfile]:
+        profiles = dict(DEFAULT_ASSOCIATION_PROFILES)
+        if max_distance_m is not None or max_heading_diff_deg is not None or max_speed_diff_mps is not None:
+            # Explicit legacy thresholds mean the caller intentionally wants one shared profile.
+            profiles = {
+                object_type: AssociationProfile(
+                    max_distance_m=float(max_distance_m if max_distance_m is not None else profile.max_distance_m),
+                    max_heading_diff_deg=float(
+                        max_heading_diff_deg if max_heading_diff_deg is not None else profile.max_heading_diff_deg
+                    ),
+                    max_speed_diff_mps=float(
+                        max_speed_diff_mps if max_speed_diff_mps is not None else profile.max_speed_diff_mps
+                    ),
+                )
+                for object_type, profile in profiles.items()
+            }
+        for object_type, override in (overrides or {}).items():
+            base = profiles.get(object_type, profiles["unknown"])
+            if isinstance(override, AssociationProfile):
+                profiles[object_type] = override
+                continue
+            profiles[object_type] = AssociationProfile(
+                max_distance_m=float(override.get("max_distance_m", base.max_distance_m)),
+                max_heading_diff_deg=float(
+                    override.get("max_heading_diff_deg", base.max_heading_diff_deg)
+                ),
+                max_speed_diff_mps=float(override.get("max_speed_diff_mps", base.max_speed_diff_mps)),
+            )
+        return profiles
+
+    def _pair_profile(self, left: TrackState, right: TrackState) -> AssociationProfile:
+        if left.object_type == right.object_type:
+            return self.association_profiles.get(left.object_type, self.association_profiles["unknown"])
+        # Preserve the previous mixed-target behavior instead of imposing an unvalidated cross-domain gate.
+        return self.association_profiles["unknown"]
 
     def _build_group(
         self,
@@ -168,7 +401,13 @@ class GroupDetector:
             metadata={},
         )
 
-    def _mark_observed_group(self, group: TrackGroup, previous: TrackGroup | None) -> None:
+    def _mark_observed_group(
+        self,
+        group: TrackGroup,
+        previous: TrackGroup | None,
+        held_member_ids: List[str] | None = None,
+        member_relation_misses: Dict[str, int] | None = None,
+    ) -> None:
         previous_metadata = previous.metadata if previous is not None else {}
         hit_count = int(previous_metadata.get("hit_count", 0)) + 1
         confirmed_once = bool(previous_metadata.get("confirmed_once")) or hit_count >= self.confirmation_hits
@@ -187,10 +426,48 @@ class GroupDetector:
                 "added": sorted(current_members - previous_members),
                 "removed": sorted(previous_members - current_members),
             },
+            "held_member_ids": sorted(held_member_ids or []),
+            "member_relation_misses": dict(member_relation_misses or {}),
         }
         group.evidence.append(
             f"群组生命周期状态为 {lifecycle_state}，累计命中 {hit_count} 帧"
         )
+        if held_member_ids:
+            group.evidence.append(
+                "成员短时未满足关联门限，按离组滞回机制暂时保留："
+                + ", ".join(sorted(held_member_ids))
+            )
+
+    def _apply_member_exit_hysteresis(
+        self,
+        observed_members: List[TrackState],
+        previous: TrackGroup | None,
+        tracks_by_id: Dict[str, TrackState],
+        observed_member_ids: Set[str],
+    ) -> tuple[List[TrackState], List[str], Dict[str, int]]:
+        """Retain a confirmed member for brief relation breaks, never across another observed group."""
+        members_by_id = {member.track_id: member for member in observed_members}
+        if previous is None or not bool((previous.metadata or {}).get("confirmed_once")):
+            return list(members_by_id.values()), [], {}
+
+        prior_misses = {
+            str(track_id): int(miss_count)
+            for track_id, miss_count in (previous.metadata or {}).get("member_relation_misses", {}).items()
+        }
+        held_member_ids: List[str] = []
+        member_relation_misses: Dict[str, int] = {}
+        for track_id in previous.member_track_ids:
+            if track_id in members_by_id:
+                continue
+            if track_id not in tracks_by_id or track_id in observed_member_ids:
+                continue
+            miss_count = prior_misses.get(track_id, 0) + 1
+            if miss_count >= self.member_exit_misses:
+                continue
+            members_by_id[track_id] = tracks_by_id[track_id]
+            held_member_ids.append(track_id)
+            member_relation_misses[track_id] = miss_count
+        return [members_by_id[track_id] for track_id in sorted(members_by_id)], held_member_ids, member_relation_misses
 
     def _coasting_group(self, previous: TrackGroup) -> TrackGroup | None:
         metadata = previous.metadata or {}
@@ -308,9 +585,10 @@ class GroupDetector:
         pair_scores = []
         for i, left in enumerate(members):
             for right in members[i + 1 :]:
-                distance_score = 1.0 - haversine_m(left.lat, left.lon, right.lat, right.lon) / self.max_distance_m
-                heading_score = 1.0 - heading_difference_deg(left.heading, right.heading) / self.max_heading_diff_deg
-                speed_score = 1.0 - abs(left.speed - right.speed) / self.max_speed_diff_mps
+                profile = self._pair_profile(left, right)
+                distance_score = 1.0 - haversine_m(left.lat, left.lon, right.lat, right.lon) / profile.max_distance_m
+                heading_score = 1.0 - heading_difference_deg(left.heading, right.heading) / profile.max_heading_diff_deg
+                speed_score = 1.0 - abs(left.speed - right.speed) / profile.max_speed_diff_mps
                 pair_scores.append(clamp((distance_score + heading_score + speed_score) / 3.0))
         return clamp(sum(pair_scores) / len(pair_scores))
 
@@ -341,7 +619,10 @@ class GroupDetector:
             union_size = len(component | previous)
             if union_size == 0:
                 continue
-            score = len(component & previous) / union_size
+            intersection_size = len(component & previous)
+            jaccard = intersection_size / union_size
+            smaller_retention = intersection_size / max(1, min(len(component), len(previous)))
+            score = max(jaccard, smaller_retention)
             if score > best_score:
                 best_score = score
                 best_id = group_id

@@ -53,6 +53,9 @@ from .models import Detection
 from .utils import haversine_m, velocity_to_speed_heading
 
 
+CMS_SOURCE_AGENT = "TacticalIntelligenceAgent"
+
+
 # ---------------------------------------------------------------------------
 # COCO 类别名 → 军用目标类型 映射表
 # ---------------------------------------------------------------------------
@@ -73,8 +76,6 @@ CLASS_TO_OBJECT_TYPE: Dict[str, str] = {
     "warship": "ship",
     "submarine": "ship",
     "carrier": "ship",
-    "fast_attack_craft": "ship",
-    "fishing_vessel": "ship",
     # 车辆 / 地面目标 → 不属于 air/ship/uav，归为 unknown
     # 但跟踪器仍可追踪其位置，预测模型用默认参数
     "bus": "unknown",
@@ -228,8 +229,9 @@ def convert_target_to_detection(
     _frame_cache.record(tid, lat, lon, alt, timestamp)
 
     # 把同门的其他字段打包进 metadata，不丢失信息
+    mission_id = str(target.get("mission_id", "") or "unknown-mission")
+    packet_id = str(target.get("packet_id", "") or "legacy-packet")
     metadata: Dict[str, Any] = {
-        "source_track_id": tid,
         "source_class": class_name,
         "label": target.get("label", ""),
         "affiliation": target.get("affiliation", ""),
@@ -238,6 +240,16 @@ def convert_target_to_detection(
         "knowledge_relations": list(knowledge_relations or []),
         "damage_score": target.get("damage_score"),
         "adapted_by": "intelligence_adapter",
+        # Keep the legacy Commander-facing identifier available for the local
+        # compatibility tracking path.  CMS fused tracks use the richer
+        # source_identity/source_object_id fields below.
+        "source_track_id": tid,
+        "source_object_id": f"{mission_id}:{tid}",
+        "source_identity": f"{CMS_SOURCE_AGENT}:{mission_id}:{tid}",
+        "upstream_track_id": tid,
+        "upstream_mission_id": mission_id,
+        "upstream_packet_id": packet_id,
+        "input_kind": "semantic_target_fallback",
     }
 
     return Detection(
@@ -250,9 +262,129 @@ def convert_target_to_detection(
         speed=speed,
         heading=heading,
         confidence=confidence,
-        source_agent="TacticalIntelligenceAgent",
+        source_agent=CMS_SOURCE_AGENT,
         metadata=metadata,
     )
+
+
+def extract_intelligence_packet(payload_or_output: Dict[str, Any]) -> Dict[str, Any]:
+    """Unwrap the CMS intelligence packet from its supported Commander envelopes."""
+    if not isinstance(payload_or_output, dict):
+        return {}
+    tracks = payload_or_output.get("tracks")
+    targets = payload_or_output.get("targets")
+    if isinstance(tracks, list) or isinstance(targets, list):
+        return payload_or_output
+    for key in ("intelligence_packet", "output", "input", "value", "artifact"):
+        nested = payload_or_output.get(key)
+        if not isinstance(nested, dict):
+            continue
+        packet = extract_intelligence_packet(nested)
+        if packet:
+            return packet
+    return {}
+
+
+def has_upstream_tracks(payload_or_output: Dict[str, Any]) -> bool:
+    packet = extract_intelligence_packet(payload_or_output)
+    return isinstance(packet.get("tracks"), list) and bool(packet["tracks"])
+
+
+def _timestamp_value(value: Any, fallback: float | None = None) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            from datetime import datetime
+
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            pass
+    return float(fallback if fallback is not None else time.time())
+
+
+def _convert_upstream_tracks(packet: Dict[str, Any]) -> List[Detection]:
+    mission_id = str(packet.get("mission_id") or "unknown-mission")
+    packet_id = str(packet.get("packet_id") or f"packet-{_timestamp_value(packet.get('created_at')):.6f}")
+    packet_timestamp = _timestamp_value(packet.get("created_at"))
+    semantic_by_track_id = {
+        str(item.get("track_id")): item
+        for item in packet.get("targets") or []
+        if isinstance(item, dict) and item.get("track_id") is not None
+    }
+    detections: List[Detection] = []
+    for upstream in packet.get("tracks") or []:
+        if not isinstance(upstream, dict):
+            continue
+        track_id = str(upstream.get("track_id") or "")
+        if not track_id:
+            continue
+        geo = upstream.get("geo") if isinstance(upstream.get("geo"), dict) else {}
+        lat = upstream.get("lat", geo.get("lat"))
+        lon = upstream.get("lon", geo.get("lon"))
+        if lat is None or lon is None:
+            continue
+        timestamp = _timestamp_value(upstream.get("timestamp"), packet_timestamp)
+        history = [
+            dict(point)
+            for point in upstream.get("history_path") or []
+            if isinstance(point, dict) and "lat" in point and "lon" in point
+        ]
+        latest_history = history[-1] if history else {}
+        class_name = str(
+            upstream.get("class_name")
+            or semantic_by_track_id.get(track_id, {}).get("class")
+            or upstream.get("object_type")
+            or "unknown"
+        )
+        mapped_type = map_class_to_object_type(class_name)
+        if mapped_type == "unknown" and upstream.get("object_type") in {
+            "aircraft",
+            "ship",
+            "uav",
+            "unknown",
+        }:
+            mapped_type = str(upstream["object_type"])
+        semantic = semantic_by_track_id.get(track_id, {})
+        track_instance_id = str(upstream.get("track_instance_id") or track_id)
+        source_object_id = f"{mission_id}:{track_instance_id}"
+        metadata = {
+            "source_class": class_name,
+            "label": semantic.get("label", ""),
+            "affiliation": semantic.get("affiliation", ""),
+            "threat_level": semantic.get("threat_level", ""),
+            "upstream_threat_score": semantic.get("threat_score"),
+            "knowledge_ref": semantic.get("knowledge_ref", ""),
+            "adapted_by": "intelligence_adapter",
+            "input_kind": "fused_track",
+            "source_object_id": source_object_id,
+            "source_identity": f"{CMS_SOURCE_AGENT}:{source_object_id}",
+            "upstream_track_id": track_id,
+            "upstream_track_instance_id": track_instance_id,
+            "upstream_mission_id": mission_id,
+            "upstream_packet_id": packet_id,
+            "upstream_history_path": history,
+            "upstream_lifecycle_state": upstream.get("lifecycle_state"),
+            "upstream_position_covariance": upstream.get("position_covariance"),
+            "upstream_velocity_covariance": upstream.get("velocity_covariance"),
+            "upstream_units": upstream.get("units") or {},
+        }
+        detections.append(
+            Detection(
+                detection_id=f"cms:{packet_id}:{track_id}:{timestamp:.6f}",
+                object_type=mapped_type,
+                timestamp=timestamp,
+                lat=float(lat),
+                lon=float(lon),
+                alt=float(upstream.get("alt", geo.get("alt_m", latest_history.get("alt", 0.0))) or 0.0),
+                speed=float(upstream.get("speed", latest_history.get("speed", 0.0)) or 0.0),
+                heading=float(upstream.get("heading", latest_history.get("heading", 0.0)) or 0.0),
+                confidence=float(upstream.get("confidence", latest_history.get("confidence", 0.5)) or 0.5),
+                source_agent=CMS_SOURCE_AGENT,
+                metadata=metadata,
+            )
+        )
+    return detections
 
 
 def convert_intelligence_to_detections(
@@ -270,6 +402,10 @@ def convert_intelligence_to_detections(
     Returns:
         Detection 对象列表。
     """
+    intelligence_payload = extract_intelligence_packet(intelligence_payload)
+    if has_upstream_tracks(intelligence_payload):
+        return _convert_upstream_tracks(intelligence_payload)
+
     targets = intelligence_payload.get("targets", [])
     if not targets:
         return []
@@ -294,6 +430,11 @@ def convert_intelligence_to_detections(
     detections: List[Detection] = []
     for target in targets:
         try:
+            target = {
+                **target,
+                "mission_id": intelligence_payload.get("mission_id", "unknown-mission"),
+                "packet_id": intelligence_payload.get("packet_id", "legacy-packet"),
+            }
             knowledge_ref = str(target.get("knowledge_ref", ""))
             detection = convert_target_to_detection(
                 target,
@@ -347,29 +488,8 @@ def extract_scene_from_intelligence(
         "operation_name": intelligence_payload.get("mission_id", "unknown-mission"),
     }
 
-    # 从 targets 的 geo 坐标推算作战区域中心
-    targets = intelligence_payload.get("targets", [])
-    if targets:
-        lats = []
-        lons = []
-        for t in targets:
-            geo = t.get("geo", {}) or {}
-            if "lat" in geo and "lon" in geo:
-                lats.append(float(geo["lat"]))
-                lons.append(float(geo["lon"]))
-        if lats and lons:
-            scene["protected_zone_lat"] = sum(lats) / len(lats)
-            scene["protected_zone_lon"] = sum(lons) / len(lons)
-            # 用 targets 分布范围估算保护区半径
-            from .utils import haversine_m as h
-            center_lat = scene["protected_zone_lat"]
-            center_lon = scene["protected_zone_lon"]
-            max_dist = max(
-                h(center_lat, center_lon, lat, lon)
-                for lat, lon in zip(lats, lons)
-            )
-            scene["protected_radius_m"] = max(max_dist * 1.5, 5_000.0)
-            scene["protected_assets"] = []
+    # Protected assets must come from Commander/AMOS asset management, never target geometry.
+    scene["protected_assets"] = []
 
     # 从 knowledge_graph 和 routing 提取额外场景信息
     kg = intelligence_payload.get("knowledge_graph", {}) or {}
@@ -380,9 +500,8 @@ def extract_scene_from_intelligence(
     scene["knowledge_graph_edges"] = len(kg.get("edges", []))
     scene["anti_jam_mode"] = routing.get("anti_jam_mode", False)
     scene["routing_destinations"] = [
-        route.get("destination") if isinstance(route, dict) else str(route)
-        for route in routing.get("routes", [])
-        if isinstance(route, (dict, str))
+        r.get("destination") if isinstance(r, dict) else str(r)
+        for r in routing.get("routes", [])
     ]
     scene["provenance_summary"] = {
         "perception": list(provenance.get("perception", {}).keys()),
@@ -398,7 +517,11 @@ def is_intelligence_format(payload: Dict[str, Any]) -> bool:
 
     检测规则：顶层包含 ``targets`` 字段即为情报格式。
     """
-    return "targets" in payload and isinstance(payload["targets"], list)
+    packet = extract_intelligence_packet(payload)
+    return bool(packet) and (
+        isinstance(packet.get("tracks"), list)
+        or isinstance(packet.get("targets"), list)
+    )
 
 
 def reset_adapter_cache() -> None:

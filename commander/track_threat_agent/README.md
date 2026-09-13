@@ -60,7 +60,7 @@ metadata.status=idle
 - 本地 JSON 状态快照，支持演示环境重启后恢复航迹、最近 artifact、幂等缓存和 workflow work list。
 - 独立 ST-GNN 模型包发现：默认发现 `models/track_threat` 下的内置模型包，也可通过 `ST_GNN_AIRCRAFT_MODEL_DIR`、`ST_GNN_SHIP_MODEL_DIR` 或旧 `ST_GNN_MODEL_DIR` 覆盖；模型不可用时安全回退。
 
-当前工程不再只是“预留接口”。`PlanAlgorithmProvider` 会在 Agent 进程内直接执行协方差 Kalman 跟踪、自适应 CV/CA/CT 物理预测、TorchScript ST-GNN、版本化 DBN 态势关注校准、保护资产影响分析、编队识别和 XAI 证据链。知识库/RAG/方案规划/合规授权不放在本 Agent 中，交由独立下游 Agent 消费 `risk_assessments` 后继续处理。公共算法库只作为算法源码、模型包和 schema 的交付仓库，不是本 Agent 的运行时 HTTP 依赖。
+`PlanAlgorithmProvider` 的首选执行路径是：由 GPT-4o-mini 在受限 Skill/算法白名单内生成调用计划，再由 Agent 校验版本与后端类型并调用公共算法库 HTTP 服务。当前链路可调用航迹预测、特征融合、图关系推理和随机森林优先级算法；算法库不可用、模型超时或输出校验失败时，才回退到 Agent 本地的物理预测、风险证据与群体生命周期实现。知识库/RAG/方案规划/合规授权不放在本 Agent 中，交由独立下游 Agent 消费 `risk_assessments` 后继续处理。
 
 ## 2.1 独立 ST-GNN 训练工程
 
@@ -185,7 +185,7 @@ Nacos 只发现 Agent、公布 skill/模型/健康状态，不调度算法、不
 - SDK 注册/心跳失败时自动回退 Nacos HTTP API；metadata PUT 遇到 Nacos Raft metadata 更新异常时，以幂等 POST 重新注册同一实例。
 - 当 `/lifecycle/ready` 设置为 `ready=false` 时，`/sendMessage` 返回标准失败信封，`/sendMessageStream` 返回 503，Commander 可切换到同 role 其他 idle Agent。
 
-本次实现参考 `lzh` 分支的分布式 Agent 运行时契约，但没有复制其远程算法库 `/run` 模式。航迹 Agent 是有状态服务，Kalman、ST-GNN、DBN、编组与资产影响算法全部在 Agent 进程内加载执行；Nacos 只发布发现、容量、心跳、资源、Skill 和模型摘要。`/sendMessage` 响应额外返回 `selected_algorithms` 与 `algorithm_duration_ms`，用于定位实际算法链和性能问题。
+Agent 兼容两类上游输入：原始 `detections` 走兼容的本地跟踪路径；CMS 输出的 `intelligence_packet.tracks` 是首选路径，会保留其稳定航迹身份并跳过二次本地关联。Nacos 只发布发现、容量、心跳、资源、Skill 和模型摘要，不承载逐帧航迹；`/sendMessage` artifact 通过 `algorithm_calls`、`algorithm_invocations` 和 `trace.algorithm_library` 输出实际算法调用、耗时、输入输出摘要与本地回退原因，便于 Commander 和展示层追踪。
 
 恢复通知示例：
 

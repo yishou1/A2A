@@ -44,8 +44,8 @@ available_task_slots=1
 task_execution_status=idle
 quality_success_rate=1.000000
 quality_avg_latency_ms=0.000
-algorithm_loading_mode=agent_local_model_bundle
-remote_algorithm_execution=false
+algorithm_loading_mode=gpt_4o_mini_tool_plan_then_validated_algolib_run
+remote_algorithm_execution=<true when ALGORITHM_LIBRARY_ENABLED=true>
 ```
 
 The Agent first uses the Nacos SDK for registration and heartbeat, then falls back to the Nacos HTTP API when the SDK path fails. Heartbeats preserve Commander-owned lease, circuit-breaker, unavailable and scheduling metadata.
@@ -137,7 +137,7 @@ Example:
 
 ### A2A Task Envelope
 
-The Agent accepts the Commander task envelope used by the shared A2A repository. `workflow_id` is correlation metadata only; algorithms still execute in-process without an internal workflow engine:
+The Agent accepts the Commander task envelope used by the shared A2A repository. `workflow_id` is correlation metadata only; the Agent does not host an internal workflow engine. For each request, GPT-4o-mini may select from the validated Skill allowlist, and the Agent invokes the matching shared-algorithm service when enabled.
 
 ```http
 POST /sendMessage
@@ -164,6 +164,40 @@ Content-Type: application/json
 ```
 
 `work_item` is an idempotency key. If the same work item is retried, the Agent returns the cached artifact and does not update track history or DBN state again.
+
+### Preferred CMS fused-track handoff
+
+For the production chain, CMS has already completed source association and track fusion. Pass its stable tracks under `input.intelligence_packet.tracks` (or use `POST /a2a/intelligence-result`) rather than converting them back to raw detections. The Agent preserves `mission_id + track_instance_id` as the source identity, synchronizes track state without a second association pass, and then performs trajectory prediction, group relation assessment, protected-asset impact analysis, and priority ranking.
+
+```json
+{
+  "workflow_id": "wf-cms-001",
+  "task_id": "wf-cms-001:track-threat",
+  "required_skill": "track_threat_situation_analysis",
+  "input": {
+    "intelligence_packet": {
+      "mission_id": "mission-001",
+      "packet_id": "packet-001",
+      "tracks": [
+        {
+          "track_id": "cms-track-001",
+          "track_instance_id": "cms-track-001-v1",
+          "object_type": "aircraft",
+          "timestamp": 1789200000,
+          "lat": 30.1,
+          "lon": 120.2,
+          "alt": 5000,
+          "speed": 230,
+          "heading": 270,
+          "confidence": 0.95
+        }
+      ]
+    }
+  }
+}
+```
+
+The returned artifact sets `trace.input_kind=upstream_tracks`, includes `algorithm_calls` and `algorithm_invocations` for observable algorithm execution, and records any local fallback in `trace.algorithm_library.local_fallbacks`.
 
 The current Commander can invoke this Agent in two stages:
 

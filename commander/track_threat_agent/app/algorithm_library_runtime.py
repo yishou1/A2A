@@ -14,29 +14,38 @@ from .tool_llm import AzureToolLLM, ToolLLMError
 
 TRACK_THREAT_ALGORITHM_ORDER = (
     "multimodal_feature_fuser",
-    "target_type_classifier",
-    "track_state_updater",
     "trajectory_predictor",
     "graph_relation_reasoner",
+    "threat_priority_random_forest",
 )
 TRACK_THREAT_ALGORITHM_IDS = frozenset(TRACK_THREAT_ALGORITHM_ORDER)
 
 SKILL_ALGORITHM_DEFAULTS: dict[str, tuple[str, ...]] = {
-    "trajectory_tracking": ("track_state_updater",),
+    # The upstream CMS agent owns data association and track fusion.  This
+    # agent consumes that stable track state and applies prediction/assessment.
+    "trajectory_tracking": (),
     "trajectory_prediction": ("trajectory_predictor",),
-    "threat_ranking": ("multimodal_feature_fuser",),
+    "threat_ranking": ("multimodal_feature_fuser", "threat_priority_random_forest"),
     "group_detection": ("graph_relation_reasoner",),
-    "group_threat_ranking": ("graph_relation_reasoner", "multimodal_feature_fuser"),
+    "group_threat_ranking": (
+        "graph_relation_reasoner",
+        "multimodal_feature_fuser",
+        "threat_priority_random_forest",
+    ),
     "protected_asset_impact_analysis": ("multimodal_feature_fuser", "trajectory_predictor"),
     "track_threat_situation_analysis": TRACK_THREAT_ALGORITHM_ORDER,
 }
 
 SKILL_ALGORITHM_ALLOWLIST: dict[str, frozenset[str]] = {
-    "trajectory_tracking": frozenset({"target_type_classifier", "track_state_updater"}),
-    "trajectory_prediction": frozenset({"track_state_updater", "trajectory_predictor"}),
-    "threat_ranking": frozenset({"multimodal_feature_fuser"}),
+    "trajectory_tracking": frozenset(),
+    "trajectory_prediction": frozenset({"trajectory_predictor"}),
+    "threat_ranking": frozenset({"multimodal_feature_fuser", "threat_priority_random_forest"}),
     "group_detection": frozenset({"graph_relation_reasoner"}),
-    "group_threat_ranking": frozenset({"multimodal_feature_fuser", "graph_relation_reasoner"}),
+    "group_threat_ranking": frozenset({
+        "multimodal_feature_fuser",
+        "graph_relation_reasoner",
+        "threat_priority_random_forest",
+    }),
     "protected_asset_impact_analysis": frozenset({"multimodal_feature_fuser", "trajectory_predictor"}),
     "track_threat_situation_analysis": TRACK_THREAT_ALGORITHM_IDS,
 }

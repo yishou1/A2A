@@ -23,10 +23,9 @@ ACTIVE_ALGORITHMS = [
     }
     for algorithm_id in (
         "multimodal_feature_fuser",
-        "target_type_classifier",
-        "track_state_updater",
         "trajectory_predictor",
         "graph_relation_reasoner",
+        "threat_priority_random_forest",
     )
 ]
 
@@ -110,7 +109,7 @@ def test_llm_plan_is_restricted_to_active_track_threat_algorithms():
     assert runtime.status()["planner_mode"] == "azure_openai_gpt_4o_mini"
     assert {
         item["algorithm_id"] for item in llm.last_kwargs["algorithms"]
-    } == {"track_state_updater", "trajectory_predictor"}
+    } == {"trajectory_predictor"}
 
 
 def test_composite_skill_plan_is_completed_with_mandatory_algorithms():
@@ -122,7 +121,7 @@ def test_composite_skill_plan_is_completed_with_mandatory_algorithms():
                 "intent": "analyze the full situation",
                 "algorithm_calls": [
                     {
-                        "algorithm_id": "target_type_classifier",
+                    "algorithm_id": "threat_priority_random_forest",
                         "version": "1.0.0",
                         "backend_type": "python_http_service",
                     },
@@ -149,13 +148,11 @@ def test_composite_skill_plan_is_completed_with_mandatory_algorithms():
 
     assert [call.algorithm_id for call in plan] == [
         "multimodal_feature_fuser",
-        "target_type_classifier",
-        "track_state_updater",
         "trajectory_predictor",
         "graph_relation_reasoner",
+        "threat_priority_random_forest",
     ]
     assert runtime.execution_trace()["planner_augmented_algorithms"] == [
-        "track_state_updater",
         "trajectory_predictor",
     ]
 
@@ -201,7 +198,6 @@ def test_llm_failure_uses_deterministic_skill_mapping_when_not_required():
     )
 
     assert [call.algorithm_id for call in plan] == [
-        "track_state_updater",
         "trajectory_predictor",
     ]
     assert runtime.status()["planner_mode"] == "deterministic_fallback"

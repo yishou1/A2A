@@ -36,13 +36,13 @@ def test_resource_and_algorithm_catalog_are_discoverable():
     assert card["resourcesEndpoint"] == "/resources"
     assert card["algorithmsEndpoint"] == "/algorithms"
     assert card["recoveryEndpoint"] == "/recovery/notify"
-    assert card["algorithmExecution"]["location"] == "agent_process"
+    assert card["algorithmExecution"]["location"] == "zsl_algorithm_library_with_agent_local_fallback"
     assert card["algorithmExecution"]["remote_execution"] is False
 
-    assert algorithms["execution_location"] == "agent_process"
+    assert algorithms["execution_location"] == "zsl_algorithm_library_with_agent_local_fallback"
     assert algorithms["network_algorithm_calls"] is False
-    assert algorithms["contract_version"] == "track_threat_algorithms/v1"
-    assert any(item["algorithm_id"] == "covariance_kalman_cv_filter" for item in algorithms["algorithms"])
+    assert algorithms["contract_version"] == "track_threat_algorithms/v2"
+    assert any(item["algorithm_id"] == "trajectory_predictor" for item in algorithms["algorithms"])
     assert any(item["backend"] == "torchscript" for item in algorithms["algorithms"])
 
 
@@ -143,7 +143,7 @@ def test_nacos_metadata_advertises_runtime_compatibility_endpoints():
     assert metadata["resources_endpoint"].endswith("/resources")
     assert metadata["recovery_endpoint"].endswith("/recovery/notify")
     assert metadata["algorithms_endpoint"].endswith("/algorithms")
-    assert metadata["algorithm_loading_mode"] == "agent_local_model_bundle"
+    assert metadata["algorithm_loading_mode"] == "gpt_4o_mini_tool_plan_then_validated_algolib_run"
     assert metadata["remote_algorithm_execution"] == "false"
 
 
@@ -171,14 +171,14 @@ def test_nacos_sdk_and_http_paths_use_the_same_default_cluster(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_a2a_response_reports_selected_local_algorithms_and_stage_timings():
+async def test_a2a_response_reports_selected_algorithms_and_stage_timings():
     main.reset_runtime_state()
 
     response = await main.send_message(_task("wi-algorithm-trace"), token="unit-test")
 
     assert response["status"] == "completed"
-    assert "covariance_kalman_cv_filter" in response["selected_algorithms"]
-    assert "st_gnn_dynamic_entity_tracking" in response["selected_algorithms"]
+    assert "trajectory_predictor" in response["selected_algorithms"]
+    assert "graph_relation_reasoner" in response["selected_algorithms"]
     assert response["algorithm_duration_ms"]["trajectory_tracking_and_prediction"] >= 0
     assert response["algorithm_duration_ms"]["threat_assessment_and_xai"] >= 0
     assert response["artifact"]["trace"]["algorithm_duration_ms"] == response["algorithm_duration_ms"]

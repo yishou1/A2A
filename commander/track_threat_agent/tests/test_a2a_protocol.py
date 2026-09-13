@@ -466,7 +466,14 @@ def test_input_output_schemas_document_assets_and_ranking_fields():
     output_payload = main.output_schema()
 
     assert "protected_assets" in input_payload["scene_fields"]
+    assert set(input_payload["accepted_message_types"]) == {
+        "perception_result",
+        "tactical_intelligence_result",
+        "a2a_task",
+    }
     assert "asset_impacts" in output_payload["artifact_fields"]
+    assert "algorithm_calls" in output_payload["artifact_fields"]
+    assert "algorithm_invocations" in output_payload["artifact_fields"]
     assert "reason" in output_payload["unified_threat_ranking_fields"]
     assert "eta_to_protected_radius_s" in output_payload["asset_impact_fields"]
 

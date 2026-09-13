@@ -14,19 +14,18 @@ def test_default_algorithm_provider_uses_project_plan_contract():
     provider = main.algorithm_provider
 
     assert isinstance(provider, PlanAlgorithmProvider)
-    assert provider.mode == "agent_local_model_runtime"
+    assert provider.mode == "llm_algolib_hybrid_runtime"
 
     contract = provider.algorithm_contract()
-    assert contract["execution_strategy"] == "in_process_model_execution"
-    assert contract["model_ownership"] == "track_threat_agent"
-    assert "algorithm_library" not in contract
-    assert contract["primary_algorithms"]["trajectory_prediction"] == "st_gnn_dynamic_entity_tracking"
-    assert contract["primary_algorithms"]["threat_assessment"] == "dynamic_bayesian_network"
+    assert contract["execution_strategy"] == "llm_planned_algorithm_library_with_local_fallback"
+    assert contract["model_ownership"] == "algorithm_library_with_agent_local_fallback"
+    assert "algorithm_library" in contract
+    assert contract["primary_algorithms"]["trajectory_prediction"] == "trajectory_predictor"
+    assert contract["primary_algorithms"]["threat_assessment"] == "threat_priority_random_forest"
     assert "semantic_reasoning" not in contract["primary_algorithms"]
     assert contract["primary_algorithms"]["explainability"] == "xai_evidence_chain"
     assert contract["fallback_providers"]["trajectory_prediction"] == "adaptive_cv_ca_ct_physics"
     assert contract["training_status"]["dbn"]["parameter_version"] == "dbn-risk-attention-v1"
-    assert "learned_trajectory_predictor" not in contract["training_status"]
     assert contract["algorithm_boundary"]["intent_inference"] == "downstream_agent"
     assert contract["network_algorithm_calls"] is False
 
@@ -47,10 +46,10 @@ async def test_artifact_exposes_plan_algorithm_trace_for_reporting():
     artifact = body["artifact"]
     summary = artifact["summary"]
 
-    assert summary["algorithm_provider"]["mode"] == "agent_local_model_runtime"
-    assert summary["algorithm_provider"]["execution_strategy"] == "in_process_model_execution"
+    assert summary["algorithm_provider"]["mode"] == "llm_algolib_hybrid_runtime"
+    assert summary["algorithm_provider"]["execution_strategy"] == "llm_planned_algorithm_library_with_local_fallback"
     assert summary["algorithm_provider"]["network_algorithm_calls"] is False
-    assert summary["algorithm_provider"]["primary_algorithms"]["trajectory_prediction"] == "st_gnn_dynamic_entity_tracking"
+    assert summary["algorithm_provider"]["primary_algorithms"]["trajectory_prediction"] == "trajectory_predictor"
     assert summary["algorithm_provider"]["fallback_providers"]["trajectory_prediction"] == "adaptive_cv_ca_ct_physics"
 
     first_track = artifact["tracks"][0]

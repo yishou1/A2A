@@ -29,7 +29,7 @@ curl http://127.0.0.1:8848/nacos/v1/ns/operator/metrics
 
 ## 2. 启动 Track Threat Agent
 
-算法和 TorchScript 模型由 Agent 本进程加载，不需要额外启动算法库 HTTP 服务。
+Nacos 只用于服务发现、心跳和运行状态。若要验证首选算法执行链路，还应启动公共算法库 HTTP 服务，并设置 `ALGORITHM_LIBRARY_ENABLED=true`；服务不可用时 Agent 会记录回退原因并使用本地退化算法，不会中断 A2A 响应。
 
 ```bash
 cd /path/to/yishou1-A2A/track_threat_agent
@@ -44,6 +44,8 @@ AGENT_ID=track-threat-group-agent-01 \
 AGENT_ROLE=track_threat \
 AGENT_STATUS=idle \
 HEARTBEAT_INTERVAL=5 \
+ALGORITHM_LIBRARY_ENABLED=true \
+ALGOLIB_BASE_URL=http://127.0.0.1:8088 \
 PYTHONPATH=.. uv run --with-requirements ../requirements.txt --with-requirements requirements.txt \
   uvicorn app.main:app --host 127.0.0.1 --port 8102
 ```

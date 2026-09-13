@@ -292,10 +292,10 @@ def test_extract_scene_from_intelligence():
     scene = extract_scene_from_intelligence(INTEL_SAMPLE)
     assert "operation_name" in scene
     assert scene["operation_name"] == "OP-IRON-VALLEY-2026"
-    # 从 targets 几何中心推算的保护区
-    assert "protected_zone_lat" in scene
-    assert "protected_zone_lon" in scene
-    assert "protected_radius_m" in scene
+    # Protection assets and zones are owned by Commander/AMOS asset management;
+    # they must not be fabricated from the geometry of possibly hostile targets.
+    assert scene["protected_assets"] == []
+    assert "protected_zone_lat" not in scene
     assert scene["anti_jam_mode"] is True
     assert "provenance_summary" in scene
 
