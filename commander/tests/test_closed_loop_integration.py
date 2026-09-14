@@ -81,10 +81,10 @@ class ClosedLoopIntegrationTest(unittest.TestCase):
             self.assertIn("work_list", payload)
             self.assertIn("context", payload)
             results = payload["input"]["results"]
-            self.assertIn("perception_detection", results)
-            self.assertIn("threat_evaluation", results)
+            self.assertNotIn("perception_detection", results)
+            self.assertNotIn("threat_evaluation", results)
             self.assertIn("execution_control", results)
-            self.assertIn("communication", results)
+            self.assertNotIn("communication", results)
             self.assertEqual(
                 results["assault"]["output_data"]["result"],
                 "Assault unit captured the beachhead.",

@@ -168,7 +168,7 @@ class MissionFeatureSchemaTest(unittest.TestCase):
                     result="Win",
                 )
             )
-            self.assertAlmostEqual(model_a.predict_one(vector), model_b.predict_one(vector), places=6)
+            self.assertAlmostEqual(model_a.predict([vector])[0], model_b.predict([vector])[0], places=6)
 
     def test_online_agent_json_maps_to_mission_assessment(self):
         with tempfile.TemporaryDirectory() as temp_dir:

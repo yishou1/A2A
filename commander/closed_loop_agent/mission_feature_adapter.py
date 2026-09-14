@@ -44,6 +44,17 @@ def _normalize_score(value: Any) -> Optional[float]:
     return clamp(score)
 
 
+def _target_numeric_values(targets: Optional[Sequence[dict]], key: str) -> List[float]:
+    values: List[float] = []
+    for target in targets or []:
+        if not isinstance(target, dict):
+            continue
+        score = _normalize_score(target.get(key))
+        if score is not None:
+            values.append(score)
+    return values
+
+
 def _result_block(results: dict, *keys: str) -> dict:
     for key in keys:
         block = _safe_dict(results.get(key))
@@ -192,17 +203,7 @@ def build_features_from_agent_results(
     warnings: List[str] = []
     sources: Dict[str, str] = {}
     values: Dict[str, float] = {}
-    missing = _missing_agent_fields(results, mode=mode)
-
-    if mode == "strict" and missing:
-        return {
-            "feature_version": FEATURE_VERSION,
-            "values": {name: 0.0 for name in FEATURE_ORDER},
-            "sources": sources,
-            "warnings": warnings,
-            "assessment_status": "insufficient_data",
-            "missing_fields": missing,
-        }
+    missing: List[str] = []
 
     if mode in {"fixture", "test"}:
         warnings.append("using_fixture")
@@ -213,17 +214,19 @@ def build_features_from_agent_results(
         values["damage_rate"] = clamp(_mean(damage_probs))
         sources["damage_rate"] = "damage_probs"
     elif targets:
-        values["damage_rate"] = clamp(_mean([float(item.get("damage_probability", 0.0)) for item in targets]))
-        sources["damage_rate"] = "targets.damage_probability"
+        target_damage = _target_numeric_values(targets, "damage_probability")
+        if target_damage:
+            values["damage_rate"] = clamp(_mean(target_damage))
+            sources["damage_rate"] = "targets.damage_probability"
     elif damage_out.get("engaged_targets") is not None and damage_out.get("confirmed_destroyed") is not None:
         engaged = max(1, int(damage_out.get("engaged_targets")))
         destroyed = int(damage_out.get("confirmed_destroyed"))
         values["damage_rate"] = clamp(destroyed / engaged)
         sources["damage_rate"] = "damage_confirmation"
-    elif mode in {"fixture", "test", "hybrid"}:
+    if "damage_rate" not in values and mode in {"fixture", "test"}:
         values["damage_rate"] = clamp(float(FEATURE_SCHEMA["damage_rate"]["missing_policy_fixture"]))
         sources["damage_rate"] = "fixture_default"
-    else:
+    elif "damage_rate" not in values:
         missing.append("damage_rate")
 
     resource = _result_block(results, "resource_allocation")
@@ -233,12 +236,14 @@ def build_features_from_agent_results(
         values["asset_readiness"] = readiness
         sources["asset_readiness"] = "resource_allocation.readiness"
     elif targets:
-        values["asset_readiness"] = clamp(0.92 - 0.18 * _mean([float(item.get("ammo_need", 0.5)) for item in targets]))
-        sources["asset_readiness"] = "targets.ammo_need"
-    elif mode in {"fixture", "test", "hybrid"}:
+        ammo_need = _target_numeric_values(targets, "ammo_need")
+        if ammo_need:
+            values["asset_readiness"] = clamp(0.92 - 0.18 * _mean(ammo_need))
+            sources["asset_readiness"] = "targets.ammo_need"
+    if "asset_readiness" not in values and mode in {"fixture", "test"}:
         values["asset_readiness"] = float(FEATURE_SCHEMA["asset_readiness"]["missing_policy_fixture"])
         sources["asset_readiness"] = "fixture_default"
-    else:
+    elif "asset_readiness" not in values:
         missing.append("asset_readiness")
 
     execution = _result_block(results, "execution_control", "artillery", "assault")
@@ -254,7 +259,7 @@ def build_features_from_agent_results(
     if latency_ms is not None:
         values["control_timeliness"] = clamp(1.0 - latency_ms / max(1.0, float(latency_reference_ms)))
         sources["control_timeliness"] = "execution_control.latency_ms"
-    elif mode in {"fixture", "test", "hybrid"}:
+    elif mode in {"fixture", "test"}:
         values["control_timeliness"] = float(FEATURE_SCHEMA["control_timeliness"]["missing_policy_fixture"])
         sources["control_timeliness"] = "fixture_default"
     else:
@@ -274,12 +279,14 @@ def build_features_from_agent_results(
         values["intel_confidence"] = _normalize_score(_safe_dict(fusion_out.get("fused_track")).get("det_conf"))
         sources["intel_confidence"] = "data_fusion.fused_track.det_conf"
     elif targets:
-        values["intel_confidence"] = clamp(_mean([float(item.get("detection_confidence", 0.7)) for item in targets]))
-        sources["intel_confidence"] = "targets.detection_confidence"
-    elif mode in {"fixture", "test", "hybrid"}:
+        target_conf = _target_numeric_values(targets, "detection_confidence")
+        if target_conf:
+            values["intel_confidence"] = clamp(_mean(target_conf))
+            sources["intel_confidence"] = "targets.detection_confidence"
+    if "intel_confidence" not in values and mode in {"fixture", "test"}:
         values["intel_confidence"] = float(FEATURE_SCHEMA["intel_confidence"]["missing_policy_fixture"])
         sources["intel_confidence"] = "fixture_default"
-    else:
+    elif "intel_confidence" not in values:
         missing.append("intel_confidence")
 
     threat = _result_block(results, "threat_evaluation", "evaluator")
@@ -299,16 +306,20 @@ def build_features_from_agent_results(
                 sources["threat_pressure"] = f"threat_evaluation.{key}"
                 break
     if "threat_pressure" not in values and targets:
-        values["threat_pressure"] = clamp(
-            _mean(
-                [
-                    float(item.get("threat_score", 0.5)) * (1.0 - float(item.get("damage_probability", 0.0)))
-                    for item in targets
-                ]
-            )
-        )
-        sources["threat_pressure"] = "targets.threat_score"
-    elif "threat_pressure" not in values and mode in {"fixture", "test", "hybrid"}:
+        target_scores = []
+        for target in targets:
+            if not isinstance(target, dict):
+                continue
+            threat_score = _normalize_score(target.get("threat_score"))
+            if threat_score is None:
+                continue
+            damage_probability = _normalize_score(target.get("damage_probability"))
+            multiplier = 1.0 - damage_probability if damage_probability is not None else 1.0
+            target_scores.append(threat_score * multiplier)
+        if target_scores:
+            values["threat_pressure"] = clamp(_mean(target_scores))
+            sources["threat_pressure"] = "targets.threat_score"
+    if "threat_pressure" not in values and mode in {"fixture", "test"}:
         values["threat_pressure"] = float(FEATURE_SCHEMA["threat_pressure"]["missing_policy_fixture"])
         sources["threat_pressure"] = "fixture_default"
     elif "threat_pressure" not in values:
@@ -322,9 +333,11 @@ def build_features_from_agent_results(
             sources["ammo_pressure"] = f"resource_allocation.{key}"
             break
     if "ammo_pressure" not in values and targets:
-        values["ammo_pressure"] = clamp(_mean([float(item.get("ammo_need", 0.5)) for item in targets]))
-        sources["ammo_pressure"] = "targets.ammo_need"
-    elif "ammo_pressure" not in values and mode in {"fixture", "test", "hybrid"}:
+        ammo_need = _target_numeric_values(targets, "ammo_need")
+        if ammo_need:
+            values["ammo_pressure"] = clamp(_mean(ammo_need))
+            sources["ammo_pressure"] = "targets.ammo_need"
+    if "ammo_pressure" not in values and mode in {"fixture", "test"}:
         values["ammo_pressure"] = float(FEATURE_SCHEMA["ammo_pressure"]["missing_policy_fixture"])
         sources["ammo_pressure"] = "fixture_default"
     elif "ammo_pressure" not in values:
@@ -339,24 +352,25 @@ def build_features_from_agent_results(
             values["comm_quality"] = comm
             sources["comm_quality"] = f"communication.{key}"
             break
-    if "comm_quality" not in values and mode in {"fixture", "test", "hybrid"}:
+    if "comm_quality" not in values and mode in {"fixture", "test"}:
         values["comm_quality"] = float(FEATURE_SCHEMA["comm_quality"]["missing_policy_fixture"])
         sources["comm_quality"] = "fixture_default"
     elif "comm_quality" not in values:
         missing.append("comm_quality")
 
-    if mode == "strict" and missing:
+    if missing and mode not in {"fixture", "test"}:
         return {
             "feature_version": FEATURE_VERSION,
-            "values": {name: 0.0 for name in FEATURE_ORDER},
+            "values": {name: round(float(values[name]), 4) for name in FEATURE_ORDER if name in values},
             "sources": sources,
             "warnings": warnings,
             "assessment_status": "insufficient_data",
             "missing_fields": sorted(set(missing)),
         }
 
-    for name in FEATURE_ORDER:
-        values.setdefault(name, float(FEATURE_SCHEMA[name]["missing_policy_fixture"]))
+    if mode in {"fixture", "test"}:
+        for name in FEATURE_ORDER:
+            values.setdefault(name, float(FEATURE_SCHEMA[name]["missing_policy_fixture"]))
 
     assert_no_label_leakage(dict(values), context="agent_results")
     for forbidden in LABEL_FIELDS:

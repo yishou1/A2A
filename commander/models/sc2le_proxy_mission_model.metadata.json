@@ -1,5 +1,10 @@
 {
-  "model_source": "sc2le_proxy",
+  "model_source": "sc2le_proxy_sklearn_random_forest",
+  "model_family": "sklearn.ensemble.RandomForestRegressor",
+  "library": {
+    "name": "scikit-learn",
+    "version": "1.7.2"
+  },
   "feature_version": "mission_features_v2",
   "feature_order": [
     "damage_rate",
@@ -16,7 +21,7 @@
   },
   "training_ranges": {
     "damage_rate": {
-      "min": 0.3504,
+      "min": 0.35,
       "max": 1.0
     },
     "asset_readiness": {
@@ -24,11 +29,11 @@
       "max": 1.0
     },
     "control_timeliness": {
-      "min": 0.0025,
+      "min": 0.0,
       "max": 1.0
     },
     "intel_confidence": {
-      "min": 0.4504,
+      "min": 0.45,
       "max": 1.0
     },
     "threat_pressure": {
@@ -40,12 +45,26 @@
       "max": 1.0
     },
     "comm_quality": {
-      "min": 0.5008,
+      "min": 0.5,
       "max": 1.0
     }
   },
   "threshold": 0.5,
-  "split_strategy": "group_by_replay_id",
+  "threshold_selection": "maximum validation balanced_accuracy",
+  "profile_tree_budgets": {
+    "low": 32,
+    "medium": 96,
+    "high": 192
+  },
+  "hyperparameters": {
+    "n_estimators": 192,
+    "max_depth": 10,
+    "min_samples_leaf": 12,
+    "max_features": "sqrt",
+    "bootstrap": true,
+    "random_state": 20260412
+  },
+  "split_strategy": "group_by_replay_id_70_15_15",
   "split_seed": 20260412,
   "split_counts": {
     "replays": {
@@ -60,39 +79,32 @@
     }
   },
   "metrics": {
-    "mae": 0.4847,
-    "r2": 0.0387,
-    "classification_accuracy": 0.5743,
-    "precision": 0.5831,
-    "recall": 0.5276,
-    "f1": 0.5539,
+    "mae": 0.4658,
+    "r2": 0.0745,
+    "classification_accuracy": 0.5951,
+    "balanced_accuracy": 0.5951,
+    "precision": 0.5921,
+    "recall": 0.6186,
+    "f1": 0.6051,
     "confusion_matrix": {
-      "tp": 5107,
-      "fp": 3652,
-      "tn": 5988,
-      "fn": 4573
+      "tp": 5992,
+      "fp": 4128,
+      "tn": 5506,
+      "fn": 3694
     }
+  },
+  "feature_importances": {
+    "damage_rate": 0.206002,
+    "asset_readiness": 0.097828,
+    "control_timeliness": 0.171134,
+    "intel_confidence": 0.102819,
+    "threat_pressure": 0.124123,
+    "ammo_pressure": 0.195196,
+    "comm_quality": 0.102898
   },
   "label_leakage_check": {
     "passed": true,
-    "win_values": {
-      "damage_rate": 0.6329,
-      "asset_readiness": 0.5,
-      "control_timeliness": 0.375,
-      "intel_confidence": 0.7063,
-      "threat_pressure": 0.6883,
-      "ammo_pressure": 0.5,
-      "comm_quality": 0.7125
-    },
-    "loss_values": {
-      "damage_rate": 0.6329,
-      "asset_readiness": 0.5,
-      "control_timeliness": 0.375,
-      "intel_confidence": 0.7063,
-      "threat_pressure": 0.6883,
-      "ammo_pressure": 0.5,
-      "comm_quality": 0.7125
-    }
+    "method": "all seven features recomputed from raw mmr/apm/duration/opponent_mmr; CSV derived feature and result columns excluded"
   },
-  "csv_path": "C:\\Users\\14350\\Desktop\\文档+代码\\zhangheng\\temp_study\\A2A\\data\\sc2\\processed\\sc2le_task_features.csv"
+  "csv_path": "D:\\zh\\code_613\\temp_study\\A2A\\data\\sc2\\processed\\sc2le_task_features.csv"
 }

@@ -87,6 +87,24 @@ def _mock_run_algorithm(*, request_id: str, trace_id: str, call):
     }
 
 
+def _target(target_id: str) -> dict:
+    return {
+        "target_id": target_id,
+        "target_class": "ship",
+        "detection_confidence": 0.9,
+        "threat_score": 0.7,
+        "pre_area": 0.8,
+        "spectral_delta": 0.6,
+        "texture_delta": 0.55,
+        "heat_signature": 0.5,
+        "crater_density": 0.4,
+        "normalized_distance": 0.3,
+        "velocity_norm": 0.2,
+        "uncertainty": 0.1,
+        "ammo_need": 0.45,
+    }
+
+
 class ClosedLoopAlgolibOrchestrationTest(unittest.TestCase):
     def test_closed_loop_llm_stage_plans_once_and_reuses(self):
         stage_plan = {
@@ -178,6 +196,7 @@ class ClosedLoopAlgolibOrchestrationTest(unittest.TestCase):
                                 "cycles": 2,
                                 "target_count": 2,
                                 "enforce_min_target_count": False,
+                                "targets": [_target("T-1"), _target("T-2")],
                                 "results": {
                                     "threat_evaluation": {"output_data": {"priority_score": 0.7}},
                                 },
@@ -233,29 +252,37 @@ class ClosedLoopAlgolibOrchestrationTest(unittest.TestCase):
 
         output = result["output_data"]
         self.assertEqual(output["execution_control"]["processed_targets"], 1)
-        self.assertEqual(output["effect_assessment"]["target_assessments"][0]["target_id"], "TRK-AMOS-01")
+        assessment = output["effect_assessment"]["target_assessments"][0]
+        self.assertEqual(assessment["target_id"], "TRK-AMOS-01")
+        self.assertEqual(assessment["assessment_status"], "insufficient_data")
+        self.assertIn("threat_score", assessment["missing_fields"])
 
-    def test_synthesizes_targets_and_commander_envelope(self):
+    def test_uses_explicit_targets_and_commander_envelope(self):
         with mock.patch.dict(
             os.environ,
-            {"CLOSED_LOOP_BACKEND": "algolib", "ALGOLIB_TRANSPORT": "direct"},
+            {"CLOSED_LOOP_BACKEND": "algolib", "ALGOLIB_TRANSPORT": "direct", "ALGOLIB_ENABLE_LLM": "false"},
             clear=False,
         ):
             with mock.patch(
-                "closed_loop_agent.algolib_runtime.AlgorithmLibraryClient.run_outputs",
-                side_effect=_mock_run_outputs,
+                "closed_loop_agent.algolib_runtime.AlgorithmLibraryClient.list_algorithms",
+                return_value=[],
             ):
-                result = run_closed_loop_via_algolib(
-                    {
-                        "seed": 7,
-                        "cycles": 2,
-                        "target_count": 3,
-                        "enforce_min_target_count": False,
-                        "results": {
-                            "threat_evaluation": {"output_data": {"priority_score": 0.7}},
-                        },
-                    }
-                )
+                with mock.patch(
+                    "closed_loop_agent.algolib_runtime.AlgorithmLibraryClient.run_algorithm",
+                    side_effect=_mock_run_algorithm,
+                ):
+                    result = run_closed_loop_via_algolib(
+                        {
+                            "seed": 7,
+                            "cycles": 2,
+                            "target_count": 3,
+                            "enforce_min_target_count": False,
+                            "targets": [_target("T-1"), _target("T-2"), _target("T-3")],
+                            "results": {
+                                "threat_evaluation": {"output_data": {"priority_score": 0.7}},
+                            },
+                        }
+                    )
         output = result["output_data"]
         self.assertEqual(output["backend"], "algolib")
         self.assertEqual(output["execution_control"]["processed_targets"], 3)
@@ -265,14 +292,13 @@ class ClosedLoopAlgolibOrchestrationTest(unittest.TestCase):
         self.assertEqual(len(output["closed_loop_optimization"]["history"]), 2)
         self.assertIn("requirement_report", output)
         self.assertIn("meets_requirements", output)
-        self.assertTrue(any(str(w).startswith("targets_synthesized_from_target_count") for w in output["warnings"]))
         self.assertGreaterEqual(output["mission_completion_final"], 0.0)
         self.assertEqual(
             output["requirement_report"]["xbd_damage_accuracy_note"],
             "not_evaluated_in_algolib_mode_use_local_for_offline_gates",
         )
 
-    def test_beachhead_style_target_count_fifty(self):
+    def test_target_count_without_targets_is_insufficient_data(self):
         with mock.patch(
             "closed_loop_agent.algolib_runtime.AlgorithmLibraryClient.run_outputs",
             side_effect=_mock_run_outputs,
@@ -286,9 +312,11 @@ class ClosedLoopAlgolibOrchestrationTest(unittest.TestCase):
                 }
             )
         output = result["output_data"]
-        self.assertEqual(output["execution_control"]["processed_targets"], 50)
-        self.assertTrue(output["requirement_report"]["meets_target_count"])
-        self.assertTrue(output["requirement_report"]["sc2le_proxy_model_loaded"])
+        self.assertEqual(output["assessment_status"], "insufficient_data")
+        self.assertEqual(output["execution_control"]["processed_targets"], 0)
+        self.assertFalse(output["requirement_report"]["meets_target_count"])
+        self.assertFalse(output["requirement_report"]["sc2le_proxy_model_loaded"])
+        self.assertIn("targets", output["missing_fields"])
 
 
 class ExecutionControlContractTest(unittest.TestCase):

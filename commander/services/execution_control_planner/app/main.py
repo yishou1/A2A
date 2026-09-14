@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "services"))
 
 from a2a_algorithms_common.http_service import create_algorithm_app
+from a2a_algorithms_common.algorithm_profiles import available_algorithm_profiles
 from a2a_algorithms_common.service_predictors import predict_execution_control_planner, mission_model_loaded
 
 ALGORITHM_ID = "execution_control_planner"
@@ -28,6 +29,7 @@ app = create_algorithm_app(
     "planning",
     _predict,
     model_loaded_callable=_model_loaded,
+    extra_metadata={"supported_profiles": available_algorithm_profiles()},
 )
 
 if __name__ == "__main__":

@@ -2004,13 +2004,13 @@ def _result_block(results: dict, *keys: str) -> dict:
     return {}
 
 
-def _normalize_upstream_score(value: Any, default: float) -> float:
+def _normalize_upstream_score(value: Any) -> Optional[float]:
     if value is None or value == "":
-        return default
+        return None
     try:
         score = float(value)
     except (TypeError, ValueError):
-        return default
+        return None
     if score > 1.0:
         score = score / 100.0
     return _clamp(score)
@@ -2027,87 +2027,96 @@ def _base_from_upstream(results: dict) -> dict:
     fusion_out = _safe_dict(fusion.get("output_data"))
     threat_out = _safe_dict(threat.get("output_data"))
     detections = _safe_list(perception_out.get("detections"))
-    if not detections and perception_out.get("report_text"):
-        detections = [{"conf": 0.82}]
-    if not detections and perception_out.get("report"):
-        detections = [{"conf": 0.82}]
     first_det = _safe_dict(detections[0]) if detections else {}
     fused_track = _safe_dict(fusion_out.get("fused_track"))
 
-    threat_score = 0.70
+    threat_score = None
     for key in ("priority_score", "eval_score", "threat_score"):
         if threat_out.get(key) is not None and threat_out.get(key) != "":
-            threat_score = _normalize_upstream_score(threat_out.get(key), threat_score)
+            threat_score = _normalize_upstream_score(threat_out.get(key))
             break
 
     resource = _result_block(results, "resource_allocation")
     resource_out = _safe_dict(resource.get("output_data"))
-    default_ammo = _normalize_upstream_score(
-        resource_out.get("supply_pressure") or resource_out.get("ammo_pressure"),
-        0.5,
-    )
+    default_ammo = _normalize_upstream_score(resource_out.get("supply_pressure") or resource_out.get("ammo_pressure"))
 
     return {
-        "det_conf": float(first_det.get("conf") or fused_track.get("det_conf") or 0.82),
-        "class_conf": float(recognition_out.get("confidence") or fused_track.get("class_confidence") or 0.86),
-        "threat_score": float(threat_score),
-        "target_class": str(recognition_out.get("target_class") or fused_track.get("target_class") or "Unknown"),
-        "track_id": str(fused_track.get("track_id") or perception_out.get("frame_id") or "track"),
-        "default_ammo_need": float(default_ammo),
+        "det_conf": _normalize_upstream_score(first_det.get("conf") or fused_track.get("det_conf")),
+        "class_conf": _normalize_upstream_score(recognition_out.get("confidence") or fused_track.get("class_confidence")),
+        "threat_score": threat_score,
+        "target_class": recognition_out.get("target_class") or fused_track.get("target_class"),
+        "track_id": fused_track.get("track_id") or perception_out.get("frame_id"),
+        "default_ammo_need": default_ammo,
     }
 
 
 def _build_live_targets(arguments: dict, seed: int) -> Tuple[List[dict], dict]:
-    rng = random.Random(seed + 10)
-    requested = int(arguments.get("target_count") or 50)
-    enforce_min_target_count = bool(arguments.get("enforce_min_target_count", True))
-    min_target_count = 50 if enforce_min_target_count else 1
-    target_count = max(min_target_count, requested)
     explicit_targets = _safe_list(arguments.get("targets"))
-    if explicit_targets:
-        target_count = max(min_target_count, len(explicit_targets))
     results = _extract_upstream_results(arguments)
     base = _base_from_upstream(results)
     targets: List[dict] = []
-    for index in range(target_count):
-        explicit = _safe_dict(explicit_targets[index]) if index < len(explicit_targets) else {}
-        det_conf = _clamp(
-            _as_float(explicit, ["detection_confidence"], base["det_conf"])
-            + rng.gauss(0, 0.035)
-        )
-        threat_score = _clamp(
-            _as_float(explicit, ["threat_score"], base["threat_score"])
-            + rng.gauss(0, 0.12)
-        )
-        initial_effect = _clamp(
-            _as_float(explicit, ["initial_effect"], 0.38 + 0.28 * rng.random())
-        )
-        distance = _clamp(_as_float(explicit, ["normalized_distance"], rng.random()))
+    missing_by_target: dict[str, list[str]] = {}
+    for index, raw_target in enumerate(explicit_targets):
+        explicit = _safe_dict(raw_target)
+        if not explicit:
+            continue
+        target_id = explicit.get("target_id") or explicit.get("track_id") or explicit.get("contact_id")
         target = {
-            "target_id": str(explicit.get("target_id") or f"{base['track_id']}-{index + 1:03d}"),
-            "target_class": str(explicit.get("target_class") or base["target_class"]),
-            "pre_area": _clamp(_as_float(explicit, ["pre_area"], rng.uniform(0.35, 1.0))),
-            "spectral_delta": _clamp(_as_float(explicit, ["spectral_delta"], initial_effect + rng.gauss(0, 0.08))),
-            "texture_delta": _clamp(_as_float(explicit, ["texture_delta"], initial_effect * 0.90 + rng.gauss(0, 0.08))),
-            "heat_signature": _clamp(_as_float(explicit, ["heat_signature"], initial_effect * 0.85 + rng.gauss(0, 0.09))),
-            "crater_density": _clamp(_as_float(explicit, ["crater_density"], initial_effect * 0.72 + rng.gauss(0, 0.08))),
-            "normalized_distance": distance,
-            "detection_confidence": det_conf,
-            "threat_score": threat_score,
-            "velocity_norm": _clamp(_as_float(explicit, ["velocity_norm"], rng.random())),
-            "uncertainty": _clamp(_as_float(explicit, ["uncertainty"], 0.42 - 0.25 * det_conf + rng.random() * 0.25)),
-            "ammo_need": _clamp(
-                _as_float(
-                    explicit,
-                    ["ammo_need"],
-                    base.get("default_ammo_need", 0.5)
-                    + 0.55 * threat_score
-                    + rng.gauss(0, 0.08),
-                )
-            ),
+            "target_id": str(target_id) if target_id else f"target-{index + 1}",
         }
+        for text_key in ("target_class", "sample_id"):
+            if explicit.get(text_key) is not None:
+                target[text_key] = explicit.get(text_key)
+        if "target_class" not in target and base.get("target_class") is not None:
+            target["target_class"] = base["target_class"]
+        numeric_keys = (
+            "pre_area",
+            "spectral_delta",
+            "texture_delta",
+            "heat_signature",
+            "crater_density",
+            "normalized_distance",
+            "detection_confidence",
+            "threat_score",
+            "velocity_norm",
+            "uncertainty",
+            "ammo_need",
+            "damage_probability",
+        )
+        for key in numeric_keys:
+            value = explicit.get(key)
+            if value is None and key == "detection_confidence":
+                value = explicit.get("confidence") or base.get("det_conf")
+            if value is None and key == "threat_score":
+                value = base.get("threat_score")
+            if value is None and key == "ammo_need":
+                value = base.get("default_ammo_need")
+            score = _normalize_upstream_score(value)
+            if score is not None:
+                target[key] = score
+        missing = [
+            key
+            for key in ("detection_confidence", "threat_score")
+            if target.get(key) is None
+        ]
+        damage_feature_keys = (
+            "pre_area",
+            "spectral_delta",
+            "texture_delta",
+            "heat_signature",
+            "crater_density",
+        )
+        if not any(target.get(key) is not None for key in damage_feature_keys) and target.get("damage_probability") is None:
+            missing.append("damage_evidence")
+        if missing:
+            missing_by_target[str(target["target_id"])] = missing
         targets.append(target)
-    return targets, {"source_results_present": bool(results), "upstream_summary": base}
+    return targets, {
+        "source_results_present": bool(results),
+        "explicit_target_count": len(explicit_targets),
+        "upstream_summary": {key: value for key, value in base.items() if value is not None},
+        "missing_by_target": missing_by_target,
+    }
 
 
 def _damage_features(target: dict) -> List[float]:
@@ -2116,11 +2125,11 @@ def _damage_features(target: dict) -> List[float]:
 
 def _situation_features(target: dict, damage_prob: float) -> List[float]:
     return [
-        float(target.get("threat_score", 0.5)),
-        float(target.get("velocity_norm", 0.5)),
+        float(target.get("threat_score")),
+        float(target.get("velocity_norm")),
         1.0 - damage_prob,
-        float(target.get("uncertainty", 0.3)),
-        float(target.get("ammo_need", 0.5)),
+        float(target.get("uncertainty")),
+        float(target.get("ammo_need")),
     ]
 
 
@@ -2140,7 +2149,7 @@ def _mission_features(
     results: Optional[dict] = None,
     *,
     control_latency_sla_ms: float = 2000.0,
-    feature_mode: str = "hybrid",
+    feature_mode: str = "strict",
 ) -> List[float]:
     from closed_loop_agent.agent_results_mapping import mission_vector_from_results
 
@@ -2196,7 +2205,7 @@ def _closed_loop_optimization(arguments: dict) -> dict:
     seed = int(arguments.get("seed") or 20260412)
     cycles = max(1, min(8, int(arguments.get("cycles") or 3)))
     paths = _dataset_paths(arguments)
-    feature_mode = str(arguments.get("feature_mode") or "hybrid")
+    feature_mode = str(arguments.get("feature_mode") or os.environ.get("CLOSED_LOOP_FEATURE_MODE") or "strict")
     trained = _train_models(seed, paths)
     damage_model = trained["damage_model"]
     damage_threshold = float(getattr(damage_model, "decision_threshold", 0.5))
@@ -2217,6 +2226,66 @@ def _closed_loop_optimization(arguments: dict) -> dict:
 
     model_path = str(paths.get("mission_model_path") or "").strip() or None
     metadata_path = str(paths.get("mission_model_metadata_path") or "").strip() or None
+    missing_by_target = _safe_dict(source_info.get("missing_by_target"))
+    if not targets or missing_by_target:
+        total_latency = time.perf_counter() - start_time
+        missing_fields = ["targets"] if not targets else ["targets.required_fields"]
+        target_requirement = max(1, int(arguments.get("target_count") or len(targets) or 1))
+        execution_gate = execution_gate_from_results(upstream_results)
+        output = {
+            "assessment_status": "insufficient_data",
+            "missing_fields": missing_fields,
+            "source_info": source_info,
+            "execution_control": {
+                "control_cycles": 0,
+                "processed_targets": len(targets),
+                "commands": [],
+            },
+            "effect_assessment": {
+                "damage_confirmed_count": 0,
+                "mean_damage_probability": None,
+                "target_assessments": [],
+            },
+            "closed_loop_optimization": {
+                "mission_completion_initial": None,
+                "mission_completion_final": None,
+                "mission_completion_improvement": None,
+                "history": [],
+            },
+            "performance_report": {
+                "max_update_latency_seconds": round(total_latency, 6),
+                "total_agent_latency_seconds": round(total_latency, 6),
+            },
+            "requirement_report": {
+                "target_count_requirement": target_requirement,
+                "target_count_actual": len(targets),
+                "meets_target_count": bool(targets and len(targets) >= target_requirement),
+                "sc2le_proxy_model_loaded": False,
+                "meets_mission_completion_threshold": False,
+                "meets_execution_requirement": execution_gate["meets_execution_requirement"],
+                "execution_gate": execution_gate,
+            },
+            "metric_requirements_met": False,
+            "execution_gate": execution_gate,
+            "meets_requirements": False,
+            "targets": targets,
+            "assessments": [],
+            "commands": [],
+            "mission_assessment": {
+                "assessment_status": "insufficient_data",
+                "missing_fields": missing_fields,
+                "mission_completion": None,
+            },
+            "warnings": ["closed_loop:missing_targets" if not targets else "targets_missing_required_fields"],
+            "backend": "local",
+        }
+        return {
+            "task_type": "closed_loop_optimization",
+            "input_data": arguments,
+            "output_data": output,
+            "accuracy": 0.0,
+            "latency": total_latency,
+        }
 
     history: List[dict] = []
     final_commands: List[dict] = []
@@ -2258,25 +2327,32 @@ def _closed_loop_optimization(arguments: dict) -> dict:
             )
             mission_completion = float(mission_assessment.get("mission_completion") or 0.0)
         except FileNotFoundError:
-            if mission_model is not None:
-                mission_completion = float(mission_model.predict_one(mission_features))
-                mission_assessment = {
-                    "mission_completion": round(mission_completion, 4),
-                    "mission_result": "success" if mission_completion >= 0.5 else "failure",
-                    "threshold": 0.5,
-                    "model_source": "legacy_inline_retrain",
-                    "feature_version": "mission_features_v2",
-                    "assessment_status": "legacy_inline_model",
-                    "warnings": ["frozen_model_not_found"],
+            mission_completion = 0.0
+            mission_assessment = {
+                "mission_completion": None,
+                "mission_result": None,
+                "assessment_status": "insufficient_data",
+                "missing_fields": ["mission_model_metadata"],
+                "warnings": ["frozen_mission_model_not_found"],
+            }
+            commands = []
+            assessments = []
+            update_latency = time.perf_counter() - cycle_start
+            update_latencies.append(update_latency)
+            history.append(
+                {
+                    "cycle": cycle,
+                    "mission_completion": None,
+                    "mission_assessment": mission_assessment,
+                    "mean_damage_probability": round(_mean(probs), 4),
+                    "critical_targets": 0,
+                    "action_counts": {},
+                    "update_latency_seconds": round(update_latency, 6),
                 }
-            else:
-                mission_completion = 0.0
-                mission_assessment = {
-                    "mission_completion": 0.0,
-                    "mission_result": "failure",
-                    "assessment_status": "missing_model",
-                    "warnings": ["mission_model_not_found"],
-                }
+            )
+            final_commands = commands
+            final_assessments = assessments
+            break
         if cycle == 1:
             initial_completion = mission_completion
         final_completion = mission_completion
@@ -2349,6 +2425,7 @@ def _closed_loop_optimization(arguments: dict) -> dict:
     metrics["mission_completion_final"] = final_completion
     metrics["mission_completion_improvement"] = final_completion - initial_completion
 
+    target_requirement = max(1, int(arguments.get("target_count") or len(targets) or 1))
     requirement_report = {
         "xbd_damage_accuracy_requirement": DAMAGE_ACCURACY_REQUIREMENT,
         "xbd_damage_accuracy_actual": round(float(metrics["damage_accuracy"]), 4),
@@ -2356,9 +2433,9 @@ def _closed_loop_optimization(arguments: dict) -> dict:
         "situation_update_frequency_requirement_seconds": 1.0,
         "situation_update_latency_actual_seconds": round(max_update_latency, 6),
         "meets_situation_update_frequency": bool(max_update_latency <= 1.0),
-        "target_count_requirement": 50,
+        "target_count_requirement": target_requirement,
         "target_count_actual": len(targets),
-        "meets_target_count": bool(len(targets) >= 50),
+        "meets_target_count": bool(len(targets) >= target_requirement),
         "sc2le_task_completion_accuracy_requirement": SC2LE_TASK_COMPLETION_ACCURACY_REQUIREMENT,
         "sc2le_task_completion_accuracy_actual": round(float(metrics.get("classification_accuracy", metrics["task_completion_accuracy"])), 4),
         "meets_sc2le_task_completion_accuracy": bool(
