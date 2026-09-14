@@ -34,7 +34,6 @@ def predict_linear(ts: Sequence[float], values: Sequence[float], future_t: float
 
 
 def build_track_histories(results: dict, fixture: dict | None = None) -> List[dict]:
-    fixture = fixture or load_track_fixture()
     fusion = (results.get("data_fusion") or {}).get("output_data") or {}
     history = fusion.get("track_history") or fusion.get("tracks") or []
     tracks: List[dict] = []
@@ -45,17 +44,15 @@ def build_track_histories(results: dict, fixture: dict | None = None) -> List[di
             track_id = str(item.get("track_id") or item.get("id") or "")
             points = item.get("history") or item.get("points") or []
             if track_id and isinstance(points, list) and points:
-                tracks.append(
-                    {
-                        "track_id": track_id,
-                        "history": points,
-                        "weapon_prep_sec": float(item.get("weapon_prep_sec") or 2.0),
-                        "flight_time_sec": float(item.get("flight_time_sec") or 4.0),
-                    }
-                )
+                track = {"track_id": track_id, "history": points}
+                if item.get("weapon_prep_sec") is not None:
+                    track["weapon_prep_sec"] = float(item.get("weapon_prep_sec"))
+                if item.get("flight_time_sec") is not None:
+                    track["flight_time_sec"] = float(item.get("flight_time_sec"))
+                tracks.append(track)
     if tracks:
         return tracks
-    return list((fixture or {}).get("default_tracks") or [])
+    return list((fixture or {}).get("default_tracks") or []) if fixture else []
 
 
 def predict_tracks(tracks: Sequence[dict]) -> Tuple[List[dict], List[dict]]:
@@ -66,12 +63,21 @@ def predict_tracks(tracks: Sequence[dict]) -> Tuple[List[dict], List[dict]]:
         points = [point for point in history if isinstance(point, dict)]
         if len(points) < 2:
             continue
-        ts = [float(point.get("t") or index * 0.1) for index, point in enumerate(points)]
-        xs = [float(point.get("x") or 0.0) for point in points]
-        ys = [float(point.get("y") or 0.0) for point in points]
+        if track.get("weapon_prep_sec") is None or track.get("flight_time_sec") is None:
+            continue
+        usable_points = [
+            point
+            for point in points
+            if point.get("t") is not None and point.get("x") is not None and point.get("y") is not None
+        ]
+        if len(usable_points) < 2:
+            continue
+        ts = [float(point.get("t")) for point in usable_points]
+        xs = [float(point.get("x")) for point in usable_points]
+        ys = [float(point.get("y")) for point in usable_points]
         last_t = ts[-1]
-        weapon_prep = float(track.get("weapon_prep_sec") or 2.0)
-        flight_time = float(track.get("flight_time_sec") or 4.0)
+        weapon_prep = float(track.get("weapon_prep_sec"))
+        flight_time = float(track.get("flight_time_sec"))
         execute_at = round(last_t + weapon_prep, 3)
         future_t = last_t + weapon_prep + flight_time
         predicted_x = predict_linear(ts, xs, future_t)
@@ -94,7 +100,7 @@ def predict_tracks(tracks: Sequence[dict]) -> Tuple[List[dict], List[dict]]:
                 "execute_at": execute_at,
                 "aim_point": {"x": round(predicted_x, 4), "y": round(predicted_y, 4)},
                 "model": "linear_regression",
-                "history_points": len(points),
+                "history_points": len(usable_points),
             }
         )
     return updated_tracks, prediction_details

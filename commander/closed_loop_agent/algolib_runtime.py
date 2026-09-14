@@ -316,7 +316,7 @@ def build_damage_assessor_inputs(
     Build xbd_damage_assessor request inputs.
 
     Returns (inputs_or_none, selected_mode, warnings).
-    When inputs is None, caller should use a local probability fallback.
+    When inputs is None, the caller must report insufficient target damage evidence.
     """
     warnings: List[str] = []
     sid = str(sample_id or target.get("sample_id") or target.get("target_id") or "")
@@ -370,6 +370,16 @@ def preferred_damage_input_mode(arguments: Optional[dict] = None) -> str:
     return mode
 
 
+def closed_loop_algorithm_profile(arguments: Optional[dict] = None) -> str:
+    arguments = arguments or {}
+    return str(
+        arguments.get("algorithm_profile")
+        or arguments.get("profile")
+        or os.environ.get("CLOSED_LOOP_ALGORITHM_PROFILE")
+        or "medium"
+    ).strip().lower()
+
+
 def _situation_label(threat_score: float, damage_prob: float) -> str:
     if threat_score >= 0.75 or damage_prob >= 0.7:
         return "critical"
@@ -383,17 +393,18 @@ def _stage_plan_specs(
     feature_mode: str,
     preferred_damage_mode: str,
     device: Optional[str],
+    algorithm_profile: str,
 ) -> list[dict[str, Any]]:
     specs: list[dict[str, Any]] = []
     for spec in CLOSED_LOOP_STAGE_TASKS:
-        params: dict[str, Any] = {}
+        params: dict[str, Any] = {"profile": algorithm_profile}
         if spec["default_algorithm_id"] == "xbd_damage_assessor":
             if preferred_damage_mode:
                 params["damage_input_mode"] = preferred_damage_mode
             if device:
                 params["device"] = device
         elif spec["default_algorithm_id"] == "mission_feature_adapter":
-            params["mode"] = feature_mode if feature_mode in {"strict", "fixture", "hybrid"} else "hybrid"
+            params["mode"] = feature_mode if feature_mode in {"strict", "fixture", "test", "hybrid"} else "strict"
         specs.append({**spec, "params": params})
     return specs
 
@@ -425,6 +436,7 @@ def _build_closed_loop_stage_plan(
     feature_mode: str,
     preferred_damage_mode: str,
     device: Optional[str],
+    algorithm_profile: str,
 ) -> ClosedLoopStagePlan:
     settings = client.settings
     warnings: list[str] = []
@@ -432,6 +444,7 @@ def _build_closed_loop_stage_plan(
         feature_mode=feature_mode,
         preferred_damage_mode=preferred_damage_mode,
         device=device,
+        algorithm_profile=algorithm_profile,
     )
     algorithms: list[dict[str, Any]] = []
     try:
@@ -617,7 +630,7 @@ def assess_target_damage_via_algolib(
     stage_plan: Optional[ClosedLoopStagePlan] = None,
     llm_plans: Optional[List[dict]] = None,
     invocation_log: Optional[List[dict[str, Any]]] = None,
-) -> Tuple[float, str, dict, List[str]]:
+) -> Tuple[Optional[float], str, dict, List[str]]:
     """Call xbd_damage_assessor for one target; returns prob, mode, raw_out, warnings."""
     sample_id = str(target.get("sample_id") or target.get("target_id") or request_id)
     inputs, mode, warnings = build_damage_assessor_inputs(
@@ -627,8 +640,7 @@ def assess_target_damage_via_algolib(
         device=device,
     )
     if inputs is None:
-        damage_prob = float(target.get("damage_probability") or target.get("threat_score") or 0.5)
-        return damage_prob, mode, {}, warnings
+        return None, mode, {"assessment_status": "insufficient_data", "missing_fields": ["damage_evidence"]}, warnings
 
     params = {}
     if device:
@@ -697,8 +709,7 @@ def assess_target_damage_via_algolib(
                 mode = feature_mode
                 if damage_out.get("assessment_status") != "insufficient_data":
                     return float(damage_out.get("damage_probability") or 0.0), mode, damage_out, warnings
-        damage_prob = float(target.get("damage_probability") or 0.0)
-        return damage_prob, mode, damage_out, warnings
+        return None, mode, damage_out, warnings
     return float(damage_out.get("damage_probability") or 0.0), mode, damage_out, warnings
 
 
@@ -715,7 +726,7 @@ def _score_mission_via_algolib(
     warnings: List[str] = []
     adapter_inputs = {
         "source_type": "agent_results",
-        "mode": feature_mode if feature_mode in {"strict", "fixture", "hybrid"} else "hybrid",
+        "mode": feature_mode if feature_mode in {"strict", "fixture", "test", "hybrid"} else "strict",
         "agent_results": agent_results,
     }
     if stage_plan is not None:
@@ -858,23 +869,76 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
     seed = int(arguments.get("seed") or 20260412)
     cycles = max(1, min(8, int(arguments.get("cycles") or 3)))
     upstream = _extract_upstream_results(arguments)
-    feature_mode = str(arguments.get("feature_mode") or "hybrid")
+    feature_mode = str(arguments.get("feature_mode") or os.environ.get("CLOSED_LOOP_FEATURE_MODE") or "strict")
     damage_mode_pref = preferred_damage_input_mode(arguments)
     device = str(arguments.get("device") or os.environ.get("CLOSED_LOOP_DAMAGE_DEVICE") or "").strip() or None
+    algorithm_profile = closed_loop_algorithm_profile(arguments)
     warnings: List[str] = []
 
-    # Beachhead often sends target_count without targets; reuse local synthesizer.
     targets, source_info = _build_live_targets(arguments, seed)
-    if not arguments.get("targets"):
-        warnings.append(f"targets_synthesized_from_target_count:{len(targets)}")
+    if not targets:
+        latency = time.perf_counter() - start
+        target_requirement = max(1, int(arguments.get("target_count") or 1))
+        output_data = {
+            "assessment_status": "insufficient_data",
+            "missing_fields": ["targets"],
+            "source_info": source_info,
+            "execution_control": {"control_cycles": 0, "processed_targets": 0, "commands": []},
+            "effect_assessment": {
+                "damage_confirmed_count": 0,
+                "mean_damage_probability": None,
+                "target_assessments": [],
+            },
+            "closed_loop_optimization": {
+                "mission_completion_initial": None,
+                "mission_completion_final": None,
+                "mission_completion_improvement": None,
+                "history": [],
+            },
+            "requirement_report": {
+                "assessment_mode": "algolib_service_orchestration",
+                "target_count_requirement": target_requirement,
+                "target_count_actual": 0,
+                "meets_target_count": False,
+                "sc2le_proxy_model_loaded": False,
+                "meets_mission_completion_threshold": False,
+            },
+            "meets_requirements": False,
+            "meets_mission_threshold": False,
+            "targets": [],
+            "assessments": [],
+            "commands": [],
+            "mission_assessment": {
+                "assessment_status": "insufficient_data",
+                "missing_fields": ["targets"],
+                "mission_completion": None,
+            },
+            "feature_bundle": {
+                "assessment_status": "insufficient_data",
+                "missing_fields": ["targets"],
+            },
+            "warnings": ["closed_loop:missing_targets"],
+            "latency_ms": round(latency * 1000.0, 3),
+            "transport": settings.transport,
+            "backend": "algolib",
+        }
+        return {
+            "task_type": "closed_loop_optimization",
+            "input_data": arguments,
+            "output_data": output_data,
+            "accuracy": 0.0,
+            "latency": latency,
+        }
+    if _safe_dict(source_info.get("missing_by_target")):
+        warnings.append("targets_missing_required_fields")
 
     history: List[dict] = []
     final_commands: List[dict] = []
     final_assessments: List[dict] = []
     adapter_out: dict = {}
     mission_out: dict = {}
-    initial_completion = 0.0
-    final_completion = 0.0
+    initial_completion: Optional[float] = None
+    final_completion: Optional[float] = None
     update_latencies: List[float] = []
     damage_mode_counts = {"images": 0, "features": 0}
     probs: List[float] = []
@@ -886,6 +950,7 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
         feature_mode=feature_mode,
         preferred_damage_mode=damage_mode_pref,
         device=device,
+        algorithm_profile=algorithm_profile,
     )
     warnings.extend(stage_plan.warnings)
     if stage_plan.planner_mode != "fixed":
@@ -908,13 +973,14 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
         except AlgorithmLibraryError as exc:
             warnings.append(f"mission_services_failed_cycle_{cycle}:{exc}")
             mission_out = {
-                "mission_completion": final_completion if cycle > 1 else 0.0,
+                "mission_completion": final_completion,
                 "assessment_status": "service_error",
                 "warnings": [str(exc)],
             }
             adapter_out = adapter_out or {}
 
-        mission_completion = float(mission_out.get("mission_completion") or 0.0)
+        raw_completion = mission_out.get("mission_completion")
+        mission_completion = float(raw_completion) if raw_completion is not None else None
         if cycle == 1:
             initial_completion = mission_completion
         final_completion = mission_completion
@@ -938,15 +1004,42 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
                     invocation_log=algorithm_invocations,
                 )
             except AlgorithmLibraryError as exc:
-                damage_prob = float(target.get("damage_probability") or target.get("threat_score") or 0.5)
+                damage_prob = None
                 used_mode = "features"
-                damage_out = {}
+                damage_out = {"assessment_status": "service_error", "error": str(exc)}
                 damage_warnings = [f"xbd_damage_assessor:error:{sample_id}:{exc}"]
             warnings.extend(damage_warnings)
             damage_mode_counts[used_mode] = damage_mode_counts.get(used_mode, 0) + 1
-            probs.append(damage_prob)
+            if damage_prob is not None:
+                probs.append(damage_prob)
 
-            threat_score = float(target.get("threat_score") or 0.5)
+            threat_score = float(target["threat_score"]) if target.get("threat_score") is not None else None
+            if damage_prob is None or threat_score is None or mission_completion is None:
+                missing_fields = []
+                if damage_prob is None:
+                    missing_fields.append("damage_probability")
+                if threat_score is None:
+                    missing_fields.append("threat_score")
+                if mission_completion is None:
+                    missing_fields.append("mission_completion")
+                assessments.append(
+                    {
+                        "target_id": target.get("target_id") or sample_id,
+                        "damage_probability": None if damage_prob is None else round(damage_prob, 4),
+                        "damage_confirmed": None,
+                        "damage_input_mode": used_mode,
+                        "assessment_status": "insufficient_data",
+                        "missing_fields": missing_fields,
+                        "damage_assessment": {
+                            "assessment_status": damage_out.get("assessment_status"),
+                            "damage_label": damage_out.get("damage_label"),
+                            "damage_result": damage_out.get("damage_result"),
+                        }
+                        if damage_out
+                        else {},
+                    }
+                )
+                continue
             situation = _situation_label(threat_score, damage_prob)
             try:
                 advice_inputs = {
@@ -979,12 +1072,27 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
                         invocation_log=algorithm_invocations,
                     )
             except AlgorithmLibraryError as exc:
-                advice = {"action": "continue_tracking", "effect_delta": 0.04}
+                advice = {"assessment_status": "service_error", "error": str(exc)}
                 warnings.append(f"closed_loop_decision_advisor:error:{sample_id}:{exc}")
 
-            action = str(advice.get("action") or advice.get("recommended_action") or "continue_tracking")
+            action = str(advice.get("action") or advice.get("recommended_action") or "")
+            if not action:
+                assessments.append(
+                    {
+                        "target_id": target.get("target_id") or sample_id,
+                        "damage_probability": round(damage_prob, 4),
+                        "damage_confirmed": bool(damage_out.get("damage_label") == 1) if damage_out else None,
+                        "damage_input_mode": used_mode,
+                        "assessment_status": "insufficient_data",
+                        "missing_fields": ["closed_loop_decision_advisor.action"],
+                        "damage_assessment": damage_out,
+                        "advice": advice,
+                    }
+                )
+                continue
             effect_delta = float(advice.get("effect_delta") or 0.0)
-            priority = max(0.0, min(1.0, threat_score * (1.0 - damage_prob) + float(target.get("uncertainty") or 0.0)))
+            uncertainty = float(target["uncertainty"]) if target.get("uncertainty") is not None else 0.0
+            priority = max(0.0, min(1.0, threat_score * (1.0 - damage_prob) + uncertainty))
             damage_confirmed = bool(damage_out.get("damage_label") == 1) if damage_out else damage_prob >= 0.5
 
             commands.append(
@@ -1007,7 +1115,7 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
                     "damage_input_mode": used_mode,
                     "situation_cluster": situation,
                     "threat_score": round(threat_score, 4),
-                    "uncertainty": round(float(target.get("uncertainty") or 0.0), 4),
+                    "uncertainty": round(uncertainty, 4),
                     "action": action,
                     "effect_delta": round(effect_delta, 4),
                     "damage_assessment": {
@@ -1021,16 +1129,19 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
                 }
             )
             action_counts[action] = action_counts.get(action, 0) + 1
-            _apply_action(target, action, effect_delta)
+            try:
+                _apply_action(target, action, effect_delta)
+            except (KeyError, TypeError, ValueError) as exc:
+                warnings.append(f"closed_loop_apply_action:skipped_missing_target_state:{sample_id}:{exc}")
 
         update_latency = time.perf_counter() - cycle_start
         update_latencies.append(update_latency)
         history.append(
             {
                 "cycle": cycle,
-                "mission_completion": round(mission_completion, 4),
+                "mission_completion": round(mission_completion, 4) if mission_completion is not None else None,
                 "mission_assessment": mission_out,
-                "mean_damage_probability": round(sum(probs) / len(probs), 4) if probs else 0.0,
+                "mean_damage_probability": round(sum(probs) / len(probs), 4) if probs else None,
                 "critical_targets": sum(1 for item in assessments if item.get("situation_cluster") == "critical"),
                 "action_counts": action_counts,
                 "update_latency_seconds": round(update_latency, 6),
@@ -1041,15 +1152,23 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
 
     total_latency = time.perf_counter() - start
     max_update_latency = max(update_latencies) if update_latencies else total_latency
+    assessed_damage_probs = [
+        float(item["damage_probability"])
+        for item in final_assessments
+        if item.get("damage_probability") is not None
+    ]
     mean_damage = (
-        round(sum(float(item["damage_probability"]) for item in final_assessments) / len(final_assessments), 4)
-        if final_assessments
-        else 0.0
+        round(sum(assessed_damage_probs) / len(assessed_damage_probs), 4)
+        if assessed_damage_probs
+        else None
     )
     mission_threshold = float(mission_out.get("threshold") or 0.5)
     meets_mission_threshold = (
-        mission_out.get("mission_completion") is not None and final_completion >= mission_threshold
+        mission_out.get("mission_completion") is not None
+        and final_completion is not None
+        and final_completion >= mission_threshold
     )
+    target_requirement = max(1, int(arguments.get("target_count") or len(targets) or 1))
     requirement_report = {
         "assessment_mode": "algolib_service_orchestration",
         "xbd_damage_accuracy_requirement": 0.92,
@@ -1059,13 +1178,13 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
         "situation_update_frequency_requirement_seconds": 1.0,
         "situation_update_latency_actual_seconds": round(max_update_latency, 6),
         "meets_situation_update_frequency": bool(max_update_latency <= 1.0),
-        "target_count_requirement": 50,
+        "target_count_requirement": target_requirement,
         "target_count_actual": len(targets),
-        "meets_target_count": bool(len(targets) >= 50),
+        "meets_target_count": bool(len(targets) >= target_requirement),
         "sc2le_proxy_model_loaded": bool(mission_out.get("mission_completion") is not None),
         "meets_mission_completion_threshold": meets_mission_threshold,
         "mission_completion_threshold": mission_threshold,
-        "mission_completion_final": round(final_completion, 4),
+        "mission_completion_final": round(final_completion, 4) if final_completion is not None else None,
         "feature_version": str(mission_out.get("feature_version") or adapter_out.get("feature_version") or "mission_features_v2"),
     }
     # Operational model gates that algolib can honestly claim (exclude offline xBD accuracy).
@@ -1100,6 +1219,7 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
             "mission_evaluation": "mission_feature_adapter + mission_completion_scorer",
             "closed_loop_policy": "closed_loop_decision_advisor",
             "backend": "algolib",
+            "algorithm_profile": algorithm_profile,
         },
         "source_info": source_info,
         "execution_control": {
@@ -1113,9 +1233,11 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
             "target_assessments": final_assessments,
         },
         "closed_loop_optimization": {
-            "mission_completion_initial": round(initial_completion, 4),
-            "mission_completion_final": round(final_completion, 4),
-            "mission_completion_improvement": round(final_completion - initial_completion, 4),
+            "mission_completion_initial": round(initial_completion, 4) if initial_completion is not None else None,
+            "mission_completion_final": round(final_completion, 4) if final_completion is not None else None,
+            "mission_completion_improvement": round(final_completion - initial_completion, 4)
+            if initial_completion is not None and final_completion is not None
+            else None,
             "history": history,
         },
         "performance_report": {
@@ -1133,9 +1255,11 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
         "commands": final_commands,
         "mission_assessment": mission_out,
         "feature_bundle": adapter_out,
-        "mission_completion_initial": round(initial_completion, 4),
-        "mission_completion_final": round(final_completion, 4),
-        "mission_completion_improvement": round(final_completion - initial_completion, 4),
+        "mission_completion_initial": round(initial_completion, 4) if initial_completion is not None else None,
+        "mission_completion_final": round(final_completion, 4) if final_completion is not None else None,
+        "mission_completion_improvement": round(final_completion - initial_completion, 4)
+        if initial_completion is not None and final_completion is not None
+        else None,
         "mean_damage_probability": mean_damage,
         "backend": "algolib",
         "damage_input_mode_preferred": damage_mode_pref,
@@ -1154,12 +1278,13 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
         "warning_counts": warning_counts,
         "latency_ms": round(total_latency * 1000.0, 3),
         "transport": settings.transport,
+        "algorithm_profile": algorithm_profile,
     }
     return {
         "task_type": "closed_loop_optimization",
         "input_data": arguments,
         "output_data": output_data,
-        "accuracy": mean_damage,
+        "accuracy": float(mean_damage or 0.0),
         "latency": total_latency,
     }
 

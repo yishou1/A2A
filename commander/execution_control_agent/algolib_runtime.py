@@ -3,15 +3,29 @@ from __future__ import annotations
 
 import time
 import uuid
+import os
 from copy import deepcopy
 from typing import Any
 
 from algolib_bridge import AlgorithmLibraryClient, AlgorithmLibraryError, AlgolibSettings
-from execution_control_agent.execution_control_core import extract_upstream_results, run_execution_control
+from services.a2a_algorithms_common.execution_planner import (
+    extract_upstream_results,
+    run_planner as run_execution_control,
+)
 
 ALGORITHM_ID = "execution_control_planner"
 AGENT_BACKEND_ENV = "EXECUTION_CONTROL_BACKEND"
 REQUIRED_COMMAND_FIELDS = ("executor_role", "action")
+
+
+def execution_control_profile(arguments: dict | None = None) -> str:
+    arguments = arguments or {}
+    return str(
+        arguments.get("algorithm_profile")
+        or arguments.get("profile")
+        or os.environ.get("EXECUTION_CONTROL_ALGORITHM_PROFILE")
+        or "medium"
+    ).strip().lower()
 
 
 def use_execution_control_algolib() -> bool:
@@ -121,6 +135,8 @@ def _wrap_planner_outputs(
         "prediction_details": list(outputs.get("prediction_details") or []),
         "backend": "algolib",
         "algorithm_id": ALGORITHM_ID,
+        "algorithm_profile": outputs.get("algorithm_profile") or execution_control_profile(arguments),
+        "profile_config": outputs.get("profile_config") or {},
         "selected_algorithms": [ALGORITHM_ID],
         "algorithm_calls": [
             {
@@ -170,11 +186,14 @@ def run_execution_control_via_algolib(arguments: dict) -> dict:
         "results": results,
         "context": context,
     }
+    profile = execution_control_profile(arguments)
+    params = {"profile": profile}
     if settings.enable_llm:
         outputs, llm_plan = client.run_outputs_with_planning(
             default_algorithm_id=ALGORITHM_ID,
             allowed_algorithm_ids=[ALGORITHM_ID],
             inputs=inputs,
+            params=params,
             request_id=request_id,
             trace_id=request_id,
             task="execution_control",
@@ -185,6 +204,7 @@ def run_execution_control_via_algolib(arguments: dict) -> dict:
         outputs = client.run_outputs(
             algorithm_id=ALGORITHM_ID,
             inputs=inputs,
+            params=params,
             request_id=request_id,
             trace_id=request_id,
         )
@@ -218,7 +238,8 @@ def run_execution_control_with_backend(arguments: dict) -> dict:
     """Run EC via algolib when enabled; on failure optionally fall back to local."""
     settings = AlgolibSettings.load(agent_backend_env=AGENT_BACKEND_ENV)
     if settings.backend != "algolib":
-        result = run_execution_control(arguments)
+        local_arguments = {**arguments, "profile": execution_control_profile(arguments)}
+        result = run_execution_control(local_arguments)
         if isinstance(result.get("output_data"), dict):
             result["output_data"].setdefault("backend", "local")
         return result
@@ -228,7 +249,8 @@ def run_execution_control_with_backend(arguments: dict) -> dict:
     except AlgorithmLibraryError as exc:
         if not settings.fallback_local:
             raise
-        result = run_execution_control(arguments)
+        local_arguments = {**arguments, "profile": execution_control_profile(arguments)}
+        result = run_execution_control(local_arguments)
         output_data = result.setdefault("output_data", {})
         if isinstance(output_data, dict):
             warnings = list(output_data.get("warnings") or [])

@@ -2,22 +2,26 @@
   "model_id": "execution_rule_matcher",
   "model_version": "1.0.0",
   "model_family": "apriori_association_rule_miner",
+  "library": {
+    "name": "mlxtend",
+    "version": "0.23.4"
+  },
   "artifact_path": "data/execution_control/processed/mined_rules.json",
-  "artifact_sha256": "78bca1082997f08f24b8787fc7a1f7d0a0868368307579a941b697905921731c",
+  "artifact_sha256": "848e226d1cb8d232f859151f564453f0d40548675d8143b17f6bc4ab1c56353a",
   "rule_count": 28,
   "implementation_path": "services/a2a_algorithms_common/association_rules.py",
-  "implementation_sha256": "95771981274bbfdaa27bbf3f79b780f9a9d309e95855d385c55c48ac2e9132d9",
+  "implementation_sha256": "e7ff1742f979a7c60bfeb18bfb3ef039378a09e5fd8a2b7f57bf898ecfc81a9b",
   "training_script": "scripts/train_execution_rule_matcher.py",
-  "training_script_sha256": "41b92b5e301fc20acd132c4a9db12631f58ac558739f59bbfacf1e4837552dc6",
+  "training_script_sha256": "f595fab1b65a573212b58f75ffd1ee804043e4903e79d880c9b56831b23c0373",
   "training_dataset": {
     "path": "data/execution_control/fixtures/rule_training_records.json",
-    "sha256": "f628f0045ad47095312a752c79cc01665e047adf02d1e4e452fd9a6504a81bc6",
+    "sha256": "c94e6a70ebb86490815adcee9f095ae4d019e00820c1523ce224d0a6f53b131d",
     "row_count": 12,
     "source": "repository_reference_policy_fixtures"
   },
   "evaluation_dataset": {
     "path": "data/execution_control/fixtures/rule_evaluation_records.json",
-    "sha256": "e34ebfa230f5ad59d4aa4bec6599c05c2b5fe9ce3ab6338361a75aa6110b32f5",
+    "sha256": "d6d73182bba19c448b1a7ec4a35f2b63b2788d65914913b5a7896faa21123bcc",
     "row_count": 12,
     "source": "independent_repository_reference_policy_holdout",
     "limitation": "Synthetic policy scenarios only; not an operational battlefield benchmark."
@@ -122,6 +126,9 @@
   },
   "runtime": {
     "language": "python",
-    "external_ml_dependencies": []
+    "external_ml_dependencies": [
+      "pandas",
+      "mlxtend"
+    ]
   }
 }

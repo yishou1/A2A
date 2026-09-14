@@ -6,9 +6,10 @@ import json
 import pickle
 import random
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from closed_loop_agent.closed_loop_core import RandomForestRegressor
+import sklearn
+from sklearn.ensemble import RandomForestRegressor
 from closed_loop_agent.mission_feature_adapter import (
     build_features_from_sc2le_proxy,
     bundle_to_vector,
@@ -184,7 +185,15 @@ def train_sc2le_proxy_model(
     if len(train_x) < 10:
         raise ValueError("Not enough training samples after replay_id grouping")
 
-    model = RandomForestRegressor(seed=seed).fit(train_x, train_y)
+    model = RandomForestRegressor(
+        n_estimators=192,
+        max_depth=10,
+        min_samples_leaf=12,
+        max_features="sqrt",
+        bootstrap=True,
+        n_jobs=-1,
+        random_state=seed,
+    ).fit(train_x, train_y)
     test_pred = model.predict(test_x)
     regression = _regression_metrics(test_y, test_pred)
     classification = _classification_metrics(test_y, test_pred, threshold=MISSION_COMPLETION_THRESHOLD)
@@ -199,6 +208,9 @@ def train_sc2le_proxy_model(
 
     metadata = {
         "model_source": "sc2le_proxy",
+        "model_family": "sklearn.ensemble.RandomForestRegressor",
+        "library": {"name": "scikit-learn", "version": sklearn.__version__},
+        "profile_tree_budgets": {"low": 32, "medium": 96, "high": 192},
         "feature_version": FEATURE_VERSION,
         "feature_order": list(FEATURE_ORDER),
         "normalization": {"clip_min": 0.0, "clip_max": 1.0},
@@ -238,7 +250,7 @@ def train_sc2le_proxy_model(
     return metadata
 
 
-def load_mission_model(model_path: str | Path | None = None) -> RandomForestRegressor:
+def load_mission_model(model_path: str | Path | None = None) -> Any:
     path = _default_model_path(model_path)
     if not path.exists():
         raise FileNotFoundError(f"Mission model not found: {path}")
@@ -275,7 +287,10 @@ def predict_mission_assessment(
     model = load_mission_model(model_path)
     normalized = normalize_feature_bundle(feature_bundle, metadata=metadata)
     vector = bundle_to_vector(normalized)
-    completion = float(model.predict_one(vector))
+    if hasattr(model, "predict_one"):
+        completion = float(model.predict_one(vector))
+    else:
+        completion = float(model.predict([vector])[0])
     threshold = float(metadata.get("threshold") or MISSION_COMPLETION_THRESHOLD)
     return {
         "mission_completion": round(completion, 4),

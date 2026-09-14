@@ -4,9 +4,12 @@ from __future__ import annotations
 import json
 import hashlib
 from collections import Counter
-from itertools import combinations
 from pathlib import Path
 from typing import Dict, List, Sequence, Set, Tuple
+
+import pandas as pd
+from mlxtend.frequent_patterns import apriori
+from mlxtend.preprocessing import TransactionEncoder
 
 
 DEFAULT_RULES_RELATIVE_PATH = Path("data/execution_control/processed/mined_rules.json")
@@ -53,38 +56,27 @@ def mine_association_rules(
     min_confidence: float = 0.6,
     max_itemset_size: int = 4,
 ) -> List[dict]:
-    """Mine association rules from historical task records using Apriori-style pruning."""
+    """Mine domain rules using mlxtend's maintained Apriori implementation."""
     rows = _transactions(records)
     transactions = [items for items, _ in rows]
-    item_counts: Counter[str] = Counter()
-    for txn in transactions:
-        item_counts.update(txn)
-
-    frequent: Dict[int, Set[frozenset]] = {1: set()}
-    total = max(1, len(transactions))
-    for item, count in item_counts.items():
-        if count / total >= min_support:
-            frequent[1].add(frozenset([item]))
-
-    for size in range(2, max_itemset_size + 1):
-        prev = sorted(frequent.get(size - 1, set()), key=lambda s: tuple(sorted(s)))
-        candidates: Set[frozenset] = set()
-        for left, right in combinations(prev, 2):
-            union = left | right
-            if len(union) != size:
-                continue
-            if all(union - frozenset([item]) in frequent[size - 1] for item in union):
-                candidates.add(union)
-        level: Set[frozenset] = set()
-        for candidate in candidates:
-            if _support(candidate, transactions) >= min_support:
-                level.add(candidate)
-        if level:
-            frequent[size] = level
-
-    all_itemsets: List[frozenset] = []
-    for level in frequent.values():
-        all_itemsets.extend(sorted(level, key=lambda s: (-len(s), tuple(sorted(s)))))
+    if not transactions:
+        return []
+    encoder = TransactionEncoder()
+    encoded = encoder.fit([sorted(items) for items in transactions]).transform(
+        [sorted(items) for items in transactions]
+    )
+    frame = pd.DataFrame(encoded, columns=encoder.columns_)
+    frequent_frame = apriori(
+        frame,
+        min_support=float(min_support),
+        use_colnames=True,
+        max_len=int(max_itemset_size),
+        low_memory=False,
+    )
+    all_itemsets = sorted(
+        (frozenset(str(item) for item in itemset) for itemset in frequent_frame["itemsets"]),
+        key=lambda itemset: (len(itemset), tuple(sorted(itemset))),
+    )
 
     rules: List[dict] = []
     seen: Set[Tuple[frozenset, str, str]] = set()

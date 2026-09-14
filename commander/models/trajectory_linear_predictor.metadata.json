@@ -1,7 +1,7 @@
 {
   "model_id": "trajectory_linear_predictor",
   "model_version": "1.0.0",
-  "model_family": "per_request_ordinary_least_squares_2d",
+  "model_family": "filterpy_constant_velocity_kalman_with_sklearn_initialization",
   "training_required": false,
   "fitted_parameters_per_request": [
     "x_slope",
@@ -10,12 +10,12 @@
     "y_intercept"
   ],
   "implementation_path": "services/a2a_algorithms_common/motion_prediction.py",
-  "implementation_sha256": "a26a756eeb3f5abe2718ccdcd3ab166c3ac6e31191fcec82f44cbbf7be2b0d33",
+  "implementation_sha256": "185947a9492ac59167c50192dc459531708c5954509865e4fa1f4c5304e6ac25",
   "evaluation_script": "scripts/evaluate_trajectory_linear_predictor.py",
-  "evaluation_script_sha256": "ac7e3e594be074cf6d453b4eb61d6803eeb232984e19ed9aa5a10bf144d61fad",
+  "evaluation_script_sha256": "811c5f6d48f0f7d62d49c82ededed2897493f5907747d4c5d9d02ce670bd7745",
   "evaluation_dataset": {
     "path": "data/trajectory_linear/reference_evaluation_data.json",
-    "sha256": "0e77722d5a0858a47ed5a675818f49b80bc9f6d3362e180dfcc0180bc63f9f48",
+    "sha256": "b3c7270d6eb0d71f42e467e7bb2af5699a413932901f7d91921f1bf43a1a1ded",
     "source": "deterministic_synthetic_motion_generator",
     "seed": 20260816,
     "row_count": 160,
@@ -26,19 +26,28 @@
   "evaluation": {
     "method": "deterministic_synthetic_trajectory_holdout",
     "test_count": 160,
-    "position_mae": 0.519819,
-    "position_rmse": 0.964136,
-    "position_p95": 2.170402,
-    "x_mae": 0.338247,
-    "y_mae": 0.339271,
-    "velocity_vector_mae": 0.143697,
+    "position_mae": 0.501741,
+    "position_rmse": 0.909958,
+    "position_p95": 2.168741,
+    "x_mae": 0.325446,
+    "y_mae": 0.329245,
+    "velocity_vector_mae": 0.137502,
     "position_mae_by_motion_type": {
-      "constant_velocity": 0.169626,
-      "mild_acceleration": 1.570399
+      "constant_velocity": 0.171931,
+      "mild_acceleration": 1.49117
     }
+  },
+  "profiles": {
+    "low": "scikit-learn LinearRegression",
+    "medium": "FilterPy constant-velocity Kalman filter",
+    "high": "FilterPy Kalman filter with lower process and measurement noise"
   },
   "runtime": {
     "language": "python",
-    "external_ml_dependencies": []
+    "external_ml_dependencies": [
+      "numpy",
+      "scikit-learn",
+      "filterpy"
+    ]
   }
 }
