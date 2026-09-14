@@ -3,7 +3,10 @@ uvicorn
 numpy
 onnxruntime
 pillow
-scikit-learn
+scikit-learn>=1.4,<1.8
+filterpy>=1.4.5,<2.0
+mlxtend>=0.23.4,<0.25
+pandas>=2.2,<3.0
 joblib
 torch
 torchvision

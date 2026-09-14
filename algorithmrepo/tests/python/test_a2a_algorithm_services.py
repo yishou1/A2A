@@ -127,7 +127,7 @@ def test_mission_completion_scorer_outputs():
         },
         {},
     )
-    assert outputs["model_source"] == "sc2le_proxy"
+    assert outputs["model_source"] == "sc2le_proxy_sklearn_random_forest"
     assert outputs["feature_version"] == "mission_features_v2"
     assert outputs["mission_result"] in {"success", "failure"}
     assert outputs["assessment_status"] == "proxy_model_estimate"

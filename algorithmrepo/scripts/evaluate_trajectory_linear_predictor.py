@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate and evaluate the reproducible M03 linear-trajectory reference set."""
+"""Generate and evaluate the reproducible M03 Kalman trajectory reference set."""
 from __future__ import annotations
 
 import argparse
@@ -92,7 +92,7 @@ def evaluate(records: list[dict]) -> dict:
     velocity_errors: list[float] = []
     by_motion: dict[str, list[float]] = {}
     for record in records:
-        result = predict_single_track(record["track"])
+        result = predict_single_track(record["track"], profile="medium")
         if not result.get("ok"):
             raise ValueError(f"prediction failed for {record['case_id']}: {result}")
         expected = record["expected"]
@@ -140,7 +140,7 @@ def build(dataset_path: Path, metadata_path: Path, count: int) -> dict:
     metadata = {
         "model_id": "trajectory_linear_predictor",
         "model_version": "1.0.0",
-        "model_family": "per_request_ordinary_least_squares_2d",
+        "model_family": "filterpy_constant_velocity_kalman_with_sklearn_initialization",
         "training_required": False,
         "fitted_parameters_per_request": ["x_slope", "x_intercept", "y_slope", "y_intercept"],
         "implementation_path": str(implementation_path.relative_to(ROOT)).replace("\\", "/"),
@@ -158,7 +158,12 @@ def build(dataset_path: Path, metadata_path: Path, count: int) -> dict:
             "limitation": "Synthetic kinematics only; not an operational sensor-track benchmark.",
         },
         "evaluation": evaluation,
-        "runtime": {"language": "python", "external_ml_dependencies": []},
+        "profiles": {
+            "low": "scikit-learn LinearRegression",
+            "medium": "FilterPy constant-velocity Kalman filter",
+            "high": "FilterPy Kalman filter with lower process and measurement noise",
+        },
+        "runtime": {"language": "python", "external_ml_dependencies": ["numpy", "scikit-learn", "filterpy"]},
     }
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
     metadata_path.write_text(

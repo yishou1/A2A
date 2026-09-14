@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Tuple
 
+from .algorithm_profiles import normalize_algorithm_profile, profile_config
+
 
 _ACTION_RECOMMENDATIONS = {
     "confirm_effect_and_shift": "Damage probability is high; confirm effect and shift focus to remaining threats.",
@@ -32,8 +34,10 @@ def advise(
     damage_prob: float,
     situation: str,
     mission_completion: float,
+    profile: str = "medium",
 ) -> dict:
     """Recommend a closed-loop action for a single target."""
+    profile = normalize_algorithm_profile(profile)
     action, effect_delta = _choose_action(target, damage_prob, situation, mission_completion)
     return {
         "action": action,
@@ -43,4 +47,6 @@ def advise(
         "situation": situation,
         "damage_probability": round(float(damage_prob), 4),
         "mission_completion": round(float(mission_completion), 4),
+        "algorithm_profile": profile,
+        "profile_config": profile_config("closed_loop_advisor", profile),
     }

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .algorithm_profiles import resolve_algorithm_profile
 from .association_rules import (
     choose_primary_rule,
     discretize_situation,
@@ -86,7 +87,8 @@ def predict_conditional_tabular_gan(inputs: dict, params: dict) -> dict:
 
 def predict_trajectory_linear_predictor(inputs: dict, params: dict) -> dict:
     track = dict(inputs.get("track") or {})
-    result = predict_single_track(track)
+    profile = resolve_algorithm_profile(params, inputs)
+    result = predict_single_track(track, profile=profile)
     if not result.get("ok"):
         raise ValueError(result.get("error", {}).get("message", "prediction failed"))
     return {
@@ -99,30 +101,38 @@ def predict_trajectory_linear_predictor(inputs: dict, params: dict) -> dict:
         "history_points": result["history_points"],
         "model_identity": motion_predictor_identity(),
         "track_id": result.get("track_id"),
+        "algorithm_profile": result.get("algorithm_profile", profile),
     }
 
 
 def predict_execution_control_planner(inputs: dict, params: dict) -> dict:
+    profile = resolve_algorithm_profile(params, inputs)
     payload = run_planner(
         {
             "phase": inputs.get("phase") or "strike",
             "results": inputs.get("results") or {},
             "context": inputs.get("context") or {},
+            "profile": profile,
         }
     )
     output = payload["output_data"]
     return {
-        "phase": output["phase"],
-        "commands": output["commands"],
-        "tracks": output["tracks"],
-        "coordination": output["coordination"],
-        "matched_rules": output["matched_rules"],
-        "prediction_details": output["prediction_details"],
-        "latency_ms": output["latency_ms"],
+        "phase": output.get("phase"),
+        "assessment_status": output.get("assessment_status", "ready"),
+        "missing_fields": output.get("missing_fields", []),
+        "commands": output.get("commands", []),
+        "tracks": output.get("tracks", []),
+        "coordination": output.get("coordination", {"groups": []}),
+        "matched_rules": output.get("matched_rules", []),
+        "prediction_details": output.get("prediction_details", []),
+        "latency_ms": output.get("latency_ms"),
+        "algorithm_profile": output.get("algorithm_profile", profile),
+        "profile_config": output.get("profile_config") or {},
     }
 
 
 def predict_mission_feature_adapter(inputs: dict, params: dict) -> dict:
+    profile = resolve_algorithm_profile(params, inputs)
     source_type = str(inputs.get("source_type") or "")
     mode = str(inputs.get("mode") or params.get("mode") or "strict")
     if source_type == "sc2le_proxy":
@@ -145,10 +155,12 @@ def predict_mission_feature_adapter(inputs: dict, params: dict) -> dict:
         "warnings": bundle.get("warnings") or [],
         "assessment_status": bundle.get("assessment_status", "ready"),
         "missing_fields": bundle.get("missing_fields") or [],
+        "algorithm_profile": profile,
     }
 
 
 def predict_mission_completion_scorer(inputs: dict, params: dict) -> dict:
+    profile = resolve_algorithm_profile(params, inputs)
     features = dict(inputs.get("features") or {})
     if not features:
         raise ValueError("features is required")
@@ -158,10 +170,16 @@ def predict_mission_completion_scorer(inputs: dict, params: dict) -> dict:
         "warnings": [],
         "assessment_status": "ready",
     }
-    return score_mission(bundle)
+    return score_mission(
+        bundle,
+        profile=profile,
+        model_path=params.get("model_path"),
+        metadata_path=params.get("metadata_path"),
+    )
 
 
 def predict_closed_loop_decision_advisor(inputs: dict, params: dict) -> dict:
+    profile = resolve_algorithm_profile(params, inputs)
     target = dict(inputs.get("target") or {})
     if not target:
         raise ValueError("target is required")
@@ -170,6 +188,7 @@ def predict_closed_loop_decision_advisor(inputs: dict, params: dict) -> dict:
         float(inputs.get("damage_probability", 0.0)),
         str(inputs.get("situation") or "watch"),
         float(inputs.get("mission_completion", 0.0)),
+        profile=profile,
     )
 
 
