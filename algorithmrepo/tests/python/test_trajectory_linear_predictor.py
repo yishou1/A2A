@@ -79,9 +79,9 @@ def test_reference_evaluation_and_source_identity_are_verified() -> None:
     ]
     evaluation = metadata["evaluation"]
     assert evaluation["test_count"] == 160
-    assert evaluation["position_mae"] == 0.519819
-    assert evaluation["position_rmse"] == 0.964136
-    assert evaluation["position_p95"] == 2.170402
+    assert evaluation["position_mae"] == 0.501741
+    assert evaluation["position_rmse"] == 0.909958
+    assert evaluation["position_p95"] == 2.168741
 
 
 def test_service_predictor_returns_fit_and_model_identity() -> None:
@@ -105,5 +105,6 @@ def test_service_predictor_returns_fit_and_model_identity() -> None:
     assert outputs["fit"]["x"]["slope"] == 4.5
     assert outputs["fit"]["y"]["slope"] == 5.5
     assert outputs["model_identity"]["model_family"] == (
-        "per_request_ordinary_least_squares_2d"
+        "filterpy_constant_velocity_kalman_with_sklearn_initialization"
     )
+    assert outputs["model"] == "filterpy_constant_velocity_kalman"
