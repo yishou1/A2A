@@ -471,7 +471,7 @@ def test_authorization_wait_starts_only_at_reached_operator_checkpoint_and_is_wa
     assert director._authorization_stage() == "fire"
 
 
-def test_carrier_wave_two_checkpoint_waits_for_real_bda_and_close_needs_no_fire() -> None:
+def test_carrier_wave_two_waits_for_real_bda_and_close_requires_both_target_hits() -> None:
     runtime = PlatformRuntime()
     director = DirectorService(runtime)
     director.configure(
@@ -498,6 +498,13 @@ def test_carrier_wave_two_checkpoint_waits_for_real_bda_and_close_needs_no_fire(
 
     engine.events.append({"type": "damage_assessment_confirmed", "sim_time": 4380})
     assert director._checkpoint_satisfied(wave_two) is True
+    engine.clock["elapsed_sec"] = 5850
+    engine.media_capture._captures["ASC-MEDIA-09"] = {}
+    assert director._checkpoint_satisfied(close) is False
+    engine.events.append({"type": "weapon_hit", "target_threat_id": "COASTAL-AIRFIELD-01"})
+    assert director._checkpoint_satisfied(close) is False
+    engine.events.append({"type": "weapon_hit", "target_threat_id": "MOBILE-COASTAL-AD-01"})
+    assert director._checkpoint_satisfied(close) is True
     director._state["current_checkpoint"] = {
         "checkpoint_id": close["checkpoint_id"],
         "reached_at_sec": 5850,
@@ -534,6 +541,70 @@ def test_operator_checkpoint_keeps_fire_gate_after_story_phase_boundary() -> Non
         "sim_time": 4501,
     })
     assert director._authorization_stage() is None
+
+
+def test_maritime_engage_checkpoint_preserves_warning_and_fire_across_assess_boundary() -> None:
+    runtime = PlatformRuntime()
+    director = DirectorService(runtime)
+    director.configure(
+        scenario_id="maritime-convoy-air-defense",
+        mode="demonstration",
+        branch="standard",
+        seed=33031,
+    )
+    engine = runtime.get_engine()
+    engine._tick(5500)
+    hostile = next(
+        track for track in engine.sensor_fusion.tracks.values()
+        if engine._truth_target_for_track(track) == "CONTACT-HOSTILE-01"
+    )
+    hostile.classification = "FAST_ATTACK_CRAFT"
+    hostile.threat_level = "HIGH"
+    hostile.kill_chain_phase = "ASSESS"
+    hostile.agent_assessment = {
+        "status": "confirmed", "label": "高风险", "source": "test",
+    }
+    director._state["current_checkpoint"] = {
+        "checkpoint_id": "MAR-CP-ENGAGE",
+        "reached_at_sec": 4590,
+        "requires_operator_action": True,
+        "operator_action_type": "fire",
+    }
+
+    assert director._authorization_stage() == "warning"
+    public_track = next(
+        item for item in engine.get_operator_state()["fused_tracks"]
+        if item["id"] == hostile.id
+    )
+    assert public_track["engagement_eligible"] is True
+
+    warning = engine.issue_warning_at_track(hostile.id, authorized=True)
+    assert warning["status"] == "issued"
+    assert director._authorization_stage() == "warning_wait"
+    engine._tick(float(warning["delay_sec"]))
+    hostile.kill_chain_phase = "ASSESS"
+    assert director._authorization_stage() == "fire"
+    public_track = next(
+        item for item in engine.get_operator_state()["fused_tracks"]
+        if item["id"] == hostile.id
+    )
+    assert public_track["engagement_eligible"] is True
+
+
+def test_maritime_close_checkpoint_is_review_only_and_requires_real_effects() -> None:
+    scenario = get_scenario("maritime-convoy-air-defense")
+    assert scenario is not None
+    checkpoints = {
+        item["checkpoint_id"]: item for item in scenario["demo_checkpoints"]
+    }
+    assert checkpoints["MAR-CP-ENGAGE"]["operator_action_type"] == "fire"
+    assert checkpoints["MAR-CP-ENGAGE"]["conditions"] == {
+        "media_ids_released": ["MAR-MEDIA-06"],
+    }
+    assert checkpoints["MAR-CP-CLOSE"]["operator_action_type"] == "review"
+    assert checkpoints["MAR-CP-CLOSE"]["conditions"]["event_types_emitted"] == [
+        "weapon_hit", "damage_assessment_confirmed",
+    ]
 
 
 def test_checkpoint_callback_is_the_only_source_of_submitted_status() -> None:
@@ -645,7 +716,9 @@ def test_final_analysis_completion_does_not_restart_completed_clock() -> None:
         branch="standard",
         seed=33031,
     )
-    director._checkpoint_index = 3
+    scenario = get_scenario("maritime-convoy-air-defense")
+    assert scenario is not None
+    director._checkpoint_index = len(scenario["demo_checkpoints"]) - 1
     director._state["current_checkpoint"] = {
         "checkpoint_id": "MAR-CP-CLOSE",
         "analysis_status": "running",

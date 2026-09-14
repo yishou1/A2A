@@ -454,7 +454,9 @@ window.PlatformMap = (function () {
   }
 
   function ownLabel(asset) {
-    var role = asset.role || asset.type || asset.id || "己方平台";
+    var assetId = String(asset.asset_id || asset.id || "");
+    var aliases = scenarioView && scenarioView.assetLabelAliases || {};
+    var role = aliases[assetId] || asset.role || asset.type || assetId || "己方平台";
     var memberCount = Number(asset.swarm_size || asset.member_count || 0);
     var formation = memberCount > 1 ? " · " + memberCount + (asset.domain === "maritime" ? "舰" : "机") : "";
     var status = String(asset.status || "").toLowerCase();
@@ -588,6 +590,14 @@ window.PlatformMap = (function () {
       [horizontal, 0], [-horizontal, 0], [0, vertical], [0, -vertical],
       [horizontal, vertical], [-horizontal, -vertical], [horizontal, -vertical], [-horizontal, vertical],
     ];
+    [1.65, 2.3].forEach(function (scale) {
+      generic = generic.concat([
+        [horizontal * scale, 0], [-horizontal * scale, 0],
+        [0, vertical * scale], [0, -vertical * scale],
+        [horizontal * scale, vertical * scale], [-horizontal * scale, -vertical * scale],
+        [horizontal * scale, -vertical * scale], [-horizontal * scale, vertical * scale],
+      ]);
+    });
     if (kind === "escort") {
       return [[horizontal, 0], [horizontal, -vertical], [horizontal, vertical]].concat(generic);
     }
@@ -647,6 +657,14 @@ window.PlatformMap = (function () {
       return {left: point.x - radius, top: point.y - radius, right: point.x + radius, bottom: point.y + radius};
     });
     var occupied = [];
+    var mapRect = map.getContainer().getBoundingClientRect();
+    map.getContainer().querySelectorAll(".map-resource-label:not(.own-label)").forEach(function (element) {
+      var rect = element.getBoundingClientRect();
+      occupied.push({
+        left: rect.left - mapRect.left, top: rect.top - mapRect.top,
+        right: rect.right - mapRect.left, bottom: rect.bottom - mapRect.top,
+      });
+    });
     markers.sort(function (first, second) {
       var priority = {escort: 0, shoreRadar: 1, aew: 2, uav: 3, merchant: 4};
       var firstPriority = priority[first._amosIconKind] == null ? 5 : priority[first._amosIconKind];
@@ -1151,6 +1169,7 @@ window.PlatformMap = (function () {
       excludeDomains: excludedDomains.slice(),
       fixedBounds: Boolean(configuredFocus),
       labelAssetIds: Array.isArray(mapDisplay.label_asset_ids) ? mapDisplay.label_asset_ids.slice() : null,
+      assetLabelAliases: mapDisplay.asset_label_aliases || {},
       trailAssetIds: Array.isArray(mapDisplay.trail_asset_ids) ? mapDisplay.trail_asset_ids.slice() : null,
       coordinationLinkTypes: Array.isArray(mapDisplay.coordination_link_types)
         ? mapDisplay.coordination_link_types.map(function (value) { return String(value); }) : null,
@@ -1176,6 +1195,8 @@ window.PlatformMap = (function () {
       // pre-run coordinates are not a live position and must not flash on map.
       if (String(asset.domain || "") === "space") return;
       var id = asset.asset_id || asset.id;
+      var visibility = (scenario.asset_visibility_windows || {})[id] || {};
+      if (Number(visibility.visible_from_sec || 0) > 0) return;
       var pos = position(asset);
       var assetIconSize = ownIconSize(asset);
       var marker = L.marker([pos.lat, pos.lng], {
@@ -1524,6 +1545,7 @@ window.PlatformMap = (function () {
     });
     updateDestroyedImpactMarkers(events, destroyedTrackIds);
     renderCoordinationLinks(coordinationLinks);
+    scheduleOwnLabelLayout();
   }
 
   function focusScenarioView() {

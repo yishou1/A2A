@@ -5,6 +5,7 @@ window.Platform = (function () {
   var Map = window.PlatformMap;
   var Panels = window.PlatformPanels;
   var Workflow = window.PlatformWorkflow;
+  var FunctionShowcase = window.PlatformFunctionShowcase;
   var currentScenarioId = null;
   var currentScenario = null;
   var scenarioCatalog = [];
@@ -395,6 +396,16 @@ window.Platform = (function () {
     document.title = name === "未选择场景" ? "Simulation 场景仿真平台" : name + " · Simulation";
   }
 
+  function syncFunctionShowcaseContext(runId) {
+    if (!FunctionShowcase || !FunctionShowcase.setContext) return;
+    var summary = scenarioSummary(currentScenarioId);
+    FunctionShowcase.setContext({
+      scenarioId: currentScenarioId,
+      scenarioName: currentScenario && currentScenario.name || summary.name || null,
+      runId: runId || null,
+    });
+  }
+
   function renderStoryAnalysis(analysis) {
     var status = document.getElementById("story-agent-status");
     if (!status) return;
@@ -562,6 +573,7 @@ window.Platform = (function () {
       localStorage.setItem("amos.scenario.selected", scenarioId);
       select.value = scenarioId;
       setScenarioHeader();
+      syncFunctionShowcaseContext(null);
       Map.loadScenario({
         assets: currentScenario.assets || [],
         theater: currentScenario.theater,
@@ -1139,6 +1151,7 @@ window.Platform = (function () {
     }
     document.getElementById("status-text").textContent = statusText;
     document.getElementById("mode-tag").textContent = modeText;
+    syncFunctionShowcaseContext(clock.run_id);
     Workflow.syncRun(clock.run_id);
     updateButtons();
     syncAuthorizationDialog(currentDirectorState);
@@ -1489,6 +1502,16 @@ window.Platform = (function () {
       activeWorkflowStoryContext = event.detail || null;
       if (latestStory) renderStory(latestStory, latestState);
     });
+    document.addEventListener("amos:function-showcase-locate", function (event) {
+      var activityId = event.detail && event.detail.activity_id;
+      if (!activityId) return;
+      selectWorkspace(event.detail.workspace || "execution");
+      if (Workflow.locateActivity) Workflow.locateActivity(
+        activityId,
+        event.detail.activity_tab || "algorithm",
+        event.detail.workflow_id || null
+      );
+    });
   }
 
   function showControlError(error) {
@@ -1498,6 +1521,7 @@ window.Platform = (function () {
   async function init() {
     var query = new URLSearchParams(window.location.search);
     Map.init();
+    if (FunctionShowcase && FunctionShowcase.init) FunctionShowcase.init();
     updateMapStyleButton(Map.getMapLabelsVisible());
     Panels.updateAll({});
     initWorkspaceResize();

@@ -66,6 +66,16 @@ WEAPON_CATALOG = {
         warhead="simulation",
         guidance="multi_mode_standoff",
     ),
+    "自杀式无人机战斗部": WeaponSpec(
+        weapon_id="SIM-ONEWAY-UAV-01",
+        weapon_type="自杀式无人机战斗部",
+        category="anti-ground",
+        range_nm=60,
+        speed_kts=240,
+        p_kill=0.72,
+        warhead="simulation",
+        guidance="operator_authorized_eo_terminal",
+    ),
     "巡飞攻击载荷": WeaponSpec(
         weapon_id="SIM-LOITER-01",
         weapon_type="巡飞攻击载荷",

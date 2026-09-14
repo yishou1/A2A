@@ -66,10 +66,9 @@ test('carrier scenario resources use dedicated offline tactical symbols', () => 
   const symbols = window.TacticalSymbols;
   assert.equal(symbols.ownKind({asset_id:'CV-01', role:'航母一号', domain:'maritime'}), 'aircraftCarrier');
   assert.equal(symbols.ownKind({asset_id:'UAV-C2-01', role:'舰载指挥中继无人机一号', domain:'air'}), 'commandUav');
-  assert.equal(symbols.ownKind({asset_id:'UAV-TANKER-01', role:'舰载无人加油/通信中继机一号', domain:'air'}), 'tankerUav');
+  assert.equal(symbols.ownKind({asset_id:'UAV-ONEWAY-01', role:'舰载自杀式无人机一号', domain:'air'}), 'loiterUav');
   assert.equal(symbols.ownKind({asset_id:'AEW-01', role:'舰载有人预警指挥机一号', domain:'air'}), 'aew');
   assert.equal(symbols.ownKind({asset_id:'UAV-STRIKE-01', role:'舰载攻击无人机01', domain:'air'}), 'strikeUav');
-  assert.equal(symbols.ownKind({asset_id:'LOITER-UAV-01', role:'巡飞攻击无人机01', domain:'air'}), 'loiterUav');
   for (const kind of ['aircraftCarrier', 'commandUav', 'tankerUav', 'aew', 'strikeUav', 'loiterUav']) {
     assert.match(symbols.svg(kind, 45), /<svg/);
   }

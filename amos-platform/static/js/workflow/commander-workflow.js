@@ -320,6 +320,19 @@ window.PlatformWorkflow = (function () {
       runManifest = manifest || {};
       historyRunId = requestedRunId;
       renderTaskHistory();
+      var ids = (runManifest.workflow_ids || []).map(String);
+      var archivedViews = await Promise.all(ids.map(function (id) {
+        if (viewCache[id]) return Promise.resolve(viewCache[id]);
+        return API.getWorkflowView(id).catch(function () { return null; });
+      }));
+      if (generation !== runHistoryGeneration || requestedRunId !== simulationRunId) return null;
+      archivedViews.forEach(function (view) {
+        if (view && view.workflow_id) viewCache[String(view.workflow_id)] = view;
+      });
+      document.dispatchEvent(new CustomEvent("amos:workflow-view-history", {
+        detail: {run_id: requestedRunId, views: archivedViews.filter(Boolean)},
+      }));
+      renderTaskHistory();
       return runManifest;
     } catch (error) {
       if (generation === runHistoryGeneration) {
@@ -1231,6 +1244,35 @@ window.PlatformWorkflow = (function () {
     });
   }
 
+  function locateActivity(id, detailTab, targetWorkflowId) {
+    if (targetWorkflowId && String(targetWorkflowId) !== String(workflowId || "")) {
+      if (!viewCache[String(targetWorkflowId)]) return false;
+      selectHistoryWorkflow(String(targetWorkflowId));
+    }
+    if (!lastView || !id) return false;
+    if (targetWorkflowId && String(lastView.workflow_id || "") !== String(targetWorkflowId)) return false;
+    var rows = lastView.orchestration && lastView.orchestration.activities || [];
+    var target = rows.find(function (item) {
+      return activityKey(item) === String(id) || String(item.activity_id || "") === String(id) ||
+        String(item.work_item || "") === String(id);
+    });
+    if (!target) return false;
+    selectedActivityId = activityKey(target);
+    followCurrentActivity = false;
+    activityDetailSelection = {input: "__all__", output: "__all__"};
+    if (["input", "output", "call", "algorithm", "evidence"].indexOf(detailTab) >= 0) activityTab = detailTab;
+    var follow = document.getElementById("wf-follow-current");
+    if (follow) follow.checked = false;
+    renderActivities(lastView);
+    var selected = Array.from(document.querySelectorAll("[data-activity-id]")).find(function (button) {
+      return button.dataset.activityId === selectedActivityId;
+    });
+    if (selected && selected.scrollIntoView) selected.scrollIntoView({block: "nearest"});
+    var inspector = document.getElementById("a2a-workflow-card");
+    if (inspector && inspector.scrollIntoView) inspector.scrollIntoView({block: "start"});
+    return true;
+  }
+
   function init(api, initOptions) {
     API = api;
     options = initOptions || {};
@@ -1325,6 +1367,7 @@ window.PlatformWorkflow = (function () {
     loadView: loadView,
     checkHealth: checkHealth,
     selectTab: selectTab,
+    locateActivity: locateActivity,
     syncRun: syncRun,
     track: track,
     reset: resetWorkflowDisplay,

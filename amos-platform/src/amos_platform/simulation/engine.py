@@ -60,6 +60,22 @@ def _advance_position(lat: float, lng: float, heading_deg: float, distance_nm: f
     return round(lat + dlat, 6), round(lng + dlng, 6)
 
 
+def _assignment_participants(assignment: dict | None) -> list[dict]:
+    """Expand one target assignment into its independently audited fire nodes."""
+    if not isinstance(assignment, dict):
+        return []
+    configured = assignment.get("participants")
+    if not isinstance(configured, list) or not configured:
+        return [dict(assignment)]
+    defaults = {key: value for key, value in assignment.items() if key != "participants"}
+    return [
+        {**defaults, **dict(participant)}
+        for participant in configured
+        if isinstance(participant, dict)
+        and participant.get("asset_id") and participant.get("weapon_name")
+    ]
+
+
 class SimEngine:
     """Real-time simulation engine with background tick loop."""
 
@@ -1561,8 +1577,10 @@ class SimEngine:
             )
             has_target_assignment = isinstance(assignment, dict) and bool(assignment)
             assignment = assignment if has_target_assignment else {}
-            selected_asset_id = str(assignment.get("asset_id") or asset_ids[0])
-            selected_weapon_name = str(assignment.get("weapon_name") or weapon_names[0])
+            assignment_members = _assignment_participants(assignment)
+            primary_assignment = assignment_members[0] if assignment_members else assignment
+            selected_asset_id = str(primary_assignment.get("asset_id") or asset_ids[0])
+            selected_weapon_name = str(primary_assignment.get("weapon_name") or weapon_names[0])
             eligibility = self.engagement_eligibility(
                 track_id,
                 asset_id=selected_asset_id,
@@ -1583,17 +1601,19 @@ class SimEngine:
                 track["engagement_block_reason"] = "该航迹已完成授权打击"
             assignment_wave = int(assignment.get("wave", 0) or 0)
             if has_target_assignment:
-                wave_participants = [
-                    {
+                wave_participants = []
+                for wave_assignment in target_engagements.values():
+                    if (
+                        not isinstance(wave_assignment, dict)
+                        or assignment_wave <= 0
+                        or int(wave_assignment.get("wave", 0) or 0) != assignment_wave
+                    ):
+                        continue
+                    wave_participants.extend({
                         "asset_id": str(member.get("asset_id") or ""),
                         "weapon_name": str(member.get("weapon_name") or ""),
                         "role": str(member.get("role") or "member"),
-                    }
-                    for member in target_engagements.values()
-                    if isinstance(member, dict)
-                    and assignment_wave > 0
-                    and int(member.get("wave", 0) or 0) == assignment_wave
-                ]
+                    } for member in _assignment_participants(wave_assignment))
             else:
                 # A scenario-wide coordinated engagement has no per-target
                 # assignment. Preserve the chain on the target action so the
@@ -2150,9 +2170,11 @@ class SimEngine:
         )
         assignment = target_engagements.get(str(truth_target_id))
         if isinstance(assignment, dict):
-            if str(assignment.get("asset_id") or "") != str(asset_id) or str(
-                assignment.get("weapon_name") or ""
-            ) != str(weapon_name):
+            assigned_pairs = {
+                (str(member.get("asset_id") or ""), str(member.get("weapon_name") or ""))
+                for member in _assignment_participants(assignment)
+            }
+            if (str(asset_id), str(weapon_name)) not in assigned_pairs:
                 return {"eligible": False, "reason": "该目标必须使用已分配的专用火力单元"}
             elapsed = float(self.clock.get("elapsed_sec", 0) or 0)
             not_before = max(0.0, float(assignment.get("not_before_sec", 0) or 0))
@@ -2261,6 +2283,7 @@ class SimEngine:
             if target_assignment and target_assignment.get("authorize_wave_as_group"):
                 selected_wave = int(target_assignment.get("wave", 0) or 0)
                 wave_members = []
+                wave_target_ids = set()
                 for member_target_id, raw_member in target_engagements.items():
                     if not isinstance(raw_member, dict) or int(raw_member.get("wave", 0) or 0) != selected_wave:
                         continue
@@ -2272,10 +2295,12 @@ class SimEngine:
                         ),
                         "",
                     )
-                    member = dict(raw_member)
-                    member["_truth_target_id"] = str(member_target_id)
-                    member["_target_track_id"] = str(member_track_id)
-                    wave_members.append(member)
+                    for configured_member in _assignment_participants(raw_member):
+                        member = dict(configured_member)
+                        member["_truth_target_id"] = str(member_target_id)
+                        member["_target_track_id"] = str(member_track_id)
+                        wave_members.append(member)
+                        wave_target_ids.add(str(member_target_id))
                 wave_members.sort(
                     key=lambda item: 0 if item.get("_truth_target_id") == truth_target_id else 1
                 )
@@ -2285,7 +2310,7 @@ class SimEngine:
                     "arrival_tolerance_sec": float(target_assignment.get("arrival_tolerance_sec", 30) or 30),
                     "max_launch_stagger_sec": float(target_assignment.get("max_launch_stagger_sec", 180) or 180),
                     "participants": wave_members,
-                    "multi_target": True,
+                    "multi_target": len(wave_target_ids) > 1,
                     "wave": selected_wave,
                 }
             participants = [

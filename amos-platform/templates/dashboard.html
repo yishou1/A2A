@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
 <link rel="stylesheet" href="/static/css/platform.css?v=20260913-clear2">
 <link rel="stylesheet" href="/static/css/authorization-dialog.css?v=20260907b">
+<link rel="stylesheet" href="/static/css/function-showcase.css?v=20260914b">
 <script src="/static/vendor/leaflet/leaflet.js"></script>
 <script src="/static/vendor/protomaps/protomaps-leaflet.js"></script>
 </head>
@@ -75,6 +76,7 @@
       <button type="button" role="tab" aria-selected="false" data-workspace-tab="agents">Agent 拓扑</button>
       <button type="button" role="tab" aria-selected="false" data-workspace-tab="algorithms">算法与功能</button>
       <button type="button" role="tab" aria-selected="false" data-workspace-tab="execution">流程执行</button>
+      <button type="button" role="tab" aria-selected="false" data-workspace-tab="showcase">功能展示</button>
       <button type="button" role="tab" aria-selected="false" data-workspace-tab="evidence">证据与结果</button>
     </nav>
 
@@ -247,6 +249,19 @@
         </div>
       </section>
 
+      <section class="workspace-panel function-showcase" data-workspace-panel="showcase" role="tabpanel" hidden>
+        <div id="function-showcase-root" data-contract="amos.workflow-view.v2">
+          <div class="function-showcase-empty">当前运行尚未选择可查看的分析任务</div>
+        </div>
+        <a
+          id="function-showcase-algorithm-console"
+          href="{{ algolib_console_url }}"
+          target="_blank"
+          rel="noopener noreferrer"
+          hidden
+        >算法管理台</a>
+      </section>
+
       <section class="workspace-panel" data-workspace-panel="evidence" role="tabpanel" hidden>
         <div class="card report-card">
           <div class="card-heading">
@@ -358,9 +373,10 @@
 
 <script src="/static/js/api/platform-api.js?v=20260817d"></script>
 <script src="/static/js/map/tactical-symbols.js?v=20260825b"></script>
-<script src="/static/js/map/platform-map.js?v=20260914-orbit3"></script>
+<script src="/static/js/map/platform-map.js?v=20260914-scenario3-split-target"></script>
 <script src="/static/js/panels/platform-panels.js?v=20260911c"></script>
-<script src="/static/js/workflow/commander-workflow.js?v=20260911c"></script>
-<script src="/static/js/app/platform.js?v=20260914b"></script>
+<script src="/static/js/workflow/commander-workflow.js?v=20260914d"></script>
+<script src="/static/js/panels/function-showcase.js?v=20260914b"></script>
+<script src="/static/js/app/platform.js?v=20260914d"></script>
 </body>
 </html>

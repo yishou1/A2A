@@ -232,6 +232,17 @@ class DirectorService:
             str(value) for value in conditions.get("event_types_emitted") or []
         ).issubset(event_types):
             return False
+        hit_target_ids = {
+            str(event.get("target_threat_id"))
+            for event in engine.events
+            if isinstance(event, dict)
+            and event.get("type") == "weapon_hit"
+            and event.get("target_threat_id")
+        }
+        if not set(
+            str(value) for value in conditions.get("weapon_hit_target_ids") or []
+        ).issubset(hit_target_ids):
+            return False
         return True
 
     def _reach_checkpoint(self, checkpoint: dict[str, Any]) -> dict[str, Any]:

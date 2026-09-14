@@ -30,7 +30,7 @@ CHECKSUMS = {
     "03-fast-surface-contact.png": "2350517e8782677684f8442196da6bc66466ec6b0677961649449e1c84c822a6",
     "04-low-altitude-contact-ir.png": "8285ed1ab25980c6733e081ec865cc11dec0919f00fd57b017974c4684c4385a",
     "05-elint-interference.svg": "847100d22e535cb3bc6ef981e94383e91b4e736d65aac5a79b34804570c6860d",
-    "06-convoy-maneuver-current.svg": "b3f6b95f8fde76f864de745ebe650df7a3d3cbc3365df26ddc6bd4f8b157689e",
+    "06-convoy-maneuver-current.svg": "76fe05155ca6ba7b8859dfa8bf8096a1f65302122a7a474e4e1d6e9993101d13",
     "07-post-maneuver-observation.png": "1345a0e0e095ef0f92e0650473148c5c8e840dd16205c18e5fd32aa1b5e42a59",
 }
 
@@ -54,7 +54,7 @@ def _media_cues() -> list[dict[str, Any]]:
         ("MAR-MEDIA-03", "03-fast-surface-contact.png", 2160, "TRACK", "高速海面目标光电复核", "舰载光电在目标南向规避机动中形成稳定长焦当前帧，外形、航速和机动行为供后端识别，前端不预设敌我结论。", "ESCORT-01/EO-IR", "eo_ir", "image/png"),
         ("MAR-MEDIA-04", "04-low-altitude-contact-ir.png", 2880, "TRACK", "渔船目标红外复核", "护航舰光电红外形成慢速海面接触的当前帧，供后端确认渔船身份并建立禁射约束。", "ESCORT-01/IR", "ir", "image/png"),
         ("MAR-MEDIA-05", "05-elint-interference.svg", 3600, "TARGET", "敌方目标辐射源复核", "护航舰电子侦察载荷冻结高速目标的当前频谱观测；环境背景频点与目标辐射源分开标注，供后端完成目标优先级、交战规则和武器方案审查。", "ESCORT-01/ELINT", "telemetry", "image/svg+xml"),
-        ("MAR-MEDIA-06", "06-convoy-maneuver-current.svg", 4560, "ENGAGE", "警告观察期与攻击准备状态", "已完成敌方识别、渔船排除和操作员警告授权；观察期内各己方资源持续按既有航线运动，满足规则后才可执行模拟发射。", "COMMANDER/EXECUTION", "telemetry", "image/svg+xml"),
+        ("MAR-MEDIA-06", "06-convoy-maneuver-current.svg", 4560, "ENGAGE", "无线电警告与攻击准备状态", "敌方识别、渔船排除和武器方案已经完成；到达交战检查点后先等待操作员下达无线电警告，观察期结束后再显示模拟开火确认。", "COMMANDER/EXECUTION", "telemetry", "image/svg+xml"),
         ("MAR-MEDIA-07", "07-post-maneuver-observation.png", 5580, "ASSESS", "攻击后效果评估", "补充侦察无人机在目标东南约 1.49 海里处冻结光电画面，记录高速攻击艇已确认摧毁、停航并局部燃烧的状态；渔船位于镜头视场外且保持安全。", "UAV-CONFIRM-01/EO", "eo_ir", "image/png"),
     )
     return [
@@ -289,7 +289,8 @@ def build_maritime_convoy_air_defense_scenario() -> dict[str, Any]:
             {"checkpoint_id": "MAR-CP-PERCEPTION", "title": "海空观测融合输入就绪", "min_elapsed_sec": 1470, "conditions": {"stable_track_count_at_least": 2, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["MAR-MEDIA-01", "MAR-MEDIA-02"]}, "pause": True, "submit_analysis": True},
             {"checkpoint_id": "MAR-CP-ASSESS", "title": "敌方与渔船识别输入就绪", "min_elapsed_sec": 2910, "conditions": {"stable_track_count_at_least": 2, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["MAR-MEDIA-03", "MAR-MEDIA-04"]}, "pause": True, "submit_analysis": True},
             {"checkpoint_id": "MAR-CP-PLAN", "title": "攻击方案与禁射约束输入就绪", "min_elapsed_sec": 3630, "conditions": {"media_ids_released": ["MAR-MEDIA-05"]}, "pause": True, "submit_analysis": True},
-            {"checkpoint_id": "MAR-CP-CLOSE", "title": "毁伤评估与渔船安全复核就绪", "min_elapsed_sec": 5610, "conditions": {"media_ids_released": ["MAR-MEDIA-07"]}, "pause": True, "submit_analysis": True, "requires_operator_action": True},
+            {"checkpoint_id": "MAR-CP-ENGAGE", "title": "无线电警告与模拟开火等待授权", "min_elapsed_sec": 4590, "conditions": {"media_ids_released": ["MAR-MEDIA-06"]}, "pause": True, "submit_analysis": True, "requires_operator_action": True, "operator_action_type": "fire"},
+            {"checkpoint_id": "MAR-CP-CLOSE", "title": "毁伤评估与渔船安全复核就绪", "min_elapsed_sec": 5610, "conditions": {"media_ids_released": ["MAR-MEDIA-07"], "event_types_emitted": ["weapon_hit", "damage_assessment_confirmed"]}, "pause": True, "submit_analysis": True, "requires_operator_action": True, "operator_action_type": "review"},
         ],
         "fault_injections": [
             {"fault_id": "MAR-FAULT-JAM", "type": "communication_degradation", "target": "ESCORT-01", "at_checkpoint": "MAR-CP-ASSESS", "status": "available"},
@@ -309,7 +310,7 @@ def build_maritime_convoy_air_defense_scenario() -> dict[str, Any]:
         # 复访与毁伤评估属于该授权的执行支援，因此开火指令下达时一并授权剧本中
         # 声明 requires_operator_authorization 的跟踪任务。其余剧本不设此项，
         # 它们的跟踪任务保持待决，直到操作员单独下达派出指令。
-        "engagement_policy": {"decision_authority": "operator", "requires_backend_identification": True, "requires_explicit_authorization": True, "requires_prior_warning": True, "warning_delay_sec": 300, "minimum_threat_levels": ["HIGH", "CRITICAL"], "eligible_kill_chain_phases": ["TARGET", "ENGAGE"], "authorized_asset_ids": ["ESCORT-01"], "authorized_weapons": ["舰载反舰导弹"], "protected_classifications": ["FISHING_VESSEL", "FISHING BOAT", "FISHING", "CIVILIAN", "MERCHANT"], "protected_truth_ids": ["CONTACT-FISHING-01"], "authorize_follow_on_weapon_release": True},
+        "engagement_policy": {"decision_authority": "operator", "requires_backend_identification": True, "requires_explicit_authorization": True, "requires_prior_warning": True, "warning_delay_sec": 300, "minimum_threat_levels": ["HIGH", "CRITICAL"], "eligible_kill_chain_phases": ["TARGET", "ENGAGE", "ASSESS"], "authorized_asset_ids": ["ESCORT-01"], "authorized_weapons": ["舰载反舰导弹"], "protected_classifications": ["FISHING_VESSEL", "FISHING BOAT", "FISHING", "CIVILIAN", "MERCHANT"], "protected_truth_ids": ["CONTACT-FISHING-01"], "authorize_follow_on_weapon_release": True},
         "agent_plan": {"mode": "commander_workflow", "steps": ["submit_current_snapshot", "execute_a1_a6_workflow", "project_run_scoped_evidence", "request_operator_fire_authorization", "execute_authorized_fire_command", "assess_effects"]},
         "events": [row["title"] for row in _timeline()],
     }
