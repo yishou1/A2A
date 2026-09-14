@@ -233,11 +233,27 @@ is_track_threat_mounted_algorithm() {
   esac
 }
 
-echo "[infra] checking Docker Desktop connection"
-docker info >/dev/null
-docker compose -f "$COMMANDER_DIR/docker-compose.yml" up -d nacos auth-server
-wait_http "Nacos" "http://${NACOS_ADDR}/nacos/v1/console/health/readiness" 120
-wait_http "A2A auth mock" "http://127.0.0.1:8080/get" 60
+echo "[infra] checking Docker connection"
+infra_mode="native"
+if docker info >/dev/null 2>&1 \
+  && docker compose -f "$COMMANDER_DIR/docker-compose.yml" up -d nacos auth-server \
+  && wait_http "Nacos" "http://${NACOS_ADDR}/nacos/v1/console/health/readiness" 120 \
+  && wait_http "A2A auth mock" "http://127.0.0.1:8080/get" 60; then
+  infra_mode="docker"
+  echo "[infra] Docker Nacos and auth service are ready"
+else
+  echo "[infra] Docker unavailable; starting bundled native Nacos and auth mock"
+  docker compose -f "$COMMANDER_DIR/docker-compose.yml" stop nacos auth-server >/dev/null 2>&1 || true
+  native_runtime_dir="${A2A_RUNTIME_DIR:-${HOME}/.local/a2a-runtime}"
+  env A2A_RUNTIME_DIR="$native_runtime_dir" \
+    JAVA_HOME="$native_runtime_dir/jdk" NACOS_HOME="$native_runtime_dir/nacos" \
+    bash "$COMMANDER_DIR/scripts/start_local_nacos.sh"
+  native_nacos_pid="$(tr -d '[:space:]' < "$native_runtime_dir/nacos/logs/a2a-nacos.pid")"
+  printf '%s\n' "$native_nacos_pid" > "$(pid_file nacos-native)"
+  wait_http "Nacos" "http://${NACOS_ADDR}/nacos/v1/console/health/readiness" 120
+  start_service auth-mock "$COMMANDER_DIR" "http://127.0.0.1:8080/get" \
+    "$A2A_PYTHON" scripts/auth_mock_server.py
+fi
 
 llm_url="${TOOL_LLM_URL:-}"
 if [[ "${ENABLE_LLM:-false}" == "true" && "$llm_provider" != "azure" && "$llm_provider" != "azure_openai" ]]; then
@@ -382,6 +398,7 @@ echo "System is running:"
 echo "  AMOS UI:       http://127.0.0.1:5000/"
 echo "  Commander:     http://127.0.0.1:8021/supervisor"
 echo "  Nacos console: http://${NACOS_ADDR}/nacos/"
+echo "  Infrastructure: $infra_mode"
 echo "  LLM profile:   $active_llm_profile"
 echo "  LLM provider:  ${LLM_PROVIDER:-disabled}"
 echo "  Planner mode:  $TIA_ALGORITHM_PLANNER"

@@ -63,6 +63,14 @@ def _advance_position(lat: float, lng: float, heading_deg: float, distance_nm: f
 class SimEngine:
     """Real-time simulation engine with background tick loop."""
 
+    VALID_SPEEDS = (0.25, 0.5, 1, 2, 4, 8, 16, 32)
+
+    @classmethod
+    def normalize_speed(cls, multiplier: float) -> float:
+        """Clamp an arbitrary multiplier to a supported playback speed."""
+        value = float(multiplier)
+        return min(cls.VALID_SPEEDS, key=lambda speed: abs(speed - value))
+
     def __init__(self, *, seed: int = 0):
         self._seed = int(seed)
         self._rng = random.Random(self._seed)
@@ -213,9 +221,7 @@ class SimEngine:
 
     def set_speed(self, multiplier: float) -> None:
         """Set simulation speed multiplier without changing physical rates."""
-        valid = [0.25, 0.5, 1, 2, 4, 8, 16, 32]
-        if multiplier not in valid:
-            multiplier = min(valid, key=lambda x: abs(x - multiplier))
+        multiplier = self.normalize_speed(multiplier)
         with self._lock:
             if self._speed_lock_reasons:
                 multiplier = 1
@@ -419,12 +425,30 @@ class SimEngine:
                 at_sec = float(phase.get("at_sec", 0) or 0)
                 if current_sim_time + 1e-9 < at_sec:
                     break
-                if isinstance(phase.get("route"), list):
-                    self.waypoint_nav.set_route(
-                        asset_id,
-                        [dict(point) for point in phase["route"]],
-                        mode=str(phase.get("mode") or "hold"),
-                    )
+                phase_route = phase.get("route")
+                if phase.get("position_mode") == "timed_ground_track" and isinstance(phase_route, list):
+                    current_position = asset.get("position") or {}
+                    timed_points = [{
+                        "lat": float(current_position.get("lat", 0) or 0),
+                        "lng": float(current_position.get("lng", 0) or 0),
+                        "at_sec": at_sec,
+                    }, *[dict(point) for point in phase_route]]
+                    asset["_timed_ground_track"] = {
+                        "start_sec": at_sec,
+                        "end_sec": float(phase.get("track_end_sec", at_sec) or at_sec),
+                        "points": timed_points,
+                    }
+                    # Keep an exhausted route registered so the generic
+                    # dead-reckoning branch cannot also move the spacecraft.
+                    self.waypoint_nav.set_route(asset_id, [], mode="hold")
+                else:
+                    asset.pop("_timed_ground_track", None)
+                    if isinstance(phase_route, list) and not phase.get("preserve_route"):
+                        self.waypoint_nav.set_route(
+                            asset_id,
+                            [dict(point) for point in phase_route],
+                            mode=str(phase.get("mode") or "hold"),
+                        )
                 if phase.get("speed_kts") is not None:
                     phase_speed = float(phase.get("speed_kts") or 0)
                     asset["_cruise_speed_kts"] = phase_speed
@@ -488,6 +512,79 @@ class SimEngine:
                 asset["speed_kts"] = 0.0
 
         self._update_asset_follow_tasks()
+
+        # Orbital speed remains physically reported (roughly 14,500 kt), but
+        # the local sub-satellite point is prescribed across the declared
+        # access interval.  A pursuit-style aircraft navigator cannot model a
+        # nearly straight orbital ground track: at orbital speed it overshoots
+        # the first waypoint, turns in a huge circle and can leave the theater
+        # before the next UI sample.
+        for asset in self.assets.values():
+            track = asset.get("_timed_ground_track")
+            if not isinstance(track, dict):
+                continue
+            points = track.get("points") or []
+            if len(points) < 2:
+                continue
+            start_sec = float(track.get("start_sec", current_sim_time) or current_sim_time)
+            end_sec = float(track.get("end_sec", start_sec) or start_sec)
+            try:
+                point_times = [float(point["at_sec"]) for point in points]
+                uses_point_times = all(
+                    point_times[index] > point_times[index - 1]
+                    for index in range(1, len(point_times))
+                )
+            except (KeyError, TypeError, ValueError):
+                point_times = []
+                uses_point_times = False
+
+            if uses_point_times:
+                segment_index = len(points) - 2
+                fraction = 1.0
+                for index in range(1, len(points)):
+                    if current_sim_time <= point_times[index]:
+                        segment_index = index - 1
+                        fraction = max(0.0, min(
+                            1.0,
+                            (current_sim_time - point_times[index - 1])
+                            / (point_times[index] - point_times[index - 1]),
+                        ))
+                        break
+            else:
+                progress = 1.0 if end_sec <= start_sec else max(
+                    0.0, min(1.0, (current_sim_time - start_sec) / (end_sec - start_sec)),
+                )
+                lengths = [
+                    self.waypoint_nav._haversine(
+                        float(first["lat"]), float(first["lng"]),
+                        float(second["lat"]), float(second["lng"]),
+                    )
+                    for first, second in zip(points, points[1:])
+                ]
+                remaining = sum(lengths) * progress
+                segment_index = len(lengths) - 1
+                fraction = 1.0
+                for index, length in enumerate(lengths):
+                    if remaining <= length or index == len(lengths) - 1:
+                        segment_index = index
+                        fraction = min(1.0, remaining / length) if length > 1e-9 else 1.0
+                        break
+                    remaining -= length
+
+            first, second = points[segment_index], points[segment_index + 1]
+            position = asset.get("position") or {}
+            position["lat"] = round(
+                float(first["lat"]) + (float(second["lat"]) - float(first["lat"])) * fraction,
+                6,
+            )
+            position["lng"] = round(
+                float(first["lng"]) + (float(second["lng"]) - float(first["lng"])) * fraction,
+                6,
+            )
+            asset["heading_deg"] = round(self.waypoint_nav._bearing(
+                float(first["lat"]), float(first["lng"]),
+                float(second["lat"]), float(second["lng"]),
+            ), 1)
 
         # 1. Move assets along waypoint routes
         wp_events = self.waypoint_nav.tick(self.assets, dt)
@@ -2233,6 +2330,7 @@ class SimEngine:
                     return {"error": f"协同节点 {participant_asset} 发射前检查失败：{preflight_error}"}
 
             launch_delays: dict[str, float] = {}
+            common_time_on_target: float | None = None
             if isinstance(coordinated, dict) and coordinated.get("coordination_mode") == "time_on_target":
                 from amos_platform.data.scenario_repository import get_weapon_spec
 
@@ -2264,6 +2362,9 @@ class SimEngine:
                     str(participant.get("asset_id") or ""): longest_flight - flight_time
                     for participant, flight_time in zip(launch_plan, arrival_times)
                 }
+                common_time_on_target = (
+                    float(self.clock.get("elapsed_sec", 0) or 0) + longest_flight
+                )
 
             launch_results = []
             for participant in launch_plan:
@@ -2284,7 +2385,9 @@ class SimEngine:
                     weapon["flight_time_sec"] = float(weapon.get("eta_sec", 0) or 0)
                     weapon["planned_launch_delay_sec"] = round(launch_delay, 1)
                     weapon["planned_time_on_target_sec"] = round(
-                        float(self.clock.get("elapsed_sec", 0) or 0)
+                        common_time_on_target
+                        if common_time_on_target is not None
+                        else float(self.clock.get("elapsed_sec", 0) or 0)
                         + launch_delay + float(weapon.get("flight_time_sec", 0) or 0),
                         1,
                     )
@@ -2420,14 +2523,22 @@ class SimEngine:
             # release decision.  Mark configured follow/assessment assets as
             # authorized for this track so the ASSESS evidence window can be
             # satisfied after the confirmed fire command.
-            for task in self._scenario_asset_follow_tasks:
-                if not task.get("requires_operator_authorization"):
-                    continue
-                follow_asset = self.assets.get(str(task.get("asset_id") or ""))
-                if follow_asset is None:
-                    continue
-                follow_asset["_follow_launch_authorized_track_id"] = track_id
-                follow_asset["_follow_pending_prompt"] = None
+            #
+            # This is a scenario-level decision, not a general rule: a release
+            # order only implies authorization for the follow tasks of a
+            # scenario that says so.  Scenarios that model re-tasking as a
+            # separate operator decision leave
+            # ``authorize_follow_on_weapon_release`` unset, and their follow
+            # tasks keep waiting for :meth:`authorize_follow_asset`.
+            if bool(policy.get("authorize_follow_on_weapon_release")):
+                for task in self._scenario_asset_follow_tasks:
+                    if not task.get("requires_operator_authorization"):
+                        continue
+                    follow_asset = self.assets.get(str(task.get("asset_id") or ""))
+                    if follow_asset is None:
+                        continue
+                    follow_asset["_follow_launch_authorized_track_id"] = track_id
+                    follow_asset["_follow_pending_prompt"] = None
             return {
                 key: value
                 for key, value in {

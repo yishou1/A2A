@@ -13,8 +13,6 @@ from amos_platform.frontend_state.temporal_story import build_internal_story
 
 def load_scenario_into_engine(engine: Any, scenario: dict[str, Any], now_iso: Any) -> None:
     """Initialize engine state from an existing scenario dict."""
-    if engine._speed_before_lock is not None:
-        engine.clock["speed"] = engine._speed_before_lock
     engine._speed_before_lock = None
     engine._speed_lock_reasons.clear()
     engine.assets.clear()
@@ -58,6 +56,8 @@ def load_scenario_into_engine(engine: Any, scenario: dict[str, Any], now_iso: An
     engine.mesh = MeshNetwork()
     engine.geofence = GeofenceManager()
     engine.clock["elapsed_sec"] = 0.0
+    configured_speed = (scenario.get("demo_controls") or {}).get("recommended_speed", 1)
+    engine.clock["speed"] = engine.normalize_speed(configured_speed)
     engine.clock["running"] = False
     engine.clock["lifecycle"] = "ready"
     engine.clock["started_at"] = None

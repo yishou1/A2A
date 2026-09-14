@@ -19,8 +19,12 @@ for name in "${names[@]}"; do
 done
 
 if [[ "$KEEP_NACOS" == 0 ]]; then
-  docker compose -f "$COMMANDER_DIR/docker-compose.yml" stop nacos >/dev/null
-  echo "[stopped] nacos"
+  if docker info >/dev/null 2>&1; then
+    docker compose -f "$COMMANDER_DIR/docker-compose.yml" stop nacos >/dev/null || true
+    echo "[stopped] nacos"
+  fi
 fi
-docker compose -f "$COMMANDER_DIR/docker-compose.yml" stop auth-server >/dev/null
-echo "[stopped] auth-server"
+if docker info >/dev/null 2>&1; then
+  docker compose -f "$COMMANDER_DIR/docker-compose.yml" stop auth-server >/dev/null || true
+  echo "[stopped] auth-server"
+fi

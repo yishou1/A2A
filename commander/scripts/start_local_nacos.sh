@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RUNTIME_DIR="${A2A_RUNTIME_DIR:-/home/dell/.local/a2a-runtime}"
+RUNTIME_DIR="${A2A_RUNTIME_DIR:-${HOME}/.local/a2a-runtime}"
 JAVA_HOME="${JAVA_HOME:-$RUNTIME_DIR/jdk}"
 NACOS_HOME="${NACOS_HOME:-$RUNTIME_DIR/nacos}"
 PID_FILE="$NACOS_HOME/logs/a2a-nacos.pid"
@@ -37,6 +37,7 @@ setsid "$JAVA_HOME/bin/java" \
   -Dloader.path="$NACOS_HOME/plugins,$NACOS_HOME/plugins/health,$NACOS_HOME/plugins/cmdb,$NACOS_HOME/plugins/selector" \
   -Dnacos.home="$NACOS_HOME" \
   -jar "$NACOS_HOME/target/nacos-server.jar" \
+  --server.port="${NACOS_PORT:-8848}" \
   --spring.config.additional-location="file:$NACOS_HOME/conf/" \
   --logging.config="$NACOS_HOME/conf/nacos-logback.xml" \
   --server.max-http-header-size=524288 \

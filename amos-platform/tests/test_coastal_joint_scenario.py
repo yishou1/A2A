@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 
 from amos_platform.agents.a2a.commander_projection import apply_commander_assessments
 from amos_platform.agents.commander_bridge import CommanderBridge
@@ -11,6 +12,7 @@ from amos_platform.simulation.engine import SimEngine
 
 
 SCENARIO_ID = "coastal-joint-recon-strike"
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _advance(engine: SimEngine, elapsed_sec: float) -> None:
@@ -81,13 +83,27 @@ def test_coastal_joint_force_package_and_backend_contract_are_complete() -> None
     assert len(scenario["function_point_coverage"]) == 28
     assert len(scenario["coordination_links"]) == 11
     assert len(scenario["engagement_policy"]["coordinated_engagement"]["participants"]) == 4
+    assert scenario["map_display"]["default_layers"]["coordination"] is True
+    assert scenario["map_display"]["coordination_link_types"] == ["weapon"]
+    assert scenario["map_display"]["trail_window_sec"] == 240
     assert len(scenario["media_cues"]) == 12
     assert scenario["map_display"]["space_visual_speed_factor"] == 0.035
     assert "SAT-RECON-01" not in scenario["map_display"]["trail_asset_ids"]
+    assert {"SAT-RECON-01", "SAT-RECON-02"}.issubset(
+        scenario["map_display"]["label_asset_ids"]
+    )
     assert len(scenario["map_display"]["space_ground_tracks"]) == 2
     assert scenario["map_display"]["space_node_asset_ids"] == ["SAT-COM-01"]
     assert len(scenario["space_operations"]["passes"]) == 2
     assert scenario["space_operations"]["relay"]["asset_id"] == "SAT-COM-01"
+    close_checkpoint = next(
+        item for item in scenario["demo_checkpoints"]
+        if item["checkpoint_id"] == "CJR-CP-CLOSE"
+    )
+    assert close_checkpoint["operator_action_type"] == "review"
+    assert close_checkpoint["conditions"]["event_types_emitted"] == [
+        "damage_assessment_confirmed"
+    ]
     media_by_id = {item["media_id"]: item for item in scenario["media_cues"]}
     assert {
         media_by_id[media_id]["sensor_id"]
@@ -95,9 +111,21 @@ def test_coastal_joint_force_package_and_backend_contract_are_complete() -> None
     } == {"ATTACK-UAV-01/EO-IR", "ATTACK-UAV-02/EO-IR"}
     assert media_by_id["CJR-MEDIA-10"]["sensor_id"] == "WZ10-01/ELINT"
     assert media_by_id["CJR-MEDIA-11"]["sensor_id"] == "SEA-C2-01/DATALINK-TRANSFER"
+    for item in scenario["media_cues"]:
+        path = ROOT / item["uri"].removeprefix("/")
+        assert "authorization" not in path.name.lower()
+        if path.suffix == ".svg":
+            svg = path.read_text(encoding="utf-8")
+            assert "授权执行（操作员）" not in svg
+            assert "拒绝 / 返回重规划" not in svg
     capture_by_media = {
         item["media_id"]: item for item in scenario["capture_plans"]
     }
+    assert all(
+        (item.get("capture_parameters") or {}).get("renderer_type")
+        != "authorization_state"
+        for item in scenario["capture_plans"]
+    )
     assert capture_by_media["CJR-MEDIA-11"]["capture_parameters"]["required_source_media_ids"] == [
         "CJR-MEDIA-01", "CJR-MEDIA-02", "CJR-MEDIA-03", "CJR-MEDIA-10",
     ]

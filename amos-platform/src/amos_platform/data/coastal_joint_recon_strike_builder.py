@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from amos_platform.data.scenario_builder_support import (
@@ -114,14 +115,18 @@ def _capture_contract() -> tuple[list[dict[str, Any]], list[dict[str, Any]], lis
         "CJR-MEDIA-00": {"precollected": True, "collection_age_sec": 300, "simulation_only": True},
         "CJR-MEDIA-01": {"renderer_type": "radar_ppi", "swath_width_km": 120, "ground_sample_distance_m": 3, "resolution_px": [1672, 941], "data_source": "sensor_observations"},
         "CJR-MEDIA-02": {"renderer_type": "radar_ppi", "effective_range_nm": 40, "ground_sample_distance_m": 1.2, "registration_group": "CJR-SITE-01", "observation_window_sec": 330, "resolution_px": [1672, 941], "data_source": "sensor_observations"},
-        "CJR-MEDIA-03": {"effective_range_nm": 15, "horizontal_fov_deg": 18, "look_angle_deg": 36.46, "point_at_target": True, "resolution_px": [1672, 941]},
+        # look_angle_deg 是"计划俯仰角"，必须与驻留环几何在该捕获时刻真正解算出的
+        # 俯仰角一致（测试按 ±1.0° 校验 计划 vs 实测）。下面三个值取自驻留环
+        # 航路本身：光电捕获点在内收 3.95 海里阵位附近，电子侦察在东侧 13 海里
+        # 阵位外推段上。改动 1440/4200/4440 三个相位的航路后必须重新标定。
+        "CJR-MEDIA-03": {"effective_range_nm": 15, "horizontal_fov_deg": 18, "look_angle_deg": 39.75, "point_at_target": True, "resolution_px": [1672, 941]},
         "CJR-MEDIA-04": {"renderer_type": "network_topology", "input_cutoff_sec": 2100, "data_source": "network_and_track_state"},
         "CJR-MEDIA-05": {"renderer_type": "resource_status", "input_cutoff_sec": 2700, "data_source": "task_state"},
         "CJR-MEDIA-06": {"renderer_type": "execution_state", "input_cutoff_sec": 3300, "simulation_execution_only": True, "data_source": "task_state"},
-        "CJR-MEDIA-07": {"effective_range_nm": 40, "ground_sample_distance_m": 1.2, "look_angle_deg": 18.97, "point_at_target": True, "registration_group": "CJR-SITE-01", "reference_media_id": "CJR-MEDIA-02", "required_damage_state": "destroyed", "resolution_px": [1672, 941], "data_source": "sensor_observations"},
-        "CJR-MEDIA-08": {"effective_range_nm": 12, "horizontal_fov_deg": 24, "look_angle_deg": 6.58, "point_at_target": True, "resolution_px": [1672, 941]},
+        "CJR-MEDIA-07": {"effective_range_nm": 40, "ground_sample_distance_m": 1.2, "look_angle_deg": 18.11, "point_at_target": True, "registration_group": "CJR-SITE-01", "reference_media_id": "CJR-MEDIA-02", "required_damage_state": "destroyed", "resolution_px": [1672, 941], "data_source": "sensor_observations"},
+        "CJR-MEDIA-08": {"effective_range_nm": 12, "horizontal_fov_deg": 24, "look_angle_deg": 8.54, "point_at_target": True, "resolution_px": [1672, 941]},
         "CJR-MEDIA-09": {"effective_range_nm": 12, "horizontal_fov_deg": 24, "look_angle_deg": 6.07, "point_at_target": True, "polarity": "white_hot", "resolution_px": [1672, 941]},
-        "CJR-MEDIA-10": {"renderer_type": "elint_spectrum", "effective_range_nm": 40, "frequency_range_mhz": [5200, 5700], "look_angle_deg": 19.55, "point_at_target": True, "data_source": "sensor_observations"},
+        "CJR-MEDIA-10": {"renderer_type": "elint_spectrum", "effective_range_nm": 40, "frequency_range_mhz": [5200, 5700], "look_angle_deg": 21.68, "point_at_target": True, "data_source": "sensor_observations"},
         "CJR-MEDIA-11": {"renderer_type": "network_topology", "input_cutoff_sec": 2280, "required_source_media_ids": ["CJR-MEDIA-01", "CJR-MEDIA-02", "CJR-MEDIA-03", "CJR-MEDIA-10"], "data_source": "network_and_track_state"},
     }
     captures = []
@@ -145,12 +150,14 @@ def _timeline() -> list[dict[str, Any]]:
     return [
         {"cue_id": "CJR-CUE-01", "at_sec": 0, "phase": "FIND", "level": "INFO", "title": "海上指挥与无人机保障舰进入任务海域", "description": "SEA-C2-01 抵达集结点；无侦-10与歼-16在空中待命，两架舰载攻击无人机仍在保障舰甲板待命。", "media_ids": ["CJR-MEDIA-00"], "functional_agent_ids": ["A1", "A3"], "model_requirement_ids": ["M17"], "function_ids": []},
         {"cue_id": "CJR-CUE-02", "at_sec": 360, "phase": "FIND", "level": "INFO", "title": "卫星发现疑似沿海固定阵地", "description": "天基 SAR 形成一个待识别地面接触，后端不得依据剧本名称直接推断目标类型。", "media_ids": ["CJR-MEDIA-01"], "functional_agent_ids": ["A1"], "model_requirement_ids": ["M01", "M15", "M17"], "function_ids": ["KC-01", "KC-08"]},
+        {"cue_id": "CJR-CUE-02A", "at_sec": 600, "phase": "FIX", "level": "INFO", "title": "无侦-10按卫星线索转入SAR搜索航线", "description": "首颗卫星离区前把概略位置交给海上联合指挥舰；无侦-10结束侦察待命区盘旋，转入沿海 SAR 搜索航线，对疑似阵地及周边交通实施第一轮空基雷达成像。", "media_ids": [], "functional_agent_ids": ["A1", "A2"], "model_requirement_ids": ["M05", "M15"], "function_ids": ["KC-06", "KC-07"]},
         {"cue_id": "CJR-CUE-03", "at_sec": 930, "phase": "FIX", "level": "INFO", "title": "无侦-10完成 SAR 精细复核", "description": "空基 SAR 与天基提示完成跨源关联，固定目标位置并继续保持身份未知。", "media_ids": ["CJR-MEDIA-02"], "functional_agent_ids": ["A1", "A2"], "model_requirement_ids": ["M06", "M15", "M19"], "function_ids": ["KC-04", "KC-05", "KC-08", "KC-09", "KC-10"]},
         {"cue_id": "CJR-CUE-04", "at_sec": 1500, "phase": "TRACK", "level": "WARNING", "title": "阵地外形与辐射源分时复核", "description": "无侦-10先回传当前光电外形帧，再于T+1680秒回传被动电子侦察频谱和测向结果，供后端与SAR证据关联。", "media_ids": ["CJR-MEDIA-03", "CJR-MEDIA-10"], "functional_agent_ids": ["A1", "A2"], "model_requirement_ids": ["M05", "M07", "M19", "M20"], "function_ids": ["KC-06", "KC-07", "KC-11", "KC-12", "KC-13", "KC-15", "KC-19"]},
         {"cue_id": "CJR-CUE-04A", "at_sec": 1740, "phase": "TRACK", "level": "INFO", "title": "第二颗低轨卫星接力复访", "description": "侦察卫星02进入后续访问窗口，复访目标区并经通信卫星下传航迹更新；首颗卫星产品仍按时效保留，不因平台离场而删除。", "media_ids": [], "functional_agent_ids": ["A1", "A2"], "model_requirement_ids": ["M15", "M19"], "function_ids": []},
         {"cue_id": "CJR-CUE-05", "at_sec": 2100, "phase": "TRACK", "level": "INFO", "title": "多源情报完成融合与校验传输", "description": "海上联合指挥舰汇集当前观测、航迹、网络和资源状态；T+2280秒形成带时标、校验状态和接收确认的数据链产品，再提交后端工作流。", "media_ids": ["CJR-MEDIA-04", "CJR-MEDIA-11"], "functional_agent_ids": ["A1", "A2", "A3"], "model_requirement_ids": ["M02", "M10", "M11", "M15"], "function_ids": ["KC-14"]},
+        {"cue_id": "CJR-CUE-05A", "at_sec": 2400, "phase": "TARGET", "level": "INFO", "title": "保障舰弹射两架攻击无人机并分轴进入", "description": "海上联合指挥舰进入舰载火力机动区转场航路；两架攻击无人机由 SEA-C2-01 甲板依次弹射，分别沿北、南两条独立低空航路向释放阵位进入，全程保持安全间隔。", "media_ids": [], "functional_agent_ids": ["A3", "A6"], "model_requirement_ids": ["M13"], "function_ids": ["KC-20"]},
         {"cue_id": "CJR-CUE-06", "at_sec": 2700, "phase": "TARGET", "level": "WARNING", "title": "歼-16接管空中战术指挥", "description": "海上联合指挥舰向歼-16下达任务级指令；歼-16分别向攻击无人机01和02分配北、南两条低空突入航路。", "media_ids": ["CJR-MEDIA-05"], "functional_agent_ids": ["A3", "A4", "A5"], "model_requirement_ids": ["M04", "M09", "M10", "M11", "M13", "M14"], "function_ids": ["KC-16", "KC-17", "KC-18", "KC-20", "KC-21"]},
-        {"cue_id": "CJR-CUE-06A", "at_sec": 3000, "phase": "TARGET", "level": "INFO", "title": "两架攻击无人机由保障舰分路抵达释放阵位", "description": "攻击无人机01、02从 SEA-C2-01 依次起飞，沿北、南两条独立航路抵达释放阵位并保持安全间隔。", "media_ids": [], "functional_agent_ids": ["A3", "A6"], "model_requirement_ids": ["M13"], "function_ids": ["KC-20"]},
+        {"cue_id": "CJR-CUE-06A", "at_sec": 3000, "phase": "TARGET", "level": "INFO", "title": "两架攻击无人机沿南北两轴抵达释放阵位", "description": "攻击无人机01、02 自 T+2400 秒弹射起飞后分别沿北、南两条独立低空航路飞抵各自释放阵位并保持安全间隔；在获得授权前不再改变阵位。", "media_ids": [], "functional_agent_ids": ["A3", "A6"], "model_requirement_ids": ["M13"], "function_ids": ["KC-20"]},
         {"cue_id": "CJR-CUE-06B", "at_sec": 3150, "phase": "TARGET", "level": "INFO", "title": "双路无人机回传独立通视画面", "description": "攻击无人机01回传北路昼间光电帧，攻击无人机02回传南路白热红外帧；两路画面只确认当前通视和热特征，不替代后端识别与人工授权。", "media_ids": ["CJR-MEDIA-08", "CJR-MEDIA-09"], "functional_agent_ids": ["A2", "A3", "A6"], "model_requirement_ids": ["M05", "M13", "M20"], "function_ids": ["KC-07", "KC-20"]},
         {"cue_id": "CJR-CUE-07", "at_sec": 3300, "phase": "ENGAGE", "level": "CRITICAL", "title": "四节点武器链建立并等待授权", "description": "舰载巡航导弹、歼-16防区外弹药、攻击无人机01和02的四条独立通道已完成同一到达时刻规划；仅在保护区核验和人工授权后执行。", "media_ids": ["CJR-MEDIA-06"], "functional_agent_ids": ["A6"], "model_requirement_ids": ["M03", "M13", "M16"], "function_ids": ["KC-22", "KC-23", "KC-24"]},
         {"cue_id": "CJR-CUE-08", "at_sec": 4200, "phase": "ASSESS", "level": "INFO", "title": "无侦-10实施攻击后复查", "description": "无侦-10保持目标区观测，只有实际命中和当前 SAR/光电证据同时存在时才确认毁伤。", "media_ids": [], "functional_agent_ids": ["A2", "A6"], "model_requirement_ids": ["M18"], "function_ids": ["KC-25", "KC-27"]},
@@ -159,10 +166,131 @@ def _timeline() -> list[dict[str, Any]]:
     ]
 
 
+def _phase(
+    at_sec: int,
+    behavior: str,
+    label: str,
+    speed_kts: float,
+    route: list[dict[str, Any]],
+    *,
+    mode: str = "hold",
+    status: str = "active",
+    preserve_route: bool = False,
+    position_mode: str | None = None,
+    track_end_sec: int | None = None,
+) -> dict[str, Any]:
+    """One time-anchored behavior phase, matching the carrier scenario's shape."""
+    return {
+        "at_sec": at_sec,
+        "behavior": behavior,
+        "label": label,
+        "speed_kts": speed_kts,
+        "status": status,
+        "mode": mode,
+        "route": route,
+        "preserve_route": preserve_route,
+        "position_mode": position_mode,
+        "track_end_sec": track_end_sec,
+    }
+
+
+# 无侦-10 的三段任务航路都围绕同一个固定阵地（COASTAL-SITE-01，位于
+# 20.45N/121.98E 的海岸线上）设计，全部落在目标的海侧，避免盘旋时压到陆上
+# 目标区，也避免被地面防空火力包线覆盖。三段的观测斜距经过统一校核，使
+# capture_plans 里记录的 look_angle_deg 与实际飞行几何一致。
+_COASTAL_SITE_LAT = 20.45
+_COASTAL_SITE_LNG = 121.98
+
+
+def _at_standoff(bearing_deg: float, distance_nm: float) -> tuple[float, float]:
+    """Point at a compass bearing and ground distance from the fixed site."""
+    lat_nm = distance_nm * math.cos(math.radians(bearing_deg))
+    lng_nm = distance_nm * math.sin(math.radians(bearing_deg))
+    return (
+        _COASTAL_SITE_LAT + lat_nm / 60.0,
+        _COASTAL_SITE_LNG + lng_nm / (60.0 * math.cos(math.radians(_COASTAL_SITE_LAT))),
+    )
+
+
+def _standoff_route(*beats: tuple[float, float, str]) -> list[dict[str, Any]]:
+    return [
+        {"lat": round(lat, 5), "lng": round(lng, 5), "label": label}
+        for lat, lng, label in beats
+    ]
+
+
+# 攻击后 SAR 条带沿一条与海岸线近乎平行的等经线飞行。条带上的侧视斜距在
+# 捕获窗口内保持在 11 海里量级，俯仰角波动不超过一度，使攻击前后两帧取自
+# 同一观测几何。条带两端各接一条外海转向边，构成标准 SAR 往返航路；两条
+# 转向边都留在目标海侧，不越过海岸线。
+_BDA_SWATH_LNG = 122.1779
+_BDA_SWATH_SOUTH = 20.3200
+_BDA_SWATH_NORTH = 20.6200
+_BDA_SWATH_TURN_LNG = 122.3000
+_BDA_SWATH_TURN_SOUTH = 20.2600
+_BDA_SWATH_TURN_NORTH = 20.6800
+
+
+def _swath(lat: float, label: str) -> dict[str, Any]:
+    return {"lat": lat, "lng": _BDA_SWATH_LNG, "label": label}
+
+
+def _swath_turn(lat: float, label: str) -> dict[str, Any]:
+    return {"lat": lat, "lng": _BDA_SWATH_TURN_LNG, "label": label}
+
+
+def _bda_racetrack(start: int) -> list[dict[str, Any]]:
+    """SAR 往返航路；`start` 决定从哪条边进入，使相位切换不产生回头。"""
+    ring = [
+        _swath(_BDA_SWATH_NORTH, "BDA-SWATH-NORTH"),
+        _swath(_BDA_SWATH_SOUTH, "BDA-SWATH-SOUTH"),
+        _swath_turn(_BDA_SWATH_TURN_SOUTH, "BDA-SWATH-TURN-SOUTH"),
+        _swath_turn(_BDA_SWATH_TURN_NORTH, "BDA-SWATH-TURN-NORTH"),
+    ]
+    return ring[start:] + ring[:start]
+
+
+def _floor_standoff_orbit() -> list[dict[str, Any]]:
+    """EO/ELINT 驻留环：内收做光电捕获，随后外推做被动测向，再沿海侧盘旋。"""
+    return _standoff_route(
+        (*_at_standoff(130.0, 3.95), "EO-CLOSE-IN"),
+        (*_at_standoff(114.9, 13.27), "ELINT-STANDOFF-EAST"),
+        (*_at_standoff(60.0, 11.5), "ELINT-STANDOFF-NORTH"),
+    )
+
+
+def _bda_run_in_route() -> list[dict[str, Any]]:
+    """转场：脱离侦察驻留环后从北端切入 SAR 航路，转入南向第一条带。"""
+    return _bda_racetrack(0)
+
+
+def _bda_swath_route() -> list[dict[str, Any]]:
+    """受攻击后 SAR 条带段：从南端继续同一条往返航路，观测几何不变。"""
+    return _bda_racetrack(1)
+
+
 def build_coastal_joint_recon_strike_scenario() -> dict[str, Any]:
+    orbital_tracks = {
+        "SAT-RECON-01": [
+            {"lat": 19.45, "lng": 119.85, "at_sec": 240, "label": "LOCAL-VIEW-ENTRY"},
+            {"lat": 20.12, "lng": 121.12, "at_sec": 300, "label": "AO-ENTRY-PROJECTION"},
+            {"lat": 20.30, "lng": 121.55, "at_sec": 330, "label": "GROUND-TRACK-SW"},
+            {"lat": 20.45, "lng": 121.98, "at_sec": 360, "label": "SAR-SWATH-CENTER"},
+            {"lat": 20.68, "lng": 122.38, "at_sec": 400, "label": "AO-EXIT-PROJECTION"},
+            {"lat": 22.25, "lng": 123.55, "at_sec": 590, "label": "LOCAL-VIEW-EXIT"},
+        ],
+        "SAT-RECON-02": [
+            {"lat": 19.40, "lng": 119.95, "at_sec": 1680, "label": "REVISIT-LOCAL-VIEW-ENTRY"},
+            {"lat": 20.04, "lng": 121.24, "at_sec": 1740, "label": "REVISIT-AO-ENTRY"},
+            {"lat": 20.22, "lng": 121.66, "at_sec": 1780, "label": "REVISIT-GROUND-TRACK-SW"},
+            {"lat": 20.43, "lng": 122.04, "at_sec": 1820, "label": "REVISIT-SWATH-CENTER"},
+            {"lat": 20.72, "lng": 122.46, "at_sec": 1860, "label": "REVISIT-AO-EXIT"},
+            {"lat": 22.30, "lng": 123.60, "at_sec": 2030, "label": "REVISIT-LOCAL-VIEW-EXIT"},
+        ],
+    }
     assets = [
-        AssetSnapshot("SAT-RECON-01", "space", "低轨SAR侦察卫星01（星下点投影）", "active", 20.12, 121.12, alt_ft=1640420, heading=65, speed_kts=14500, sensors=["ORBITAL-SAR", "ELINT", "SATCOM"], endurance_hr=9999, autonomy_tier=4, health={"battery_pct": 96, "comms_strength": 98}, formation_role="first_orbital_access", network_role="intelligence_source"),
-        AssetSnapshot("SAT-RECON-02", "space", "低轨SAR侦察卫星02（接力星下点投影）", "active", 20.04, 121.24, alt_ft=1706037, heading=64, speed_kts=14400, sensors=["ORBITAL-SAR", "ELINT", "SATCOM"], endurance_hr=9999, autonomy_tier=4, health={"battery_pct": 95, "comms_strength": 97}, formation_role="follow_on_orbital_access", network_role="intelligence_source"),
+        AssetSnapshot("SAT-RECON-01", "space", "低轨SAR侦察卫星01（星下点投影）", "active", orbital_tracks["SAT-RECON-01"][0]["lat"], orbital_tracks["SAT-RECON-01"][0]["lng"], alt_ft=1640420, heading=65, speed_kts=14500, sensors=["ORBITAL-SAR", "ELINT", "SATCOM"], endurance_hr=9999, autonomy_tier=4, health={"battery_pct": 96, "comms_strength": 98}, formation_role="first_orbital_access", network_role="intelligence_source"),
+        AssetSnapshot("SAT-RECON-02", "space", "低轨SAR侦察卫星02（接力星下点投影）", "active", orbital_tracks["SAT-RECON-02"][0]["lat"], orbital_tracks["SAT-RECON-02"][0]["lng"], alt_ft=1706037, heading=64, speed_kts=14400, sensors=["ORBITAL-SAR", "ELINT", "SATCOM"], endurance_hr=9999, autonomy_tier=4, health={"battery_pct": 95, "comms_strength": 97}, formation_role="follow_on_orbital_access", network_role="intelligence_source"),
         AssetSnapshot("SAT-COM-01", "space", "地球同步通信中继卫星", "active", 20.49, 122.13, alt_ft=117421260, heading=0, speed_kts=0, sensors=["SATCOM"], endurance_hr=9999, autonomy_tier=3, health={"battery_pct": 98, "comms_strength": 99}, formation_role="persistent_communications_relay", network_role="communications_relay"),
         AssetSnapshot("SEA-C2-01", "maritime", "海上联合指挥与无人机保障舰", "active", 20.19, 122.28, heading=285, speed_kts=14, sensors=["SEA_SURVEILLANCE_RADAR", "C2-FUSION", "SATCOM", "DATALINK"], weapons=["舰载对陆巡航导弹"], endurance_hr=720, autonomy_tier=2, health={"fuel_pct": 93, "comms_strength": 99}, formation_role="maritime_mission_command_uav_support", network_role="command_hub"),
         AssetSnapshot("WZ10-01", "air", "无侦-10侦察机", "active", 20.36, 122.33, alt_ft=24000, heading=270, speed_kts=190, sensors=["SAR", "EO/IR", "ELINT", "SATCOM", "DATALINK"], endurance_hr=12, autonomy_tier=4, health={"fuel_pct": 88, "comms_strength": 96}, formation_role="reconnaissance", network_role="intelligence_relay"),
@@ -171,58 +299,110 @@ def build_coastal_joint_recon_strike_scenario() -> dict[str, Any]:
         AssetSnapshot("ATTACK-UAV-02", "air", "攻击无人机02", "active", 20.19, 122.28, alt_ft=5200, heading=295, speed_kts=130, sensors=["EO/IR", "DATALINK"], weapons=["无人机协同攻击弹药"], endurance_hr=8, autonomy_tier=5, health={"battery_pct": 92, "comms_strength": 92}, formation_role="south_axis_strike", network_role="weapon_chain_member"),
     ]
     threats = [
-        ThreatSnapshot("COASTAL-SITE-01", "疑似虚构离岛导弹阵地", "ground", 20.45, 121.98, risk_level="UNKNOWN", rf_freq_mhz=5450, power_dbm=-42, rcs_dbsm=18, ir_signature="medium"),
+        ThreatSnapshot(
+            "COASTAL-SITE-01", "疑似虚构离岛导弹阵地", "ground", 20.45, 121.98,
+            risk_level="UNKNOWN", rf_freq_mhz=5450, power_dbm=-42, rcs_dbsm=18, ir_signature="medium",
+            # 固定阵地不机动：只按剧本节拍改变辐射状态，让 expected_branches 中声明的
+            # behavior_changed 分支成为真实分支。速度全程为 0，四发武器的到达时刻跨度
+            # 才不会因为目标位移而超出 coordinated_engagement 的容差。
+            behavior_script={
+                "phases": [
+                    {"phase": 1, "name": "阵地搜索雷达常规值班", "duration_sec": 900, "heading": 0, "speed_kts": 0, "risk_level": "UNKNOWN"},
+                    {"phase": 2, "name": "察觉被持续跟踪后短暂静默", "duration_sec": 600, "heading": 0, "speed_kts": 0, "risk_level": "UNKNOWN", "state_updates": {"power_dbm": -120}},
+                    {"phase": 3, "name": "恢复辐射并转入制导待发", "duration_sec": 3600, "heading": 0, "speed_kts": 0, "risk_level": "UNKNOWN", "state_updates": {"power_dbm": -38}},
+                ],
+                # 后端确认为岸基导弹阵地后才转入待发；只改辐射与状态，不机动、
+                # 不清除 rf_freq_mhz，被动电子侦察链路因此始终成立。
+                "on_confirmed_classification": {
+                    "classifications": ["COASTAL_MISSILE_SITE"],
+                    "speed_kts": 0,
+                    "hold_after_route": True,
+                    "state": "weapon_ready",
+                    "label": "阵地被确认后转入制导辐射与待发状态",
+                },
+            },
+        ),
     ]
     routes = {
-        "SAT-RECON-01": [{"lat": 20.30, "lng": 121.55, "label": "GROUND-TRACK-SW"}, {"lat": 20.45, "lng": 121.98, "label": "SAR-SWATH-CENTER"}, {"lat": 20.68, "lng": 122.38, "label": "AO-EXIT-PROJECTION"}],
-        "SAT-RECON-02": [{"lat": 20.22, "lng": 121.66, "label": "REVISIT-GROUND-TRACK-SW"}, {"lat": 20.43, "lng": 122.04, "label": "REVISIT-SWATH-CENTER"}, {"lat": 20.72, "lng": 122.46, "label": "REVISIT-AO-EXIT"}],
+        "SAT-RECON-01": [dict(point) for point in orbital_tracks["SAT-RECON-01"][1:]],
+        "SAT-RECON-02": [dict(point) for point in orbital_tracks["SAT-RECON-02"][1:]],
         "SAT-COM-01": [],
         "SEA-C2-01": [{"lat": 20.21, "lng": 122.30, "label": "C2-PATROL-NE"}, {"lat": 20.24, "lng": 122.28, "label": "C2-PATROL-NW"}, {"lat": 20.21, "lng": 122.24, "label": "C2-PATROL-SW"}, {"lat": 20.17, "lng": 122.25, "label": "C2-PATROL-SE"}],
         "WZ10-01": [{"lat": 20.40, "lng": 122.34, "label": "WZ10-HOLD-EAST"}, {"lat": 20.45, "lng": 122.28, "label": "WZ10-HOLD-NORTH"}, {"lat": 20.38, "lng": 122.23, "label": "WZ10-HOLD-WEST"}, {"lat": 20.31, "lng": 122.29, "label": "WZ10-HOLD-SOUTH"}],
-        "J16-01": [{"lat": 20.66, "lng": 122.56, "label": "J16-CAP-EAST"}, {"lat": 20.72, "lng": 122.46, "label": "J16-CAP-NORTH"}, {"lat": 20.63, "lng": 122.37, "label": "J16-CAP-WEST"}, {"lat": 20.53, "lng": 122.45, "label": "J16-CAP-SOUTH"}],
+        # 战斗机待命采用较大的椭圆跑道，避免高航速平台在数海里小圆内连续
+        # 转弯，地图符号看起来像原地自旋。
+        "J16-01": [{"lat": 20.66, "lng": 122.62, "label": "J16-CAP-EAST"}, {"lat": 20.80, "lng": 122.48, "label": "J16-CAP-NORTH"}, {"lat": 20.63, "lng": 122.30, "label": "J16-CAP-WEST"}, {"lat": 20.47, "lng": 122.45, "label": "J16-CAP-SOUTH"}],
         "ATTACK-UAV-01": [{"lat": 20.13, "lng": 122.34, "label": "UAV01-HOLD-NE"}, {"lat": 20.16, "lng": 122.30, "label": "UAV01-HOLD-NW"}, {"lat": 20.12, "lng": 122.25, "label": "UAV01-HOLD-SW"}, {"lat": 20.08, "lng": 122.27, "label": "UAV01-HOLD-SE"}],
         "ATTACK-UAV-02": [{"lat": 20.07, "lng": 122.41, "label": "UAV02-HOLD-NE"}, {"lat": 20.11, "lng": 122.38, "label": "UAV02-HOLD-NW"}, {"lat": 20.08, "lng": 122.33, "label": "UAV02-HOLD-SW"}, {"lat": 20.04, "lng": 122.36, "label": "UAV02-HOLD-SE"}],
     }
     route_modes = {"SAT-RECON-01": "hold", "SAT-RECON-02": "hold", "SAT-COM-01": "hold", "SEA-C2-01": "loop", "WZ10-01": "loop", "J16-01": "loop", "ATTACK-UAV-01": "loop", "ATTACK-UAV-02": "loop"}
     behavior_phases = {
         "SAT-RECON-01": [
-            {"at_sec": 0, "behavior": "awaiting_orbital_access", "label": "等待首个轨道访问窗口", "speed_kts": 0, "status": "staged", "mode": "hold", "route": []},
-            {"at_sec": 240, "behavior": "orbital_ground_track_pass", "label": "首颗低轨卫星过境成像", "speed_kts": 14500, "status": "active", "mode": "hold", "route": routes["SAT-RECON-01"]},
-            {"at_sec": 600, "behavior": "outside_local_map", "label": "已越出本地视区，星上任务继续", "speed_kts": 14500, "status": "off_station", "mode": "hold", "route": []},
+            _phase(0, "awaiting_orbital_access", "等待首个轨道访问窗口", 0, [], status="staged"),
+            _phase(240, "orbital_ground_track_pass", "首颗低轨卫星过境成像", 14500, routes["SAT-RECON-01"], position_mode="timed_ground_track", track_end_sec=600),
+            _phase(600, "outside_local_map", "已越出本地视区，星上任务继续", 14500, [], status="off_station"),
         ],
         "SAT-RECON-02": [
-            {"at_sec": 0, "behavior": "awaiting_follow_on_access", "label": "等待接力轨道访问窗口", "speed_kts": 0, "status": "staged", "mode": "hold", "route": []},
-            {"at_sec": 1680, "behavior": "follow_on_orbital_pass", "label": "第二颗低轨卫星接力复访", "speed_kts": 14400, "status": "active", "mode": "hold", "route": routes["SAT-RECON-02"]},
-            {"at_sec": 2040, "behavior": "outside_local_map", "label": "接力卫星越出本地视区", "speed_kts": 14400, "status": "off_station", "mode": "hold", "route": []},
+            _phase(0, "awaiting_follow_on_access", "等待接力轨道访问窗口", 0, [], status="staged"),
+            _phase(1680, "follow_on_orbital_pass", "第二颗低轨卫星接力复访", 14400, routes["SAT-RECON-02"], position_mode="timed_ground_track", track_end_sec=2040),
+            _phase(2040, "outside_local_map", "接力卫星越出本地视区", 14400, [], status="off_station"),
         ],
+        # 通信中继星不机动，但它的中继职责跟随剧本节拍推进：先承接首颗侦察星
+        # 下传，再承接接力星复访，随后分发多源产品、保障武器链、回传评估结论，
+        # 最后保障撤离。始终零速零航路，因此在地图上保持定点。
         "SAT-COM-01": [
-            {"at_sec": 0, "behavior": "persistent_satcom_relay", "label": "持续承担星—舰通信中继", "speed_kts": 0, "status": "active", "mode": "hold", "route": []},
+            _phase(0, "persistent_satcom_relay", "持续承担星—舰通信中继", 0, []),
+            _phase(240, "orbital_downlink_relay", "承接首颗侦察星过境产品下传", 0, []),
+            _phase(1680, "follow_on_downlink_relay", "承接接力星复访数据下传", 0, []),
+            _phase(2280, "multi_source_distribution_relay", "向指挥舰与打击节点分发多源数据链产品", 0, []),
+            _phase(3300, "weapon_chain_relay", "保障四节点武器链指挥链路", 0, []),
+            _phase(4500, "damage_assessment_relay", "回传攻击后变化产品与评估结论", 0, []),
+            _phase(4800, "withdrawal_support_relay", "保障各资源撤离阶段链路", 0, []),
         ],
         "SEA-C2-01": [
-            {"at_sec": 0, "behavior": "maritime_command_patrol", "label": "海上指挥区低速巡逻", "speed_kts": 12, "status": "active", "mode": "loop", "route": routes["SEA-C2-01"]},
-            {"at_sec": 2400, "behavior": "fire_position_transit", "label": "向舰载火力机动区转场", "speed_kts": 14, "status": "active", "mode": "hold", "route": [{"lat": 20.22, "lng": 122.26, "label": "FIRE-AREA-INGRESS"}, {"lat": 20.24, "lng": 122.25, "label": "SEA-FIRE-POSITION"}]},
-            {"at_sec": 2700, "behavior": "fire_area_patrol", "label": "发射阵位低速巡逻", "speed_kts": 8, "status": "active", "mode": "loop", "route": [{"lat": 20.25, "lng": 122.24, "label": "FIRE-PATROL-NORTH"}, {"lat": 20.23, "lng": 122.22, "label": "FIRE-PATROL-WEST"}, {"lat": 20.21, "lng": 122.24, "label": "FIRE-PATROL-SOUTH"}]},
+            _phase(0, "maritime_command_patrol", "海上指挥区低速巡逻", 12, routes["SEA-C2-01"], mode="loop"),
+            _phase(2100, "intelligence_fusion_cycle", "保持既有指挥巡逻航线，汇集多源观测、航迹与网络状态并完成校验", 10, routes["SEA-C2-01"], mode="loop", preserve_route=True),
+            _phase(2280, "datalink_distribution_cycle", "保持连续航向，向歼-16与攻击无人机分发带时标的数据链产品", 10, routes["SEA-C2-01"], mode="loop", preserve_route=True),
+            _phase(2400, "fire_position_transit", "向舰载火力机动区转场", 14, [{"lat": 20.22, "lng": 122.26, "label": "FIRE-AREA-INGRESS"}, {"lat": 20.24, "lng": 122.25, "label": "SEA-FIRE-POSITION"}]),
+            _phase(2700, "fire_area_patrol", "发射阵位低速巡逻", 8, [{"lat": 20.25, "lng": 122.24, "label": "FIRE-PATROL-NORTH"}, {"lat": 20.23, "lng": 122.22, "label": "FIRE-PATROL-WEST"}, {"lat": 20.21, "lng": 122.24, "label": "FIRE-PATROL-SOUTH"}], mode="loop"),
         ],
         "WZ10-01": [
-            {"at_sec": 0, "behavior": "airborne_standby_orbit", "label": "侦察待命区标准盘旋", "speed_kts": 175, "status": "active", "mode": "loop", "route": routes["WZ10-01"]},
-            {"at_sec": 600, "behavior": "sar_search_pattern", "label": "SAR搜索航线", "speed_kts": 195, "status": "active", "mode": "loop", "route": [{"lat": 20.45, "lng": 122.19, "label": "SAR-INGRESS"}, {"lat": 20.58, "lng": 122.07, "label": "RECON-NORTH"}, {"lat": 20.50, "lng": 121.89, "label": "SAR-WEST"}, {"lat": 20.34, "lng": 121.97, "label": "SAR-SOUTH"}, {"lat": 20.33, "lng": 122.17, "label": "RECON-EGRESS"}]},
-            {"at_sec": 1320, "behavior": "eo_elint_standoff_orbit", "label": "光电/电子侦察侧视盘旋", "speed_kts": 165, "status": "active", "mode": "loop", "route": [{"lat": 20.53, "lng": 122.14, "label": "EO-NORTH"}, {"lat": 20.43, "lng": 122.18, "label": "EO-EAST"}, {"lat": 20.34, "lng": 122.10, "label": "ELINT-SOUTH"}, {"lat": 20.39, "lng": 121.99, "label": "ELINT-WEST"}]},
-            {"at_sec": 4200, "behavior": "post_strike_bda_pattern", "label": "攻击后SAR复查航线", "speed_kts": 185, "status": "active", "mode": "loop", "route": [{"lat": 20.38, "lng": 122.14, "label": "BDA-EAST"}, {"lat": 20.51, "lng": 122.12, "label": "BDA-NORTH"}, {"lat": 20.57, "lng": 121.98, "label": "BDA-OVERLOOK"}, {"lat": 20.45, "lng": 121.83, "label": "BDA-WEST"}]},
+            _phase(0, "airborne_standby_orbit", "侦察待命区标准盘旋", 175, routes["WZ10-01"], mode="loop"),
+            _phase(600, "sar_search_pattern", "SAR搜索航线", 195, [{"lat": 20.45, "lng": 122.19, "label": "SAR-INGRESS"}, {"lat": 20.58, "lng": 122.07, "label": "RECON-NORTH"}, {"lat": 20.50, "lng": 121.89, "label": "SAR-WEST"}, {"lat": 20.34, "lng": 121.97, "label": "SAR-SOUTH"}, {"lat": 20.33, "lng": 122.17, "label": "RECON-EGRESS"}], mode="loop"),
+            # 光电/电子侦察侧视驻留从光电捕获任务窗口打开的 T+1440 起接管。盘旋
+            # 全程保持在目标的**海侧**：先内收至 3.95 海里阵位（实测 T+1500 光电
+            # 捕获时地面距离 4.75 海里、俯仰 39.75°）完成外形复核，再外推至东侧
+            # 13 海里阵位（实测 T+1680 测向时地面距离 9.93 海里、俯仰 21.68°）完成
+            # 被动电子侦察，随后沿海侧驻留环稳定盘旋，覆盖识别、融合、目标分配
+            # 与武器链建立，直到武器命中前不再改变观测几何。
+            _phase(1440, "eo_elint_standoff_orbit", "光电/电子侦察侧视盘旋", 165, _floor_standoff_orbit(), mode="loop"),
+            # 攻击完成后脱离侦察驻留环，沿其北侧外推，经 SAR 往返航路北端的转向边
+            # 切入条带；转场本身就是进入复查条带的航路，不放空程，也不产生回头。
+            _phase(4200, "bda_run_in_transit", "转入攻击后目标区复查航路", 210, _bda_run_in_route(), mode="loop"),
+            # 毁伤评估窗口打开后沿与海岸线近乎平行的 SAR 条带南向通过目标区，全程
+            # 保持约 10—11 海里的侧视斜距和不变的俯仰角，保证攻击前后两帧取自同一
+            # 观测几何（实测 T+4500 地面距离 11.04 海里、俯仰 18.11°）。
+            _phase(4440, "post_strike_bda_pattern", "攻击后SAR复查航线", 185, _bda_swath_route(), mode="loop"),
         ],
         "J16-01": [
-            {"at_sec": 0, "behavior": "combat_air_patrol", "label": "高空战斗空中巡逻待命", "speed_kts": 300, "status": "active", "mode": "loop", "route": routes["J16-01"]},
-            {"at_sec": 2100, "behavior": "airborne_tactical_command", "label": "空中战术指挥盘旋", "speed_kts": 330, "status": "active", "mode": "loop", "route": [{"lat": 20.60, "lng": 122.31, "label": "COMMAND-NORTH"}, {"lat": 20.52, "lng": 122.22, "label": "COMMAND-WEST"}, {"lat": 20.42, "lng": 122.30, "label": "COMMAND-SOUTH"}, {"lat": 20.49, "lng": 122.44, "label": "COMMAND-EAST"}]},
-            {"at_sec": 3000, "behavior": "standoff_strike_hold", "label": "防区外攻击等待航线", "speed_kts": 360, "status": "active", "mode": "loop", "route": [{"lat": 20.50, "lng": 122.25, "label": "AIR-RELEASE-LINE"}, {"lat": 20.44, "lng": 122.30, "label": "STRIKE-HOLD-SOUTH"}, {"lat": 20.51, "lng": 122.40, "label": "STRIKE-HOLD-EAST"}]},
+            _phase(0, "combat_air_patrol", "高空战斗空中巡逻待命", 300, routes["J16-01"], mode="loop"),
+            # T+2100 接收海上任务级指令（CJR-LINK-C2-J16 的开链时刻），转场至战术
+            # 指挥阵位并持续跟踪地面接触，为 T+2700 接管空中战术指挥做准备。
+            _phase(2100, "airborne_tactical_command", "接收任务级指令并转场至战术指挥阵位", 310, [{"lat": 20.49, "lng": 122.27, "label": "TACTICAL-CMD-STATION-W"}, {"lat": 20.66, "lng": 122.34, "label": "TACTICAL-CMD-STATION-N"}, {"lat": 20.54, "lng": 122.50, "label": "TACTICAL-CMD-STATION-E"}, {"lat": 20.38, "lng": 122.38, "label": "TACTICAL-CMD-STATION-S"}], mode="loop"),
+            # T+2700 与 CJR-CUE-06 对齐：正式接管空中战术指挥，并向攻击无人机
+            # 01、02 分配北、南两条突入航路。航路首点与上一相位共点，转场无回头。
+            _phase(2700, "tactical_command_and_weapon_assignment", "保持战术指挥跑道并向攻击无人机01、02分配南北突入航路", 310, [], mode="loop", preserve_route=True),
+            _phase(3000, "standoff_strike_hold", "防区外攻击等待航线", 300, [{"lat": 20.50, "lng": 122.25, "label": "AIR-RELEASE-LINE"}, {"lat": 20.68, "lng": 122.42, "label": "STRIKE-HOLD-NORTH"}, {"lat": 20.48, "lng": 122.55, "label": "STRIKE-HOLD-EAST"}, {"lat": 20.33, "lng": 122.38, "label": "STRIKE-HOLD-SOUTH"}], mode="loop"),
         ],
         "ATTACK-UAV-01": [
-            {"at_sec": 0, "behavior": "deck_standby", "label": "保障舰甲板待命", "speed_kts": 0, "status": "staged", "mode": "hold", "route": []},
-            {"at_sec": 2400, "behavior": "north_axis_ingress", "label": "北路低空突入", "speed_kts": 130, "status": "active", "mode": "hold", "route": [{"lat": 20.19, "lng": 122.23, "label": "NORTH-INGRESS-1"}, {"lat": 20.26, "lng": 122.15, "label": "NORTH-INGRESS-2"}, {"lat": 20.34, "lng": 122.06, "label": "NORTH-RELEASE-STATION"}]},
-            {"at_sec": 3000, "behavior": "north_release_station_orbit", "label": "北路释放阵位盘旋", "speed_kts": 95, "status": "active", "mode": "loop", "route": [{"lat": 20.34, "lng": 122.06, "label": "NORTH-RELEASE-STATION"}, {"lat": 20.36, "lng": 122.09, "label": "NORTH-HOLD-NE"}, {"lat": 20.32, "lng": 122.11, "label": "NORTH-HOLD-SE"}, {"lat": 20.30, "lng": 122.07, "label": "NORTH-HOLD-SW"}]},
+            _phase(0, "deck_standby", "保障舰甲板待命", 0, [], status="staged"),
+            _phase(2400, "north_axis_ingress", "北路低空突入", 130, [{"lat": 20.19, "lng": 122.23, "label": "NORTH-INGRESS-1"}, {"lat": 20.26, "lng": 122.15, "label": "NORTH-INGRESS-2"}, {"lat": 20.34, "lng": 122.06, "label": "NORTH-RELEASE-STATION"}]),
+            _phase(3000, "north_release_station_orbit", "北路释放阵位长航段待命", 95, [{"lat": 20.34, "lng": 122.06, "label": "NORTH-RELEASE-STATION"}, {"lat": 20.48, "lng": 122.10, "label": "NORTH-HOLD-NORTH"}, {"lat": 20.55, "lng": 122.04, "label": "NORTH-HOLD-NORTHWEST"}, {"lat": 20.43, "lng": 122.16, "label": "NORTH-HOLD-EAST"}], mode="loop"),
         ],
         "ATTACK-UAV-02": [
-            {"at_sec": 0, "behavior": "deck_standby", "label": "保障舰甲板待命", "speed_kts": 0, "status": "staged", "mode": "hold", "route": []},
-            {"at_sec": 2460, "behavior": "south_axis_ingress", "label": "南路低空突入", "speed_kts": 130, "status": "active", "mode": "hold", "route": [{"lat": 20.14, "lng": 122.28, "label": "SOUTH-INGRESS-1"}, {"lat": 20.27, "lng": 122.14, "label": "SOUTH-INGRESS-2"}, {"lat": 20.38, "lng": 122.09, "label": "SOUTH-RELEASE-STATION"}]},
-            {"at_sec": 3000, "behavior": "south_release_station_orbit", "label": "南路释放阵位盘旋", "speed_kts": 95, "status": "active", "mode": "loop", "route": [{"lat": 20.38, "lng": 122.09, "label": "SOUTH-RELEASE-STATION"}, {"lat": 20.40, "lng": 122.12, "label": "SOUTH-HOLD-NE"}, {"lat": 20.36, "lng": 122.14, "label": "SOUTH-HOLD-SOUTH"}, {"lat": 20.34, "lng": 122.10, "label": "SOUTH-HOLD-SW"}]},
+            _phase(0, "deck_standby", "保障舰甲板待命", 0, [], status="staged"),
+            _phase(2460, "south_axis_ingress", "南路低空突入", 130, [{"lat": 20.14, "lng": 122.28, "label": "SOUTH-INGRESS-1"}, {"lat": 20.27, "lng": 122.14, "label": "SOUTH-INGRESS-2"}, {"lat": 20.38, "lng": 122.09, "label": "SOUTH-RELEASE-STATION"}]),
+            _phase(3000, "south_release_station_orbit", "南路释放阵位长航段待命", 95, [{"lat": 20.38, "lng": 122.09, "label": "SOUTH-RELEASE-STATION"}, {"lat": 20.27, "lng": 122.05, "label": "SOUTH-HOLD-SOUTHWEST"}, {"lat": 20.34, "lng": 122.16, "label": "SOUTH-HOLD-EAST"}, {"lat": 20.49, "lng": 122.14, "label": "SOUTH-HOLD-NORTH"}], mode="loop"),
         ],
     }
     extra_devices = [
@@ -277,7 +457,7 @@ def build_coastal_joint_recon_strike_scenario() -> dict[str, Any]:
         "description": "验证两颗低轨侦察卫星接力过境、通信卫星持续中继、情报产品时效管理、单机侦察、海上任务指挥、空中战术指挥、四节点协同武器链、人工授权、分路撤离和毁伤评估闭环。",
         "scenario_type": "scripted_agent_demo",
         "theater": {"theater_id": "bashi_channel_adjacent_joint_training", "name": "台湾南部—菲律宾北部毗邻海域虚构联合训练区", "location_profile": "fictional_training_area", "center": {"lat": 20.49, "lng": 122.13}, "zoom": 8, "ao": {"north": 21.06, "south": 20.01, "east": 122.93, "west": 121.07}},
-        "map_display": {"relief_manifest": "/static/assets/maps/taiwan-se-relief/manifest.json", "default_layers": {"sensors": False, "ao": True, "coordination": False}, "track_style": "tactical_joint", "base_surface": "coastal", "focus_bounds": {"north": 22.10, "south": 19.70, "east": 122.80, "west": 120.80}, "exclude_domains_from_focus": ["space"], "space_node_asset_ids": ["SAT-COM-01"], "space_visual_speed_factor": 0.035, "space_ground_tracks": [{"asset_id": "SAT-RECON-01", "label": "侦察卫星01预测星下轨迹", "access_start_sec": 240, "access_end_sec": 600, "color": "#9eb2c8", "points": [{"lat": 20.12, "lng": 121.12}, {"lat": 20.30, "lng": 121.55}, {"lat": 20.45, "lng": 121.98}, {"lat": 20.68, "lng": 122.38}]}, {"asset_id": "SAT-RECON-02", "label": "侦察卫星02接力星下轨迹", "access_start_sec": 1680, "access_end_sec": 2040, "color": "#9da7bf", "points": [{"lat": 20.04, "lng": 121.24}, {"lat": 20.22, "lng": 121.66}, {"lat": 20.43, "lng": 122.04}, {"lat": 20.72, "lng": 122.46}]}], "trail_window_sec": 480, "track_trail_window_sec": 600, "label_asset_ids": ["SEA-C2-01", "WZ10-01", "J16-01", "ATTACK-UAV-01", "ATTACK-UAV-02"], "trail_asset_ids": ["WZ10-01", "J16-01", "ATTACK-UAV-01", "ATTACK-UAV-02"]},
+        "map_display": {"relief_manifest": "/static/assets/maps/taiwan-se-relief/manifest.json", "default_layers": {"sensors": False, "ao": True, "coordination": True}, "coordination_link_types": ["weapon"], "track_style": "tactical_joint", "base_surface": "coastal", "focus_bounds": {"north": 22.10, "south": 19.70, "east": 122.80, "west": 120.80}, "exclude_domains_from_focus": ["space"], "space_node_asset_ids": ["SAT-COM-01"], "space_visual_speed_factor": 0.035, "space_ground_tracks": [{"asset_id": "SAT-RECON-01", "label": "侦察卫星01完整星下轨迹", "access_start_sec": 240, "access_end_sec": 600, "color": "#9eb2c8", "points": [dict(point) for point in orbital_tracks["SAT-RECON-01"]]}, {"asset_id": "SAT-RECON-02", "label": "侦察卫星02完整接力星下轨迹", "access_start_sec": 1680, "access_end_sec": 2040, "color": "#9da7bf", "points": [dict(point) for point in orbital_tracks["SAT-RECON-02"]]}], "trail_window_sec": 240, "track_trail_window_sec": 360, "label_asset_ids": ["SAT-RECON-01", "SAT-RECON-02", "SEA-C2-01", "WZ10-01", "J16-01", "ATTACK-UAV-01", "ATTACK-UAV-02"], "trail_asset_ids": ["WZ10-01", "J16-01", "ATTACK-UAV-01", "ATTACK-UAV-02"]},
         "space_operations": {
             "title": "空天支援 · 双星接力",
             "relay": {"asset_id": "SAT-COM-01", "label": "通信中继在线"},
@@ -307,6 +487,16 @@ def build_coastal_joint_recon_strike_scenario() -> dict[str, Any]:
             "ATTACK-UAV-01": {"visible_from_sec": 2400},
             "ATTACK-UAV-02": {"visible_from_sec": 2460},
         },
+        # 剧本一靠"后端确认 + 操作员授权"才把侦察机重新指派到融合航迹上；
+        # 剧本二原本只有开环定时器。这里补上同构的复访任务：只有岸基阵地被后端
+        # 本剧本不为无侦-10 配置 asset_follow_tasks。引擎在 weapon release 时会
+        # 把**所有**声明 requires_operator_authorization 的跟踪任务视为已授权
+        # （那是剧本一"操作员只确认一次交战动作、随后的评估机属于同一授权"
+        # 的语义），因此在这里声明跟踪任务会让无侦-10 在 T+3300 武器链建立的
+        # 那一刻脱离时间线航路，抢占 post_bda_routes 的返航/复查航路，出现
+        # "行为标签写着攻击后复查、轨迹却在抵近驻留"的自相矛盾。
+        # 无侦-10 的反应式行为改由 threat.behavior_script 与 engagement_policy
+        # 的 post_launch/post_bda 航路承担（见下）。
         "asset_profiles": asset_profiles(assets),
         "physical_devices": physical_devices(assets, extra_devices),
         "compute_nodes": compute_nodes,
@@ -343,7 +533,7 @@ def build_coastal_joint_recon_strike_scenario() -> dict[str, Any]:
         "timeline": timeline,
         "media_cues": bind_media_consumers(_media_cues(), timeline),
         "cover_media_id": "CJR-MEDIA-00",
-        "demo_controls": {"recommended_speed": 8, "duration_sec": 5100, "auto_agent_interval_sec": 600, "show_truth": False, "latest_visual_only": True, "auto_stop": True, "advance_while_analyzing": True},
+        "demo_controls": {"recommended_speed": 32, "duration_sec": 5100, "auto_agent_interval_sec": 600, "show_truth": False, "latest_visual_only": True, "auto_stop": True, "advance_while_analyzing": True},
         "default_seed": 61023,
         "supported_modes": ["integration", "demonstration"],
         "functional_agents": scenario_agents(),
@@ -366,7 +556,10 @@ def build_coastal_joint_recon_strike_scenario() -> dict[str, Any]:
             {"checkpoint_id": "CJR-CP-FUSION", "title": "情报融合与共享输入就绪", "min_elapsed_sec": 2130, "conditions": {"stable_track_count_at_least": 1, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["CJR-MEDIA-03", "CJR-MEDIA-10"]}, "pause": True, "submit_analysis": True},
             {"checkpoint_id": "CJR-CP-PLAN", "title": "战术指挥与协同方案输入就绪", "min_elapsed_sec": 2730, "conditions": {"stable_track_count_at_least": 1, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["CJR-MEDIA-03", "CJR-MEDIA-10"]}, "pause": True, "submit_analysis": True},
             {"checkpoint_id": "CJR-CP-ENGAGE", "title": "协同武器链等待明确授权", "min_elapsed_sec": 3330, "conditions": {"media_ids_released": ["CJR-MEDIA-06", "CJR-MEDIA-08", "CJR-MEDIA-09"]}, "pause": True, "submit_analysis": True, "requires_operator_action": True},
-            {"checkpoint_id": "CJR-CP-CLOSE", "title": "毁伤评估与闭环建议就绪", "min_elapsed_sec": 4530, "conditions": {"media_ids_released": ["CJR-MEDIA-07"]}, "pause": True, "submit_analysis": True, "requires_operator_action": True},
+            # 收尾检查点只承载复核结果，不得再次进入 FIRE 授权状态。否则首轮
+            # 齐射已经核销后不存在 eligible track，前端没有可展示目标，导演却会
+            # 永久等待一个不可能出现的第二个攻击弹窗。
+            {"checkpoint_id": "CJR-CP-CLOSE", "title": "毁伤评估与闭环建议就绪", "min_elapsed_sec": 4530, "conditions": {"media_ids_released": ["CJR-MEDIA-07"], "event_types_emitted": ["damage_assessment_confirmed"]}, "pause": True, "submit_analysis": True, "requires_operator_action": True, "operator_action_type": "review"},
         ],
         "fault_injections": [
             {"fault_id": "CJR-FAULT-LINK", "type": "communication_degradation", "target": "J16-01", "at_checkpoint": "CJR-CP-PLAN", "status": "available"},

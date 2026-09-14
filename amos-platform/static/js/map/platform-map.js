@@ -18,6 +18,7 @@ window.PlatformMap = (function () {
   var coordinationLayers = {};
   var protectedLayers = [];
   var spaceGroundTrackLayers = [];
+  var spaceGroundTrackConfigs = {};
   var spaceOperationsElement = null;
   var sensorLayerSignatures = {};
   var sensorPoseSignatures = {};
@@ -48,44 +49,66 @@ window.PlatformMap = (function () {
     if (!map) return;
     if (baseMapLayer) map.removeLayer(baseMapLayer);
     if (mapDetailLayer) map.removeLayer(mapDetailLayer);
+    if (terrainDetailLayer) map.removeLayer(terrainDetailLayer);
+    terrainDetailLayer = null;
+    mapDetailLayer = null;
+    // Keep geographic labels above the relief so terrain never dims the text.
+    var palette = {
+      sea: "#426d82", land: "#9caa98", coast: "#c0d0bc",
+      city_label: "#233e39", city_label_halo: "#c7d1bf",
+      country_label: "#2b443f", ocean_label: "#c1dce6",
+      state_label: "#354c44", state_label_halo: "#c7d1bf",
+      roads_label_major: "#354c44", roads_label_major_halo: "#c7d1bf",
+      roads_label_minor: "#40554b", roads_label_minor_halo: "#c7d1bf",
+    };
     var options = {
       url: "/static/tiles/taiwan-southeast-tactical.pmtiles",
-      lang: "zh",
-      minZoom: 5,
-      // Fetch only bundled z9 data, but redraw vectors at the display zoom.
-      // Leaflet maxNativeZoom would enlarge rasterized labels as well.
-      maxDataZoom: 9,
-      maxZoom: 14,
-      noWrap: true,
+      // The renderer otherwise reads z-1 and enlarges less detailed geometry.
+      lang: "zh", minZoom: 5, levelDiff: 0,
+      maxDataZoom: 9, maxZoom: 14, noWrap: true,
       attribution: 'Protomaps · © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     };
-    baseMapLayer = L.tileLayer("/static/tiles/natural-terrain/{z}/{x}/{y}.webp?v=20260911a", {
-      minZoom: 5, maxNativeZoom: 9, maxZoom: 14,
-      bounds: [[8, 105], [35, 135]], noWrap: true,
-      attribution: '<a href="https://www.naturalearthdata.com/">Natural Earth II</a>',
-    }).addTo(map);
-    if (terrainDetailLayer) map.removeLayer(terrainDetailLayer);
-    terrainDetailLayer = L.tileLayer("/static/tiles/natural-terrain/detail/{z}/{x}/{y}.webp?v=20260911a", {
-      minZoom: 8, maxNativeZoom: 11, maxZoom: 14,
-      bounds: [[17, 119], [25, 124]], noWrap: true,
-      attribution: '<a href="https://registry.opendata.aws/terrain-tiles/">Mapzen Terrain</a> · USGS · NOAA/NCEI',
+    baseMapLayer = protomapsL.leafletLayer(Object.assign({}, options, {
+      backgroundColor: palette.sea,
+      paintRules: [
+        {dataLayer: "earth", symbolizer: new protomapsL.PolygonSymbolizer({fill: palette.land})},
+        {dataLayer: "landuse", minzoom: 8,
+          symbolizer: new protomapsL.PolygonSymbolizer({fill: "#708e7e", opacity: 0.24}),
+          filter: function (zoom, feature) {
+            return ["forest", "wood", "national_park", "nature_reserve", "park"].indexOf(feature.props.kind) !== -1;
+          }},
+        {dataLayer: "water", symbolizer: new protomapsL.PolygonSymbolizer({fill: palette.sea}),
+          filter: function (zoom, feature) { return feature.geomType === 3; }},
+        {dataLayer: "water", minzoom: 8,
+          symbolizer: new protomapsL.LineSymbolizer({color: "#668d9e", width: 0.7, opacity: 0.5}),
+          filter: function (zoom, feature) { return feature.geomType === 2; }},
+        {dataLayer: "water", symbolizer: new protomapsL.LineSymbolizer({color: palette.coast, width: 0.7, opacity: 0.45}),
+          filter: function (zoom, feature) { return feature.geomType === 3; }},
+        {dataLayer: "roads", minzoom: 8,
+          symbolizer: new protomapsL.LineSymbolizer({color: "#e0e4cc", width: 0.85, opacity: 0.65}),
+          filter: function (zoom, feature) {
+            return ["highway", "major_road", "medium_road"].indexOf(feature.props.kind) !== -1;
+          }},
+        {dataLayer: "boundaries",
+          symbolizer: new protomapsL.LineSymbolizer({color: "#c7d7ca", width: 0.8, opacity: 0.26})},
+      ],
+      labelRules: [],
+    })).addTo(map);
+    var labels = protomapsL.labelRules(palette, "zh");
+    labels.forEach(function (rule) {
+      if (rule.dataLayer === "places" && rule.minzoom === 9) {
+        rule.symbolizer = new protomapsL.CenteredTextSymbolizer({
+          labelProps: ["name:zh", "name"], font: '400 12px "Microsoft YaHei", sans-serif',
+          fill: palette.city_label, stroke: palette.city_label_halo, width: 0.65,
+        });
+      }
     });
     mapDetailLayer = protomapsL.leafletLayer(Object.assign({}, options, {
-      pane: "mapDetailPane",
-      paintRules: [], labelRules: [{
-        dataLayer: "places",
-        symbolizer: new protomapsL.CenteredTextSymbolizer({
-          labelProps: ["name:zh", "name"], font: '500 11px "Microsoft YaHei", sans-serif',
-          fill: "#e0e6db", stroke: "#2b403f", width: 2,
-        }),
-      }],
+      pane: "mapDetailPane", attribution: "", paintRules: [], labelRules: labels,
     }));
     if (mapLabelsVisible) mapDetailLayer.addTo(map);
-    if (baseMapLayer.bringToBack) baseMapLayer.bringToBack();
-    var container = map.getContainer();
-    container.classList.add("map-style-natural");
-    document.documentElement.setAttribute("data-map-style", "natural");
-    updateNaturalTerrain();
+    map.getContainer().classList.remove("map-style-natural");
+    document.documentElement.setAttribute("data-map-style", "clear-vector");
   }
 
   function updateNaturalTerrain() {
@@ -295,8 +318,12 @@ window.PlatformMap = (function () {
   }
 
   function renderSpaceGroundTracks(tracks) {
-    spaceGroundTrackLayers.forEach(removeLayer);
+    spaceGroundTrackLayers.forEach(function (layers) {
+      removeLayer(layers.planned);
+      removeLayer(layers.completed);
+    });
     spaceGroundTrackLayers = [];
+    spaceGroundTrackConfigs = {};
     (tracks || []).forEach(function (track) {
       var points = (track.points || []).map(function (point) {
         return [Number(point.lat), Number(point.lng == null ? point.lon : point.lng)];
@@ -304,32 +331,120 @@ window.PlatformMap = (function () {
         return Number.isFinite(point[0]) && Number.isFinite(point[1]);
       });
       if (points.length < 2) return;
-      var line = L.polyline(points, {
+      var plannedLine = L.polyline(points, {
         color: track.color || "#ad9fc5",
         weight: Number(track.weight || 1.1),
         opacity: Number(track.opacity == null ? 0.30 : track.opacity),
         dashArray: track.dash_array || "5 9",
         interactive: true,
       }).addTo(map);
-      line.bindTooltip(escapeHtml(track.label || "卫星预测星下轨迹"), {sticky: true});
-      line._amosTrackConfig = track;
-      spaceGroundTrackLayers.push(line);
+      var completedLine = L.polyline([], {
+        color: track.active_color || "#bde8ff",
+        weight: Number(track.completed_weight || 2.2),
+        opacity: 0,
+        interactive: false,
+      }).addTo(map);
+      plannedLine.bindTooltip(escapeHtml(track.label || "卫星完整星下轨迹"), {sticky: true});
+      spaceGroundTrackLayers.push({planned: plannedLine, completed: completedLine, track: track});
+      if (track.asset_id) spaceGroundTrackConfigs[String(track.asset_id)] = track;
     });
+  }
+
+  function spaceGroundTrackProgress(track, elapsedSec) {
+    var sourcePoints = track && track.points || [];
+    var points = sourcePoints.map(function (point) {
+      var value = position(point);
+      return [value.lat, value.lng];
+    }).filter(function (point) {
+      return Number.isFinite(point[0]) && Number.isFinite(point[1]);
+    });
+    if (!track || points.length < 2) return null;
+    var start = Number(track.access_start_sec || 0);
+    var end = Number(track.access_end_sec || start);
+    if (end <= start) return null;
+    var pointTimes = sourcePoints.map(function (point) { return Number(point.at_sec); });
+    var usesPointTimes = pointTimes.length === points.length && pointTimes.every(function (value, index) {
+      return Number.isFinite(value) && (index === 0 || value > pointTimes[index - 1]);
+    });
+    if (usesPointTimes) {
+      if (Number(elapsedSec) <= pointTimes[0]) {
+        return {position: {lat: points[0][0], lng: points[0][1]}, completed: [points[0]]};
+      }
+      for (var timedIndex = 1; timedIndex < points.length; timedIndex += 1) {
+        if (Number(elapsedSec) <= pointTimes[timedIndex]) {
+          var timedFraction = Math.max(0, Math.min(1,
+            (Number(elapsedSec) - pointTimes[timedIndex - 1]) /
+            (pointTimes[timedIndex] - pointTimes[timedIndex - 1])
+          ));
+          var timedFrom = points[timedIndex - 1];
+          var timedTo = points[timedIndex];
+          var timedCurrent = [
+            timedFrom[0] + (timedTo[0] - timedFrom[0]) * timedFraction,
+            timedFrom[1] + (timedTo[1] - timedFrom[1]) * timedFraction,
+          ];
+          return {
+            position: {lat: timedCurrent[0], lng: timedCurrent[1]},
+            completed: points.slice(0, timedIndex).concat([timedCurrent]),
+          };
+        }
+      }
+      return {
+        position: {lat: points[points.length - 1][0], lng: points[points.length - 1][1]},
+        completed: points,
+      };
+    }
+    var progress = Math.max(0, Math.min(1, (Number(elapsedSec) - start) / (end - start)));
+    var lengths = [];
+    var total = 0;
+    for (var index = 1; index < points.length; index += 1) {
+      var length = trailDistanceNm(points[index - 1], points[index]);
+      lengths.push(length);
+      total += length;
+    }
+    var remaining = total * progress;
+    var completed = [points[0]];
+    for (var segmentIndex = 0; segmentIndex < lengths.length; segmentIndex += 1) {
+      var segmentLength = lengths[segmentIndex];
+      if (remaining <= segmentLength || segmentIndex === lengths.length - 1) {
+        var fraction = segmentLength > 1e-9 ? Math.min(1, remaining / segmentLength) : 1;
+        var from = points[segmentIndex];
+        var to = points[segmentIndex + 1];
+        var current = [
+          from[0] + (to[0] - from[0]) * fraction,
+          from[1] + (to[1] - from[1]) * fraction,
+        ];
+        if (fraction > 1e-6) completed.push(current);
+        return {position: {lat: current[0], lng: current[1]}, completed: completed};
+      }
+      remaining -= segmentLength;
+      completed.push(points[segmentIndex + 1]);
+    }
+    return {
+      position: {lat: points[points.length - 1][0], lng: points[points.length - 1][1]},
+      completed: points,
+    };
   }
 
   function updateSpaceGroundTracks(elapsedSec) {
     var elapsed = Math.max(0, Number(elapsedSec || 0));
-    spaceGroundTrackLayers.forEach(function (line) {
-      var track = line._amosTrackConfig || {};
+    spaceGroundTrackLayers.forEach(function (layers) {
+      var track = layers.track || {};
       var state = spacePassState(track, elapsed);
       var active = state.phase === "active";
-      line.setStyle({
+      var progress = spaceGroundTrackProgress(track, elapsed);
+      layers.planned.setStyle({
         color: track.color || "#9bacc2",
         weight: active ? Number(track.active_weight || 1.8) : Number(track.weight || 1.0),
-        opacity: active ? Number(track.active_opacity || 0.48) : Number(track.opacity == null ? 0.16 : track.opacity),
+        opacity: active ? Number(track.active_opacity || 0.42) : Number(track.opacity == null ? 0.16 : track.opacity),
         dashArray: active ? (track.active_dash_array || "5 7") : (track.dash_array || "3 10"),
       });
-      line.setTooltipContent(escapeHtml(track.label || "卫星预测星下轨迹") + " · " + escapeHtml(state.label));
+      layers.completed.setLatLngs(progress ? progress.completed : []);
+      layers.completed.setStyle({
+        color: track.active_color || "#bde8ff",
+        weight: active ? Number(track.completed_weight || 2.2) : Number(track.completed_weight || 2.2) - 0.5,
+        opacity: state.phase === "scheduled" ? 0 : (active ? 0.88 : 0.42),
+      });
+      layers.planned.setTooltipContent(escapeHtml(track.label || "卫星完整星下轨迹") + " · " + escapeHtml(state.label));
     });
   }
 
@@ -362,8 +477,28 @@ window.PlatformMap = (function () {
     return {color: "#8eabb3", opacity: 0.25, weight: 1.15, dashArray: "2 6", points: 60, smooth: false};
   }
 
-  function visualAssetPosition(marker, asset, actual) {
+  function interpolateSpaceGroundTrack(assetId, elapsedSec) {
+    var track = spaceGroundTrackConfigs[String(assetId || "")];
+    if (!track) return null;
+    var start = Number(track.access_start_sec || 0);
+    var end = Number(track.access_end_sec || start);
+    if (elapsedSec < start || elapsedSec > end || end <= start) return null;
+    var progress = spaceGroundTrackProgress(track, elapsedSec);
+    return progress && progress.position;
+  }
+
+  function visualAssetPosition(marker, asset, actual, elapsedSec) {
     if (!marker || String(asset.domain || "") !== "space") return actual;
+    // A LEO platform crosses the local theater much faster than the 2 Hz UI
+    // stream.  Drive its displayed sub-satellite point from the declared
+    // access window so it enters at the first edge point, traverses the whole
+    // predicted track, and exits at the opposite edge instead of first
+    // flashing wherever the latest backend sample happened to land.
+    var planned = interpolateSpaceGroundTrack(asset.id || asset.asset_id, Number(elapsedSec || 0));
+    if (planned) {
+      marker._amosActualPosition = {lat: actual.lat, lng: actual.lng};
+      return planned;
+    }
     var factor = Number(scenarioView && scenarioView.spaceVisualSpeedFactor);
     if (!Number.isFinite(factor)) factor = 1;
     factor = Math.max(0.01, Math.min(1, factor));
@@ -581,7 +716,7 @@ window.PlatformMap = (function () {
     window.setTimeout(function () {
       removeLayer(layer);
       delete weaponImpactLayers[weaponId];
-    }, 1700);
+    }, 3200);
   }
 
   function updateDestroyedImpactMarkers(events, destroyedTrackIds) {
@@ -624,12 +759,23 @@ window.PlatformMap = (function () {
       marker.setIcon(icon(kind, heading, actualSize));
       marker._amosIconKind = kind;
       marker._amosIconSize = actualSize;
+      marker._amosRenderedHeading = Number(heading || 0);
       return;
     }
     var element = marker.getElement && marker.getElement();
     var symbolBody = element && element.querySelector(".symbol-body");
     if (symbolBody) {
-      symbolBody.setAttribute("transform", "rotate(" + Number(heading || 0) + " 28 28)");
+      var normalized = ((Number(heading || 0) % 360) + 360) % 360;
+      var rendered = Number(marker._amosRenderedHeading);
+      if (!Number.isFinite(rendered)) rendered = normalized;
+      var previousNormalized = ((rendered % 360) + 360) % 360;
+      var delta = (normalized - previousNormalized + 540) % 360 - 180;
+      rendered += delta;
+      marker._amosRenderedHeading = rendered;
+      // Keep an unwrapped angle (for example 361 instead of 1 after 359).
+      // CSS otherwise animates across the long 358-degree arc and the symbol
+      // appears to spin in place at north-crossing headings.
+      symbolBody.setAttribute("transform", "rotate(" + rendered + " 28 28)");
     }
   }
 
@@ -938,7 +1084,10 @@ window.PlatformMap = (function () {
     removeCollection(trackTrails);
     removeCollection(coordinationLayers);
     protectedLayers.forEach(removeLayer);
-    spaceGroundTrackLayers.forEach(removeLayer);
+    spaceGroundTrackLayers.forEach(function (layers) {
+      removeLayer(layers.planned);
+      removeLayer(layers.completed);
+    });
     clearSensors();
     ownMarkers = {};
     weaponMarkers = {};
@@ -959,20 +1108,22 @@ window.PlatformMap = (function () {
     var theaterRelief = theaterId === "taiwan_southeast_convoy_corridor"
       ? "/static/assets/maps/taiwan-se-relief/manifest.json" : null;
     var configuredRelief = (scenario.map_display || {}).relief_manifest || theaterRelief;
-    // The new XYZ pack already contains shaded terrain and ocean relief.
-    // Do not reload the previous ETOPO overlays when changing scenarios.
+    ["terrain", "hillshade", "contours"].forEach(function (kind) {
+      var button = document.getElementById("btn-toggle-" + kind);
+      if (button) button.disabled = !Boolean(configuredRelief);
+    });
+    if (configuredRelief && configuredRelief !== reliefManifestPath) loadRelief(configuredRelief);
     layerState = Object.assign({
-      terrain: Boolean(configuredRelief),
-      hillshade: Boolean(configuredRelief),
-      contours: Boolean(configuredRelief),
+      // Every scenario opens with the complete offline relief stack. Operators
+      // may still hide individual layers after the scenario has loaded.
+      terrain: true,
+      hillshade: true,
+      contours: true,
       sensors: false,
       coordination: true,
       ao: true,
     },
       (scenario.map_display || {}).default_layers || {});
-    layerState.terrain = false;
-    layerState.hillshade = false;
-    layerState.contours = false;
     scenarioSurface = (scenario.map_display || {}).base_surface || "maritime";
     var theater = scenario.theater || {};
     var center = theater.center || {lat: 23.50, lng: 121.00};
@@ -1001,6 +1152,8 @@ window.PlatformMap = (function () {
       fixedBounds: Boolean(configuredFocus),
       labelAssetIds: Array.isArray(mapDisplay.label_asset_ids) ? mapDisplay.label_asset_ids.slice() : null,
       trailAssetIds: Array.isArray(mapDisplay.trail_asset_ids) ? mapDisplay.trail_asset_ids.slice() : null,
+      coordinationLinkTypes: Array.isArray(mapDisplay.coordination_link_types)
+        ? mapDisplay.coordination_link_types.map(function (value) { return String(value); }) : null,
       trailWindowSec: Math.max(60, Number(mapDisplay.trail_window_sec || 480)),
       trackTrailWindowSec: Math.max(60, Number(mapDisplay.track_trail_window_sec || 600)),
       spaceVisualSpeedFactor: Number(mapDisplay.space_visual_speed_factor == null ? 1 : mapDisplay.space_visual_speed_factor),
@@ -1143,12 +1296,14 @@ window.PlatformMap = (function () {
     var seen = {};
     (links || []).forEach(function (link) {
       var id = String(link.link_id || "");
+      var type = String(link.link_type || "coordination");
+      if (scenarioView && scenarioView.coordinationLinkTypes &&
+          scenarioView.coordinationLinkTypes.indexOf(type) < 0) return;
       var source = position(link.source_position || {});
       var target = position(link.target_position || {});
       if (!id || !Number.isFinite(source.lat) || !Number.isFinite(source.lng) ||
           !Number.isFinite(target.lat) || !Number.isFinite(target.lng)) return;
       seen[id] = true;
-      var type = String(link.link_type || "coordination");
       var style = styles[type] || {color: "#78dce8", dashArray: "6 6", weight: 2};
       var opacity = layerState.coordination ? (link.status === "degraded" ? 0.35 : 0.78) : 0;
       var points = [[source.lat, source.lng], [target.lat, target.lng]];
@@ -1226,15 +1381,18 @@ window.PlatformMap = (function () {
       seenAssets[id] = true;
       if (!ownMarkers[id]) {
         var assetIconSize = ownIconSize(asset);
-        ownMarkers[id] = L.marker([pos.lat, pos.lng], {icon: icon(ownKind(asset), asset.heading, assetIconSize)}).addTo(map);
+        var initialDisplayPosition = String(asset.domain || "") === "space"
+          ? (interpolateSpaceGroundTrack(id, Number(elapsedSec || 0)) || pos) : pos;
+        ownMarkers[id] = L.marker([initialDisplayPosition.lat, initialDisplayPosition.lng], {icon: icon(ownKind(asset), asset.heading, assetIconSize)}).addTo(map);
         ownMarkers[id]._amosIconKind = ownKind(asset);
         ownMarkers[id]._amosIconSize = assetIconSize;
+        ownMarkers[id]._amosRenderedHeading = Number(asset.heading || 0);
         ownMarkers[id]._amosLabelSlot = assetIndex;
         ownMarkers[id]._amosActualPosition = {lat: pos.lat, lng: pos.lng};
         syncOwnLabel(ownMarkers[id], asset);
       } else {
         ownMarkers[id]._amosLabelSlot = assetIndex;
-        moveMarker(ownMarkers[id], visualAssetPosition(ownMarkers[id], asset, pos));
+        moveMarker(ownMarkers[id], visualAssetPosition(ownMarkers[id], asset, pos, elapsedSec));
         updateMarkerIcon(ownMarkers[id], ownKind(asset), asset.heading, ownIconSize(asset));
         syncOwnLabel(ownMarkers[id], asset);
       }
@@ -1394,10 +1552,8 @@ window.PlatformMap = (function () {
 
   function applyLayerVisibility(name) {
     if (!name || name === "terrain" || name === "hillshade" || name === "contours") {
-      var reliefOpacity = {terrain: 0, hillshade: 0, contours: 0};
+      var reliefOpacity = {terrain: 0.34, hillshade: 0.26, contours: 0.28};
       var zoom = map ? map.getZoom() : 0;
-      // Fine raster contours compete with symbols at theater scale.
-      reliefOpacity.contours *= Math.max(0, Math.min(1, (zoom - 8) / 3));
       var viewBounds = map ? map.getBounds() : null;
       var layersByKind = {};
       Object.keys(reliefLayers).forEach(function (layerName) {

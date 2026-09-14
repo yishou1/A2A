@@ -304,7 +304,12 @@ def build_maritime_convoy_air_defense_scenario() -> dict[str, Any]:
         ],
         "default_branch": "standard",
         "acceptance_profile": {"functional_agents": 6, "core_algorithms": 15, "engineering_models": 4, "function_points": 28, "evidence_policy": "backend_trace_only", "required_target_count": 2, "requires_civilian_no_strike": True, "requires_explicit_fire_authorization": True},
-        "engagement_policy": {"decision_authority": "operator", "requires_backend_identification": True, "requires_explicit_authorization": True, "requires_prior_warning": True, "warning_delay_sec": 300, "minimum_threat_levels": ["HIGH", "CRITICAL"], "eligible_kill_chain_phases": ["TARGET", "ENGAGE"], "authorized_asset_ids": ["ESCORT-01"], "authorized_weapons": ["舰载反舰导弹"], "protected_classifications": ["FISHING_VESSEL", "FISHING BOAT", "FISHING", "CIVILIAN", "MERCHANT"], "protected_truth_ids": ["CONTACT-FISHING-01"]},
+        # authorize_follow_on_weapon_release：本剧本把"派出补充侦察无人机"当作
+        # 操作员对同一次交战动作的授权延伸——操作员只确认一次交战，随后的巡逻机
+        # 复访与毁伤评估属于该授权的执行支援，因此开火指令下达时一并授权剧本中
+        # 声明 requires_operator_authorization 的跟踪任务。其余剧本不设此项，
+        # 它们的跟踪任务保持待决，直到操作员单独下达派出指令。
+        "engagement_policy": {"decision_authority": "operator", "requires_backend_identification": True, "requires_explicit_authorization": True, "requires_prior_warning": True, "warning_delay_sec": 300, "minimum_threat_levels": ["HIGH", "CRITICAL"], "eligible_kill_chain_phases": ["TARGET", "ENGAGE"], "authorized_asset_ids": ["ESCORT-01"], "authorized_weapons": ["舰载反舰导弹"], "protected_classifications": ["FISHING_VESSEL", "FISHING BOAT", "FISHING", "CIVILIAN", "MERCHANT"], "protected_truth_ids": ["CONTACT-FISHING-01"], "authorize_follow_on_weapon_release": True},
         "agent_plan": {"mode": "commander_workflow", "steps": ["submit_current_snapshot", "execute_a1_a6_workflow", "project_run_scoped_evidence", "request_operator_fire_authorization", "execute_authorized_fire_command", "assess_effects"]},
         "events": [row["title"] for row in _timeline()],
     }

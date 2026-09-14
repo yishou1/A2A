@@ -35,6 +35,11 @@ EVIDENCE_SENSOR_CHECKS = (
     ("air-space-sea-carrier-strike", 2160, "UAV-ISR-01", 3),
 )
 
+SATELLITE_SCENARIOS = (
+    "coastal-joint-recon-strike",
+    "air-space-sea-carrier-strike",
+)
+
 
 def _inside_ao(lat: float, lng: float, ao: dict) -> bool:
     return ao["south"] <= lat <= ao["north"] and ao["west"] <= lng <= ao["east"]
@@ -67,6 +72,45 @@ def test_formal_scenario_story_and_media_are_complete(scenario_id: str) -> None:
 
 
 @pytest.mark.parametrize("scenario_id", SCENARIO_IDS)
+def test_formal_scenarios_load_at_32x_by_default(scenario_id: str) -> None:
+    scenario = get_scenario(scenario_id)
+    assert scenario is not None
+    assert scenario["demo_controls"]["recommended_speed"] == 32
+
+    engine = SimEngine()
+    engine.load_scenario(scenario)
+    assert engine.clock["speed"] == 32
+
+
+@pytest.mark.parametrize("scenario_id", SATELLITE_SCENARIOS)
+def test_satellite_ground_tracks_cross_the_complete_map_view(scenario_id: str) -> None:
+    scenario = get_scenario(scenario_id)
+    assert scenario is not None
+    focus = scenario["map_display"]["focus_bounds"]
+    assets = {asset["asset_id"]: asset for asset in scenario["assets"]}
+
+    def inside_focus(point: dict) -> bool:
+        return (
+            focus["south"] <= point["lat"] <= focus["north"]
+            and focus["west"] <= point["lng"] <= focus["east"]
+        )
+
+    for track in scenario["map_display"]["space_ground_tracks"]:
+        asset_id = track["asset_id"]
+        points = track["points"]
+        assert len(points) >= 6
+        assert [point["at_sec"] for point in points] == sorted(
+            point["at_sec"] for point in points
+        )
+        assert not inside_focus(points[0]), asset_id
+        assert not inside_focus(points[-1]), asset_id
+        assert assets[asset_id]["position"]["lat"] == points[0]["lat"]
+        assert assets[asset_id]["position"]["lng"] == points[0]["lng"]
+        assert scenario["asset_routes"][asset_id][-1]["lat"] == points[-1]["lat"]
+        assert scenario["asset_routes"][asset_id][-1]["lng"] == points[-1]["lng"]
+
+
+@pytest.mark.parametrize("scenario_id", SCENARIO_IDS)
 def test_formal_scenarios_use_regional_training_areas_and_keep_all_geometry_inside_ao(
     scenario_id: str,
 ) -> None:
@@ -83,20 +127,24 @@ def test_formal_scenarios_use_regional_training_areas_and_keep_all_geometry_insi
     assert theater["location_profile"] == "fictional_training_area"
     assert _inside_ao(center["lat"], center["lng"], ao)
 
+    asset_domains = {asset["asset_id"]: asset["domain"] for asset in scenario["assets"]}
     for asset in scenario["assets"]:
         pos = asset["position"]
-        assert _inside_ao(pos["lat"], pos["lng"], ao), asset["asset_id"]
+        if asset["domain"] != "space":
+            assert _inside_ao(pos["lat"], pos["lng"], ao), asset["asset_id"]
     for threat in scenario["threats"]:
         pos = threat["position"]
         assert _inside_ao(pos["lat"], pos["lng"], ao), threat["threat_id"]
     for asset_id, route in scenario["asset_routes"].items():
-        assert all(_inside_ao(point["lat"], point["lng"], ao) for point in route), asset_id
+        if asset_domains.get(asset_id) != "space":
+            assert all(_inside_ao(point["lat"], point["lng"], ao) for point in route), asset_id
     for asset_id, phases in (scenario.get("asset_behavior_phases") or {}).items():
-        for phase in phases:
-            assert all(
-                _inside_ao(point["lat"], point["lng"], ao)
-                for point in phase["route"]
-            ), (asset_id, phase["behavior"])
+        if asset_domains.get(asset_id) != "space":
+            for phase in phases:
+                assert all(
+                    _inside_ao(point["lat"], point["lng"], ao)
+                    for point in phase["route"]
+                ), (asset_id, phase["behavior"])
     for protected in scenario["protected_assets"]:
         assert _inside_ao(protected["lat"], protected["lon"], ao)
         assert protected["metadata"]["location_profile"] == "fictional_training_area"

@@ -65,7 +65,7 @@ def test_speed_switch_keeps_simulation_clock_advancing() -> None:
     assert after > before
 
 
-def test_authorization_wait_locks_speed_and_restores_previous_multiplier() -> None:
+def test_authorization_wait_freezes_story_time_and_restores_previous_multiplier() -> None:
     runtime = PlatformRuntime()
     director = runtime.get_director()
     engine = runtime.get_engine()
@@ -75,8 +75,8 @@ def test_authorization_wait_locks_speed_and_restores_previous_multiplier() -> No
     director._enter_authorization_wait()
 
     assert engine.clock["speed"] == 1
-    assert engine.clock["running"] is True
-    assert engine.clock["lifecycle"] == "running"
+    assert engine.clock["running"] is False
+    assert engine.clock["lifecycle"] == "paused"
     assert engine.clock["speed_locked_reason"] == "awaiting_authorization"
     assert engine.clock["speed_resume_value"] == 8
     operator_clock = engine.get_operator_state()["clock"]
@@ -115,7 +115,7 @@ def test_speed_endpoint_cannot_override_authorization_lock() -> None:
         engine.unlock_speed_for_confirmation("awaiting_authorization")
 
 
-def test_weapon_confirmation_keeps_clock_running_at_one_x(monkeypatch) -> None:
+def test_weapon_confirmation_freezes_clock_at_the_decision_boundary(monkeypatch) -> None:
     runtime = PlatformRuntime()
     director = runtime.get_director()
     director.configure(
@@ -139,8 +139,8 @@ def test_weapon_confirmation_keeps_clock_running_at_one_x(monkeypatch) -> None:
 
     assert director.state()["awaiting_authorization"] is True
     assert engine.clock["speed"] == 1
-    assert engine.clock["running"] is True
-    assert engine.clock["lifecycle"] == "running"
+    assert engine.clock["running"] is False
+    assert engine.clock["lifecycle"] == "paused"
     assert engine.clock["authorization_stage"] == "fire"
     director._leave_authorization_wait()
     engine.stop()
@@ -340,6 +340,9 @@ def test_frontend_keeps_director_stream_and_interpolates_live_markers() -> None:
     assert "directorOwnsLiveUpdates" in controller
     assert "!running && !directorOwnsLiveUpdates(currentDirectorState)" in controller
     assert "if (pollTimer || sseAbortController) return" in controller
+    assert "var runChanged = Boolean(" in controller
+    assert "runChanged &&" in controller
+    assert "Map.focusScenarioView();" in controller
 
 
 def test_frontend_fails_closed_after_analysis_error_and_uses_panel_width() -> None:
@@ -571,3 +574,32 @@ def test_coincident_loop_route_consumes_tick_without_spinning() -> None:
 
     assert len(events) == 1
     assert assets["UAV"]["position"] == {"lat": 22.5, "lng": 120.5}
+
+
+def test_waypoint_capture_does_not_snap_heading_or_spin_the_symbol() -> None:
+    nav = WaypointNav()
+    assets = {
+        "SHIP": {
+            "domain": "maritime",
+            "position": {"lat": 10.0, "lng": 110.0},
+            "heading_deg": 0.0,
+            "speed_kts": 20.0,
+        }
+    }
+    nav.set_route("SHIP", [{"lat": 10.0, "lng": 110.00005, "label": "near-east"}])
+
+    nav.tick(assets, 1.0)
+
+    assert 0 < assets["SHIP"]["heading_deg"] <= 0.8
+
+
+def test_map_unwraps_heading_and_places_satellite_at_track_entry() -> None:
+    map_script = (ROOT / "static/js/map/platform-map.js").read_text(encoding="utf-8")
+    controller = (ROOT / "static/js/app/platform.js").read_text(encoding="utf-8")
+    assert "function interpolateSpaceGroundTrack" in map_script
+    assert "function spaceGroundTrackProgress" in map_script
+    assert "completed: completed" in map_script
+    assert "var initialDisplayPosition" in map_script
+    assert "rendered += delta" in map_script
+    assert "authorizationTarget(directorState)" in controller
+    assert "checkpoint.engagement_wave" in controller

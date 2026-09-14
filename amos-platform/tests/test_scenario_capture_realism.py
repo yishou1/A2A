@@ -32,7 +32,7 @@ GEOMETRY_ANCHORS = {
         "MAR-MEDIA-04": ((22.245648, 121.403350, 0), 187.65, 0.00, [15.47], [15.47]),
         # The confirmation UAV records this frame after post-impact visual
         # assessment, then begins its documented return to the escort.
-        "MAR-MEDIA-07": ((22.185548, 121.634398, 8000), 309.31, 41.39, [1.49], [1.99]),
+        "MAR-MEDIA-07": ((22.185450, 121.634397, 8000), 309.49, 41.32, [1.50], [1.99]),
     },
     "coastal-joint-recon-strike": {},
 }

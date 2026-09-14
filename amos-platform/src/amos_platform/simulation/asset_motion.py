@@ -166,7 +166,13 @@ class WaypointNav:
                     reached = wps.pop(0)
                     pos["lat"] = round(float(reached["lat"]), 6)
                     pos["lng"] = round(float(reached["lng"]), 6)
-                    asset["heading_deg"] = round(desired, 1)
+                    # Keep the rate-limited heading used for this sub-step.
+                    # Snapping to ``desired`` is especially visible when the
+                    # 0.01 nm capture tolerance reaches a waypoint from the
+                    # side: the icon can rotate tens of degrees in one frame.
+                    # The following sub-step will slew toward the next leg at
+                    # the platform's configured physical turn rate.
+                    asset["heading_deg"] = round(heading, 1)
                     remaining_sec -= travel_sec
                     zero_time_hops = zero_time_hops + 1 if travel_sec <= 1e-9 else 0
                     events.append({

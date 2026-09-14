@@ -464,11 +464,76 @@ def test_authorization_wait_starts_only_at_reached_operator_checkpoint_and_is_wa
 
     director._state["current_checkpoint"] = {
         "checkpoint_id": "ASC-CP-WAVE2",
-        "reached_at_sec": 4230,
+        "reached_at_sec": 4380,
         "requires_operator_action": True,
     }
     engine.clock["elapsed_sec"] = 4380
     assert director._authorization_stage() == "fire"
+
+
+def test_carrier_wave_two_checkpoint_waits_for_real_bda_and_close_needs_no_fire() -> None:
+    runtime = PlatformRuntime()
+    director = DirectorService(runtime)
+    director.configure(
+        scenario_id="air-space-sea-carrier-strike",
+        mode="demonstration",
+        branch="standard",
+        seed=76091,
+    )
+    engine = runtime.get_engine()
+    scenario = get_scenario("air-space-sea-carrier-strike")
+    assert scenario is not None
+    wave_two = next(
+        item for item in scenario["demo_checkpoints"]
+        if item["checkpoint_id"] == "ASC-CP-WAVE2"
+    )
+    close = next(
+        item for item in scenario["demo_checkpoints"]
+        if item["checkpoint_id"] == "ASC-CP-CLOSE"
+    )
+
+    engine.clock["elapsed_sec"] = 4380
+    engine.media_capture._captures["ASC-MEDIA-08"] = {}
+    assert director._checkpoint_satisfied(wave_two) is False
+
+    engine.events.append({"type": "damage_assessment_confirmed", "sim_time": 4380})
+    assert director._checkpoint_satisfied(wave_two) is True
+    director._state["current_checkpoint"] = {
+        "checkpoint_id": close["checkpoint_id"],
+        "reached_at_sec": 5850,
+        "requires_operator_action": True,
+        "operator_action_type": close["operator_action_type"],
+    }
+    assert director._authorization_stage() is None
+
+
+def test_operator_checkpoint_keeps_fire_gate_after_story_phase_boundary() -> None:
+    runtime = PlatformRuntime()
+    director = DirectorService(runtime)
+    director.configure(
+        scenario_id="coastal-joint-recon-strike",
+        mode="demonstration",
+        branch="standard",
+        seed=61023,
+    )
+    engine = runtime.get_engine()
+    director._state["current_checkpoint"] = {
+        "checkpoint_id": "CJR-CP-ENGAGE",
+        "reached_at_sec": 3330,
+        "requires_operator_action": True,
+    }
+
+    # A slow backend response must not turn the first ASSESS timestamp into
+    # implicit approval.  The checkpoint remains the authority boundary.
+    engine.clock["elapsed_sec"] = 4500
+    assert director._authorization_stage() == "fire"
+
+    engine.events.append({
+        "type": "authorized_fire_command",
+        "command_source": "operator",
+        "sim_time": 4501,
+    })
+    assert director._authorization_stage() is None
 
 
 def test_checkpoint_callback_is_the_only_source_of_submitted_status() -> None:

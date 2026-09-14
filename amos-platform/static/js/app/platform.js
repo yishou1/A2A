@@ -745,13 +745,23 @@ window.Platform = (function () {
     }) || null;
   }
 
-  function authorizationTarget() {
-    return (latestState && latestState.fused_tracks || []).find(function (track) {
+  function authorizationTarget(directorState) {
+    var checkpoint = directorState && directorState.current_checkpoint;
+    var expectedWave = checkpoint && typeof checkpoint === "object" &&
+      checkpoint.engagement_wave != null ? Number(checkpoint.engagement_wave) : null;
+    var candidates = (latestState && latestState.fused_tracks || []).filter(function (track) {
       var assessment = track.agent_assessment || {};
       var classification = String(track.classification || "").toUpperCase();
       return track.engagement_eligible === true && assessment.status === "confirmed" &&
         !/FISHING|CIVILIAN|MERCHANT/.test(classification);
-    }) || null;
+    });
+    if (Number.isFinite(expectedWave)) {
+      var waveTarget = candidates.find(function (track) {
+        return Number((track.engagement_action || {}).wave) === expectedWave;
+      });
+      if (waveTarget) return waveTarget;
+    }
+    return candidates[0] || null;
   }
 
   function warningDelaySeconds() {
@@ -856,7 +866,7 @@ window.Platform = (function () {
     // clock can arrive before the director poll and that race previously opened
     // the wrong dialog (or replaced WARN before the operator could see it).
     if (stage !== "warning" && stage !== "fire") return;
-    var target = authorizationTarget();
+    var target = authorizationTarget(directorState);
     if (!target) return;
     var checkpoint = directorState.current_checkpoint || directorState.checkpoint_id || "ENGAGE";
     var checkpointId = typeof checkpoint === "object" ? checkpoint.checkpoint_id : checkpoint;
@@ -1038,6 +1048,10 @@ window.Platform = (function () {
     ) return;
     var incomingClock = state.clock || {};
     var currentClock = latestState && latestState.clock || {};
+    var runChanged = Boolean(
+      incomingClock.run_id && currentClock.run_id &&
+      String(incomingClock.run_id) !== String(currentClock.run_id)
+    );
     if (
       incomingClock.run_id && currentClock.run_id &&
       String(incomingClock.run_id) === String(currentClock.run_id) &&
@@ -1079,6 +1093,18 @@ window.Platform = (function () {
       Number(clock.elapsed_sec || 0), state.kill_chain_events || [],
       state.coordination_links || []
     );
+    // A backend restart or reset creates a new run while an already-open
+    // browser keeps Leaflet's old pan/zoom. Reframe once for the new run; do
+    // not keep auto-fitting afterward, so operator pan/zoom remains usable.
+    if (
+      runChanged &&
+      (!clock.scenario_id || String(clock.scenario_id) === String(currentScenarioId))
+    ) {
+      window.requestAnimationFrame(function () {
+        Map.invalidateSize();
+        Map.focusScenarioView();
+      });
+    }
     renderStory(state.scenario_story, state);
     refreshEvidenceProducts(state);
     syncSpeedFromClock(clock);

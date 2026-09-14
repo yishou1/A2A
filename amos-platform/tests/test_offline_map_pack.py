@@ -129,6 +129,10 @@ def test_map_defaults_to_a_larger_view_and_supports_expanded_mode() -> None:
     assert 'id="btn-toggle-map-expanded"' in dashboard
     assert "function setMapExpanded(expanded)" in controller
     assert 'sessionStorage.setItem("amos.map.expanded"' in controller
+    assert "terrain: true, hillshade: true, contours: true" in (
+        ROOT / "static/js/map/platform-map.js"
+    ).read_text(encoding="utf-8")
+    assert "清晰底图" not in dashboard
 
 
 @pytest.mark.parametrize("subdirectory", ["", "detail"])
@@ -174,7 +178,8 @@ def test_map_uses_decluttered_short_trails_and_slow_space_projection() -> None:
     dashboard = (ROOT / "templates/dashboard.html").read_text(encoding="utf-8")
     css = (ROOT / "static/css/platform.css").read_text(encoding="utf-8")
 
-    assert "function visualAssetPosition(marker, asset, actual)" in map_script
+    assert "function visualAssetPosition(marker, asset, actual, elapsedSec)" in map_script
+    assert "function interpolateSpaceGroundTrack" in map_script
     assert "spaceVisualSpeedFactor" in map_script
     assert "function renderSpaceGroundTracks(tracks)" in map_script
     assert "function renderSpaceOperations(elapsedSec)" in map_script

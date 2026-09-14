@@ -6,7 +6,7 @@
 <title>Simulation 场景仿真平台</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
-<link rel="stylesheet" href="/static/css/platform.css?v=20260911c">
+<link rel="stylesheet" href="/static/css/platform.css?v=20260913-clear2">
 <link rel="stylesheet" href="/static/css/authorization-dialog.css?v=20260907b">
 <script src="/static/vendor/leaflet/leaflet.js"></script>
 <script src="/static/vendor/protomaps/protomaps-leaflet.js"></script>
@@ -41,11 +41,10 @@
     </div>
     <button class="btn btn-sm" id="btn-focus-map">任务区</button>
     <div class="map-layer-group" aria-label="地图图层">
-      <span class="basemap-name" title="Natural Earth II 自然地形离线地图">自然地形</span>
       <button class="btn btn-sm layer-active" id="btn-toggle-map-style" title="隐藏地名标注" aria-pressed="true">地名</button>
-      <button hidden class="btn btn-sm" id="btn-toggle-terrain">地形</button>
-      <button hidden class="btn btn-sm" id="btn-toggle-hillshade">阴影</button>
-      <button hidden class="btn btn-sm" id="btn-toggle-contours">等高线</button>
+      <button class="btn btn-sm" id="btn-toggle-terrain">地形</button>
+      <button class="btn btn-sm" id="btn-toggle-hillshade">阴影</button>
+      <button class="btn btn-sm" id="btn-toggle-contours">等高线</button>
       <button class="btn btn-sm" id="btn-toggle-sensors">传感器</button>
       <button class="btn btn-sm" id="btn-toggle-coordination" title="情报链、指挥链与武器链">协同链路</button>
       <button class="btn btn-sm" id="btn-toggle-ao">边界</button>
@@ -359,9 +358,9 @@
 
 <script src="/static/js/api/platform-api.js?v=20260817d"></script>
 <script src="/static/js/map/tactical-symbols.js?v=20260825b"></script>
-  <script src="/static/js/map/platform-map.js?v=20260911b"></script>
+<script src="/static/js/map/platform-map.js?v=20260914-orbit3"></script>
 <script src="/static/js/panels/platform-panels.js?v=20260911c"></script>
 <script src="/static/js/workflow/commander-workflow.js?v=20260911c"></script>
-<script src="/static/js/app/platform.js?v=20260911c"></script>
+<script src="/static/js/app/platform.js?v=20260914b"></script>
 </body>
 </html>

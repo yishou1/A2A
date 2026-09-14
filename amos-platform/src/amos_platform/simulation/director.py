@@ -223,6 +223,15 @@ class DirectorService:
         emitted = set(engine._story_emitted)
         if not set(str(value) for value in conditions.get("cue_ids_emitted") or []).issubset(emitted):
             return False
+        event_types = {
+            str(event.get("type") or "")
+            for event in engine.events
+            if isinstance(event, dict)
+        }
+        if not set(
+            str(value) for value in conditions.get("event_types_emitted") or []
+        ).issubset(event_types):
+            return False
         return True
 
     def _reach_checkpoint(self, checkpoint: dict[str, Any]) -> dict[str, Any]:
@@ -261,6 +270,14 @@ class DirectorService:
             # start an operator gate merely because the timeline entered the
             # ENGAGE phase before the evidence/analysis checkpoint was ready.
             "requires_operator_action": bool(checkpoint.get("requires_operator_action")),
+            "operator_action_type": str(
+                checkpoint.get("operator_action_type") or "fire"
+            ),
+            "engagement_wave": (
+                int(checkpoint["engagement_wave"])
+                if checkpoint.get("engagement_wave") is not None
+                else None
+            ),
         }
         if callback_result:
             reached["submission"] = deepcopy(callback_result)
@@ -306,9 +323,9 @@ class DirectorService:
         checkpoint = self._state.get("current_checkpoint")
         if (
             not policy.get("requires_explicit_authorization")
-            or self._current_phase() != "ENGAGE"
             or not isinstance(checkpoint, dict)
             or not checkpoint.get("requires_operator_action")
+            or str(checkpoint.get("operator_action_type") or "fire") != "fire"
             or self._has_authorized_engagement(
                 since_sec=float(checkpoint.get("reached_at_sec", 0) or 0),
             )
@@ -341,8 +358,15 @@ class DirectorService:
             engine.clock["director_analysis_status"] = analysis_status
 
     def _enter_authorization_wait(self) -> None:
-        """Lock playback to real time while an operator decision is pending."""
+        """Freeze story time while an operator decision is pending.
+
+        Merely reducing playback to 1x lets the timeline cross into ASSESS and
+        can make an unexecuted engagement look complete.  Preserve the chosen
+        multiplier for later, but pause the simulation until an explicit
+        command creates the corresponding event.
+        """
         self.runtime.get_engine().lock_speed_for_confirmation("awaiting_authorization")
+        self.runtime.get_engine().pause()
 
     def _leave_authorization_wait(self, *, restore: bool = True) -> None:
         """Release the decision lock and restore the last operator speed."""
@@ -617,11 +641,6 @@ class DirectorService:
                             )
                             self._set_status("awaiting_authorization")
                             self._enter_authorization_wait()
-                            if (
-                                not engine.clock.get("running")
-                                and engine.clock.get("lifecycle") != "completed"
-                            ):
-                                engine.resume()
                             self._record(
                                 "authorization_required",
                                 phase="ENGAGE",
@@ -630,8 +649,24 @@ class DirectorService:
                             self.runtime.record_director_state(self.state())
                     continue
                 if self._state.get("awaiting_authorization"):
+                    checkpoint = self._state.get("current_checkpoint") or {}
+                    reached_at = float(checkpoint.get("reached_at_sec", 0) or 0)
+                    completed_stage = self._state.get("authorization_stage")
+                    completed_by_event = (
+                        completed_stage == "fire"
+                        and self._has_authorized_engagement(since_sec=reached_at)
+                    )
+                    warning_issued = (
+                        completed_stage == "warning"
+                        and authorization_stage == "warning_wait"
+                    )
+                    # Fail closed: phase changes, completion of the simulation,
+                    # or a missing policy must never be interpreted as operator
+                    # approval.  Only the explicit command event advances the
+                    # director out of the authorization wait.
+                    if not completed_by_event and not warning_issued:
+                        continue
                     with self._lock:
-                        completed_stage = self._state.get("authorization_stage")
                         self._state["awaiting_authorization"] = False
                         self._state["authorization_stage"] = (
                             "warning_wait" if authorization_stage == "warning_wait" else None
