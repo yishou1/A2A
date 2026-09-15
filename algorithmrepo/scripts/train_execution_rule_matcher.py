@@ -21,12 +21,8 @@ from a2a_algorithms_common.association_rules import (  # noqa: E402
 )
 
 
-def sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 def normalized_text_sha256(path: Path) -> str:
-    text = path.read_text(encoding="utf-8").replace("\r\n", "\n")
+    text = path.read_text(encoding="utf-8")
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
@@ -101,7 +97,7 @@ def train(
         "model_version": "1.0.0",
         "model_family": "apriori_association_rule_miner",
         "artifact_path": str(rules_path.relative_to(ROOT)).replace("\\", "/"),
-        "artifact_sha256": sha256(rules_path),
+        "artifact_sha256": normalized_text_sha256(rules_path),
         "rule_count": len(rules),
         "implementation_path": str(implementation_path.relative_to(ROOT)).replace("\\", "/"),
         "implementation_sha256": normalized_text_sha256(implementation_path),
@@ -109,13 +105,13 @@ def train(
         "training_script_sha256": normalized_text_sha256(script_path),
         "training_dataset": {
             "path": str(training_path.relative_to(ROOT)).replace("\\", "/"),
-            "sha256": sha256(training_path),
+            "sha256": normalized_text_sha256(training_path),
             "row_count": len(training_records),
             "source": "repository_reference_policy_fixtures",
         },
         "evaluation_dataset": {
             "path": str(evaluation_path.relative_to(ROOT)).replace("\\", "/"),
-            "sha256": sha256(evaluation_path),
+            "sha256": normalized_text_sha256(evaluation_path),
             "row_count": len(evaluation_records),
             "source": "independent_repository_reference_policy_holdout",
             "limitation": "Synthetic policy scenarios only; not an operational battlefield benchmark.",

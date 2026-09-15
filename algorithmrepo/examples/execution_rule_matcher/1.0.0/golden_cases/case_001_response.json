@@ -33,7 +33,7 @@
       "model_id": "execution_rule_matcher",
       "model_version": "1.0.0",
       "model_family": "apriori_association_rule_miner",
-      "artifact_sha256": "848e226d1cb8d232f859151f564453f0d40548675d8143b17f6bc4ab1c56353a"
+      "artifact_sha256": "78bca1082997f08f24b8787fc7a1f7d0a0868368307579a941b697905921731c"
     }
   },
   "usage": {

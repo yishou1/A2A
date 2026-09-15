@@ -22,12 +22,8 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 def _normalized_text_sha256(path: Path) -> str:
-    text = path.read_text(encoding="utf-8").replace("\r\n", "\n")
+    text = path.read_text(encoding="utf-8")
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
@@ -98,7 +94,7 @@ def validate_motion_predictor_artifact() -> dict:
     implementation_path = root / str(metadata["implementation_path"])
     evaluation_path = root / str(metadata["evaluation_dataset"]["path"])
     actual_implementation_hash = _normalized_text_sha256(implementation_path)
-    actual_evaluation_hash = _sha256(evaluation_path)
+    actual_evaluation_hash = _normalized_text_sha256(evaluation_path)
     if actual_implementation_hash != metadata.get("implementation_sha256"):
         raise ValueError("trajectory predictor implementation SHA256 mismatch")
     if actual_evaluation_hash != metadata.get("evaluation_dataset", {}).get("sha256"):

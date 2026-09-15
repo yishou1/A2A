@@ -21,12 +21,8 @@ from a2a_algorithms_common.motion_prediction import predict_single_track  # noqa
 DATASET_SEED = 20260816
 
 
-def sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 def normalized_text_sha256(path: Path) -> str:
-    text = path.read_text(encoding="utf-8").replace("\r\n", "\n")
+    text = path.read_text(encoding="utf-8")
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
@@ -149,7 +145,7 @@ def build(dataset_path: Path, metadata_path: Path, count: int) -> dict:
         "evaluation_script_sha256": normalized_text_sha256(script_path),
         "evaluation_dataset": {
             "path": str(dataset_path.relative_to(ROOT)).replace("\\", "/"),
-            "sha256": sha256(dataset_path),
+            "sha256": normalized_text_sha256(dataset_path),
             "source": "deterministic_synthetic_motion_generator",
             "seed": DATASET_SEED,
             "row_count": len(records),

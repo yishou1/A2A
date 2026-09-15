@@ -20,8 +20,10 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def _normalized_text_sha256(path: Path) -> str:
+    """Hash text content independently of the checkout's line endings."""
+    text = path.read_text(encoding="utf-8")
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def load_training_records(path: Path | None = None) -> List[dict]:
@@ -167,7 +169,7 @@ def validate_rule_artifact(rules_path: Path | None = None) -> dict:
     metadata_path = root / DEFAULT_METADATA_RELATIVE_PATH
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     expected_hash = str(metadata.get("artifact_sha256") or "")
-    actual_hash = _sha256(resolved_rules)
+    actual_hash = _normalized_text_sha256(resolved_rules)
     if not expected_hash or actual_hash != expected_hash:
         raise ValueError(
             f"execution rule artifact SHA256 mismatch: expected={expected_hash}, actual={actual_hash}"
