@@ -4,13 +4,12 @@ from unittest.mock import patch
 
 import requests
 
-from decision_agents.common.config import get_settings
-from decision_agents.common.schemas import AgentRequest, CandidatePlan, RuleEvidence
-from decision_agents.compliance_authorization import local_algorithm as compliance
-from decision_agents.decision_planning import local_algorithm as planning
-from decision_agents.knowledge.synapserag_client import EvidenceQuery, SynapseRagClient
-from decision_agents.knowledge.retrieval import retrieve_rule_rag_result
-from decision_agents.rag.pipeline import RagResult
+from decision_support.config import get_settings
+from decision_support.schemas import AgentRequest, CandidatePlan, RuleEvidence
+from decision_support import compliance, planning
+from decision_support.knowledge.synapserag_client import EvidenceQuery, SynapseRagClient
+from decision_support.knowledge.retrieval import retrieve_rule_rag_result
+from decision_support.rag.pipeline import RagResult
 
 
 def rag_result(*evidence, status="ok", warnings=None):
@@ -51,6 +50,22 @@ class FakeResponse:
 
 
 class SynapseRagClientTests(unittest.TestCase):
+    def test_algolib_transport_uses_version_two_and_preserves_trace(self):
+        body = {"ok": True, "outputs": {
+            "status": "success", "results": [{"query_id": "RULE-1", "evidence": []}],
+            "retrieval_profile": {"index_id": "kb", "index_version": "v1"},
+            "trace_id": "trace-1",
+        }}
+        with patch.dict(os.environ, {"SYNAPSERAG_TRANSPORT": "algolib", "ALGOLIB_BASE_URL": "http://library:8088"}), patch(
+            "decision_support.knowledge.synapserag_client.requests.post",
+            return_value=FakeResponse(body),
+        ) as post:
+            result = SynapseRagClient(get_settings()).retrieve(
+                [EvidenceQuery("RULE-1", "rule")], request_id="r", purpose="planning", top_k=3)
+        self.assertEqual(post.call_args.args[0], "http://library:8088/run")
+        self.assertEqual(post.call_args.kwargs["json"]["version"], "2.0.0")
+        self.assertEqual(result.model_profile["trace_id"], "trace-1")
+
     def test_maps_query_id_to_rule_evidence_and_sends_token(self):
         body = {
             "status": "success",
@@ -84,7 +99,7 @@ class SynapseRagClientTests(unittest.TestCase):
             "SYNAPSERAG_API_TOKEN": "secret",
         }
         with patch.dict(os.environ, env, clear=True), patch(
-            "decision_agents.knowledge.synapserag_client.requests.post",
+            "decision_support.knowledge.synapserag_client.requests.post",
             return_value=FakeResponse(body),
         ) as post:
             result = SynapseRagClient(get_settings()).retrieve(
@@ -102,7 +117,7 @@ class SynapseRagClientTests(unittest.TestCase):
     def test_http_failure_is_returned_as_structured_rag_error(self):
         env = {**os.environ, "RAG_BACKEND": "synapserag"}
         with patch.dict(os.environ, env, clear=True), patch(
-            "decision_agents.knowledge.synapserag_client.requests.post",
+            "decision_support.knowledge.synapserag_client.requests.post",
             side_effect=requests.Timeout("offline"),
         ):
             result = SynapseRagClient(get_settings()).retrieve(
@@ -135,7 +150,7 @@ class SynapseRagClientTests(unittest.TestCase):
             "warnings": [],
         }
         with patch(
-            "decision_agents.knowledge.synapserag_client.requests.post",
+            "decision_support.knowledge.synapserag_client.requests.post",
             return_value=FakeResponse(body),
         ):
             result = SynapseRagClient(get_settings()).retrieve(

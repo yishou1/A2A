@@ -7,9 +7,9 @@ from typing import Any, Protocol
 
 from pydantic import ValidationError
 
-from decision_agents.common.config import get_settings
+from decision_support.config import get_settings
 from decision_agents.common.prompt_loader import get_prompt_module
-from decision_agents.common.schemas import AgentRequest, AgentResponse
+from decision_support.schemas import AgentRequest, AgentResponse
 from llm.client import LLMClientError, OpenAICompatibleClient
 
 

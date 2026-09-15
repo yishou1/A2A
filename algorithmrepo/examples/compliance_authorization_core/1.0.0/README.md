@@ -1,7 +1,12 @@
 # compliance_authorization_core
 
-Python HTTP Service algorithm package for the A2A compliance and authorization
-agent's structured-rule, SynapseRAG evidence, and ONNX calibration pipeline.
+Python HTTP Service orchestrator for structured-rule checks, SynapseRAG
+evidence, and compliance-risk calibration.
+
+Risk calibration is provided by the independent
+`compliance_risk_scorer_onnx:1.0.0` algorithm package. If that package or the
+ONNX runtime is unavailable, the adapter records the reason in `model_runtime`
+and uses the deterministic formula implementation.
 
 The service reads `RAG_BACKEND`, `SYNAPSERAG_BASE_URL`,
 `SYNAPSERAG_API_TOKEN`, `SYNAPSERAG_TIMEOUT_SECONDS`, and

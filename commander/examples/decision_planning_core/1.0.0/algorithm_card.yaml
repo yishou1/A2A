@@ -13,8 +13,7 @@ modalities:
 
 capabilities:
   - candidate_plan_generation
-  - logistic_plan_scoring
-  - lstm_trend_scoring
+  - composed_model_capabilities
   - structured_rule_matching
   - synapserag_rule_evidence
 
@@ -24,11 +23,13 @@ operational_functions:
 
 agent_card:
   summary: >
-    Decision planning core with ONNX scoring, structured rules, and optional SynapseRAG evidence.
+    Planning orchestrator that composes independent recommendation and trend algorithms,
+    structured rules, and optional SynapseRAG evidence.
   when_to_use:
     - Candidate plans must be generated or ranked from structured tasks, resources, risks, and constraints.
   when_not_to_use:
     - Compliance or final authorization decisions are required.
+    - Only a scalar recommendation score or target trend prediction is required.
   input_description: >
     A structured AgentRequest-like object containing scheduled_tasks and resources.
   output_description: >

@@ -1,7 +1,16 @@
 # decision_planning_core
 
-Python HTTP Service algorithm package for the A2A decision planning agent's
-ONNX, structured-rule, and optional SynapseRAG pipeline.
+Python HTTP Service orchestrator for candidate generation, independent model
+capabilities, structured rules, and optional SynapseRAG evidence.
+
+Model capabilities are versioned algorithm packages rather than private core
+assets:
+
+- `decision_plan_recommender_onnx:1.0.0`
+- `target_trend_predictor_onnx:1.0.0`
+
+If an ONNX package or runtime is unavailable, the capability adapter records
+the reason in `model_runtime` and uses the deterministic formula implementation.
 
 The service reads `RAG_BACKEND`, `SYNAPSERAG_BASE_URL`,
 `SYNAPSERAG_API_TOKEN`, `SYNAPSERAG_TIMEOUT_SECONDS`, and

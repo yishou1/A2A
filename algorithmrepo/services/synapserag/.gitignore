@@ -1,0 +1,51 @@
+synapserag2/*
+.idea/*
+
+# Ignore test files
+test_example.py
+test_example.ipynb
+# ignore log files
+*.log
+# Ignore python compiled caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+# Ignore nohup_out directory
+nohup_out/
+# Ignore outputs directory
+outputs/
+# Ignore data directory
+data/
+# Ignore the bash script to clear files under outputs and logs directories
+clear_outputs_and_logs.sh
+# Ignore the env file
+.env
+.venv/
+.env.*
+!service.env.example
+.pytest_cache/
+models/
+local_models/
+*.sqlite3
+*.sqlite3-*
+docs/*.pdf
+docs/*.docx
+
+# IDE 和工具配置
+.claude/
+.serena/
+.spec-workflow/
+
+# Python 构建产物
+*.egg-info/
+
+# 测试输出
+test_output/
+
+# 临时计划文件
+COMMIT_PLAN.md
+# conda安装包
+Miniconda3-*.sh
+# 大型数据集json
+reproduce/dataset/*.json

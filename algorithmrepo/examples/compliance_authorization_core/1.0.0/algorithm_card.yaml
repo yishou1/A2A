@@ -14,7 +14,7 @@ modalities:
 capabilities:
   - rule_table_matching
   - authorization_checking
-  - logistic_risk_calibration
+  - composed_risk_calibration
   - synapserag_rule_evidence
 
 operational_functions:
@@ -22,11 +22,13 @@ operational_functions:
 
 agent_card:
   summary: >
-    Compliance core with authoritative rule matching, SynapseRAG evidence, and ONNX calibration.
+    Compliance orchestrator that composes authoritative rule matching, SynapseRAG
+    evidence, and an independent risk-calibration algorithm.
   when_to_use:
     - Candidate plans must be checked against rule tables, authorization state, and constraints.
   when_not_to_use:
     - Candidate plans have not been generated yet.
+    - Only a scalar compliance-risk probability is required.
   input_description: >
     A structured AgentRequest-like object containing candidate_plans and authorization.
   output_description: >

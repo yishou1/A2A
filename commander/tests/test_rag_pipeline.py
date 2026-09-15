@@ -4,13 +4,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from decision_agents.rag.ingest import (
+from decision_support.rag.ingest import (
     PdfExtractionResult,
     PdfPage,
     ingest_documents,
 )
-from decision_agents.rag.documents import load_rag_chunks
-from decision_agents.rag.pipeline import run_rag
+from decision_support.rag.documents import load_rag_chunks
+from decision_support.rag.pipeline import run_rag
 
 
 class RagPipelineTest(unittest.TestCase):
@@ -78,7 +78,7 @@ class RagPipelineTest(unittest.TestCase):
                 "RAG_INDEX_PATH": str(index_path),
             }
             with patch.dict(os.environ, env, clear=True), patch(
-                "decision_agents.rag.ingest.extract_pdf_pages",
+                "decision_support.rag.ingest.extract_pdf_pages",
                 return_value=_sample_pdf_extraction(),
             ):
                 first = ingest_documents(source=source_dir)
@@ -104,7 +104,7 @@ class RagPipelineTest(unittest.TestCase):
                 "RAG_INDEX_PATH": str(index_path),
             }
             with patch.dict(os.environ, env, clear=True), patch(
-                "decision_agents.rag.ingest.extract_pdf_pages",
+                "decision_support.rag.ingest.extract_pdf_pages",
                 return_value=_sample_pdf_extraction(),
             ):
                 ingest_documents(source=source_dir)
@@ -140,7 +140,7 @@ class RagPipelineTest(unittest.TestCase):
                 warnings=["ocr_disabled:scan_roe.pdf:page:1"],
             )
             with patch.dict(os.environ, env, clear=True), patch(
-                "decision_agents.rag.ingest.extract_pdf_pages",
+                "decision_support.rag.ingest.extract_pdf_pages",
                 return_value=extraction,
             ):
                 summary = ingest_documents(source=source_dir)

@@ -3,7 +3,7 @@ import unittest
 
 from unittest.mock import patch
 
-from decision_agents.common.config import get_settings
+from decision_support.config import get_settings
 from llm.client import LLMClientError, OpenAICompatibleClient, _strip_model_wrappers
 
 

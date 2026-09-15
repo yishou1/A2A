@@ -1,0 +1,79 @@
+{
+  "type": "object",
+  "required": [
+    "operation"
+  ],
+  "properties": {
+    "operation": {
+      "type": "string",
+      "enum": [
+        "neighbors",
+        "paths",
+        "trace"
+      ]
+    },
+    "index_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "entity_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "source_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "target_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "trace_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "query_trace_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "evidence_node_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "view": {
+      "type": "string",
+      "enum": [
+        "skeleton",
+        "candidates"
+      ]
+    },
+    "max_hops": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 6
+    },
+    "max_nodes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 200
+    },
+    "max_edges": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 400
+    },
+    "max_paths": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3
+    }
+  },
+  "additionalProperties": false
+}

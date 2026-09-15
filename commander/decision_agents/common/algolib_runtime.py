@@ -13,11 +13,11 @@ from decision_agents.common.algolib_client import (
     AlgorithmLibraryError,
     AlgorithmRunCall,
 )
-from decision_agents.common.algorithm_registry import missing_required_fields
-from decision_agents.common.config import get_settings
+from decision_support.algorithm_registry import missing_required_fields
+from decision_support.config import get_settings
 from decision_agents.common.llm_enhancer import llm_enabled
 from decision_agents.common.prompt_loader import get_prompt_module
-from decision_agents.common.schemas import AgentRequest, AgentResponse
+from decision_support.schemas import AgentRequest, AgentResponse
 from llm.client import LLMClientError, OpenAICompatibleClient
 
 
