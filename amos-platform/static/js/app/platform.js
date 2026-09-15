@@ -903,8 +903,9 @@ window.Platform = (function () {
     var authorizationMessage = action.authorizationMessage || (action.coordinated
       ? "是否授权多平台组成武器链，对目标实施协同打击？"
       : "是否授权对该目标实施武器打击？");
+    var waveNames = {1: "第一波", 2: "第二波", 3: "第三波"};
     var waveLabel = Number.isFinite(action.wave) && action.wave > 0
-      ? "第" + action.wave + "波" : "";
+      ? (waveNames[action.wave] || ("第" + action.wave + "波")) : "";
     var dialogTitle = waveLabel
       ? waveLabel + "攻击授权"
       : (action.coordinated ? "协同武器链授权" : "武器打击确认");
@@ -918,7 +919,7 @@ window.Platform = (function () {
       message: action.coordinated ? authorizationMessage : "目标未回应警告，是否授权实施武器打击？",
       actionLabel: action.coordinated ? "协同武器链" : "拟用武器",
       actionValue: action.actionLabel,
-      confirmText: "确认打击",
+      confirmText: waveLabel ? ("授权" + waveLabel + "打击") : "确认打击",
       cancelText: "暂不打击"
     } : {
       mode: "fire",
@@ -929,6 +930,7 @@ window.Platform = (function () {
       message: authorizationMessage,
       actionLabel: action.coordinated ? "协同武器链" : "拟用武器",
       actionValue: action.actionLabel,
+      confirmText: waveLabel ? ("授权" + waveLabel + "打击") : "确认打击",
     })) authorizationPromptKey = key;
   }
 

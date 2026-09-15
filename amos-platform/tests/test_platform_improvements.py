@@ -377,6 +377,8 @@ def test_frontend_authorization_is_non_blocking_and_backend_driven() -> None:
     assert 'if (stage !== "warning" && stage !== "fire") return;' in controller
     assert "无线电警告确认" in controller
     assert "目标未回应警告，是否授权实施武器打击？" in controller
+    assert 'var waveNames = {1: "第一波", 2: "第二波", 3: "第三波"};' in controller
+    assert '("授权" + waveLabel + "打击")' in controller
     assert "警告发出已满" not in controller
     assert "warningDelaySeconds" in controller
     assert "interactive: false" in map_script

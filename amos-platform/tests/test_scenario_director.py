@@ -492,11 +492,18 @@ def test_carrier_wave_two_waits_for_real_bda_and_close_requires_both_target_hits
         if item["checkpoint_id"] == "ASC-CP-CLOSE"
     )
 
-    engine.clock["elapsed_sec"] = 4380
+    engine.clock["elapsed_sec"] = 4560
     engine.media_capture._captures["ASC-MEDIA-08"] = {}
     assert director._checkpoint_satisfied(wave_two) is False
 
-    engine.events.append({"type": "damage_assessment_confirmed", "sim_time": 4380})
+    engine.events.extend([
+        {
+            "type": "weapon_hit",
+            "target_threat_id": "COASTAL-AIRFIELD-01",
+            "sim_time": 3940,
+        },
+        {"type": "damage_assessment_confirmed", "sim_time": 4380},
+    ])
     assert director._checkpoint_satisfied(wave_two) is True
     engine.clock["elapsed_sec"] = 5850
     engine.media_capture._captures["ASC-MEDIA-09"] = {}
@@ -553,7 +560,7 @@ def test_maritime_engage_checkpoint_preserves_warning_and_fire_across_assess_bou
         seed=33031,
     )
     engine = runtime.get_engine()
-    engine._tick(5500)
+    engine._tick(4600)
     hostile = next(
         track for track in engine.sensor_fusion.tracks.values()
         if engine._truth_target_for_track(track) == "CONTACT-HOSTILE-01"
@@ -566,7 +573,7 @@ def test_maritime_engage_checkpoint_preserves_warning_and_fire_across_assess_bou
     }
     director._state["current_checkpoint"] = {
         "checkpoint_id": "MAR-CP-ENGAGE",
-        "reached_at_sec": 4590,
+        "reached_at_sec": 3930,
         "requires_operator_action": True,
         "operator_action_type": "fire",
     }
@@ -725,7 +732,7 @@ def test_final_analysis_completion_does_not_restart_completed_clock() -> None:
         "submission": {"workflow_id": "wf-act"},
     }
     engine = runtime.get_engine()
-    engine.clock["elapsed_sec"] = 6600.0
+    engine.clock["elapsed_sec"] = 5400.0
     engine.clock["running"] = False
     engine.clock["lifecycle"] = "completed"
 

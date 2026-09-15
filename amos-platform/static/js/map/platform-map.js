@@ -151,6 +151,12 @@ window.PlatformMap = (function () {
     return SymbolLibrary.ownKind(asset);
   }
 
+  function displayedOwnKind(asset) {
+    var assetId = String(asset.asset_id || asset.id || "");
+    var overrides = scenarioView && scenarioView.assetIconKinds || {};
+    return String(overrides[assetId] || ownKind(asset));
+  }
+
   function trackKind(track) {
     var assessment = track.agent_assessment || {};
     var classification = String(track.classification || "").toUpperCase();
@@ -539,7 +545,11 @@ window.PlatformMap = (function () {
   }
 
   function ownIconSize(asset) {
-    var kind = ownKind(asset);
+    var assetId = String(asset.asset_id || asset.id || "");
+    var overrides = scenarioView && scenarioView.assetIconSizes || {};
+    var override = Number(overrides[assetId]);
+    if (Number.isFinite(override) && override >= 18 && override <= 48) return override;
+    var kind = displayedOwnKind(asset);
     if (kind === "satellite") return 22;
     if (kind === "commandShip" || kind === "aircraftCarrier") return 30;
     if (kind === "j16" || kind === "wz10") return 27;
@@ -1170,6 +1180,8 @@ window.PlatformMap = (function () {
       fixedBounds: Boolean(configuredFocus),
       labelAssetIds: Array.isArray(mapDisplay.label_asset_ids) ? mapDisplay.label_asset_ids.slice() : null,
       assetLabelAliases: mapDisplay.asset_label_aliases || {},
+      assetIconKinds: mapDisplay.asset_icon_kinds || {},
+      assetIconSizes: mapDisplay.asset_icon_sizes || {},
       trailAssetIds: Array.isArray(mapDisplay.trail_asset_ids) ? mapDisplay.trail_asset_ids.slice() : null,
       coordinationLinkTypes: Array.isArray(mapDisplay.coordination_link_types)
         ? mapDisplay.coordination_link_types.map(function (value) { return String(value); }) : null,
@@ -1402,10 +1414,11 @@ window.PlatformMap = (function () {
       seenAssets[id] = true;
       if (!ownMarkers[id]) {
         var assetIconSize = ownIconSize(asset);
+        var assetIconKind = displayedOwnKind(asset);
         var initialDisplayPosition = String(asset.domain || "") === "space"
           ? (interpolateSpaceGroundTrack(id, Number(elapsedSec || 0)) || pos) : pos;
-        ownMarkers[id] = L.marker([initialDisplayPosition.lat, initialDisplayPosition.lng], {icon: icon(ownKind(asset), asset.heading, assetIconSize)}).addTo(map);
-        ownMarkers[id]._amosIconKind = ownKind(asset);
+        ownMarkers[id] = L.marker([initialDisplayPosition.lat, initialDisplayPosition.lng], {icon: icon(assetIconKind, asset.heading, assetIconSize)}).addTo(map);
+        ownMarkers[id]._amosIconKind = assetIconKind;
         ownMarkers[id]._amosIconSize = assetIconSize;
         ownMarkers[id]._amosRenderedHeading = Number(asset.heading || 0);
         ownMarkers[id]._amosLabelSlot = assetIndex;
@@ -1414,7 +1427,7 @@ window.PlatformMap = (function () {
       } else {
         ownMarkers[id]._amosLabelSlot = assetIndex;
         moveMarker(ownMarkers[id], visualAssetPosition(ownMarkers[id], asset, pos, elapsedSec));
-        updateMarkerIcon(ownMarkers[id], ownKind(asset), asset.heading, ownIconSize(asset));
+        updateMarkerIcon(ownMarkers[id], displayedOwnKind(asset), asset.heading, ownIconSize(asset));
         syncOwnLabel(ownMarkers[id], asset);
       }
       updateMarkerPopup(ownMarkers[id], assetPopupHtml(asset));

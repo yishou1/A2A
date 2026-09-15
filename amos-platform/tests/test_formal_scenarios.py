@@ -312,10 +312,19 @@ def test_air_assets_publish_real_altitude_and_story_fits_duration(scenario_id: s
     scenario = get_scenario(scenario_id)
     assert scenario is not None
     duration = float(scenario["demo_controls"]["duration_sec"])
-    assert all(
-        float(asset["position"].get("alt_ft", 0)) > 0
-        for asset in scenario["assets"] if asset["domain"] == "air"
-    )
+    phases_by_asset = scenario.get("asset_behavior_phases") or {}
+    for asset in scenario["assets"]:
+        if asset["domain"] != "air":
+            continue
+        initial_altitude = float(asset["position"].get("alt_ft", 0))
+        phases = phases_by_asset.get(asset["asset_id"]) or []
+        # Carrier aircraft may correctly begin on deck at zero feet, but their
+        # first airborne phase must publish a real mission altitude.
+        assert initial_altitude > 0 or (
+            phases
+            and str(phases[0].get("status") or "") == "staged"
+            and any(float(phase.get("alt_ft") or 0) > 0 for phase in phases[1:])
+        )
     assert max(row["at_sec"] for row in scenario["timeline"]) <= duration
     assert max(row["at_sec"] for row in scenario["media_cues"]) <= duration
     assert max(row["min_elapsed_sec"] for row in scenario["demo_checkpoints"]) <= duration
@@ -382,8 +391,8 @@ def test_maritime_scenario_has_two_unknown_surface_targets_and_engagement_policy
     assert scenario["asset_route_modes"]["AEW-01"] == "loop"
     assert scenario["engagement_policy"]["protected_truth_ids"] == ["CONTACT-FISHING-01"]
     assert scenario["engagement_policy"]["requires_prior_warning"] is True
-    assert scenario["engagement_policy"]["warning_delay_sec"] == 300
-    assert scenario["demo_controls"]["duration_sec"] == 6600
+    assert scenario["engagement_policy"]["warning_delay_sec"] == 120
+    assert scenario["demo_controls"]["duration_sec"] == 5400
     assert scenario["threat_observation_windows"] == {
         "CONTACT-HOSTILE-01": {"start_sec": 600},
             "CONTACT-FISHING-01": {"start_sec": 960},

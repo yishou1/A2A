@@ -173,6 +173,15 @@ def test_own_force_labels_use_collision_aware_layout() -> None:
     assert ".map-resource-label.own-label.label-low-zoom" in css
 
 
+def test_scenario_can_override_an_asset_with_the_swarm_symbol() -> None:
+    map_script = (ROOT / "static/js/map/platform-map.js").read_text(encoding="utf-8")
+
+    assert "function displayedOwnKind(asset)" in map_script
+    assert "assetIconKinds: mapDisplay.asset_icon_kinds || {}" in map_script
+    assert "assetIconSizes: mapDisplay.asset_icon_sizes || {}" in map_script
+    assert "displayedOwnKind(asset), asset.heading" in map_script
+
+
 def test_map_uses_decluttered_short_trails_and_slow_space_projection() -> None:
     map_script = (ROOT / "static/js/map/platform-map.js").read_text(encoding="utf-8")
     dashboard = (ROOT / "templates/dashboard.html").read_text(encoding="utf-8")

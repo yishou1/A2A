@@ -73,7 +73,7 @@ def test_fire_command_requires_identification_and_explicit_authorization() -> No
         weapon_name="舰载反舰导弹",
         authorized=True,
     )
-    engine._tick(300.0)
+    engine._tick(float(warning["delay_sec"]))
     launched = engine.fire_weapon_at_track(
         hostile.id,
         asset_id="ESCORT-01",
@@ -83,8 +83,8 @@ def test_fire_command_requires_identification_and_explicit_authorization() -> No
 
     assert "error" in rejected
     assert before_warning == {"error": "必须先向目标发出警告"}
-    assert "还需等待 300 个仿真秒" in during_wait["error"]
-    assert warning["fire_not_before_sec"] - warning["issued_at_sec"] == 300
+    assert "还需等待 120 个仿真秒" in during_wait["error"]
+    assert warning["fire_not_before_sec"] - warning["issued_at_sec"] == 120
     assert "海面接触 " in warning_alert["msg"]
     assert "高速攻击艇" in warning_alert["msg"]
     assert "TRK-" not in warning_alert["msg"]
@@ -192,7 +192,7 @@ def test_post_strike_capture_observes_destroyed_target_without_recreating_track(
         authorized=True,
     )
     assert authorized["status"] == "authorized"
-    engine._tick(5580.0 - float(engine.clock["elapsed_sec"]))
+    engine._tick(4560.0 - float(engine.clock["elapsed_sec"]))
     assert "MAR-MEDIA-07" not in engine.media_capture.captured_media_ids
 
     engine._apply_damage(engine.threats[truth_id], "destroyed")
@@ -466,7 +466,7 @@ def test_confirm_uav_stays_visible_for_post_strike_assessment_media() -> None:
     assert uav.get("_follow_returning_home") is not True
     assert uav.get("_operator_follow_visible") is True
 
-    engine._tick(max(0.0, 5580.0 - float(engine.clock["elapsed_sec"])))
+    engine._tick(max(0.0, 4560.0 - float(engine.clock["elapsed_sec"])))
 
     assert "MAR-MEDIA-07" in engine.media_capture.captured_media_ids
     assert any(
@@ -474,7 +474,7 @@ def test_confirm_uav_stays_visible_for_post_strike_assessment_media() -> None:
         for asset in engine.get_operator_state()["assets"]
     )
 
-    engine.clock["elapsed_sec"] = 5609.0
+    engine.clock["elapsed_sec"] = 4589.0
     engine._tick(1.0)
     assert uav.get("_follow_returning_home") is True
     assert engine.waypoint_nav.get_route("UAV-CONFIRM-01")[0]["label"] == "RETURN"
@@ -524,7 +524,7 @@ def test_fire_command_api_applies_the_same_server_side_gates(monkeypatch) -> Non
         },
         "authorization": {"approved": True},
     })
-    engine._tick(300.0)
+    engine._tick(float(warning.get_json()["data"]["result"]["delay_sec"]))
     accepted = client.post("/api/v1/sim/commands", json={
         "command_type": "fire",
         "params": {
@@ -598,6 +598,6 @@ def test_public_scenario_does_not_reveal_private_no_strike_truth_ids() -> None:
         "KC-05", "KC-06", "KC-07", "KC-09", "KC-10", "KC-11",
     ]
     assert cue_03[-1]["at_sec"] < 1470
-    assert cue_08[-1]["at_sec"] < 5610
+    assert cue_08[-1]["at_sec"] < 4590
     assert payload["function_runtime_triggers"]["KC-22"]["event"] == "authorized_fire_command"
     assert payload["function_runtime_triggers"]["KC-28"]["event"] == "damage_assessment_confirmed"

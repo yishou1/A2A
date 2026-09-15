@@ -431,7 +431,7 @@ def test_workflow_file_override_is_rejected() -> None:
         (1470, "observe_workflow.bpel"),
         (2910, "orient_workflow.bpel"),
         (3630, "decide_workflow.bpel"),
-        (5610, "act_workflow.bpel"),
+        (4590, "act_workflow.bpel"),
     ],
 )
 def test_backend_selects_workflow_from_current_f2t2ea_phase(elapsed, expected) -> None:

@@ -859,6 +859,32 @@ class MediaCaptureRuntime:
             }
             if required_source_media_ids - set(self._captures):
                 continue
+            event_types = {
+                str(event.get("type") or "")
+                for event in engine.events
+                if isinstance(event, dict)
+            }
+            required_event_types = {
+                str(value)
+                for value in parameters.get("required_event_types") or []
+                if value
+            }
+            if required_event_types - event_types:
+                continue
+            hit_target_ids = {
+                str(event.get("target_threat_id") or "")
+                for event in engine.events
+                if isinstance(event, dict)
+                and event.get("type") == "weapon_hit"
+                and event.get("target_threat_id")
+            }
+            required_hit_targets = {
+                str(value)
+                for value in parameters.get("required_weapon_hit_target_ids") or []
+                if value
+            }
+            if required_hit_targets - hit_target_ids:
+                continue
             if not self._task_ready(plan, engine.tasks, elapsed, branch):
                 continue
             product_type = _product_type(plan)

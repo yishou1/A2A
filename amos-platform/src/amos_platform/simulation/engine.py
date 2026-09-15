@@ -2002,6 +2002,9 @@ class SimEngine:
                         1.0,
                         float(asset.get("_cruise_speed_kts", 1) or 1),
                     )
+                    if behavior.get("alt_ft") is not None:
+                        asset_position = asset.get("position") or asset
+                        asset_position["alt_ft"] = float(behavior.get("alt_ft") or 0)
                     rerouted_assets.append(route_asset_id)
             self.events.append({
                 "type": "damage_assessment_confirmed",
@@ -2533,6 +2536,9 @@ class SimEngine:
                         1.0,
                         float(asset.get("_cruise_speed_kts", 1) or 1),
                     )
+                    if behavior.get("alt_ft") is not None:
+                        asset_position = asset.get("position") or asset
+                        asset_position["alt_ft"] = float(behavior.get("alt_ft") or 0)
                     rerouted_assets.append(route_asset_id)
             if rerouted_assets:
                 self.events.append({
