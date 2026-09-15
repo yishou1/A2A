@@ -13,7 +13,7 @@ from decision_agents.common.a2a_service import build_agent_card
 from decision_agents.common.definitions import AGENT_DEFINITIONS
 from decision_agents.common.a2a_payloads import build_agent_request_payload
 from decision_agents.common.base_agent import AlgorithmAgent
-from decision_agents.common.schemas import AgentResponse
+from decision_support.schemas import AgentResponse
 from decision_agents.compliance_authorization.agent import ComplianceAuthorizationAgent
 from decision_agents.decision_planning.agent import DecisionPlanningAgent
 
@@ -153,8 +153,8 @@ class DecisionAgentsA2ATest(unittest.TestCase):
         self.assertTrue(response.result["target_trends"])
         self.assertTrue(response.result["rag_evidence"])
         self.assertTrue(response.result["rag_answer"])
-        self.assertIn("decision_planning_logistic", response.selected_algorithms)
-        self.assertIn("decision_planning_lstm", response.selected_algorithms)
+        self.assertIn("decision_plan_recommender_formula", response.selected_algorithms)
+        self.assertIn("target_trend_formula", response.selected_algorithms)
 
     def test_compliance_authorization_returns_structured_decision(self):
         response = ComplianceAuthorizationAgent().handle_query(
@@ -177,7 +177,7 @@ class DecisionAgentsA2ATest(unittest.TestCase):
                 for violation in plan.get("violations", [])
             )
         )
-        self.assertIn("compliance_authorization_logistic", response.selected_algorithms)
+        self.assertIn("compliance_risk_formula", response.selected_algorithms)
 
     def test_a2a_send_message_returns_standard_output(self):
         agent = DecisionAlgorithmA2AAgent(

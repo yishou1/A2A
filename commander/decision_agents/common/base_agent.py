@@ -14,7 +14,7 @@ from decision_agents.common.llm_enhancer import (
     llm_enabled,
     parse_natural_language,
 )
-from decision_agents.common.schemas import AgentRequest, AgentResponse
+from decision_support.schemas import AgentRequest, AgentResponse
 from llm.client import LLMClientError
 
 

@@ -11,7 +11,7 @@ from bpel_workflow import BPELWorkflowCatalog
 from commander_agent.agent_leases import AgentLeaseManager
 from commander_agent.main import CommanderAgent
 from decision_agents.common.a2a_payloads import build_agent_request_payload
-from decision_agents.common.schemas import AgentRequest
+from decision_support.schemas import AgentRequest
 from protocol_contracts import ContractValidationError
 from scripts.demo_bpel_workflows import main as demo_bpel_workflows_main
 

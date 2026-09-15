@@ -198,7 +198,10 @@ def test_decision_planning_core_outputs_rule_adjusted_rag_core():
     assert outputs["recommended_plan_id"]
     assert outputs["plan_scores"]
     assert outputs["target_trends"]
-    assert outputs["model_runtime"]["decision_planning_lr"]["plans"]
+    runtime = outputs["model_runtime"]
+    assert runtime["plan_recommendation"]["algorithm_id"] == "decision_plan_recommender_onnx"
+    assert runtime["plan_recommendation"]["plans"]
+    assert runtime["target_trend"]["algorithm_id"] == "target_trend_predictor_onnx"
     assert outputs["rag_model_profile"]["backend"] == "local"
     assert "rag_duration_ms" in outputs
     assert all("rag_rule_adjustment" in item for item in outputs["plan_scores"])
@@ -211,7 +214,9 @@ def test_compliance_authorization_core_outputs_rule_evidence_core():
     assert outputs["decision"] in {"approved", "blocked", "review_required"}
     assert outputs["selected_plan_id"] == "PLAN-1"
     assert "risk_probability" in outputs
-    assert outputs["model_runtime"]["compliance_authorization_lr"]["model"] == "compliance_authorization_lr.onnx"
+    runtime = outputs["model_runtime"]["compliance_risk"]
+    assert runtime["algorithm_id"] == "compliance_risk_scorer_onnx"
+    assert runtime["model"] == "model.onnx"
     assert outputs["rag_model_profile"]["backend"] == "local"
     assert "rag_duration_ms" in outputs
     assert outputs["logistic_features"]["rag_evidence_count"] >= 0.0

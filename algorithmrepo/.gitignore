@@ -76,3 +76,6 @@ desktop.ini
 
 # Keep the small example .onnx files in this repository.
 # Large production models should use Git LFS or external object storage.
+
+runtime-data/
+.venv-synapse/

@@ -1,0 +1,30 @@
+algorithm_id: synapse_rag_retriever
+version: 2.0.0
+display_name: synapse_rag_retriever
+backend_type: python_http_service
+status: draft
+task_family: retrieval
+modalities:
+  input: [structured_json]
+  output: [structured_json]
+capabilities: [synapse_rag_retriever]
+agent_card:
+  summary: Real bundled SynapseRAG service capability with no Commander dependency.
+  when_to_use: [Query an indexed knowledge base.]
+  when_not_to_use: [No active index is available.]
+  input_description: See input.schema.json; operation-specific arguments are validated by the service.
+  output_description: Attributed evidence or bounded graph associations and persisted retrieval explanations.
+machine_spec:
+  input_schema_ref: input.schema.json
+  output_schema_ref: output.schema.json
+  runtime:
+    backend_type: python_http_service
+    endpoint: http://127.0.0.1:9048/predict
+    health_endpoint: http://127.0.0.1:9048/health
+    metadata_endpoint: http://127.0.0.1:9048/metadata
+    timeout_ms: 65000
+constraints:
+  max_input_chars: 100000
+  max_request_bytes: 1048576
+  batch_supported: false
+  streaming_supported: false

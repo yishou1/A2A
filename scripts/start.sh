@@ -120,7 +120,7 @@ else
   active_llm_profile="${LLM_PROFILE:-env-default}"
 fi
 
-export PYTHONPATH="$COMMANDER_DIR:$COMMANDER_DIR/services:$AMOS_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$COMMANDER_DIR:$ROOT_DIR/algorithmrepo/services:$COMMANDER_DIR/services:$AMOS_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
 export NACOS_ADDR="${NACOS_ADDR:-127.0.0.1:${NACOS_PORT:-8848}}"
 export NACOS_PORT="${NACOS_PORT:-${NACOS_ADDR##*:}}"
 export NACOS_SERVER="$NACOS_ADDR"

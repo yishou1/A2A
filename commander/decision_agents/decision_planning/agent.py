@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from decision_agents.common.algolib_runtime import run_agent_with_algolib, use_algolib_backend
 from decision_agents.common.base_agent import AlgorithmAgent
-from decision_agents.common.schemas import AgentRequest, AgentResponse
-from decision_agents.decision_planning.local_algorithm import run_decision_planning
+from decision_support.schemas import AgentRequest, AgentResponse
+from decision_support.planning import run_decision_planning
 
 
 class DecisionPlanningAgent(AlgorithmAgent):

@@ -13,7 +13,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from decision_agents.common.base_agent import AlgorithmAgent
-from decision_agents.common.config import get_settings
+from decision_support.config import get_settings
 from decision_agents.common.definitions import AGENT_DEFINITIONS as SHARED_AGENT_DEFINITIONS
 from decision_agents.compliance_authorization.agent import ComplianceAuthorizationAgent
 from decision_agents.decision_planning.agent import DecisionPlanningAgent
