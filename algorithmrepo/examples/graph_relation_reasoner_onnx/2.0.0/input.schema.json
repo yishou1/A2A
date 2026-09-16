@@ -1,0 +1,32 @@
+{
+  "title": "M20 Multi-Platform Temporal Graph Relation Input",
+  "type": "object",
+  "required": ["tracks"],
+  "properties": {
+    "tracks": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["track_id", "lat", "lon", "speed", "heading"],
+        "properties": {
+          "track_id": {"type": "string"},
+          "type_name": {"type": "string"},
+          "class_name": {"type": "string"},
+          "platform_type": {"type": "string"},
+          "object_type": {"type": "string"},
+          "lat": {"type": "number"},
+          "lon": {"type": "number"},
+          "alt": {"type": "number"},
+          "speed": {"type": "number"},
+          "heading": {"type": "number"},
+          "confidence": {"type": "number"},
+          "history_path": {"type": "array", "minItems": 6},
+          "metadata": {"type": "object"}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false
+}

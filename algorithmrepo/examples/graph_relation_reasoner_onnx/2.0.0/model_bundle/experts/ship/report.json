@@ -1,0 +1,50 @@
+{
+  "release_status": "temporal_candidate_not_deployed",
+  "domain": "ship",
+  "model_id": "temporal_graph_relation_reasoner",
+  "model_version": "m20-ship-gru-gnn-candidate-20260914",
+  "architecture": {
+    "history_points": 8,
+    "node_features": 7,
+    "edge_features": 12,
+    "hidden_size": 32,
+    "gru_layers": 1,
+    "gnn_message_layers": 2,
+    "parameter_count": 19873
+  },
+  "dataset": {
+    "metadata": "processed/m20_temporal_ship_hard_negative_v2/metadata.json",
+    "metadata_sha256": "56b6203760e21212a7e7f2a7b62b02965144aebc7931b5852daccd0296650160"
+  },
+  "training": {
+    "epochs_requested": 100,
+    "epochs_completed": 22,
+    "best_epoch": 7,
+    "device": "mps",
+    "seed": 20260916,
+    "elapsed_seconds": 7.393
+  },
+  "evaluation": {
+    "validation_best_balanced_accuracy": 0.998108,
+    "test_at_0_5": {
+      "threshold": 0.5,
+      "accuracy": 0.991867,
+      "precision": 0.48,
+      "recall": 1.0,
+      "specificity": 0.991805,
+      "balanced_accuracy": 0.995903,
+      "f1": 0.648649,
+      "roc_auc": 1.0,
+      "pr_auc": 1.0,
+      "true_positive": 36,
+      "true_negative": 4720,
+      "false_positive": 39,
+      "false_negative": 0,
+      "verified_pair_count": 4795
+    }
+  },
+  "checkpoint": {
+    "best": "artifacts/m20_temporal_ship_hard_negative_v2_20260914/ship/best.safetensors",
+    "sha256": "e16c9bfa6f05787e126a204b8a0ef08efea09ffafa9e82c7ed7b421735c27092"
+  }
+}

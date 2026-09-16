@@ -43,6 +43,7 @@ TRACK_THREAT_ALGORITHMS = (
 
 
 for algorithm_id, task_family, algorithm_class, algorithm_class_name, predict_fn in TRACK_THREAT_ALGORITHMS:
+    algorithm_version = "2.0.0" if algorithm_id == "graph_relation_reasoner" else VERSION
     model_loaded_callable = (
         graph_relation_model_loaded if algorithm_id == "graph_relation_reasoner" else _model_loaded
     )
@@ -50,7 +51,7 @@ for algorithm_id, task_family, algorithm_class, algorithm_class_name, predict_fn
         f"/{algorithm_id}",
         create_algorithm_app(
             algorithm_id,
-            VERSION,
+            algorithm_version,
             task_family,
             predict_fn,
             model_loaded_callable=model_loaded_callable,
@@ -60,6 +61,7 @@ for algorithm_id, task_family, algorithm_class, algorithm_class_name, predict_fn
                 "owner_scope": "track_threat_agent",
                 "safety_boundary": "simulation situation awareness only; no weapon control or engagement advice",
             },
+            compatible_versions=(VERSION,) if algorithm_id == "graph_relation_reasoner" else (),
         ),
     )
 

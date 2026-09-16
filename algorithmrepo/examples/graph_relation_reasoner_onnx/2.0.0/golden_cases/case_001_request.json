@@ -1,0 +1,11 @@
+{
+  "algorithm_id": "graph_relation_reasoner",
+  "version": "2.0.0",
+  "inputs": {
+    "tracks": [
+      {"track_id": "air-01", "type_name": "fighter", "lat": 31.0035, "lon": 121.021, "alt": 8000, "speed": 230, "heading": 90, "confidence": 0.95, "history_path": [{"lat": 31.0, "lon": 121.0}, {"lat": 31.0005, "lon": 121.003}, {"lat": 31.001, "lon": 121.006}, {"lat": 31.0015, "lon": 121.009}, {"lat": 31.002, "lon": 121.012}, {"lat": 31.0025, "lon": 121.015}, {"lat": 31.003, "lon": 121.018}, {"lat": 31.0035, "lon": 121.021}]},
+      {"track_id": "air-02", "type_name": "fighter", "lat": 31.0075, "lon": 121.021, "alt": 8000, "speed": 230, "heading": 90, "confidence": 0.95, "history_path": [{"lat": 31.004, "lon": 121.0}, {"lat": 31.0045, "lon": 121.003}, {"lat": 31.005, "lon": 121.006}, {"lat": 31.0055, "lon": 121.009}, {"lat": 31.006, "lon": 121.012}, {"lat": 31.0065, "lon": 121.015}, {"lat": 31.007, "lon": 121.018}, {"lat": 31.0075, "lon": 121.021}]}
+    ]
+  },
+  "params": {"model_variant": "m20_fused_onnx_v6", "relation_threshold": 0.1}
+}
