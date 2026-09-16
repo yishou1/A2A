@@ -22,3 +22,7 @@ runs/**/weights/
 runs/**/*.jpg
 runs/**/*.png
 runs/model_profile/
+
+# Duplicate staging bundle; canonical package is examples/battlefield_rtdetr_detector_onnx/
+RT-DETR_onnx/
+

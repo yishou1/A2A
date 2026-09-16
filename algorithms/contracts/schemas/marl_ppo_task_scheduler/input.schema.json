@@ -1,0 +1,22 @@
+{
+  "title": "MARL-PPO Scheduler Input",
+  "type": "object",
+  "properties": {
+    "tracks": {
+      "type": "array"
+    },
+    "detections": {
+      "type": "array"
+    },
+    "batch_context": {
+      "type": "object"
+    },
+    "frames": {
+      "type": "array"
+    },
+    "amos_payload": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false
+}

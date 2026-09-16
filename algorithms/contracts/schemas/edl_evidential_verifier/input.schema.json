@@ -1,0 +1,13 @@
+{
+  "title": "EDL Input",
+  "type": "object",
+  "required": [
+    "detections"
+  ],
+  "properties": {
+    "detections": {
+      "type": "array"
+    }
+  },
+  "additionalProperties": false
+}

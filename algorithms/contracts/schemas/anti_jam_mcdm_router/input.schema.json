@@ -1,0 +1,23 @@
+{
+  "title": "Anti-Jam MCDM Router Input",
+  "type": "object",
+  "required": ["packet"],
+  "properties": {
+    "packet": {
+      "type": "object",
+      "description": "语义压缩后的情报包（至少含 summary/targets 等）"
+    },
+    "subscriber_agents": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "订阅方 agent id 列表"
+    },
+    "jamming_level": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "干扰强度 0–1"
+    }
+  },
+  "additionalProperties": true
+}

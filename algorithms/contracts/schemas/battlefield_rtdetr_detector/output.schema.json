@@ -1,0 +1,55 @@
+{
+  "title": "Battlefield RT-DETR Detector Output",
+  "type": "object",
+  "required": ["detections", "count"],
+  "properties": {
+    "detections": {
+      "type": "array",
+      "description": "检测框列表；bbox 为像素坐标系 xyxy",
+      "items": {
+        "type": "object",
+        "required": ["class_name", "confidence", "bbox"],
+        "properties": {
+          "sensor_id": { "type": "string" },
+          "class_name": { "type": "string" },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "最终置信度（ODConv 融合后或原 RT-DETR）"
+          },
+          "rtdetr_confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "RT-DETR/检测器原始置信度"
+          },
+          "odconv_confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "ODConv 精炼置信度（未启用 ODConv 时缺省）"
+          },
+          "bbox": {
+            "type": "array",
+            "minItems": 4,
+            "maxItems": 4,
+            "items": { "type": "number" }
+          },
+          "odconv_refined": { "type": "boolean" },
+          "odconv_large_box": {
+            "type": "boolean",
+            "description": "框面积占比≥0.20 时为大框：保留更多 RT-DETR 置信度"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "须等于 detections.length"
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,63 @@
+{
+  "title": "MOTR Neural Kalman Tracker Input",
+  "type": "object",
+  "required": ["verified_detections"],
+  "properties": {
+    "verified_detections": {
+      "type": "array",
+      "description": "经 EDL/上游校验后的检测列表（bbox=xyxy）",
+      "items": {
+        "type": "object",
+        "required": ["bbox"],
+        "properties": {
+          "class_name": { "type": "string" },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+          "bbox": {
+            "type": "array",
+            "minItems": 4,
+            "maxItems": 4,
+            "items": { "type": "number" }
+          },
+          "sensor_id": { "type": "string" },
+          "metadata": { "type": "object" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "prior_tracks": {
+      "type": "array",
+      "description": "上一拍轨迹；用于关联与 geo 平滑",
+      "items": {
+        "type": "object",
+        "properties": {
+          "track_id": { "type": "string" },
+          "class_name": { "type": "string" },
+          "bbox": {
+            "type": "array",
+            "minItems": 4,
+            "maxItems": 4,
+            "items": { "type": "number" }
+          },
+          "last_bbox": {
+            "type": "array",
+            "minItems": 4,
+            "maxItems": 4,
+            "items": { "type": "number" }
+          },
+          "geo": { "type": "object" },
+          "state": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "visual_frame": {
+      "type": ["object", "null"],
+      "description": "当前视觉帧（可选；用于 crop 外观关联与 georef）"
+    },
+    "batch_context": {
+      "type": "object",
+      "description": "批上下文（传感器位姿/海拔等）"
+    }
+  },
+  "additionalProperties": true
+}

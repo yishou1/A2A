@@ -1,0 +1,17 @@
+{
+  "title": "Semantic Comm Input",
+  "type": "object",
+  "required": [
+    "perception",
+    "cognition"
+  ],
+  "properties": {
+    "perception": {
+      "type": "object"
+    },
+    "cognition": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false
+}

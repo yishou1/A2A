@@ -1,0 +1,19 @@
+{
+  "title": "SynapseRAG Input",
+  "type": "object",
+  "required": [
+    "classifications"
+  ],
+  "properties": {
+    "classifications": {
+      "type": "array"
+    },
+    "knowledge_base": {
+      "type": "array"
+    },
+    "query": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

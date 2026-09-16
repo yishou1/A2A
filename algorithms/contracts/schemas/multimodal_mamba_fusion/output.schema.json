@@ -1,0 +1,16 @@
+{
+  "title": "Mamba Fusion Output",
+  "type": "object",
+  "required": [
+    "fused_embeddings"
+  ],
+  "properties": {
+    "fused_embeddings": {
+      "type": "object"
+    },
+    "sequence_length": {
+      "type": "number"
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,13 @@
+{
+  "title": "ImageBind Input",
+  "type": "object",
+  "required": [
+    "frames"
+  ],
+  "properties": {
+    "frames": {
+      "type": "array"
+    }
+  },
+  "additionalProperties": false
+}

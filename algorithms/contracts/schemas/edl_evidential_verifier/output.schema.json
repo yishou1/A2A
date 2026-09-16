@@ -1,0 +1,52 @@
+{
+  "title": "EDL Evidential Verifier Output",
+  "type": "object",
+  "required": ["verified_detections", "count", "summary"],
+  "properties": {
+    "assessments": {
+      "type": "array",
+      "description": "全部候选的门控结果",
+      "items": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": ["verified", "rejected", "manual_review"]
+          },
+          "verified": { "type": "boolean" },
+          "review_required": { "type": "boolean" },
+          "confidence": { "type": "number" },
+          "detector_confidence": { "type": "number" },
+          "rtdetr_confidence": { "type": "number" },
+          "edl_belief": { "type": "number" },
+          "epistemic_uncertainty": { "type": "number" },
+          "aleatoric_uncertainty": { "type": "number" },
+          "bbox": {
+            "type": "array",
+            "minItems": 4,
+            "maxItems": 4,
+            "items": { "type": "number" }
+          },
+          "class_name": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "verified_detections": { "type": "array" },
+    "rejected_detections": { "type": "array" },
+    "review_queue": { "type": "array" },
+    "count": { "type": "integer", "minimum": 0 },
+    "summary": {
+      "type": "object",
+      "required": ["total", "verified", "rejected", "manual_review"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "verified": { "type": "integer", "minimum": 0 },
+        "rejected": { "type": "integer", "minimum": 0 },
+        "manual_review": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": true
+}

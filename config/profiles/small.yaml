@@ -1,20 +1,32 @@
-# 小档 (S)：边缘 / CPU / 8GB 显存
-description: 低延迟、低显存；检测用 RT-DETR-N + 416，嵌入维度 256
+# 低算力档 (low)：同一套识别权重，靠降分辨率 / FP16 / 关 ODConv 省算力
+# 原则：不影响类别与检测语义 —— 仍用 97 类 best，不换 YOLO-nano
+description: 低算力档（同权重轻推理）
 target_device: "8GB GPU / 边缘机"
+param_tier: low
 
 inference:
-  detection_model: rtdetr-n.pt
-  # 训练完成后可改为: models/checkpoints/battlefield_rtdetr_n.pt
+  param_tier: low
+  # 识别：与高档同一权重（97 类）
+  detection_model: models/checkpoints/battlefield_rtdetr_unit17_coco25_ap_kaggle_best.pt
   detection_imgsz: 416
+  detection_half: true
+  odconv_enable: false
+  confidence_threshold: 0.30
+  # 跟踪：同一 VisDrone 微调权重（不换未训练小网）
+  motr_variant: high
+  motr_checkpoint: models/checkpoints/motr_tracker_battlefield.pt
+  # 非识别主路径可减负（毁伤/编码不改变检测类别）
+  embed_backend: lightweight_low
   embed_dim: 256
+  damage_backend: lightweight
+  damage_lightweight_checkpoint: models/checkpoints/lightweight_damage.pt
   mask2former_model: facebook/mask2former-swin-tiny-ade-semantic
+  mamba_checkpoint: models/checkpoints/mamba_fusion_s.pt
+  supcon_checkpoint: models/checkpoints/supcon_meta_s.pt
   semantic_comm_model: google/flan-t5-small
   page_index_model: paraphrase-MiniLM-L6-v2
+  clip_fallback_model: openai/clip-vit-base-patch32
   odconv_crop_size: 96
   odconv_checkpoint: models/checkpoints/odconv_refiner.pt
   edl_checkpoint: models/checkpoints/edl_head.pt
-  motr_checkpoint: models/checkpoints/motr_tracker_battlefield.pt
-  mamba_checkpoint: models/checkpoints/mamba_fusion_s.pt
-  supcon_checkpoint: models/checkpoints/supcon_meta_s.pt
-  marl_checkpoint: models/checkpoints/marl_policy.pt
-  confidence_threshold: 0.30
+  ppo_channel_checkpoint: models/checkpoints/ppo_channel_policy.pt

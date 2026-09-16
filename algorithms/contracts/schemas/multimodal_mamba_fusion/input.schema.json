@@ -1,0 +1,16 @@
+{
+  "title": "Mamba Fusion Input",
+  "type": "object",
+  "required": [
+    "embeddings"
+  ],
+  "properties": {
+    "embeddings": {
+      "type": "object"
+    },
+    "tracks": {
+      "type": "array"
+    }
+  },
+  "additionalProperties": false
+}

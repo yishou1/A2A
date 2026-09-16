@@ -1,19 +1,29 @@
-# 中档 (M)：默认战场部署；RT-DETR-L @640 + embed 1024
-description: 精度与速度平衡（推荐）
+# 中算力档 (mid)：同一套识别权重，中等输入分辨率 + FP16
+description: 中算力档（同权重轻推理）
 target_device: "12–16GB GPU（如 RTX 4060/4070）"
+param_tier: mid
 
 inference:
-  detection_model: models/checkpoints/battlefield_rtdetr.pt
+  param_tier: mid
+  detection_model: models/checkpoints/battlefield_rtdetr_unit17_coco25_ap_kaggle_best.pt
   detection_imgsz: 640
-  embed_dim: 1024
-  mask2former_model: facebook/mask2former-swin-tiny-ade-semantic
-  semantic_comm_model: google/flan-t5-small
-  page_index_model: paraphrase-MiniLM-L6-v2
+  detection_half: true
+  odconv_enable: true
   odconv_crop_size: 128
-  odconv_checkpoint: models/checkpoints/odconv_refiner.pt
-  edl_checkpoint: models/checkpoints/edl_head.pt
+  confidence_threshold: 0.30
+  motr_variant: high
   motr_checkpoint: models/checkpoints/motr_tracker_battlefield.pt
+  # 认知侧可轻量；检测/跟踪保持识别权重
+  embed_backend: lightweight_mid
+  embed_dim: 1024
+  damage_backend: mask2former
+  mask2former_model: facebook/mask2former-swin-tiny-ade-semantic
   mamba_checkpoint: models/checkpoints/mamba_fusion.pt
   supcon_checkpoint: models/checkpoints/supcon_meta.pt
-  marl_checkpoint: models/checkpoints/marl_policy.pt
-  confidence_threshold: 0.35
+  semantic_comm_model: google/flan-t5-small
+  page_index_model: paraphrase-MiniLM-L6-v2
+  clip_fallback_model: openai/clip-vit-base-patch32
+  odconv_checkpoint: models/checkpoints/odconv_refiner.pt
+  edl_checkpoint: models/checkpoints/edl_head.pt
+  ppo_channel_checkpoint: models/checkpoints/ppo_channel_policy.pt
+  marl_ppo_checkpoint: models/checkpoints/marl_ppo_scheduler.pt

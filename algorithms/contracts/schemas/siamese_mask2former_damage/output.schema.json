@@ -1,0 +1,27 @@
+{
+  "title": "Siamese Damage Assessor Output",
+  "type": "object",
+  "required": ["damage_reports"],
+  "properties": {
+    "damage_reports": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["damage_score", "change_ratio"],
+        "properties": {
+          "sensor_id": { "type": "string" },
+          "damage_score": { "type": "number", "minimum": 0, "maximum": 1 },
+          "change_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+          "damage_mask_ref": {
+            "type": "string",
+            "description": "lightweight_siamese | siamese_mask2former"
+          },
+          "mask_pixels": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": true
+      }
+    },
+    "count": { "type": "integer", "minimum": 0 }
+  },
+  "additionalProperties": true
+}
