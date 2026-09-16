@@ -624,7 +624,6 @@ window.PlatformFunctionShowcase = (function () {
     var latestModel = models[models.length - 1];
     root.innerHTML =
       coverageHtml(models) +
-      '<p class="function-showcase-scope">本页面向能力演示，突出当前剧本覆盖的功能、执行阶段和结果状态。完整的输入、算法调用和原始结果请在“流程执行”中查看。</p>' +
       '<section class="function-showcase-card"><div class="function-showcase-heading"><div><small>当前剧本运行</small><h2>' +
         escapeHtml(context.scenarioName || context.scenarioId || "未上报场景") + '</h2></div><span>' +
         escapeHtml(checkpointLabel(latestModel.checkpoint)) + '</span></div>' +
