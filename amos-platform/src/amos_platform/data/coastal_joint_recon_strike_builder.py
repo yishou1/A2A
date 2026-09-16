@@ -162,7 +162,7 @@ def _timeline() -> list[dict[str, Any]]:
         {"cue_id": "CJR-CUE-07", "at_sec": 3300, "phase": "ENGAGE", "level": "CRITICAL", "title": "四节点武器链建立并等待授权", "description": "舰载巡航导弹、歼-16防区外弹药、攻击无人机01和02的四条独立通道已完成同一到达时刻规划；仅在保护区核验和人工授权后执行。", "media_ids": ["CJR-MEDIA-06"], "functional_agent_ids": ["A6"], "model_requirement_ids": ["M03", "M13", "M16"], "function_ids": ["KC-22", "KC-23", "KC-24"]},
         {"cue_id": "CJR-CUE-08", "at_sec": 4200, "phase": "ASSESS", "level": "INFO", "title": "无侦-10实施攻击后复查", "description": "无侦-10保持目标区观测，只有实际命中和当前 SAR/光电证据同时存在时才确认毁伤。", "media_ids": [], "functional_agent_ids": ["A2", "A6"], "model_requirement_ids": ["M18"], "function_ids": ["KC-25", "KC-27"]},
         {"cue_id": "CJR-CUE-09", "at_sec": 4500, "phase": "ASSESS", "level": "INFO", "title": "形成毁伤评估与闭环建议", "description": "后端基于无侦-10的攻击前后变化产品评估效果，并决定结束、补充侦察或重新规划。", "media_ids": ["CJR-MEDIA-07"], "functional_agent_ids": ["A6"], "model_requirement_ids": ["M14", "M18"], "function_ids": ["KC-02", "KC-28"]},
-        {"cue_id": "CJR-CUE-10", "at_sec": 4800, "phase": "ASSESS", "level": "INFO", "title": "任务资源按独立返航线撤离", "description": "海上联合指挥舰离开发射阵位，无侦-10完成复查后返航；歼-16和两架攻击无人机已沿各自脱离航线撤出。", "media_ids": [], "functional_agent_ids": ["A3", "A6"], "model_requirement_ids": ["M14"], "function_ids": ["KC-28"]},
+        {"cue_id": "CJR-CUE-10", "at_sec": 4800, "phase": "ASSESS", "level": "INFO", "title": "任务资源返航与保障舰回收", "description": "海上联合指挥舰离开发射阵位，无侦-10完成复查后返航；歼-16沿空中返航线撤离，两架攻击无人机沿南北回收航线返回保障舰，并在保障舰最终回收点完成甲板回收。", "media_ids": [], "functional_agent_ids": ["A3", "A6"], "model_requirement_ids": ["M14"], "function_ids": ["KC-28"]},
     ]
 
 
@@ -453,7 +453,7 @@ def build_coastal_joint_recon_strike_scenario() -> dict[str, Any]:
         "schema_version": "amos.scenario.v2",
         "id": SCENARIO_ID,
         "name": "临海多域协同侦察与精确打击",
-        "operator_brief": "1艘海上联合指挥舰进入巴士海峡虚构任务海域后，低轨侦察卫星01在首个访问窗口形成待识别离岛接触，侦察卫星02在后续窗口接力复访，通信中继卫星持续保障星—舰链路；已经下传的情报产品在有效期内继续参与融合，不因卫星离开地图而消失。1架无侦-10按SAR、光电和电子侦察顺序复核；1架歼-16承担空中战术指挥和防区外打击；攻击无人机01、02沿北、南两条独立航路抵达释放阵位。后端完成识别与保护区审查、操作员授权后，四个火力节点按同一到达时刻实施模拟攻击，随后歼-16与两架无人机分路撤离，由无侦-10单机完成毁伤复查。",
+        "operator_brief": "1艘海上联合指挥舰进入巴士海峡虚构任务海域后，低轨侦察卫星01在首个访问窗口形成待识别离岛接触，侦察卫星02在后续窗口接力复访，通信中继卫星持续保障星—舰链路；已经下传的情报产品在有效期内继续参与融合，不因卫星离开地图而消失。1架无侦-10按SAR、光电和电子侦察顺序复核；1架歼-16承担空中战术指挥和防区外打击；攻击无人机01、02沿北、南两条独立航路抵达释放阵位。后端完成识别与保护区审查、操作员授权后，四个火力节点按同一到达时刻实施模拟攻击，随后歼-16分路撤离，两架攻击无人机沿保障舰回收航线返回并完成甲板回收，由无侦-10单机完成毁伤复查。",
         "description": "验证两颗低轨侦察卫星接力过境、通信卫星持续中继、情报产品时效管理、单机侦察、海上任务指挥、空中战术指挥、四节点协同武器链、人工授权、分路撤离和毁伤评估闭环。",
         "scenario_type": "scripted_agent_demo",
         "theater": {"theater_id": "bashi_channel_adjacent_joint_training", "name": "台湾南部—菲律宾北部毗邻海域虚构联合训练区", "location_profile": "fictional_training_area", "center": {"lat": 20.49, "lng": 122.13}, "zoom": 8, "ao": {"north": 21.06, "south": 20.01, "east": 122.93, "west": 121.07}},
@@ -551,15 +551,15 @@ def build_coastal_joint_recon_strike_scenario() -> dict[str, Any]:
             "KC-28": {"event": "damage_assessment_confirmed", "offset_sec": 0},
         },
         "demo_checkpoints": [
-            {"checkpoint_id": "CJR-CP-CUE", "title": "天基提示与空基复核输入就绪", "min_elapsed_sec": 930, "conditions": {"stable_track_count_at_least": 1, "minimum_track_confidence": 0.5, "minimum_track_samples": 2, "media_ids_released": ["CJR-MEDIA-01", "CJR-MEDIA-02"]}, "pause": True, "submit_analysis": True},
-            {"checkpoint_id": "CJR-CP-IDENTIFY", "title": "地面目标多模态识别输入就绪", "min_elapsed_sec": 1530, "conditions": {"stable_track_count_at_least": 1, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["CJR-MEDIA-03"]}, "pause": True, "submit_analysis": True},
-            {"checkpoint_id": "CJR-CP-FUSION", "title": "情报融合与共享输入就绪", "min_elapsed_sec": 2130, "conditions": {"stable_track_count_at_least": 1, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["CJR-MEDIA-03", "CJR-MEDIA-10"]}, "pause": True, "submit_analysis": True},
-            {"checkpoint_id": "CJR-CP-PLAN", "title": "战术指挥与协同方案输入就绪", "min_elapsed_sec": 2730, "conditions": {"stable_track_count_at_least": 1, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["CJR-MEDIA-03", "CJR-MEDIA-10"]}, "pause": True, "submit_analysis": True},
-            {"checkpoint_id": "CJR-CP-ENGAGE", "title": "协同武器链等待明确授权", "min_elapsed_sec": 3330, "conditions": {"media_ids_released": ["CJR-MEDIA-06", "CJR-MEDIA-08", "CJR-MEDIA-09"]}, "pause": True, "submit_analysis": True, "requires_operator_action": True},
+            {"checkpoint_id": "CJR-CP-CUE", "title": "天基提示与空基复核输入就绪", "min_elapsed_sec": 930, "conditions": {"stable_track_count_at_least": 1, "minimum_track_confidence": 0.5, "minimum_track_samples": 2, "media_ids_released": ["CJR-MEDIA-01", "CJR-MEDIA-02"]}, "pause": False, "submit_analysis": True, "block_until_analysis_complete": False},
+            {"checkpoint_id": "CJR-CP-IDENTIFY", "title": "地面目标多模态识别输入就绪", "min_elapsed_sec": 1530, "conditions": {"stable_track_count_at_least": 1, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["CJR-MEDIA-03"]}, "pause": False, "submit_analysis": True, "block_until_analysis_complete": False},
+            {"checkpoint_id": "CJR-CP-FUSION", "title": "情报融合与共享输入就绪", "min_elapsed_sec": 2130, "conditions": {"stable_track_count_at_least": 1, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["CJR-MEDIA-03", "CJR-MEDIA-10"]}, "pause": False, "submit_analysis": True, "block_until_analysis_complete": False},
+            {"checkpoint_id": "CJR-CP-PLAN", "title": "战术指挥与协同方案输入就绪", "min_elapsed_sec": 2730, "conditions": {"stable_track_count_at_least": 1, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["CJR-MEDIA-03", "CJR-MEDIA-10"]}, "pause": False, "submit_analysis": True, "block_until_analysis_complete": False},
+            {"checkpoint_id": "CJR-CP-ENGAGE", "title": "协同武器链等待明确授权", "min_elapsed_sec": 3330, "conditions": {"media_ids_released": ["CJR-MEDIA-06", "CJR-MEDIA-08", "CJR-MEDIA-09"]}, "pause": True, "submit_analysis": True, "block_until_analysis_complete": False, "requires_operator_action": True},
             # 收尾检查点只承载复核结果，不得再次进入 FIRE 授权状态。否则首轮
             # 齐射已经核销后不存在 eligible track，前端没有可展示目标，导演却会
             # 永久等待一个不可能出现的第二个攻击弹窗。
-            {"checkpoint_id": "CJR-CP-CLOSE", "title": "毁伤评估与闭环建议就绪", "min_elapsed_sec": 4530, "conditions": {"media_ids_released": ["CJR-MEDIA-07"], "event_types_emitted": ["damage_assessment_confirmed"]}, "pause": True, "submit_analysis": True, "requires_operator_action": True, "operator_action_type": "review"},
+            {"checkpoint_id": "CJR-CP-CLOSE", "title": "毁伤评估与闭环建议就绪", "min_elapsed_sec": 4530, "conditions": {"media_ids_released": ["CJR-MEDIA-07"], "event_types_emitted": ["damage_assessment_confirmed"]}, "pause": True, "submit_analysis": True, "block_until_analysis_complete": False, "requires_operator_action": True, "operator_action_type": "review"},
         ],
         "fault_injections": [
             {"fault_id": "CJR-FAULT-LINK", "type": "communication_degradation", "target": "J16-01", "at_checkpoint": "CJR-CP-PLAN", "status": "available"},
@@ -599,17 +599,19 @@ def build_coastal_joint_recon_strike_scenario() -> dict[str, Any]:
                 ],
                 "ATTACK-UAV-01": [
                     {"lat": 20.20, "lng": 122.25, "label": "UAV01-EGRESS"},
-                    {"lat": 20.05, "lng": 122.42, "label": "UAV01-RECOVERY"},
+                    {"lat": 20.23, "lng": 122.24, "label": "UAV01-FIRE-AREA-RENDEZVOUS"},
+                    {"lat": 20.20, "lng": 122.40, "label": "UAV01-SUPPORT-SHIP-APPROACH"},
                 ],
                 "ATTACK-UAV-02": [
                     {"lat": 20.10, "lng": 122.15, "label": "UAV02-EGRESS"},
-                    {"lat": 20.04, "lng": 122.28, "label": "UAV02-RECOVERY"},
+                    {"lat": 20.23, "lng": 122.24, "label": "UAV02-FIRE-AREA-RENDEZVOUS"},
+                    {"lat": 20.20, "lng": 122.40, "label": "UAV02-SUPPORT-SHIP-APPROACH"},
                 ],
             },
             "post_launch_behaviors": {
                 "J16-01": {"behavior": "post_launch_egress", "label": "发射后高速脱离返航", "speed_kts": 480},
-                "ATTACK-UAV-01": {"behavior": "north_axis_egress", "label": "北路攻击后独立脱离", "speed_kts": 130},
-                "ATTACK-UAV-02": {"behavior": "south_axis_egress", "label": "南路攻击后独立脱离", "speed_kts": 130},
+                "ATTACK-UAV-01": {"behavior": "north_axis_recovery_to_support_ship", "label": "北路攻击后返回保障舰", "speed_kts": 130},
+                "ATTACK-UAV-02": {"behavior": "south_axis_recovery_to_support_ship", "label": "南路攻击后返回保障舰", "speed_kts": 130},
             },
             "post_bda_routes": {
                 "WZ10-01": [
@@ -620,10 +622,20 @@ def build_coastal_joint_recon_strike_scenario() -> dict[str, Any]:
                     {"lat": 20.20, "lng": 122.40, "label": "C2-DEPART-FIRE-POSITION"},
                     {"lat": 20.10, "lng": 122.55, "label": "C2-RECOVERY"},
                 ],
+                "ATTACK-UAV-01": [
+                    {"lat": 20.20, "lng": 122.40, "label": "UAV01-SUPPORT-SHIP-APPROACH"},
+                    {"lat": 20.10, "lng": 122.55, "label": "SEA-C2-RECOVERY-DECK"},
+                ],
+                "ATTACK-UAV-02": [
+                    {"lat": 20.20, "lng": 122.40, "label": "UAV02-SUPPORT-SHIP-APPROACH"},
+                    {"lat": 20.10, "lng": 122.55, "label": "SEA-C2-RECOVERY-DECK"},
+                ],
             },
             "post_bda_behaviors": {
                 "WZ10-01": {"behavior": "reconnaissance_return", "label": "完成毁伤复查后返航", "speed_kts": 190},
                 "SEA-C2-01": {"behavior": "command_ship_recovery", "label": "离开发射阵位并撤收", "speed_kts": 14},
+                "ATTACK-UAV-01": {"behavior": "north_axis_recovered_to_support_ship", "label": "北路无人机返保障舰回收", "speed_kts": 130},
+                "ATTACK-UAV-02": {"behavior": "south_axis_recovered_to_support_ship", "label": "南路无人机返保障舰回收", "speed_kts": 130},
             },
             "coordinated_engagement": {
                 "chain_id": "CJR-WEAPON-CHAIN-01",
@@ -649,7 +661,7 @@ def build_coastal_joint_recon_strike_scenario() -> dict[str, Any]:
                     "海上联合指挥舰承担任务级指挥和舰载对陆主火力；歼-16长机承担空中战术指挥及防区外打击角色。",
                     "攻击无人机01和02分别执行北、南突入，不得合并为抽象群体；两机只能在目标确认、保护区审查和操作员授权后进入执行状态。",
                     "四个火力节点必须按同一到达时刻协调，任一节点超出射程或到达时差超限均不得执行。",
-                    "发射后歼-16、攻击无人机01和02立即执行各自脱离航线；毁伤评估完成后无侦-10与指挥舰分别返航和撤离。",
+                    "发射后歼-16立即执行空中脱离航线，攻击无人机01和02先回到火力区保障舰会合航线，毁伤评估完成后随海上联合指挥与无人机保障舰撤至最终回收点并完成甲板回收。",
                 ],
             },
         },

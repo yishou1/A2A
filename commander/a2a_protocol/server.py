@@ -25,6 +25,7 @@ from protocol_contracts import (
     validate_task_response,
 )
 from skill_catalog import enrich_skill_contract, professional_skills_for_role
+from distributed_coordination.agent_state import AgentCoordinationStore
 
 def verify_token(authorization: str = Header(None)):
     if not authorization or not authorization.startswith("Bearer "):
@@ -147,6 +148,7 @@ class A2ABaseAgent:
         idempotency_db_path: str | None = None,
         idempotency_namespace: str | None = None,
         max_concurrent_tasks: int | None = None,
+        coordination_client_factory=None,
     ):
         self.name = name
         self.description = description
@@ -192,6 +194,11 @@ class A2ABaseAgent:
         }
         self._last_error_details = None
         self._state_lock = threading.RLock()
+        self.coordination_client_factory = coordination_client_factory
+        self.coordination_store = AgentCoordinationStore(
+            f"{self.name}@{self.port}",
+            self._coordination_resource_state,
+        )
         self.app = FastAPI(title=name)
         self.setup_routes()
 
@@ -221,6 +228,7 @@ class A2ABaseAgent:
             "resourcesEndpoint": "/resources",
             "modelsEndpoint": "/models",
             "recoveryEndpoint": "/recovery/notify",
+            "coordinationEndpoint": "/coordination/cbba",
             "maxConcurrentTasks": self.max_concurrent_tasks,
         }
         if self.skills:
@@ -330,6 +338,100 @@ class A2ABaseAgent:
         metadata["quality_success_rate"] = round(success_rate, 6)
         metadata["quality_avg_latency_ms"] = round(average_latency, 3)
         return metadata
+
+    def _coordination_resource_state(self) -> dict:
+        metadata = self.heartbeat_metadata()
+        cpu = float(metadata.get("resource_cpu_percent") or 0.0)
+        memory = float(metadata.get("resource_memory_percent") or 0.0)
+        active = int(float(metadata.get("active_tasks") or 0))
+        maximum = max(1, int(float(metadata.get("max_concurrent_tasks") or 1)))
+        skills = [
+            str(skill.get("id"))
+            for skill in self.skills
+            if isinstance(skill, dict) and skill.get("id")
+        ]
+        role_types = {
+            "artillery": ["artillery", "strike", "fire"],
+            "assault": ["assault", "strike"],
+            "recon": ["recon", "sensor", "isr"],
+        }
+        return {
+            "role": self.role,
+            "resource_types": role_types.get(self.role, [self.role]),
+            "capabilities": skills,
+            "skills": skills,
+            "available": bool(self.ready),
+            "ready": bool(self.ready),
+            "status": metadata.get("agent_run_state", "ready"),
+            "active_tasks": active,
+            "max_concurrent_tasks": maximum,
+            "available_task_slots": max(0, maximum - active),
+            "load": active / maximum,
+            "readiness": max(0.0, min(1.0, 1.0 - ((cpu + memory) / 200.0))),
+            "resource_cpu_percent": cpu,
+            "resource_memory_percent": memory,
+        }
+
+    def handle_coordination_message(self, payload: dict) -> dict:
+        """Process CBBA control traffic outside task/workflow execution state."""
+        message_type = str(payload.get("message_type") or "").lower()
+        if message_type != "synchronize":
+            return self.coordination_store.handle(payload)
+
+        coordination_id = str(payload.get("coordination_id") or "")
+        active_agent_ids = payload.get("active_agent_ids") or []
+        round_index = int(payload.get("round") or 0)
+        peer_results = []
+        for peer in sorted(
+            payload.get("peers") or [],
+            key=lambda item: str(item.get("agent_id") or f"{item.get('ip')}:{item.get('port')}"),
+        ):
+            try:
+                if self.coordination_client_factory is not None:
+                    client = self.coordination_client_factory(peer)
+                else:
+                    from a2a_protocol.client import A2AClient
+
+                    client = A2AClient(peer.get("ip"), peer.get("port"))
+                state = client.exchange_coordination(
+                    {
+                        "schema_version": payload.get("schema_version"),
+                        "message_type": "state_request",
+                        "coordination_id": coordination_id,
+                        "sender_agent_id": f"{self.name}@{self.port}",
+                        "round": round_index,
+                    }
+                )
+                self.coordination_store.merge(
+                    {
+                        "message_type": "merge",
+                        "coordination_id": coordination_id,
+                        "round": round_index,
+                        "active_agent_ids": active_agent_ids,
+                        "winner_table": state.get("winner_table") or {},
+                    }
+                )
+                peer_results.append(
+                    {"agent_id": peer.get("agent_id"), "received": True}
+                )
+            except Exception as exc:
+                peer_results.append(
+                    {
+                        "agent_id": peer.get("agent_id"),
+                        "received": False,
+                        "error": str(exc),
+                    }
+                )
+        state = self.coordination_store.reconcile(
+            {
+                "message_type": "reconcile",
+                "coordination_id": coordination_id,
+                "round": round_index,
+                "active_agent_ids": active_agent_ids,
+            }
+        )
+        state["peer_exchange"] = peer_results
+        return state
 
     def _task_execution_status(self, active_tasks: int) -> str:
         if active_tasks <= 0:
@@ -502,6 +604,13 @@ class A2ABaseAgent:
         @self.app.post("/recovery/notify")
         async def recovery_notify(payload: dict):
             return self.notify_recovery(payload)
+
+        @self.app.post("/coordination/cbba")
+        async def coordinate_cbba(payload: dict, token: str = Depends(verify_token)):
+            try:
+                return self.handle_coordination_message(payload)
+            except (KeyError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
 
         @self.app.get("/recovery/status")
         async def recovery_status():

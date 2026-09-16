@@ -292,11 +292,14 @@ class DirectorService:
         }
         if callback_result:
             reached["submission"] = deepcopy(callback_result)
+        reached["analysis_blocking"] = bool(
+            checkpoint.get("block_until_analysis_complete", True)
+        )
         self._reached.append(reached)
         self._state["current_checkpoint"] = reached
         self._state["awaiting_analysis"] = analysis_status in {
             "submitted", "running",
-        }
+        } and bool(reached["analysis_blocking"])
         self._state["director_status"] = (
             "awaiting_analysis" if self._state["awaiting_analysis"] else "checkpoint_reached"
         )
@@ -390,6 +393,7 @@ class DirectorService:
         return bool(
             controls.get("advance_while_analyzing")
             and checkpoint.get("submit_analysis")
+            and checkpoint.get("block_until_analysis_complete", True)
         )
 
     def _analysis_motion_limit(self) -> float | None:
@@ -621,7 +625,7 @@ class DirectorService:
                 current = self._state.get("current_checkpoint")
                 if isinstance(current, dict) and current.get("analysis_status") in {
                     "submitted", "running", "backend_unreachable",
-                }:
+                } and current.get("analysis_blocking", True):
                     # Analysis still in flight and the story clock has reached
                     # the analysis motion limit: instead of freezing the left
                     # panel in place, drop the hard clamp so the scene keeps
@@ -723,13 +727,14 @@ class DirectorService:
                     return
                 if self._checkpoint_satisfied(checkpoint):
                     continue_during_analysis = self._analysis_progress_enabled(checkpoint)
-                    if not continue_during_analysis:
+                    pause_on_reach = bool(checkpoint.get("pause", True))
+                    if pause_on_reach and not continue_during_analysis:
                         engine.pause()
                     with self._lock:
                         self._reach_checkpoint(checkpoint)
                         if continue_during_analysis and self._state.get("awaiting_analysis"):
                             self._arm_analysis_motion_limit()
-                        elif continue_during_analysis:
+                        elif pause_on_reach:
                             engine.pause()
                         self.runtime.record_director_state(self.state())
                     continue
@@ -785,7 +790,7 @@ class DirectorService:
                 current = self._state.get("current_checkpoint")
                 if isinstance(current, dict) and current.get("analysis_status") in {
                     "submitted", "running", "backend_unreachable",
-                }:
+                } and current.get("analysis_blocking", True):
                     analysis_result = self._poll_current_analysis(resume_on_success=False)
                     if analysis_result == "pending":
                         raise DirectorError("checkpoint analysis is not completed")
