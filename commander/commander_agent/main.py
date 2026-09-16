@@ -33,6 +33,7 @@ from telemetry import traced_method
 from workflow_state_store import WorkflowStateStore, new_workflow_id, utc_now_iso
 from workflow_payloads import attachment_snapshot, merge_attachments, normalize_attachments
 from closed_loop_agent.agent_results_mapping import build_standard_results_from_context
+from distributed_coordination.integration import coordinate_task_schedule
 import json
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -2387,6 +2388,13 @@ class CommanderAgent:
             output_value = output.get(target_key)
             if output_value is None:
                 output_value = self._first_output_value(output)
+            if isinstance(output_value, dict):
+                output_value = coordinate_task_schedule(
+                    output_value,
+                    context,
+                    mode=self.mode,
+                    registry=self.registry,
+                )
             self._append_output_collection(
                 context,
                 target_key,
@@ -2410,6 +2418,10 @@ class CommanderAgent:
                     context["target_histories"] = deepcopy(output_value["target_histories"])
                 if isinstance(output_value.get("planning_objectives"), list):
                     context["planning_objectives"] = list(output_value["planning_objectives"])
+                if isinstance(output_value.get("distributed_allocation"), dict):
+                    context["distributed_allocation"] = deepcopy(
+                        output_value["distributed_allocation"]
+                    )
                 planning_input = {
                     "risk_assessments": deepcopy(context.get("risk_assessments", [])),
                     "scheduled_tasks": deepcopy(context.get("scheduled_tasks", [])),
@@ -2417,6 +2429,9 @@ class CommanderAgent:
                     "target_histories": deepcopy(context.get("target_histories", [])),
                     "planning_objectives": deepcopy(context.get("planning_objectives", [])),
                     "constraints": deepcopy(context.get("constraints", [])),
+                    "distributed_allocation": deepcopy(
+                        context.get("distributed_allocation", {})
+                    ),
                     "authorization": deepcopy(
                         self._normalize_authorization(context.get("authorization"))
                     ),
@@ -2819,6 +2834,7 @@ class CommanderAgent:
                 "planning_objectives",
                 "constraints",
                 "authorization",
+                "distributed_allocation",
             ):
                 if request.get(field) in (None, [], {}):
                     value = task_scheduling_result.get(field)
@@ -2833,6 +2849,7 @@ class CommanderAgent:
             "planning_objectives",
             "candidate_plans",
             "constraints",
+            "distributed_allocation",
         ):
             if field not in request and context.get(field) not in (None, [], {}):
                 request[field] = deepcopy(context[field])

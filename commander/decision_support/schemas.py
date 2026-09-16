@@ -50,6 +50,11 @@ class ScheduledTask(BaseModel):
     task_type: str = "monitor"
     deadline: str | None = None
     required_resource_types: list[str] = Field(default_factory=list)
+    assigned_resources: list[str] = Field(default_factory=list)
+    assignment_slot_ids: list[str] = Field(default_factory=list)
+    assignment_source: str | None = None
+    assignment_locked: bool = False
+    coordination_id: str | None = None
 
 
 class Resource(BaseModel):
@@ -164,6 +169,7 @@ class AgentRequest(BaseModel):
     candidate_plans: list[CandidatePlan] = Field(default_factory=list)
     constraints: list[dict[str, Any] | str] = Field(default_factory=list)
     authorization: AuthorizationState = Field(default_factory=AuthorizationState)
+    distributed_allocation: dict[str, Any] = Field(default_factory=dict)
 
 class AgentResponse(BaseModel):
     status: ResponseStatus = "completed"
