@@ -424,6 +424,20 @@ class DirectorService:
         self.runtime.get_engine()._director_motion_limit_sec = None
 
     def _poll_current_analysis(self, *, resume_on_success: bool) -> str:
+        """Poll analysis while serializing mutations of the director state.
+
+        The auto-monitor thread and the HTTP ``/director/state`` route can run
+        at the same time.  Without this guard, the monitor updates the current
+        checkpoint while ``state()`` is deep-copying it, producing
+        ``dictionary changed size during iteration`` and a misleading Gateway
+        unavailable error in the browser.
+        """
+        with self._lock:
+            return self._poll_current_analysis_locked(
+                resume_on_success=resume_on_success,
+            )
+
+    def _poll_current_analysis_locked(self, *, resume_on_success: bool) -> str:
         checkpoint = self._state.get("current_checkpoint")
         if not isinstance(checkpoint, dict):
             return "none"

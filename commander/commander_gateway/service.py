@@ -100,6 +100,15 @@ def _gateway_mission_input(snapshot: dict, chain: dict) -> dict[str, Any]:
         if isinstance(chain.get("submission_context"), dict)
         else {}
     )
+    protected_assets = stage_transfer.get("protected_assets")
+    if not isinstance(protected_assets, list):
+        protected_assets = (
+            (stage_transfer.get("supplemental_inputs") or {}).get("protected_assets")
+            if isinstance(stage_transfer.get("supplemental_inputs"), dict)
+            else []
+        )
+    if not isinstance(protected_assets, list):
+        protected_assets = []
 
     contacts = []
     for track in tracks:
@@ -228,7 +237,7 @@ def _gateway_mission_input(snapshot: dict, chain: dict) -> dict[str, Any]:
                 }
             )
     frame_times = sorted(detections_by_time)[-10:]
-    scene = {"scenario_id": scenario_id, "protected_assets": []}
+    scene = {"scenario_id": scenario_id, "protected_assets": copy.deepcopy(protected_assets)}
     perception_frames = [
         {
             "task_id": f"{scenario_id}-frame-{int(round(timestamp * 1000)):09d}",
@@ -252,7 +261,7 @@ def _gateway_mission_input(snapshot: dict, chain: dict) -> dict[str, Any]:
         ),
         "contacts": contacts,
         "friendly_platforms": friendly_platforms,
-        "protected_assets": [],
+        "protected_assets": copy.deepcopy(protected_assets),
         "perception_frames": perception_frames,
         "observations": copy.deepcopy(snapshot.get("observations") or []),
         "evidence": copy.deepcopy(stage_transfer.get("evidence_items") or []),

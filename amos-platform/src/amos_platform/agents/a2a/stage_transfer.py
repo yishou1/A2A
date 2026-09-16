@@ -418,6 +418,10 @@ def build_stage_transfer_manifest(
             for item in algorithm_rows
         ],
         "supplemental_inputs": supplemental_inputs,
+        # Protected assets are scenario geometry, not hostile truth.  Carry
+        # them through the verified Gateway chain so downstream threat scoring
+        # uses the same protected-zone reference as the AMOS snapshot builder.
+        "protected_assets": deepcopy(scenario.get("protected_assets") or []),
         "required_inputs": input_rows,
         "expected_outputs": list(PHASE_OUTPUTS.get(phase, ())),
         "transfer_policy": {

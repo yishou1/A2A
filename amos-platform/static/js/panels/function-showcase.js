@@ -9,6 +9,8 @@ window.PlatformFunctionShowcase = (function () {
   var viewOrder = [];
   var pendingViews = [];
   var selectedFunctionId = "__all__";
+  var selectedCoverageFunctionId = "__all__";
+  var coverageData = null;
   var renderSuspended = false;
   var renderPending = false;
 
@@ -341,27 +343,56 @@ window.PlatformFunctionShowcase = (function () {
     '</em></div>';
   }
 
+  function checkpointLabel(checkpoint) {
+    var value = String(checkpoint || "");
+    var labels = {
+      PERCEPTION: "观测与目标识别", CUE: "目标发现与识别", SAT: "天基发现与识别",
+      FIX: "多源融合与目标确认", IDENTIFY: "目标确认与身份研判", FUSION: "多源融合与校验",
+      TRACK: "航迹与威胁评估", ASSESS: "威胁评估与结果复核", PLAN: "方案规划与授权准备",
+      ENGAGE: "交战授权与执行", WAVE1: "第一波交战执行", WAVE2: "第二波攻击与复核",
+      CLOSE: "收尾评估与任务闭环",
+    };
+    var suffix = value.split("-").pop();
+    return labels[suffix] || (value ? "任务阶段 " + value : "等待任务阶段");
+  }
+
+  function shortWorkflowFile(value) {
+    var text = String(value || "");
+    var parts = text.split(/[\\/]/);
+    return parts[parts.length - 1] || text || "未上报";
+  }
+
+  function completedActivityCount(activities) {
+    return (activities || []).filter(function (activity) {
+      return isSuccess(activity.status);
+    }).length;
+  }
+
+  function evidenceLabel(activity) {
+    var hasResult = activity.calls.some(function (call) {
+      return isSuccess(call.invocation.status) && hasOwn(call.invocation, "output") && call.invocation.output != null;
+    });
+    if (!activity.started) return "等待执行";
+    if (isFailure(activity.status)) return "执行失败";
+    if (hasResult || activity.outputFieldCount != null) return "已形成结果";
+    return "已执行，结果待回传";
+  }
+
   function activityHtml(activity, model) {
     var pending = !activity.started;
+    var evidenceCount = activity.calls.length + activity.derivedCallCount;
     return '<article class="function-showcase-activity ' + escapeHtml(String(activity.status || "unknown")) + '">' +
-      '<header><div><b>' + escapeHtml(activity.title) + '</b><small>' + escapeHtml(activity.id) + '</small></div>' +
+      '<header><div><b>' + escapeHtml(activity.title) + '</b><small>' + escapeHtml(activity.agent ? "负责角色 " + activity.agent : "后端工作流节点") + '</small></div>' +
         '<span>' + escapeHtml(statusLabel(activity.status)) + '</span></header>' +
-      definitionRows([
-        ["执行智能体", activity.agent], ["实例", activity.instanceId], ["执行模式", activity.executionMode],
-      ]) +
-      (pending ? '<p class="function-showcase-muted">活动尚未执行，不展示输入、结果或调用明细。</p>' :
-        '<div class="function-showcase-io"><span>输入字段 <b>' + escapeHtml(valueOrUnknown(activity.inputFieldCount)) +
-        '</b></span><span>结果字段 <b>' + escapeHtml(valueOrUnknown(activity.outputFieldCount)) + '</b></span></div>' +
-        '<div class="function-showcase-algorithms">' +
-          (activity.algorithms.length ? activity.algorithms.map(function (algorithm) {
-            return algorithmHtml(algorithm, activity.calls);
-          }).join("") : '<span class="function-showcase-muted">未上报算法元数据</span>') +
-        '</div>' +
-        (activity.derivedCallCount ? '<p class="function-showcase-derived">另有 ' + escapeHtml(activity.derivedCallCount) +
-          ' 条推断或活动证据回填记录，未计入独立调用。</p>' : '') +
-        '<div class="function-showcase-calls">' + activity.calls.map(function (call) { return callHtml(call, false); }).join("") + '</div>') +
+      '<div class="function-showcase-business-evidence">' +
+        '<span><small>节点状态</small><b>' + escapeHtml(statusLabel(activity.status)) + '</b></span>' +
+        '<span><small>结果状态</small><b>' + escapeHtml(evidenceLabel(activity)) + '</b></span>' +
+        '<span><small>关联证据</small><b>' + escapeHtml(evidenceCount ? evidenceCount + " 项" : "待上报") + '</b></span>' +
+      '</div>' +
+      (pending ? '<p class="function-showcase-muted">该阶段尚未执行，执行后将在任务检查器中查看输入、结果和算法证据。</p>' :
+        '<p class="function-showcase-muted">该阶段的业务结果已纳入本轮运行记录，可打开任务检查器查看完整证据。</p>') +
       '<footer><button type="button" class="btn btn-sm" data-showcase-activity="' + escapeHtml(activity.id) +
-        '" data-showcase-workflow="' + escapeHtml(model.workflowId) + '">在任务执行检查器中查看</button></footer>' +
+        '" data-showcase-workflow="' + escapeHtml(model.workflowId) + '">查看执行证据</button></footer>' +
     '</article>';
   }
 
@@ -386,6 +417,109 @@ window.PlatformFunctionShowcase = (function () {
     viewOrder = [];
     pendingViews = [];
     selectedFunctionId = "__all__";
+    selectedCoverageFunctionId = "__all__";
+  }
+
+  function coverageKindLabel(kind) {
+    return ({
+      primary: "主覆盖", supporting: "辅助覆盖", conditional: "条件覆盖",
+      not_covered: "未覆盖",
+    })[String(kind || "")] || "设计覆盖";
+  }
+
+  function coverageKindClass(kind) {
+    return String(kind || "planned").replace(/[^a-z_]/g, "-");
+  }
+
+  function coverageScenario(scenarioId) {
+    return (coverageData && coverageData.scenarios || []).find(function (item) {
+      return String(item.id) === String(scenarioId);
+    });
+  }
+
+  function coverageItem(functionId) {
+    return (coverageData && coverageData.items || []).find(function (item) {
+      return String(item.function_point_id) === String(functionId);
+    });
+  }
+
+  function runtimeCoverageSummary(items, models) {
+    var byId = {};
+    (models || []).forEach(function (model) {
+      var activityById = {};
+      (model.activities || []).forEach(function (activity) {
+        activityById[activity.id] = activity;
+      });
+      (model.functions || []).forEach(function (point) {
+        var state = byId[point.id] || (byId[point.id] = {seen: false, verified: false});
+        state.seen = true;
+        (point.activityIds || []).forEach(function (activityId) {
+          var activity = activityById[activityId];
+          if (activity && isSuccess(activity.status)) state.verified = true;
+        });
+      });
+    });
+    var designCovered = items.filter(function (item) {
+      return Number(item.covered_scenario_count || 0) > 0;
+    }).length;
+    var verified = items.filter(function (item) {
+      return Boolean(byId[item.function_point_id] && byId[item.function_point_id].verified);
+    }).length;
+    var conditionalPending = items.filter(function (item) {
+      var conditional = (item.scenarios || []).some(function (row) {
+        return row.coverage_kind === "conditional";
+      });
+      return conditional && !(byId[item.function_point_id] && byId[item.function_point_id].verified);
+    }).length;
+    return {
+      designCovered: designCovered,
+      designTotal: Number(coverageData && coverageData.total_function_points || items.length),
+      verified: verified,
+      conditionalPending: conditionalPending,
+      notExecuted: Math.max(items.length - verified - conditionalPending, 0),
+    };
+  }
+
+  function coverageHtml(models) {
+    if (!coverageData || !Array.isArray(coverageData.scenarios)) return "";
+    var scenarios = coverageData.scenarios;
+    var items = Array.isArray(coverageData.items) ? coverageData.items : [];
+    var summary = runtimeCoverageSummary(items, models);
+    var selected = selectedCoverageFunctionId !== "__all__" ? coverageItem(selectedCoverageFunctionId) : null;
+    var stageGroups = {observe: "OBSERVE 观测", orient: "ORIENT 判断", decide: "DECIDE 决策", act: "ACT / ASSESS 执行评估"};
+    var grouped = {};
+    items.forEach(function (item) {
+      var key = item.ooda_phase || "act";
+      (grouped[key] || (grouped[key] = [])).push(item);
+    });
+    var matrixRows = Object.keys(stageGroups).map(function (phase) {
+      var rows = grouped[phase] || [];
+      if (!rows.length) return "";
+      return '<tr class="function-showcase-matrix-group"><th colspan="' + (scenarios.length + 1) + '">' + escapeHtml(stageGroups[phase]) + '</th></tr>' +
+        rows.map(function (item) {
+          return '<tr><th><button type="button" class="function-showcase-matrix-function" data-showcase-coverage-function="' + escapeHtml(item.function_point_id) + '"><code>' +
+            escapeHtml(item.function_point_id) + '</code><span>' + escapeHtml(item.chinese_name || item.name) + '</span></button></th>' +
+            scenarios.map(function (scenario) {
+              var row = (item.scenarios || []).find(function (entry) { return String(entry.scenario_id) === String(scenario.id); }) || {};
+              return '<td><button type="button" class="function-showcase-coverage-cell ' + coverageKindClass(row.coverage_kind) + '" data-showcase-coverage-function="' +
+                escapeHtml(item.function_point_id) + '" title="' + escapeHtml(coverageKindLabel(row.coverage_kind)) + '">' + escapeHtml(coverageKindLabel(row.coverage_kind)) + '</button></td>';
+            }).join("") + '</tr>';
+        }).join("");
+    }).join("");
+    var detailHtml = selected ? '<div class="function-showcase-coverage-detail"><div class="function-showcase-heading"><div><small>功能点详情</small><h3>' +
+      escapeHtml(selected.function_point_id + " · " + (selected.chinese_name || selected.name)) + '</h3></div><span>' +
+      escapeHtml((selected.english_name || "") + " / " + String(selected.ooda_phase || "").toUpperCase()) + '</span></div><div class="function-showcase-coverage-detail-grid">' +
+      scenarios.map(function (scenario) {
+        var row = (selected.scenarios || []).find(function (entry) { return String(entry.scenario_id) === String(scenario.id); }) || {};
+        return '<article><b>' + escapeHtml(scenario.name) + '</b><span class="function-showcase-coverage-badge ' + coverageKindClass(row.coverage_kind) + '">' +
+          escapeHtml(coverageKindLabel(row.coverage_kind)) + '</span><small>' + escapeHtml((row.checkpoints || []).join(" / ") || "由剧本链路承载") + '</small><em>' +
+          escapeHtml(scenario.workflow_chain_label || scenario.workflow_chain_id || "场景专用工作流链") + '</em></article>';
+      }).join("") + '</div></div>' : '<p class="function-showcase-muted">点击矩阵中的功能点，可查看它在三个剧本中的覆盖角色和工作流链归属。</p>';
+    return '<section class="function-showcase-card function-showcase-coverage"><div class="function-showcase-heading"><div><small>面向甲方的设计覆盖总览</small><h2>三剧本功能覆盖矩阵</h2></div><span>设计态 + 运行态分开</span></div>' +
+      '<p class="function-showcase-muted">设计覆盖说明“三个剧本计划覆盖什么”，运行指标说明“当前这一次演示实际验证了什么”。</p>' +
+      '<div class="function-showcase-coverage-metrics"><span><small>设计覆盖</small><b>' + escapeHtml(summary.designCovered + "/" + summary.designTotal) + '</b></span><span><small>本轮已验证</small><b>' + escapeHtml(summary.verified + "/" + summary.designTotal) + '</b></span><span><small>条件待触发</small><b>' + escapeHtml(summary.conditionalPending) + '</b></span><span><small>尚未执行</small><b>' + escapeHtml(summary.notExecuted) + '</b></span></div>' +
+      '<div class="function-showcase-legend"><span class="primary">主覆盖</span><span class="supporting">辅助覆盖</span><span class="conditional">条件覆盖</span><span class="not_covered">未覆盖</span></div>' +
+      '<div class="function-showcase-matrix-wrap"><table class="function-showcase-matrix"><thead><tr><th>功能点</th>' + scenarios.map(function (scenario) { return '<th>' + escapeHtml(scenario.name) + '</th>'; }).join("") + '</tr></thead><tbody>' + matrixRows + '</tbody></table></div>' + detailHtml + '</section>';
   }
 
   function upsertView(view) {
@@ -421,13 +555,16 @@ window.PlatformFunctionShowcase = (function () {
         if (!aggregate) {
           aggregate = byId[item.id] = {
             id: item.id, name: item.name, scope: item.scope,
-            activityCount: 0, taskCount: 0,
+            activityCount: 0, stageNames: [],
           };
           order.push(item.id);
         }
         if (item.scope === "conditional") aggregate.scope = "conditional";
         aggregate.activityCount += item.activityIds.length;
-        aggregate.taskCount += 1;
+        if (item.activityIds.length) {
+          var stageLabel = checkpointLabel(model.checkpoint);
+          if (aggregate.stageNames.indexOf(stageLabel) < 0) aggregate.stageNames.push(stageLabel);
+        }
       });
     });
     return order.map(function (id) { return byId[id]; });
@@ -435,10 +572,11 @@ window.PlatformFunctionShowcase = (function () {
 
   function functionPointHtml(item) {
     var scope = item.scope === "conditional" ? "条件功能" : "后端功能";
+    var stageText = item.stageNames.length ? item.stageNames.join("、") : "尚未关联运行阶段";
     return '<button type="button" class="function-showcase-function' +
       (item.id === selectedFunctionId ? ' selected' : '') + '" data-showcase-function="' + escapeHtml(item.id) + '">' +
-      '<code>' + escapeHtml(item.id) + '</code><b>' + escapeHtml(item.name) + '</b><small>' +
-      escapeHtml(scope + " · " + item.taskCount + " 个任务阶段 · " + item.activityCount + " 项活动关联") + '</small></button>';
+      '<b>' + escapeHtml(item.name) + '</b><small>' + escapeHtml("功能点 " + item.id + " · " + scope +
+        " · 已关联阶段：" + stageText) + '</small></button>';
   }
 
   function stageHtml(model, index) {
@@ -448,20 +586,20 @@ window.PlatformFunctionShowcase = (function () {
     }) : (selectedFunctionId === "__all__" ? model.activities : []);
     if (selectedFunctionId !== "__all__" && !selected) return "";
     var stageLabel = model.checkpoint || "未上报检查点";
+    var completed = completedActivityCount(model.activities);
     return '<section class="function-showcase-card function-showcase-stage">' +
-      '<div class="function-showcase-heading"><div><small>第 ' + escapeHtml(index + 1) + ' 个分析任务 · ' +
-        escapeHtml(stageLabel) + '</small><h2>' + escapeHtml(model.workflowId || "未上报工作流 ID") + '</h2></div><span>' +
+      '<div class="function-showcase-heading"><div><small>第 ' + escapeHtml(index + 1) + ' 个分析阶段</small><h2>' +
+        escapeHtml(checkpointLabel(stageLabel)) + '</h2></div><span>' +
         escapeHtml(visibleActivities.length + " 项活动") + '</span></div>' +
-      definitionRows([["检查点", model.checkpoint], ["实际工作流文件", model.workflowFile],
-        ["独立调用", model.independentCallCount], ["成功结果", model.successfulResultCount]]) +
+      definitionRows([["业务阶段", checkpointLabel(stageLabel)], ["执行链", shortWorkflowFile(model.workflowFile)],
+        ["节点进度", completed + "/" + model.activities.length + " 已完成"],
+        ["结果证据", model.successfulResultCount ? model.successfulResultCount + " 项已返回" : "等待返回"]]) +
       '<div class="function-showcase-stage-activities"><div class="function-showcase-activity-list">' +
         (visibleActivities.length ? visibleActivities.map(function (activity) { return activityHtml(activity, model); }).join("") :
           '<div class="function-showcase-empty compact">后端未提供该功能在此任务阶段的关联活动</div>') +
       '</div></div>' +
       (model.taskCalls.length || model.taskDerivedCallCount ? '<div class="function-showcase-task-calls"><h3>任务级调用记录 <small>活动归属未上报 · ' +
-        escapeHtml(model.taskCalls.length + " 条") + '</small></h3>' + model.taskCalls.map(function (call) { return callHtml(call, true); }).join("") +
-        (model.taskDerivedCallCount ? '<p class="function-showcase-derived">另有 ' + escapeHtml(model.taskDerivedCallCount) +
-          ' 条任务级推断或活动证据回填记录，未计入独立调用。</p>' : '') + '</div>' : '') +
+        escapeHtml(model.taskCalls.length + " 条") + '</small></h3><p class="function-showcase-muted">后台分析证据已记录，请在任务执行检查器中查看明细。</p></div>' : '') +
     '</section>';
   }
 
@@ -469,7 +607,7 @@ window.PlatformFunctionShowcase = (function () {
     if (!root) return;
     var models = modelsForContext();
     if (!models.length) {
-      root.innerHTML = '<div class="function-showcase-empty">当前运行尚未收到可展示的工作流记录</div>';
+      root.innerHTML = coverageHtml(models) + '<div class="function-showcase-empty">当前运行尚未收到可展示的工作流记录</div>';
       return;
     }
     var functions = aggregateFunctions(models);
@@ -477,44 +615,40 @@ window.PlatformFunctionShowcase = (function () {
       selectedFunctionId = "__all__";
     }
     var activityCount = models.reduce(function (total, model) { return total + model.activities.length; }, 0);
-    var independentCallCount = models.reduce(function (total, model) { return total + model.independentCallCount; }, 0);
-    var instanceRecords = [];
-    models.forEach(function (model) {
-      model.instances.forEach(function (instance) {
-        instanceRecords.push({instance: instance, workflowId: model.workflowId, checkpoint: model.checkpoint});
-      });
-    });
-    var consoleLink = document.getElementById("function-showcase-algorithm-console");
-    var consoleHref = consoleLink && consoleLink.getAttribute ? consoleLink.getAttribute("href") : "";
+    var completedActivities = models.reduce(function (total, model) {
+      return total + completedActivityCount(model.activities);
+    }, 0);
+    var successfulResultCount = models.reduce(function (total, model) {
+      return total + model.successfulResultCount;
+    }, 0);
+    var latestModel = models[models.length - 1];
     root.innerHTML =
-      '<p class="function-showcase-scope">本页累计展示当前场景、当前运行内已经收到的分析任务。功能关联不代表功能完成，算法返回结果也不代表业务功能完成；这些记录不等于整场剧本已完整执行。</p>' +
+      coverageHtml(models) +
+      '<p class="function-showcase-scope">本页面向能力演示，突出当前剧本覆盖的功能、执行阶段和结果状态。完整的输入、算法调用和原始结果请在“流程执行”中查看。</p>' +
       '<section class="function-showcase-card"><div class="function-showcase-heading"><div><small>当前剧本运行</small><h2>' +
-        escapeHtml(context.scenarioName || context.scenarioId || "未上报场景") + '</h2></div><span>只读累计</span></div>' +
-        definitionRows([["场景 ID", context.scenarioId], ["运行 ID", context.runId], ["已接收分析任务", models.length],
-          ["最新检查点", models[models.length - 1].checkpoint]]) +
+        escapeHtml(context.scenarioName || context.scenarioId || "未上报场景") + '</h2></div><span>' +
+        escapeHtml(checkpointLabel(latestModel.checkpoint)) + '</span></div>' +
+        definitionRows([["当前阶段", checkpointLabel(latestModel.checkpoint)], ["已完成节点", completedActivities + "/" + activityCount],
+          ["已接收分析阶段", models.length], ["已形成结果", successfulResultCount + " 项"]]) +
       '</section>' +
       '<div class="function-showcase-metrics"><span><small>分析任务</small><b>' + models.length + '</b></span>' +
-        '<span><small>功能点</small><b>' + functions.length + '</b></span>' +
-        '<span><small>活动记录</small><b>' + activityCount + '</b></span>' +
-        '<span><small>独立调用</small><b>' + independentCallCount + '</b></span></div>' +
+        '<span><small>本轮功能点</small><b>' + functions.length + '</b></span>' +
+        '<span><small>已完成节点</small><b>' + completedActivities + '/' + activityCount + '</b></span>' +
+        '<span><small>结果证据</small><b>' + successfulResultCount + '</b></span></div>' +
       '<section class="function-showcase-card"><div class="function-showcase-heading"><div><small>后端活动关联</small><h2>功能关联</h2></div></div>' +
         '<label class="function-showcase-filter">查看功能<select id="function-showcase-filter"><option value="__all__">全部功能与活动</option>' +
           functions.map(function (item) {
             var suffix = item.scope === "conditional" ? "（条件功能）" : "";
             return '<option value="' + escapeHtml(item.id) + '"' + (item.id === selectedFunctionId ? " selected" : "") + '>' +
-              escapeHtml(item.id + " · " + item.name + suffix + " · " + item.taskCount + " 个任务阶段") + '</option>';
+              escapeHtml(item.id + " · " + item.name + suffix + " · " +
+                (item.stageNames.length ? item.stageNames.join("、") : "尚未关联运行阶段")) + '</option>';
           }).join("") + '</select></label>' +
-        '<p class="function-showcase-muted">下列功能点按本轮已收到的任务持续保留。关联仅来自后端活动标识和 activity: 引用；未重新建立功能与算法映射。</p>' +
+        '<p class="function-showcase-muted">下列功能点按本轮已收到的任务持续保留。点击功能点可查看它对应的业务阶段和执行证据。</p>' +
         '<div class="function-showcase-function-list">' +
           (functions.length ? functions.map(functionPointHtml).join("") : '<div class="function-showcase-empty compact">当前任务未上报功能点</div>') +
         '</div>' +
       '</section>' +
-      '<div class="function-showcase-stage-list">' + models.map(stageHtml).join("") + '</div>' +
-      '<section class="function-showcase-card function-showcase-management"><div><small>沿用现有管理系统</small><h2>算法管理</h2><p>查看算法包、运行状态和管理能力。</p></div>' +
-        (consoleHref ? '<a class="btn btn-sm" href="' + escapeHtml(consoleHref) + '" target="_blank" rel="noopener noreferrer">打开算法管理台 ↗</a>' : '<span>入口未配置</span>') + '</section>' +
-      '<section class="function-showcase-card"><div class="function-showcase-heading"><div><small>当前运行实际上报</small><h2>智能体记录</h2></div><span>' +
-        escapeHtml(instanceRecords.length + " 条实例记录") + '</span></div><p class="function-showcase-muted">实例记录按任务阶段展示，数量不能证明完整协同过程；同一实例在不同任务中的上报会分别保留。</p><div class="function-showcase-instance-list">' +
-        (instanceRecords.length ? instanceRecords.map(instanceHtml).join("") : '<div class="function-showcase-empty compact">当前运行尚未上报智能体实例</div>') + '</div></section>';
+      '<div class="function-showcase-stage-list">' + models.map(stageHtml).join("") + '</div>';
   }
 
   function setContext(next) {
@@ -582,6 +716,12 @@ window.PlatformFunctionShowcase = (function () {
       }
     });
     root.addEventListener("click", function (event) {
+      var coverageButton = event.target.closest && event.target.closest("[data-showcase-coverage-function]");
+      if (coverageButton) {
+        selectedCoverageFunctionId = coverageButton.dataset.showcaseCoverageFunction || "__all__";
+        requestRender();
+        return;
+      }
       var functionButton = event.target.closest && event.target.closest("[data-showcase-function]");
       if (functionButton) {
         selectedFunctionId = functionButton.dataset.showcaseFunction || "__all__";
@@ -597,6 +737,22 @@ window.PlatformFunctionShowcase = (function () {
     });
     document.addEventListener("amos:workflow-view", function (event) { receiveView(event.detail || null); });
     document.addEventListener("amos:workflow-view-history", function (event) { receiveHistory(event.detail || null); });
+    if (typeof window.fetch === "function") {
+      window.fetch("/api/v1/scenarios/coverage").then(function (response) {
+        if (!response.ok) throw new Error("coverage request failed");
+        return response.json();
+      }).then(function (payload) {
+        receiveCoverage(payload && payload.data ? payload.data : payload);
+      }).catch(function () {
+        coverageData = null;
+      });
+    }
+    requestRender();
+  }
+
+  function receiveCoverage(payload) {
+    if (!payload || !Array.isArray(payload.scenarios) || !Array.isArray(payload.items)) return;
+    coverageData = payload;
     requestRender();
   }
 
@@ -605,6 +761,7 @@ window.PlatformFunctionShowcase = (function () {
     setContext: setContext,
     receiveView: receiveView,
     receiveHistory: receiveHistory,
+    receiveCoverage: receiveCoverage,
     normalize: normalize,
     escapeHtml: escapeHtml,
   };

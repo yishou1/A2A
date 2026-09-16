@@ -100,7 +100,12 @@ class CommanderBridge:
     def client(self) -> CommanderClient | GatewayClient:
         _configure_local_proxy_bypass()
         if self._client is None:
-            timeout = float(os.environ.get("A2A_REQUEST_TIMEOUT", "30"))
+            # Gateway submission includes Commander enqueueing and package
+            # verification.  A short implicit default makes a manually
+            # launched AMOS process report a misleading "Gateway unavailable"
+            # error even though the Gateway has accepted the request.
+            default_timeout = "180" if self.mode == "gateway" else "60"
+            timeout = float(os.environ.get("A2A_REQUEST_TIMEOUT", default_timeout))
             if self.mode == "gateway":
                 self._client = GatewayClient(
                     base_url=self.gateway_url,
@@ -436,10 +441,16 @@ class CommanderBridge:
         """Fetch and independently verify the exact Gateway input package."""
         if self.mode != "gateway" or not package_id:
             return {}, False
-        package = self.client.get_package(package_id)  # type: ignore[union-attr]
+        get_package_with_raw = getattr(self.client, "get_package_with_raw", None)
+        raw_body = b""
+        response_checksum = ""
+        if get_package_with_raw is not None:
+            package, raw_body, response_checksum = get_package_with_raw(package_id)
+        else:
+            package = self.client.get_package(package_id)  # type: ignore[union-attr]
         if package.get("error"):
             return {}, False
-        encoded = json.dumps(
+        encoded = raw_body or json.dumps(
             package,
             ensure_ascii=False,
             sort_keys=True,
@@ -450,6 +461,8 @@ class CommanderBridge:
             expected_checksum
             and secrets.compare_digest(actual_checksum, expected_checksum)
         )
+        if response_checksum and expected_checksum:
+            verified = verified and secrets.compare_digest(response_checksum, expected_checksum)
         return package, verified
 
     def get_work_list(self, workflow_id: str) -> dict[str, Any]:
