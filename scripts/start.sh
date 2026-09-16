@@ -349,10 +349,19 @@ for row in "${ALGORITHM_CARD_ROWS[@]}"; do
       continue
     fi
   fi
-  "$COMMANDER_DIR/build/algolib" register \
-    "$COMMANDER_DIR/examples/$package_dir/$version/algorithm_card.yaml" >/dev/null
-  "$COMMANDER_DIR/build/algolib" validate "$algorithm_id" "$version" "$backend_type" >/dev/null
-  "$COMMANDER_DIR/build/algolib" activate "$algorithm_id" "$version" "$backend_type" >/dev/null
+  if ! "$COMMANDER_DIR/build/algolib" register \
+    "$COMMANDER_DIR/examples/$package_dir/$version/algorithm_card.yaml" >/dev/null; then
+    echo "[warn] failed to register $algorithm_id; continuing startup." >&2
+    continue
+  fi
+  if ! "$COMMANDER_DIR/build/algolib" validate "$algorithm_id" "$version" "$backend_type" >/dev/null; then
+    echo "[warn] failed to validate $algorithm_id; continuing startup without activating it." >&2
+    continue
+  fi
+  if ! "$COMMANDER_DIR/build/algolib" activate "$algorithm_id" "$version" "$backend_type" >/dev/null; then
+    echo "[warn] failed to activate $algorithm_id; continuing startup." >&2
+    continue
+  fi
 done
 
 start_service algolib "$COMMANDER_DIR" "http://127.0.0.1:8088/health" \

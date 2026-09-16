@@ -286,10 +286,10 @@ def build_maritime_convoy_air_defense_scenario() -> dict[str, Any]:
             "KC-28": {"event": "damage_assessment_confirmed", "offset_sec": 0},
         },
         "demo_checkpoints": [
-            {"checkpoint_id": "MAR-CP-PERCEPTION", "title": "海空观测融合输入就绪", "min_elapsed_sec": 1470, "conditions": {"stable_track_count_at_least": 2, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["MAR-MEDIA-01", "MAR-MEDIA-02"]}, "pause": True, "submit_analysis": True},
-            {"checkpoint_id": "MAR-CP-ASSESS", "title": "敌方与渔船识别输入就绪", "min_elapsed_sec": 2910, "conditions": {"stable_track_count_at_least": 2, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["MAR-MEDIA-03", "MAR-MEDIA-04"]}, "pause": True, "submit_analysis": True},
-            {"checkpoint_id": "MAR-CP-PLAN", "title": "攻击方案与禁射约束输入就绪", "min_elapsed_sec": 3630, "conditions": {"media_ids_released": ["MAR-MEDIA-05"]}, "pause": True, "submit_analysis": True},
-            {"checkpoint_id": "MAR-CP-ENGAGE", "title": "无线电警告与模拟开火等待授权", "min_elapsed_sec": 3930, "conditions": {"media_ids_released": ["MAR-MEDIA-06"]}, "pause": True, "submit_analysis": True, "requires_operator_action": True, "operator_action_type": "fire"},
+            {"checkpoint_id": "MAR-CP-PERCEPTION", "title": "海空观测融合输入就绪", "min_elapsed_sec": 1470, "conditions": {"stable_track_count_at_least": 2, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["MAR-MEDIA-01", "MAR-MEDIA-02"]}, "pause": False, "submit_analysis": True, "block_until_analysis_complete": False},
+            {"checkpoint_id": "MAR-CP-ASSESS", "title": "敌方与渔船识别输入就绪", "min_elapsed_sec": 2910, "conditions": {"stable_track_count_at_least": 2, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["MAR-MEDIA-03", "MAR-MEDIA-04"]}, "pause": False, "submit_analysis": True, "block_until_analysis_complete": False},
+            {"checkpoint_id": "MAR-CP-PLAN", "title": "攻击方案与禁射约束输入就绪", "min_elapsed_sec": 3630, "conditions": {"media_ids_released": ["MAR-MEDIA-05"]}, "pause": False, "submit_analysis": True, "block_until_analysis_complete": False},
+            {"checkpoint_id": "MAR-CP-ENGAGE", "title": "无线电警告与模拟开火等待授权", "min_elapsed_sec": 3630, "conditions": {"media_ids_released": ["MAR-MEDIA-05"]}, "pause": True, "submit_analysis": True, "block_until_analysis_complete": False, "requires_operator_action": True, "operator_action_type": "fire"},
             {"checkpoint_id": "MAR-CP-CLOSE", "title": "毁伤评估与渔船安全复核就绪", "min_elapsed_sec": 4590, "conditions": {"media_ids_released": ["MAR-MEDIA-07"], "event_types_emitted": ["weapon_hit", "damage_assessment_confirmed"]}, "pause": True, "submit_analysis": True, "requires_operator_action": True, "operator_action_type": "review"},
         ],
         "fault_injections": [
