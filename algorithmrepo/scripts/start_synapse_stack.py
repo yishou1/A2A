@@ -17,7 +17,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main():
     env = os.environ.copy()
-    env.setdefault("SYNAPSERAG_SAVE_DIR", str(ROOT / "runtime-data" / "synapserag"))
+    knowledge_root = ROOT / "knowledge_bases" / "newport_roe_handbook_2022"
+    env.setdefault("SYNAPSERAG_SAVE_DIR", str(knowledge_root))
+    env.setdefault("SYNAPSERAG_RECORDS_DIR", str(knowledge_root / "records"))
+    env.setdefault("SYNAPSERAG_INDEX_ID", "newport-roe-handbook-2022-v1")
     env.setdefault("ALGOLIB_REGISTRY_PATH", str(ROOT / "runtime-data" / "synapse-registry.json"))
     env["SYNAPSERAG_BASE_URL"] = "http://127.0.0.1:8000"
     data_dir = Path(env["SYNAPSERAG_SAVE_DIR"]).resolve()

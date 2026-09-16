@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "namespace": "entity",
+  "embedding_model": "qwen3-embedding:0.6b",
+  "embedding_normalized": true,
+  "embedding_instruction_mode": "prefix",
+  "document_instruction_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "embedding_dimension": 1024
+}

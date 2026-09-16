@@ -41,17 +41,24 @@ from src.synapserag.utils.config_utils import BaseConfig, LLMEndpointConfig
 from src.synapserag.utils.misc_utils import compute_mdhash_id
 
 
-SAVE_DIR = os.getenv("SYNAPSERAG_SAVE_DIR", "outputs/api_server_data")
-INDEX_ID = os.getenv("SYNAPSERAG_INDEX_ID", "api-server-kb-v1")
+ALGORITHM_REPO_ROOT = Path(__file__).resolve().parents[2]
+BUNDLED_KNOWLEDGE_ROOT = (
+    ALGORITHM_REPO_ROOT / "knowledge_bases" / "newport_roe_handbook_2022"
+)
+SAVE_DIR = os.getenv("SYNAPSERAG_SAVE_DIR", str(BUNDLED_KNOWLEDGE_ROOT))
+INDEX_ID = os.getenv("SYNAPSERAG_INDEX_ID", "newport-roe-handbook-2022-v1")
 EMBEDDING_MODEL = os.getenv("SYNAPSERAG_EMBEDDING_MODEL", "qwen3-embedding:0.6b")
 EMBEDDING_BASE_URL = os.getenv("SYNAPSERAG_EMBEDDING_BASE_URL", "http://127.0.0.1:11434/v1")
 QA_MODEL = os.getenv("SYNAPSERAG_QA_MODEL", "qwen3:1.7b")
 QA_BASE_URL = os.getenv("SYNAPSERAG_QA_BASE_URL", "http://127.0.0.1:11434/v1")
 OPENIE_PROMPT_VERSION = "ner-triple-cn-v2"
 SUPPORTED_EXTENSIONS = {".txt", ".text", ".md", ".markdown", ".pdf", ".docx"}
-DATA_ROOT = Path(SAVE_DIR)
-JOB_DB_PATH = DATA_ROOT / "jobs.sqlite3"
-TRACE_DB_PATH = DATA_ROOT / "retrieval_traces.sqlite3"
+DATA_ROOT = Path(SAVE_DIR).expanduser().resolve()
+RECORDS_ROOT = Path(
+    os.getenv("SYNAPSERAG_RECORDS_DIR", str(DATA_ROOT / "records"))
+).expanduser().resolve()
+JOB_DB_PATH = RECORDS_ROOT / "jobs.sqlite3"
+TRACE_DB_PATH = RECORDS_ROOT / "retrieval_traces.sqlite3"
 ACTIVE_POINTER = DATA_ROOT / "active.json"
 _state_lock = threading.RLock()
 
@@ -77,7 +84,7 @@ def _read_json(path: Path, default=None):
 
 
 def _db() -> sqlite3.Connection:
-    DATA_ROOT.mkdir(parents=True, exist_ok=True)
+    JOB_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(JOB_DB_PATH, timeout=30)
     connection.row_factory = sqlite3.Row
     return connection
@@ -251,35 +258,67 @@ def _active_pointer() -> dict:
     return _read_json(ACTIVE_POINTER, {}) or {}
 
 
+def _resolve_data_path(value: object, *roots: Path) -> Path:
+    path = Path(str(value or ""))
+    if path.is_absolute():
+        return path.resolve()
+    candidates = [(root / path).resolve() for root in roots]
+    return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+
+
+def _delivery_path(path: Path) -> str:
+    """Store paths relative to the delivered knowledge-base root when possible."""
+    resolved = path.expanduser().resolve()
+    try:
+        return resolved.relative_to(DATA_ROOT).as_posix()
+    except ValueError:
+        return str(resolved)
+
+
 def _active_save_dir() -> str:
-    return _active_pointer().get("save_dir") or SAVE_DIR
+    configured = _active_pointer().get("save_dir")
+    return str(_resolve_data_path(configured, DATA_ROOT)) if configured else str(DATA_ROOT)
+
+
+def _normalize_manifest_paths(manifest: dict, root: Path) -> dict:
+    """Resolve repository-relative delivery paths without changing saved JSON."""
+    for item in manifest.get("documents", []):
+        configured_dir = item.get("artifact_dir") or item.get("output_dir")
+        candidates = []
+        if configured_dir:
+            candidates.append(_resolve_data_path(configured_dir, root, DATA_ROOT))
+        candidates.append((root / "documents" / str(item.get("document_id") or "")).resolve())
+        output_dir = next(
+            (candidate for candidate in candidates if (candidate / "parsed_document.json").is_file()),
+            candidates[-1],
+        )
+        parsed = _read_json(output_dir / "parsed_document.json", {}) or {}
+        source_value = item.get("upload_path") or parsed.get("source_path")
+        if source_value:
+            source_path = _resolve_data_path(source_value, root, DATA_ROOT, output_dir)
+            if source_path.is_file():
+                item["upload_path"] = str(source_path)
+        item["artifact_dir"] = str(output_dir)
+        item.setdefault("content_sha256", parsed.get("content_sha256"))
+    return manifest
 
 
 def _active_manifest() -> dict:
     pointer = _active_pointer()
     manifest_path = pointer.get("service_manifest")
     if manifest_path:
-        return _read_json(Path(manifest_path), {}) or {}
+        resolved_manifest = _resolve_data_path(manifest_path, DATA_ROOT)
+        manifest = _read_json(resolved_manifest, {}) or {}
+        return _normalize_manifest_paths(manifest, Path(_active_save_dir()))
     legacy = _read_json(DATA_ROOT / "source_manifest.json", {}) or {}
-    for item in legacy.get("documents", []):
-        output_dir = Path(str(item.get("output_dir") or ""))
-        if not output_dir.is_absolute():
-            output_dir = output_dir.resolve()
-        parsed_path = output_dir / "parsed_document.json"
-        parsed = _read_json(parsed_path, {}) or {}
-        source_path = Path(str(parsed.get("source_path") or ""))
-        if source_path.is_file():
-            item.setdefault("upload_path", str(source_path.resolve()))
-        item.setdefault("artifact_dir", str(output_dir))
-        item.setdefault("content_sha256", parsed.get("content_sha256"))
-    return legacy
+    return _normalize_manifest_paths(legacy, DATA_ROOT)
 
 
 def _load_source_map() -> Dict[str, List[dict]]:
     pointer = _active_pointer()
     source_path = pointer.get("source_map")
     if source_path:
-        return _read_json(Path(source_path), {}) or {}
+        return _read_json(_resolve_data_path(source_path, DATA_ROOT), {}) or {}
     # Backward compatibility with the first service prototype.
     legacy = _read_json(DATA_ROOT / "source_chunks.json", {}) or {}
     return {text: value if isinstance(value, list) else [value] for text, value in legacy.items()}
@@ -356,7 +395,9 @@ def _build_document_snapshot(payload: dict) -> Dict[str, dict]:
     for document_id in payload.get("remove_document_ids", []):
         current.pop(document_id, None)
     for item in payload.get("documents", []):
-        current[item["document_id"]] = item
+        normalized = dict(item)
+        normalized["upload_path"] = str(_resolve_data_path(item["upload_path"], DATA_ROOT))
+        current[item["document_id"]] = normalized
     return current
 
 
@@ -383,12 +424,17 @@ def _run_ingest_job(job_id: str) -> None:
             chunks = chunk_document(document)
             artifact_dir = DATA_ROOT / "documents" / document_id / document.content_sha256
             report = save_document_artifacts(document, chunks, artifact_dir)
+            parsed_path = artifact_dir / "parsed_document.json"
+            parsed_payload = _read_json(parsed_path, {}) or {}
+            parsed_payload["source_path"] = _delivery_path(Path(item["upload_path"]))
+            _write_json_atomic(parsed_path, parsed_payload)
             version_item = dict(item)
             version_item.update({
                 "content_sha256": document.content_sha256,
                 "parser": document.parser,
                 "chunk_count": len(chunks),
-                "artifact_dir": str(artifact_dir.resolve()),
+                "upload_path": _delivery_path(Path(item["upload_path"])),
+                "artifact_dir": _delivery_path(artifact_dir),
                 "updated_at": _now(),
             })
             version_documents.append(version_item)
@@ -429,7 +475,7 @@ def _run_ingest_job(job_id: str) -> None:
             "schema_version": 2,
             "job_id": job_id,
             "index_id": INDEX_ID,
-            "save_dir": str(version_dir.resolve()),
+            "save_dir": _delivery_path(version_dir),
             "documents": version_documents,
             "chunk_count": len(texts),
             "created_at": _now(),
@@ -438,16 +484,18 @@ def _run_ingest_job(job_id: str) -> None:
         pointer = {
             "schema_version": 2,
             "job_id": job_id,
-            "save_dir": str(version_dir.resolve()),
-            "service_manifest": str(manifest_path.resolve()),
-            "source_map": str(source_path.resolve()),
+            "save_dir": _delivery_path(version_dir),
+            "service_manifest": _delivery_path(manifest_path),
+            "source_map": _delivery_path(source_path),
             "activated_at": _now(),
         }
         with _state_lock:
             _write_json_atomic(ACTIVE_POINTER, pointer)
             app.state.rag = query_rag
             app.state.source_map = source_map
-            app.state.active_manifest = service_manifest
+            app.state.active_manifest = _normalize_manifest_paths(
+                json.loads(json.dumps(service_manifest)), version_dir
+            )
             app.state.startup_error = None
         result = {
             "documents": [
@@ -474,7 +522,7 @@ async def lifespan(app_instance: FastAPI):
     app_instance.state.trace_store = RetrievalTraceStore(TRACE_DB_PATH)
     app_instance.state.trace_store.initialize()
     app_instance.state.trace_store.purge_older_than(
-        int(os.getenv("SYNAPSERAG_TRACE_RETENTION_DAYS", "7"))
+        int(os.getenv("SYNAPSERAG_TRACE_RETENTION_DAYS", "0"))
     )
     app_instance.state.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="synapserag-index")
     app_instance.state.query_lock = asyncio.Lock()
@@ -660,7 +708,7 @@ async def build_index(request: Request, payload: IndexRequest):
         documents.append({
             "document_id": document_id,
             "filename": doc.title or path.name,
-            "upload_path": str(path.resolve()),
+            "upload_path": _delivery_path(path),
             "content_sha256": hashlib.sha256(content).hexdigest(),
             "uploaded_at": _now(),
         })
@@ -727,7 +775,7 @@ async def upload_documents(request: Request):
             documents.append({
                 "document_id": document_id,
                 "filename": filename,
-                "upload_path": str(destination.resolve()),
+                "upload_path": _delivery_path(destination),
                 "content_sha256": digest.hexdigest(),
                 "uploaded_at": _now(),
             })

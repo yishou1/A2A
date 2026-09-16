@@ -79,3 +79,5 @@ desktop.ini
 
 runtime-data/
 .venv-synapse/
+*.sqlite3-shm
+*.sqlite3-wal

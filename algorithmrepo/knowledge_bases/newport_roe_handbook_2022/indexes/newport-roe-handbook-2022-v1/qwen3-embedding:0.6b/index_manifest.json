@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "index_id": "newport-roe-handbook-2022-v1",
+  "embedding_model": "qwen3-embedding:0.6b",
+  "embedding_dimension": 1024,
+  "embedding_normalized": true,
+  "embedding_instruction_mode": "prefix",
+  "document_instruction_hash": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+  "query_to_fact_instruction_hash": "d928bcf580bd25f29859e285c17121b27dd57184c3f07aa547d51c4200144c11",
+  "query_to_passage_instruction_hash": "f84f7e63dcecbd4af5b8a40327482c2a73ce5a386efb1dc5ca18eaab7ed5481a",
+  "openie_source_model": "gpt-4o-mini",
+  "openie_prompt_version": "ner-triple-cn-v2",
+  "document_count": 114,
+  "document_ids_hash": "0c6bf1434880f00bb4a51a98076b5027068e11db20a7060be7c784f08a46802e",
+  "created_at": "2026-08-17T11:00:15.550764",
+  "updated_at": "2026-08-17T11:00:15.550764"
+}

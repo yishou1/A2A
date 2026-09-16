@@ -3,7 +3,8 @@
 ## 交付内容
 
 只需交付 algorithmrepo 目录。两个新算法通过 HTTP 调用其中的完整 SynapseRAG，
-不导入 Commander、decision_support 或 Agent SDK。模型服务和知识库数据另行配置。
+不导入 Commander、decision_support 或 Agent SDK。PDF、解析结果、向量索引、知识图谱、
+任务记录和检索轨迹已随仓库提交；Qwen 与 Embedding 模型服务由部署方提供。
 
 | 算法 ID | 版本 | 端口 | 功能 |
 |---|---|---|---|
@@ -23,8 +24,9 @@ python3 -m venv .venv-synapse
 cmake -S . -B build
 cmake --build build --target algolib_cli algolib_server -j2
 
-export SYNAPSERAG_SAVE_DIR="$PWD/runtime-data/synapserag"
-export SYNAPSERAG_INDEX_ID=customer-kb-v1
+export SYNAPSERAG_SAVE_DIR="$PWD/knowledge_bases/newport_roe_handbook_2022"
+export SYNAPSERAG_RECORDS_DIR="$SYNAPSERAG_SAVE_DIR/records"
+export SYNAPSERAG_INDEX_ID=newport-roe-handbook-2022-v1
 export SYNAPSERAG_EMBEDDING_MODEL=qwen3-embedding:0.6b
 export SYNAPSERAG_EMBEDDING_BASE_URL=http://127.0.0.1:11434/v1
 export SYNAPSERAG_QA_MODEL=qwen3:1.7b
@@ -40,11 +42,12 @@ export SYNAPSERAG_OPENIE_API_KEY=EMPTY
 首次 CMake 配置下载 C++ 依赖；离线交付需要提前准备依赖或编译产物。
 requirements-service.txt 是 HTTP 模型部署依赖范围，尚不是跨平台锁定环境。
 启动器遇到端口冲突直接报错；Ctrl+C 停止本次启动的四个进程。
-环境、数据和部署注册表放在 runtime-data 或指定的外部目录。
+模型环境和算法注册表可放在 runtime-data；知识库与展示记录位于已提交的
+knowledge_bases 目录。服务停止后可将新增 SQLite 记录一并提交。
 
 ## 首次索引与注册
 
-访问 http://127.0.0.1:8000/docs 使用文档上传、索引构建和任务状态管理接口。
+内置知识库可直接加载。访问 http://127.0.0.1:8000/docs 使用文档上传、索引构建和任务状态管理接口。
 最小文本导入：
 
 ```bash
@@ -55,7 +58,8 @@ curl --fail-with-body http://127.0.0.1:8000/api/index -H 'Content-Type: applicat
 request，再注册和激活两个算法包。因为注册器会实际调用 /predict，不能用任意
 客户知识库中不存在的固定实体 ID 作为验收请求。
 生成的验收包位于 runtime-data/packages，源码中的样例不被改写。
-空知识库不报告可用。当前实例仅有一个激活索引，错误 index_id 返回 INDEX_MISMATCH。
+当前实例仅有一个激活索引，错误 index_id 返回 INDEX_MISMATCH。新增索引任务和
+检索轨迹默认保存在 knowledge_bases/newport_roe_handbook_2022/records 并由 Git 跟踪。
 
 ## 检索调用
 
@@ -106,15 +110,14 @@ export ALGOLIB_BASE_URL=http://127.0.0.1:8088
 
 两个 Agent 和 core 可由上述配置通过算法库检索。direct 模式保持直接 /api/retrieve，
 algolib 模式调用 2.0.0。trace_id 保留在 rag_model_profile 中。
-AMOS 后续可用 graph explorer 的 trace 操作展示，本轮未修改前端。
+AMOS 已通过同源只读代理调用轨迹、图谱、证据定位和 PDF 高亮接口。
 
 ## 验收命令
 
 ```bash
 PYTHONPATH=services:services/synapserag:services/synapserag/src .venv-synapse/bin/python tests/python/test_synapse_delivery.py -v
-.venv-synapse/bin/python scripts/verify_synapse_delivery.py --seed-data /path/to/legacy-index-data --index-id your-index-id --query "What authorization is required?"
+.venv-synapse/bin/python scripts/verify_synapse_delivery.py --seed-data knowledge_bases/newport_roe_handbook_2022 --index-id newport-roe-handbook-2022-v1 --query "What authorization is required?"
 ```
 
-真实验收需要模型服务已运行、四个端口空闲。脚本使用临时知识库副本，结束后停止
-测试服务，结果写入 runtime-data/delivery-report.json。带绝对 active pointer 的托管
-索引须先迁移，不能直接作为此脚本输入；新客户通过文档管理接口重新构建索引。
+真实验收需要模型服务已运行、四个端口空闲。脚本使用内置知识库的临时副本，结束后停止
+测试服务，结果写入 runtime-data/delivery-report.json，不会污染已提交的展示记录。
