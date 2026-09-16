@@ -1,0 +1,35 @@
+{
+  "schema_version": "m20_fused_expert_onnx_bundle/v1",
+  "generated_at_utc": "2026-09-16T03:10:50.125043+00:00",
+  "release_status": "candidate_not_deployed",
+  "purpose": "situation-awareness group-relation classification only; no control, engagement, or weapon functions",
+  "source_bundle": "m20_fused_expert_bundle_v6_generalized_open_set",
+  "backend": "onnxruntime_cpu",
+  "type_name_router": {
+    "file": "type_name_router/model.onnx",
+    "sha256": "9a994ff743f7f6cd13439190afad13f54bfbf7426b980ab466636734dda37cf8",
+    "maximum_absolute_error": 0.0
+  },
+  "experts": {
+    "aircraft": {
+      "file": "experts/aircraft/model.onnx",
+      "sha256": "a61b5ac73bfc840613ae8d86e73e120db934f0a394e3ac65582e7b8d680f13e6",
+      "maximum_absolute_error": 5.960464477539063e-08
+    },
+    "uav": {
+      "file": "experts/uav/model.onnx",
+      "sha256": "95945338abfa70ac1bbcdc5fa2e0017bb1dbe16ad89d54ec4700e81f06c9b4b5",
+      "maximum_absolute_error": 9.5367431640625e-07
+    },
+    "ship": {
+      "file": "experts/ship/model.onnx",
+      "sha256": "2f738acad5ac2981567d6f191cafe6e1ee1861ecd472b7e608fc59a7cfbbdd69",
+      "maximum_absolute_error": 4.76837158203125e-07
+    },
+    "ground_vehicle": {
+      "file": "experts/ground_vehicle/model.onnx",
+      "sha256": "19c9fb6fb614d4e59b211035a07f5ee06cfc624be9843a3145376de482d461b8",
+      "maximum_absolute_error": 2.3245811462402344e-06
+    }
+  }
+}

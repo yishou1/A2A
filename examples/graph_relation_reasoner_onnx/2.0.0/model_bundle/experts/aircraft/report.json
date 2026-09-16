@@ -1,0 +1,52 @@
+{
+  "release_status": "temporal_candidate_not_deployed",
+  "domain": "aircraft",
+  "model_id": "temporal_graph_relation_reasoner",
+  "model_version": "m20-aircraft-gru-gnn-candidate-20260914",
+  "architecture": {
+    "history_points": 8,
+    "node_features": 7,
+    "edge_features": 12,
+    "hidden_size": 32,
+    "gru_layers": 1,
+    "gnn_message_layers": 2,
+    "parameter_count": 19873
+  },
+  "dataset": {
+    "metadata": "processed/m20_aircraft_hard_negative_v6/metadata.json",
+    "metadata_sha256": "eb75b12267c77570a6a1d1784e842bcd682001add507020a44e0c2466c3bbf86"
+  },
+  "training": {
+    "epochs_requested": 100,
+    "epochs_completed": 17,
+    "best_epoch": 2,
+    "device": "mps",
+    "seed": 20260916,
+    "elapsed_seconds": 3.232,
+    "hard_negative_weight": 2.0,
+    "hard_negative_pair_count": 651
+  },
+  "evaluation": {
+    "validation_best_balanced_accuracy": 0.9375,
+    "test_at_0_5": {
+      "threshold": 0.5,
+      "accuracy": 0.971429,
+      "precision": 0.928571,
+      "recall": 1.0,
+      "specificity": 0.954545,
+      "balanced_accuracy": 0.977273,
+      "f1": 0.962963,
+      "roc_auc": 0.956892,
+      "pr_auc": 0.825002,
+      "true_positive": 1131,
+      "true_negative": 1827,
+      "false_positive": 87,
+      "false_negative": 0,
+      "verified_pair_count": 3045
+    }
+  },
+  "checkpoint": {
+    "best": "artifacts/m20_aircraft_hard_negative_v6_candidate_20260914/aircraft/best.safetensors",
+    "sha256": "c2a7e1c7d39cb2bf4549e981d9adb55fb46daca2566d97a0716dbe315b5936eb"
+  }
+}

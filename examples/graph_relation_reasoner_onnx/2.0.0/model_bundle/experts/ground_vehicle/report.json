@@ -1,0 +1,52 @@
+{
+  "release_status": "temporal_candidate_not_deployed",
+  "domain": "ground_vehicle",
+  "model_id": "temporal_graph_relation_reasoner",
+  "model_version": "m20-ground_vehicle-gru-gnn-candidate-20260915",
+  "architecture": {
+    "history_points": 8,
+    "node_features": 7,
+    "edge_features": 12,
+    "hidden_size": 32,
+    "gru_layers": 1,
+    "gnn_message_layers": 2,
+    "parameter_count": 19873
+  },
+  "dataset": {
+    "metadata": "processed/m20_fhwa_cacc_large_v1/metadata.json",
+    "metadata_sha256": "e71bec4eff0f5b08b9c2b6cf0800594ee03e75cce53ee64ce268e9a47482ca62"
+  },
+  "training": {
+    "epochs_requested": 100,
+    "epochs_completed": 45,
+    "best_epoch": 30,
+    "device": "mps",
+    "seed": 20260916,
+    "elapsed_seconds": 52.325,
+    "hard_negative_weight": 1.5,
+    "hard_negative_pair_count": 11939
+  },
+  "evaluation": {
+    "validation_best_balanced_accuracy": 0.95132,
+    "test_at_0_5": {
+      "threshold": 0.5,
+      "accuracy": 0.986254,
+      "precision": 0.978096,
+      "recall": 0.980726,
+      "specificity": 0.989018,
+      "balanced_accuracy": 0.984872,
+      "f1": 0.979409,
+      "roc_auc": 0.995591,
+      "pr_auc": 0.991133,
+      "true_positive": 2188,
+      "true_negative": 4413,
+      "false_positive": 49,
+      "false_negative": 43,
+      "verified_pair_count": 6693
+    }
+  },
+  "checkpoint": {
+    "best": "artifacts/m20_fhwa_cacc_large_v1_candidate_20260915/ground_vehicle/best.safetensors",
+    "sha256": "90b580ef597edaadca925b81d124753d0638662c7aee3d1544fd9536fe6f6e3c"
+  }
+}
