@@ -11,8 +11,6 @@ from typing import Any, Dict, Iterable, List, Sequence
 
 import numpy as np
 
-from a2a_algorithms_common.m20_fused_onnx import M20FusedOnnxBundle, track_type_name
-
 try:
     import torch
 except ImportError:  # pragma: no cover
@@ -26,10 +24,6 @@ GRAPH_RELATION_CHECKPOINT = (
     / "models/checkpoints/graph_relation_gnn_s.safetensors"
 )
 GRAPH_RELATION_METADATA = GRAPH_RELATION_CHECKPOINT.with_suffix(".metadata.json")
-M20_FUSED_ONNX_BUNDLE = (
-    Path(__file__).resolve().parents[2]
-    / "examples/graph_relation_reasoner_onnx/2.0.0/model_bundle"
-)
 
 
 def target_type_classifier(inputs: dict, _params: dict) -> dict:
@@ -187,16 +181,6 @@ def graph_relation_reasoner(inputs: dict, params: dict) -> dict:
     if threshold <= 0.0 or threshold >= 1.0:
         raise ValueError("relation_threshold must be between 0 and 1")
 
-    # Version 2 keeps the public raw-track contract while internally routing to
-    # one of four ONNX experts.  The 1.0.0 model remains the default so existing
-    # deployed callers are not silently switched to a new trained artifact.
-    if str(params.get("model_variant", "")).strip().lower() in {
-        "m20_fused_onnx_v6",
-        "m20_fused_onnx",
-        "2.0.0",
-    }:
-        return _graph_relation_reasoner_m20_fused(tracks, threshold)
-
     model = _load_graph_relation_model()
     node_inputs, edge_inputs, node_mask = _graph_relation_tensors(tracks)
     with torch.inference_mode():
@@ -247,110 +231,6 @@ def graph_relation_reasoner(inputs: dict, params: dict) -> dict:
     }
 
 
-def _graph_relation_reasoner_m20_fused(tracks: list[dict], threshold: float) -> dict:
-    bundle = _load_m20_fused_onnx_bundle()
-    routed: dict[str, list[dict]] = {domain: [] for domain in ("aircraft", "uav", "ship", "ground_vehicle")}
-    routing = []
-    for track in tracks:
-        type_name = track_type_name(track)
-        decision = bundle.route(type_name)
-        track_id = str(track.get("track_id") or track.get("detection_id") or "track-unknown")
-        routing.append({"track_id": track_id, "type_name": type_name, **decision})
-        domain = decision["domain"]
-        # The temporal model was trained with at least six valid observations.
-        # A caller receives an explicit decline rather than a fabricated score.
-        if domain and len(_temporal_history(track)) >= 6:
-            routed[str(domain)].append(track)
-        elif domain:
-            routing[-1]["domain"] = None
-            routing[-1]["reason"] = "insufficient_history_points"
-
-    relations: list[dict] = []
-    groups: list[dict] = []
-    for domain, domain_tracks in routed.items():
-        if len(domain_tracks) < 2:
-            continue
-        probabilities, selected = bundle.score(domain, domain_tracks)
-        domain_relations: list[dict] = []
-        for left_index, left in enumerate(selected):
-            for right_index, right in enumerate(selected[left_index + 1 :], start=left_index + 1):
-                probability = float(probabilities[0, left_index, right_index])
-                if probability < threshold:
-                    continue
-                domain_relations.append(_relation_row(left, right, probability, domain))
-        relations.extend(domain_relations)
-        domain_groups = _connected_groups(selected, domain_relations)
-        for group in domain_groups:
-            group["group_id"] = f"m20-{domain}-{len(groups) + 1:03d}"
-            group["group_type"] = _group_type_for_domain(domain)
-            group["evidence"] = [
-                "多帧时空图专家模型判定成员关系边超过阈值，关系连通分量形成群体候选。",
-                f"专家域：{domain}；关系阈值：{threshold:.2f}。",
-            ]
-            groups.append(group)
-    manifest_hash = _sha256(M20_FUSED_ONNX_BUNDLE / "manifest.json")
-    return {
-        "schema_version": "graph_relation_reasoner/v3",
-        "relations": relations,
-        "groups": groups,
-        "routing": routing,
-        "graph_summary": {
-            "node_count": len(tracks),
-            "edge_count": len(relations),
-            "group_count": len(groups),
-            "relation_threshold": threshold,
-            "model_variant": "m20_fused_onnx_v6",
-            "routed_node_count": sum(len(items) for items in routed.values()),
-        },
-        "model": {
-            "model_id": "graph_relation_reasoner",
-            "model_version": "2.0.0",
-            "model_family": "type_name_routed_temporal_gru_gnn_onnx",
-            "compute_profile": "small_cpu_onnx",
-            "artifact_sha256": manifest_hash,
-        },
-        "safety_boundary": "Situation-awareness group relation analysis only; no weapon control or engagement decision.",
-    }
-
-
-def _relation_row(left: dict, right: dict, probability: float, domain: str) -> dict:
-    distance = haversine_m(float(left["lat"]), float(left["lon"]), float(right["lat"]), float(right["lon"]))
-    heading_delta = heading_difference(float(left.get("heading", 0.0)), float(right.get("heading", 0.0)))
-    speed_delta = abs(float(left.get("speed", 0.0) or 0.0) - float(right.get("speed", 0.0) or 0.0))
-    return {
-        "source_track_id": str(left.get("track_id") or left.get("detection_id")),
-        "target_track_id": str(right.get("track_id") or right.get("detection_id")),
-        "distance_m": round(distance, 3),
-        "heading_delta_deg": round(heading_delta, 3),
-        "speed_delta_mps": round(speed_delta, 3),
-        "relation_score": round(probability, 6),
-        "relation_type": "formation_membership",
-        "expert_domain": domain,
-    }
-
-
-def _temporal_history(track: dict) -> list[dict]:
-    history = [item for item in track.get("history_path", []) if isinstance(item, dict)]
-    if not history or history[-1].get("lat") != track.get("lat") or history[-1].get("lon") != track.get("lon"):
-        history.append(track)
-    return history[-8:]
-
-
-def _group_type_for_domain(domain: str) -> str:
-    if domain in {"aircraft", "uav"}:
-        return "air_formation"
-    if domain == "ship":
-        return "surface_group"
-    return "ground_group"
-
-
-@lru_cache(maxsize=1)
-def _load_m20_fused_onnx_bundle() -> M20FusedOnnxBundle:
-    if not M20_FUSED_ONNX_BUNDLE.is_dir():
-        raise FileNotFoundError(f"M20 fused ONNX bundle not found: {M20_FUSED_ONNX_BUNDLE}")
-    return M20FusedOnnxBundle(M20_FUSED_ONNX_BUNDLE)
-
-
 def graph_relation_model_loaded() -> bool:
     try:
         metadata = _graph_relation_metadata()
@@ -359,11 +239,7 @@ def graph_relation_model_loaded() -> bool:
             and metadata.get("artifact_sha256") == _sha256(GRAPH_RELATION_CHECKPOINT)
         )
     except (OSError, ValueError, KeyError, json.JSONDecodeError):
-        try:
-            _load_m20_fused_onnx_bundle()
-            return True
-        except (OSError, ValueError, RuntimeError, KeyError, json.JSONDecodeError):
-            return False
+        return False
 
 
 @lru_cache(maxsize=1)

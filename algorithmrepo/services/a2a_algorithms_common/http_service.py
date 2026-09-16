@@ -51,7 +51,6 @@ def create_algorithm_app(
     *,
     model_loaded_callable: Optional[ModelLoadedCallable] = None,
     extra_metadata: Optional[Dict[str, Any]] = None,
-    compatible_versions: tuple[str, ...] = (),
 ) -> FastAPI:
     """Create a FastAPI app exposing /health, /metadata, and /predict."""
 
@@ -92,7 +91,7 @@ def create_algorithm_app(
 
         if request_body.algorithm_id and request_body.algorithm_id != algorithm_id:
             raise HTTPException(status_code=404, detail="algorithm_id mismatch")
-        if request_body.version and request_body.version not in {version, *compatible_versions}:
+        if request_body.version and request_body.version != version:
             raise HTTPException(status_code=404, detail="version mismatch")
         if not _model_loaded():
             raise HTTPException(status_code=503, detail="model not loaded")

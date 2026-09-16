@@ -119,56 +119,6 @@ def test_graph_relation_reasoner_groups_close_tracks() -> None:
     assert outputs["groups"][0]["member_track_ids"] == ["trk-air-001", "trk-air-002"]
 
 
-def test_graph_relation_reasoner_runs_m20_fused_onnx_variant() -> None:
-    track_a = _sample_track()
-    track_a["class_name"] = "fighter"
-    track_b = dict(_sample_track())
-    track_b["track_id"] = "trk-air-002"
-    track_b["class_name"] = "fighter"
-    track_b["lat"] = track_a["lat"] + 0.004
-    track_b["history_path"] = [
-        {**point, "lat": point["lat"] + 0.004}
-        for point in track_a["history_path"]
-    ]
-
-    outputs = predict_graph_relation_reasoner(
-        {"tracks": [track_a, track_b]},
-        {"model_variant": "m20_fused_onnx_v6", "relation_threshold": 0.1},
-    )
-
-    assert outputs["model"]["model_version"] == "2.0.0"
-    assert outputs["model"]["model_family"] == "type_name_routed_temporal_gru_gnn_onnx"
-    assert {item["domain"] for item in outputs["routing"]} == {"aircraft"}
-    assert outputs["relations"]
-
-
-def test_m20_fused_onnx_rejects_static_type_name() -> None:
-    track_a = _sample_track()
-    track_a["type_name"] = "airport"
-    track_b = dict(_sample_track())
-    track_b["track_id"] = "trk-static-002"
-    track_b["type_name"] = "airport"
-    outputs = predict_graph_relation_reasoner(
-        {"tracks": [track_a, track_b]},
-        {"model_variant": "m20_fused_onnx_v6"},
-    )
-    assert outputs["relations"] == []
-    assert {item["reason"] for item in outputs["routing"]} == {"static_type_name"}
-
-
-def test_m20_fused_onnx_variant_is_available_through_http_contract() -> None:
-    client = TestClient(app)
-    payload = json.loads(
-        (ROOT / "examples/graph_relation_reasoner_onnx/2.0.0/golden_cases/case_001_request.json").read_text(encoding="utf-8")
-    )
-    response = client.post("/graph_relation_reasoner/predict", json=payload)
-    assert response.status_code == 200
-    result = response.json()
-    assert result["ok"] is True
-    assert result["version"] == "2.0.0"
-    assert result["outputs"]["model"]["model_version"] == "2.0.0"
-
-
 def test_mounted_http_apps_match_algorithm_identity() -> None:
     client = TestClient(app)
     health_root = client.get("/health").json()
