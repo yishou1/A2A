@@ -90,6 +90,9 @@ A2A_REQUEST_TIMEOUT=30
 A2A_WORKFLOW_MODE=bpel
 A2A_WORKFLOW_FILE=integrated_system/workflows/integrated_demo_workflow.bpel
 AMOS_PUBLIC_BASE_URL=http://127.0.0.1:5000/
+SYNAPSERAG_BASE_URL=http://127.0.0.1:8000
+SYNAPSERAG_API_TOKEN=
+SYNAPSERAG_TIMEOUT_SECONDS=60
 HOST=127.0.0.1
 PORT=5000
 ```
@@ -123,6 +126,8 @@ GET  /api/v1/runs/{run_id}/report?format=json|markdown|html
 导演动作包括 `start`、`pause`、`step_tick`、`advance_checkpoint`、`start_auto` 和 `stop_auto`。`advance_checkpoint` 通过正常仿真 tick 到达条件检查点，不直接改写时钟；需要分析的检查点通过与手动提交相同的 Gateway 服务提交。Gateway 不可达时记录失败，不生成替代结果。
 
 页面采用地图与任务工作区双栏结构，工作区包含场景态势、Agent 拓扑、算法覆盖、流程执行、证据与结果五个页签。场景声明只表示计划覆盖；只有后端成功 trace 才计入本次运行的算法和功能点验证结果。证据页可按当前 `run_id` 导出 JSON、Markdown 或独立 HTML 验收报告。
+
+证据页的知识图谱弹窗通过 AMOS 同源只读代理连接 SynapseRAG。左侧列出已持久化的检索任务、阶段耗时和归因来源，右侧保留完整 3D 图谱，并可切换证据骨架与召回候选。服务端负责附加可选 Token；浏览器不会获得 `SYNAPSERAG_API_TOKEN`。原文高亮要求索引保留可访问的上传文件或源文件。
 
 运行档案默认保存到 `instance/amos_runs.sqlite3`，可通过 `AMOS_RUN_DB` 指定其他 SQLite 文件。档案记录场景、随机种子、分支、冻结提交、工作流、已验证覆盖、指标、告警和最终状态；尚无运行证据的字段保持“未上报”。
 

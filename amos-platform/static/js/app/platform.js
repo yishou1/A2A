@@ -538,12 +538,14 @@ window.Platform = (function () {
     if (!frame.getAttribute("src")) frame.setAttribute("src", frame.dataset.src);
     dialog.classList.add("open");
     dialog.setAttribute("aria-hidden", "false");
+    if (window.SynapseTraceView) window.SynapseTraceView.open();
   }
 
   function closeKnowledgeGraph() {
     var dialog = document.getElementById("knowledge-graph-dialog");
     dialog.classList.remove("open");
     dialog.setAttribute("aria-hidden", "true");
+    if (window.SynapseTraceView) window.SynapseTraceView.close();
   }
 
   async function switchScenario(scenarioId, options) {

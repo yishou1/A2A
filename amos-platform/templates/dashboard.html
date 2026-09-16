@@ -346,10 +346,55 @@
 <div id="knowledge-graph-dialog" class="knowledge-graph-dialog" aria-hidden="true">
   <section class="knowledge-graph-panel" role="dialog" aria-modal="true" aria-labelledby="knowledge-graph-title">
     <header class="knowledge-graph-header">
-      <h2 id="knowledge-graph-title">交战规则知识图谱</h2>
-      <button id="knowledge-graph-close" class="btn btn-sm" type="button">关闭</button>
+      <div>
+        <h2 id="knowledge-graph-title">交战规则知识图谱</h2>
+        <span id="synapse-service-state" class="knowledge-graph-service-state">正在检查检索服务</span>
+      </div>
+      <div class="knowledge-graph-header-actions">
+        <button id="synapse-refresh-traces" class="btn btn-sm" type="button" title="刷新检索任务">刷新</button>
+        <button id="knowledge-graph-close" class="btn btn-sm" type="button">关闭</button>
+      </div>
     </header>
-    <iframe id="knowledge-graph-frame" title="交战规则知识图谱" data-src="/static/knowledge-graph/roe-knowledge-graph.html"></iframe>
+    <div class="knowledge-graph-body">
+      <aside class="synapse-trace-sidebar" aria-label="检索任务与证据">
+        <div class="synapse-sidebar-heading">
+          <div><span class="section-eyebrow">检索记录</span><h3>任务轨迹</h3></div>
+          <span id="synapse-trace-count" class="status-chip neutral">0</span>
+        </div>
+        <div id="synapse-trace-list" class="synapse-trace-list">
+          <div class="synapse-empty">尚未加载检索任务</div>
+        </div>
+        <section id="synapse-trace-detail" class="synapse-trace-detail" hidden>
+          <div class="synapse-detail-heading">
+            <div><span class="section-eyebrow">当前任务</span><h3 id="synapse-trace-title">—</h3></div>
+            <span id="synapse-trace-status" class="status-chip neutral">—</span>
+          </div>
+          <div id="synapse-trace-meta" class="synapse-trace-meta"></div>
+          <div class="synapse-detail-section">
+            <span class="section-eyebrow">查询</span>
+            <div id="synapse-query-list" class="synapse-query-list"></div>
+          </div>
+          <div class="synapse-detail-section">
+            <div class="synapse-mode-heading"><span class="section-eyebrow">图谱视图</span><button id="synapse-clear-overlay" class="synapse-text-action" type="button">显示完整图谱</button></div>
+            <div class="synapse-mode-control" role="group" aria-label="图谱轨迹模式">
+              <button type="button" class="active" data-synapse-view="skeleton">证据骨架</button>
+              <button type="button" data-synapse-view="candidates">召回候选</button>
+            </div>
+          </div>
+          <div class="synapse-detail-section">
+            <span class="section-eyebrow">检索阶段</span>
+            <div id="synapse-stage-list" class="synapse-stage-list"></div>
+          </div>
+          <div class="synapse-detail-section">
+            <span class="section-eyebrow">Attributed Sources</span>
+            <div id="synapse-source-list" class="synapse-source-list"></div>
+          </div>
+        </section>
+      </aside>
+      <div class="knowledge-graph-stage">
+        <iframe id="knowledge-graph-frame" title="交战规则知识图谱" data-src="/static/knowledge-graph/roe-knowledge-graph.html"></iframe>
+      </div>
+    </div>
   </section>
 </div>
 
@@ -377,6 +422,7 @@
 <script src="/static/js/panels/platform-panels.js?v=20260911c"></script>
 <script src="/static/js/workflow/commander-workflow.js?v=20260914d"></script>
 <script src="/static/js/panels/function-showcase.js?v=20260915c"></script>
+<script src="/static/js/knowledge/synapserag-traces.js?v=20260916a"></script>
 <script src="/static/js/app/platform.js?v=20260914-scenario3-wave-dialogs"></script>
 </body>
 </html>

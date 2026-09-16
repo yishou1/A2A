@@ -305,9 +305,12 @@ class APIDocumentServiceTests(unittest.TestCase):
             self.assertEqual(authorized_trace.status_code, 200, authorized_trace.text)
 
         pointer = service._active_pointer()
-        self.assertTrue(Path(pointer["service_manifest"]).is_file())
-        self.assertTrue(Path(pointer["source_map"]).is_file())
-        self.assertEqual(Path(pointer["save_dir"]), Path(pointer["service_manifest"]).parent)
+        manifest_path = service._resolve_data_path(pointer["service_manifest"], service.DATA_ROOT)
+        source_map_path = service._resolve_data_path(pointer["source_map"], service.DATA_ROOT)
+        save_dir = service._resolve_data_path(pointer["save_dir"], service.DATA_ROOT)
+        self.assertTrue(manifest_path.is_file())
+        self.assertTrue(source_map_path.is_file())
+        self.assertEqual(save_dir, manifest_path.parent)
 
         first = await client.post("/api/documents/upload", files={
             "files": ("policy.txt", "旧内容".encode(), "text/plain")
@@ -345,11 +348,77 @@ class APIDocumentServiceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         pointer = service._active_pointer()
         self.assertEqual(pointer["job_id"], response.json()["job_id"])
+        self.assertFalse(Path(pointer["save_dir"]).is_absolute())
+        self.assertFalse(Path(pointer["service_manifest"]).is_absolute())
+        persisted_manifest = json.loads(
+            (service.DATA_ROOT / pointer["service_manifest"]).read_text(encoding="utf-8")
+        )
+        self.assertFalse(Path(persisted_manifest["documents"][0]["upload_path"]).is_absolute())
+        self.assertFalse(Path(persisted_manifest["documents"][0]["artifact_dir"]).is_absolute())
         documents = (await client.get("/api/documents")).json()["documents"]
         self.assertIn("legacy-1", {item["document_id"] for item in documents})
 
 
 class ServiceStateHelperTests(unittest.TestCase):
+    def test_manifest_resolves_repository_relative_source_and_artifacts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            document_id = "doc-bundled"
+            artifact_dir = root / "documents" / document_id
+            artifact_dir.mkdir(parents=True)
+            source = root / "sources" / "policy.pdf"
+            source.parent.mkdir()
+            source.write_bytes(b"bundled source")
+            (artifact_dir / "parsed_document.json").write_text(json.dumps({
+                "source_path": "sources/policy.pdf",
+                "content_sha256": "bundled-sha",
+            }), encoding="utf-8")
+            manifest = {"documents": [{
+                "document_id": document_id,
+                "filename": "policy.pdf",
+                "output_dir": f"documents/{document_id}",
+                "upload_path": "sources/policy.pdf",
+            }]}
+
+            normalized = service._normalize_manifest_paths(manifest, root)
+            document = normalized["documents"][0]
+
+            self.assertEqual(Path(document["artifact_dir"]), artifact_dir)
+            self.assertEqual(Path(document["upload_path"]), source)
+            self.assertEqual(document["content_sha256"], "bundled-sha")
+
+    def test_legacy_manifest_resolves_artifacts_from_configured_data_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            document_id = "doc-portable"
+            artifact_dir = root / "documents" / document_id
+            artifact_dir.mkdir(parents=True)
+            source = root / "uploads" / "policy.pdf"
+            source.parent.mkdir()
+            source.write_bytes(b"portable source")
+            (artifact_dir / "parsed_document.json").write_text(json.dumps({
+                "source_path": str(source),
+                "content_sha256": "portable-sha",
+            }), encoding="utf-8")
+            (root / "source_manifest.json").write_text(json.dumps({
+                "documents": [{
+                    "document_id": document_id,
+                    "filename": "policy.pdf",
+                    "output_dir": "outputs/old-machine/documents/doc-portable",
+                }],
+            }), encoding="utf-8")
+
+            with patch.multiple(
+                service,
+                DATA_ROOT=root,
+                ACTIVE_POINTER=root / "active.json",
+            ):
+                document = service._active_manifest()["documents"][0]
+
+            self.assertEqual(Path(document["artifact_dir"]), artifact_dir)
+            self.assertEqual(Path(document["upload_path"]), source)
+            self.assertEqual(document["content_sha256"], "portable-sha")
+
     def test_incomplete_job_is_recovered_with_its_payload(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

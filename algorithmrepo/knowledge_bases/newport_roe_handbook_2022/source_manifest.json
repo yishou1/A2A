@@ -1,0 +1,13 @@
+{
+  "documents": [
+    {
+      "document_id": "doc-2731ef2401e52a4b",
+      "filename": "Newport Rules of Engagement Handbook.pdf",
+      "parser": "pymupdf",
+      "chunk_count": 114,
+      "output_dir": "documents/doc-2731ef2401e52a4b",
+      "upload_path": "sources/Newport Rules of Engagement Handbook.pdf"
+    }
+  ],
+  "chunk_count": 114
+}

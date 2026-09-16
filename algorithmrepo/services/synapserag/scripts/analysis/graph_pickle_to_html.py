@@ -330,7 +330,7 @@ def build_payload(
 
 
 def render_html(payload: dict[str, Any], title: str) -> str:
-    data = json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")
+    data = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
     safe_title = html.escape(title)
     template = """<!doctype html>
 <html lang="zh-CN">
@@ -982,6 +982,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Convert SynapseRAG graph.pickle to graph.html")
     parser.add_argument("graph_pickle", type=Path, help="Path to graph.pickle")
     parser.add_argument("-o", "--output", type=Path, default=None, help="Output HTML path")
+    parser.add_argument("--title", default=None, help="Display title; defaults to the pickle filename")
     parser.add_argument("--openie-json", type=Path, default=None, help="Optional openie_results_*.json for relation labels")
     parser.add_argument("--max-nodes", type=int, default=0, help="Limit nodes embedded in HTML; default 0 loads all")
     parser.add_argument("--min-edge-weight", type=float, default=0.0, help="Hide edges below this weight")
@@ -1012,7 +1013,10 @@ def main() -> None:
     )
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(render_html(payload, title=args.graph_pickle.name), encoding="utf-8")
+    output.write_text(
+        render_html(payload, title=args.title or args.graph_pickle.name),
+        encoding="utf-8",
+    )
     print(f"Wrote {output}")
     print(
         "Visible graph: "
