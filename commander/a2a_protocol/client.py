@@ -98,3 +98,20 @@ class A2AClient:
         res = self.http.post(f"{self.base_url}{endpoint}", json=notice, timeout=self.timeout)
         res.raise_for_status()
         return res.json()
+
+    def exchange_coordination(self, message: Dict[str, Any]):
+        """Exchange an Agent-local CBBA message over the existing A2A channel."""
+        if not self.jwt_token:
+            self.authenticate()
+        endpoint = (self.agent_card or {}).get(
+            "coordinationEndpoint", "/coordination/cbba"
+        )
+        headers = {"Authorization": f"Bearer {self.jwt_token}"}
+        res = self.http.post(
+            f"{self.base_url}{endpoint}",
+            json=message,
+            headers=headers,
+            timeout=self.timeout,
+        )
+        res.raise_for_status()
+        return res.json()

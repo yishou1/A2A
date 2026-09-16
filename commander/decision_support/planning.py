@@ -795,7 +795,10 @@ def _priority_monitoring_plan(request: AgentRequest) -> CandidatePlan:
 
 def _broad_surveillance_plan(request: AgentRequest) -> CandidatePlan:
     targets = [target for target in _task_targets(request.scheduled_tasks)]
-    resources = [resource.id for resource in request.resources if resource.status == "available"]
+    if any(task.assignment_locked for task in request.scheduled_tasks):
+        resources = _assign_resources(request.scheduled_tasks, request.resources)
+    else:
+        resources = [resource.id for resource in request.resources if resource.status == "available"]
     return CandidatePlan(
         id="PLAN-BROAD-SURVEILLANCE",
         name="Broad surveillance coverage",
@@ -847,6 +850,12 @@ def _assign_resources(tasks: list[ScheduledTask], resources: list[Resource]) -> 
         by_type[resource.type].append(resource)
 
     for task in tasks:
+        if task.assignment_locked and task.assigned_resources:
+            for resource_id in task.assigned_resources:
+                if resource_id not in used:
+                    used.add(resource_id)
+                    assigned.append(resource_id)
+            continue
         preferred = task.required_resource_types or []
         selected = None
         for resource_type in preferred:
