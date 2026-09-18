@@ -8,6 +8,7 @@ from decision_support.schemas import AgentRequest
 from distributed_coordination.integration import coordinate_task_schedule
 from distributed_coordination.orchestrator import A2ACBBAOrchestrator
 from execution_control_agent.execution_control_core import run_execution_control
+from resource_monitor import ResourceMonitor
 from services.a2a_algorithms_common.distributed_cbba import (
     CBBAParticipant,
     apply_assignments_to_tasks,
@@ -263,6 +264,16 @@ class _InMemoryClient:
 def test_agents_exchange_cbba_tables_over_a2a_coordination_messages() -> None:
     network: dict[str, A2ABaseAgent] = {}
 
+    def stable_resource_sample() -> dict:
+        return {
+            "node_online": True,
+            "system": {"cpu_percent": 20.0, "memory_percent": 30.0},
+            "process": {},
+            "gpu": {"available": False},
+            "energy": {"available": False},
+            "network": {"available": True, "link_up": True},
+        }
+
     def client_factory(peer: dict) -> _InMemoryClient:
         return _InMemoryClient(network[str(peer["agent_id"])])
 
@@ -273,6 +284,7 @@ def test_agents_exchange_cbba_tables_over_a2a_coordination_messages() -> None:
             role="artillery",
             port=9100 + index,
             max_concurrent_tasks=1,
+            resource_monitor=ResourceMonitor(sampler=stable_resource_sample),
             coordination_client_factory=client_factory,
         )
     descriptors = [

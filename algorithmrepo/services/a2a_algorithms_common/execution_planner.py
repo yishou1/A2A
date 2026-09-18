@@ -257,6 +257,7 @@ def synthesize_plan_commands(
             "assigned_resources": list(task.get("assigned_resources") or []),
             "assignment_slot_ids": list(task.get("assignment_slot_ids") or []),
             "assignment_source": task.get("assignment_source"),
+            "assignment_locked": bool(task.get("assignment_locked", False)),
             "coordination_id": task.get("coordination_id"),
         }
         commands.append({key: value for key, value in command.items() if value is not None})

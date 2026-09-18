@@ -92,6 +92,15 @@ echo "Starting Execution Control Agent..."
 "$PYTHON_EXEC" "$SCRIPT_DIR/execution_control_agent/main.py" &
 sleep 2
 
+if [ -n "${COOP_EXECUTION_AGENTS_CONFIG:-}" ]; then
+    echo "Starting configured Cooperative Execution Agents..."
+    "$PYTHON_EXEC" "$SCRIPT_DIR/scripts/start_cooperative_execution_agents.py" \
+        --config "$COOP_EXECUTION_AGENTS_CONFIG" &
+    sleep 2
+else
+    echo "Cooperative Execution Agents disabled: COOP_EXECUTION_AGENTS_CONFIG is not set."
+fi
+
 echo "Starting Simulation Execution Agent..."
 EXECUTION_CONTROL_AGENT_ROLE=simulation_execution \
 SIMULATION_EXECUTION_AGENT_PORT="$SIMULATION_EXECUTION_AGENT_PORT" \

@@ -115,3 +115,20 @@ class A2AClient:
         )
         res.raise_for_status()
         return res.json()
+
+    def exchange_execution_coordination(self, message: Dict[str, Any]):
+        """Exchange non-actuating execution readiness between selected Agents."""
+        if not self.jwt_token:
+            self.authenticate()
+        endpoint = (self.agent_card or {}).get(
+            "executionCoordinationEndpoint", "/execution/coordination"
+        )
+        headers = {"Authorization": f"Bearer {self.jwt_token}"}
+        res = self.http.post(
+            f"{self.base_url}{endpoint}",
+            json=message,
+            headers=headers,
+            timeout=self.timeout,
+        )
+        res.raise_for_status()
+        return res.json()

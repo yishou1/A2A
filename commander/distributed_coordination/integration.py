@@ -12,7 +12,12 @@ from services.a2a_algorithms_common.distributed_cbba import (
 )
 
 
-DEFAULT_EXECUTION_ROLES = {"artillery", "assault", "recon"}
+DEFAULT_EXECUTION_ROLES = {
+    "artillery",
+    "assault",
+    "recon",
+    "cooperative_execution",
+}
 
 
 def _tokens(value: Any, fallback: str) -> list[str]:

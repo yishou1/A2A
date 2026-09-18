@@ -34,6 +34,7 @@ from workflow_state_store import WorkflowStateStore, new_workflow_id, utc_now_is
 from workflow_payloads import attachment_snapshot, merge_attachments, normalize_attachments
 from closed_loop_agent.agent_results_mapping import build_standard_results_from_context
 from distributed_coordination.integration import coordinate_task_schedule
+from distributed_coordination.execution_dispatch import prepare_distributed_execution
 import json
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -2225,6 +2226,35 @@ class CommanderAgent:
                 if latency_ms_value is not None:
                     context["execution_latency_ms"] = latency_ms_value
                 commands = output_data.get("commands") if isinstance(output_data.get("commands"), list) else []
+                mission_input = (
+                    context.get("mission_input")
+                    if isinstance(context.get("mission_input"), dict)
+                    else {}
+                )
+                cooperative_config = mission_input.get("cooperative_execution")
+                if (
+                    isinstance(cooperative_config, dict)
+                    and cooperative_config.get("enabled") is True
+                    and cooperative_config.get("auto_prepare_execution") is True
+                    and commands
+                ):
+                    if self.mode != "remote":
+                        raise RuntimeError(
+                            "real cooperative execution preparation requires remote mode"
+                        )
+                    planned_start_at = cooperative_config.get("planned_start_at")
+                    if not planned_start_at:
+                        raise RuntimeError(
+                            "cooperative_execution.planned_start_at is required"
+                        )
+                    context["cooperative_execution_preparation"] = (
+                        prepare_distributed_execution(
+                            output_value,
+                            workflow_id=self.workflow_id,
+                            registry=self.registry,
+                            planned_start_at=str(planned_start_at),
+                        )
+                    )
                 context["battle_log"].append(
                     "[Execution Control] "
                     f"phase={output_data.get('phase')}, commands={len(commands)}, "
