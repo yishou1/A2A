@@ -2096,7 +2096,13 @@ def _build_live_targets(arguments: dict, seed: int) -> Tuple[List[dict], dict]:
                 target[key] = score
         missing = [
             key
-            for key in ("detection_confidence", "threat_score")
+            for key in (
+                "detection_confidence",
+                "threat_score",
+                "velocity_norm",
+                "uncertainty",
+                "ammo_need",
+            )
             if target.get(key) is None
         ]
         damage_feature_keys = (
@@ -2183,10 +2189,24 @@ def _choose_action(target: dict, damage_prob: float, situation: str, mission_com
 
 def _apply_action(target: dict, action: str, effect_delta: float) -> None:
     if action in {"re_attack", "coordinated_suppression"}:
-        target["spectral_delta"] = _clamp(float(target["spectral_delta"]) + effect_delta)
-        target["texture_delta"] = _clamp(float(target["texture_delta"]) + effect_delta * 0.75)
-        target["heat_signature"] = _clamp(float(target["heat_signature"]) + effect_delta * 0.65)
-        target["crater_density"] = _clamp(float(target["crater_density"]) + effect_delta * 0.55)
+        damage_feature_deltas = {
+            "spectral_delta": effect_delta,
+            "texture_delta": effect_delta * 0.75,
+            "heat_signature": effect_delta * 0.65,
+            "crater_density": effect_delta * 0.55,
+        }
+        present_damage_features = [
+            key for key in damage_feature_deltas if target.get(key) is not None
+        ]
+        if present_damage_features:
+            for key in present_damage_features:
+                target[key] = _clamp(
+                    float(target[key]) + damage_feature_deltas[key]
+                )
+        elif target.get("damage_probability") is not None:
+            target["damage_probability"] = _clamp(
+                float(target["damage_probability"]) + effect_delta
+            )
         target["velocity_norm"] = _clamp(float(target["velocity_norm"]) - effect_delta * 0.70)
         target["uncertainty"] = _clamp(float(target["uncertainty"]) - 0.08)
         target["ammo_need"] = _clamp(float(target["ammo_need"]) + 0.02)
@@ -2301,9 +2321,19 @@ def _closed_loop_optimization(arguments: dict) -> dict:
         damage_rows = [_build_damage_feature_row(target, cnn_store, cnn_default) for target in targets]
         sample_ids = [str(target.get("sample_id") or target.get("target_id") or "") for target in targets]
         try:
-            probs = damage_model.predict_proba(damage_rows, sample_ids)
+            model_probs = damage_model.predict_proba(damage_rows, sample_ids)
         except TypeError:
-            probs = damage_model.predict_proba(damage_rows)
+            model_probs = damage_model.predict_proba(damage_rows)
+        probs = []
+        for target, model_probability in zip(targets, model_probs):
+            upstream_probability = _normalize_upstream_score(
+                target.get("damage_probability")
+            )
+            probs.append(
+                upstream_probability
+                if upstream_probability is not None
+                else float(model_probability)
+            )
         situation_rows = [_situation_features(target, prob) for target, prob in zip(targets, probs)]
         cluster_labels = kmeans.predict(situation_rows)
         profiles = _cluster_profiles(targets, cluster_labels, probs)

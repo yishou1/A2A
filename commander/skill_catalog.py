@@ -60,10 +60,16 @@ SKILL_CONTRACTS = {
                 "coordinates": {"type": "string"},
                 "intensity": {"type": "string"},
                 "recon_report": CONTEXT_ENTRY_ARRAY_SCHEMA,
+                "authorization": {"type": "object", "additionalProperties": True},
+                "simulation_profile": {"type": ["string", "null"]},
+                "simulation_inputs": {"type": "object", "additionalProperties": True},
+                "execution_command": {"type": ["object", "null"], "additionalProperties": True},
+                "execution_commands": {"type": "array", "items": {"type": "object"}},
+                "execution_control_result": CONTEXT_ENTRY_ARRAY_SCHEMA,
             },
             "additionalProperties": False,
         },
-        "output_schema": {"type": "string"},
+        "output_schema": {"type": "object", "additionalProperties": True},
     },
     "evaluate_strike": {
         "input_schema": {
@@ -85,6 +91,9 @@ SKILL_CONTRACTS = {
             "required": ["coordinates"],
             "properties": {
                 "coordinates": {"type": "string"},
+                "authorization": {"type": "object", "additionalProperties": True},
+                "simulation_profile": {"type": ["string", "null"]},
+                "simulation_inputs": {"type": "object", "additionalProperties": True},
                 "recon_report": CONTEXT_ENTRY_ARRAY_SCHEMA,
                 "strike_result": CONTEXT_ENTRY_ARRAY_SCHEMA,
                 "eval_score": CONTEXT_ENTRY_ARRAY_SCHEMA,

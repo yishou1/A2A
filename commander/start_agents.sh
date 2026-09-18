@@ -71,6 +71,10 @@ export SIMULATION_EXECUTION_AGENT_PORT="${SIMULATION_EXECUTION_AGENT_PORT:-10204
 export CLOSED_LOOP_AGENT_PORT="${CLOSED_LOOP_AGENT_PORT:-8016}"
 export DECISION_PLANNING_AGENT_PORT="${DECISION_PLANNING_AGENT_PORT:-10202}"
 export COMPLIANCE_AUTHORIZATION_AGENT_PORT="${COMPLIANCE_AUTHORIZATION_AGENT_PORT:-10203}"
+export ARTILLERY_AGENT_PORT="${ARTILLERY_AGENT_PORT:-8003}"
+export ASSAULT_AGENT_PORT="${ASSAULT_AGENT_PORT:-8004}"
+export EVALUATOR_AGENT_PORT="${EVALUATOR_AGENT_PORT:-8015}"
+export RULE_SIMULATION_PROFILE="${RULE_SIMULATION_PROFILE:-medium}"
 
 echo "Starting Tactical Intelligence Agent..."
 "$PYTHON_EXEC" "$SCRIPT_DIR/tactical_intelligence_agent/main.py" &
@@ -121,6 +125,18 @@ echo "Starting Compliance Authorization Agent..."
 export DECISION_AGENT_BACKEND="${DECISION_AGENT_BACKEND:-algolib}"
 export DECISION_AGENT_ALGOLIB_LLM="${DECISION_AGENT_ALGOLIB_LLM:-false}"
 "$PYTHON_EXEC" "$SCRIPT_DIR/compliance_authorization_agent/main.py" &
+sleep 2
+
+echo "Starting Rule-Based Artillery Simulation Agent..."
+"$PYTHON_EXEC" "$SCRIPT_DIR/artillery_agent/main.py" &
+sleep 2
+
+echo "Starting Rule-Based Assault Simulation Agent..."
+"$PYTHON_EXEC" "$SCRIPT_DIR/assault_agent/main.py" &
+sleep 2
+
+echo "Starting Rule-Based Effect Evaluator Agent..."
+"$PYTHON_EXEC" "$SCRIPT_DIR/evaluator_agent/main.py" &
 sleep 2
 
 echo "Starting Commander Agent..."

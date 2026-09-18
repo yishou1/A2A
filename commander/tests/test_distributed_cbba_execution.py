@@ -261,7 +261,7 @@ class _InMemoryClient:
         return self.target.handle_coordination_message(message)
 
 
-def test_agents_exchange_cbba_tables_over_a2a_coordination_messages() -> None:
+def test_agents_exchange_cbba_tables_over_a2a_coordination_messages(tmp_path) -> None:
     network: dict[str, A2ABaseAgent] = {}
 
     def stable_resource_sample() -> dict:
@@ -284,6 +284,7 @@ def test_agents_exchange_cbba_tables_over_a2a_coordination_messages() -> None:
             role="artillery",
             port=9100 + index,
             max_concurrent_tasks=1,
+            idempotency_db_path=str(tmp_path / f"{agent_id}.db"),
             resource_monitor=ResourceMonitor(sampler=stable_resource_sample),
             coordination_client_factory=client_factory,
         )

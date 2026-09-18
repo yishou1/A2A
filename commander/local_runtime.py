@@ -889,7 +889,13 @@ class LocalAgentRuntime:
             structured, _message = execute_artillery_command(payload)
             value = structured
         elif role == "evaluator":
-            value = int(payload.get("input", {}).get("mock_eval_score", 40))
+            from evaluator_agent.main import evaluate_strike
+
+            structured, _message = evaluate_strike(payload)
+            return {
+                output_hint: structured["eval_score"],
+                "structured_evaluation_result": structured,
+            }, _message
         elif role == "assault":
             from assault_agent.main import execute_assault_command
 

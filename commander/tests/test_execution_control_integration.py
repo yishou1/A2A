@@ -19,6 +19,42 @@ from execution_control_agent.motion_prediction import build_track_histories, pre
 from local_runtime import LocalAgentRuntime
 
 
+def approved_strike_results():
+    return {
+        "threat_evaluation": {"output_data": {"priority_score": 0.75}},
+        "perception_detection": {
+            "output_data": {"detections": [{"conf": 0.9}]}
+        },
+        "resource_allocation": {"output_data": {"readiness": 0.85}},
+        "communication": {"output_data": {"delivery_rate": 0.9}},
+        "plan_decision": {"output_data": {"decision": "execute"}},
+        "compliance_authorization": {
+            "output_data": {
+                "decision": "approved",
+                "approved_for_demo_handoff": True,
+            }
+        },
+        "data_fusion": {
+            "output_data": {
+                "track_history": [
+                    {
+                        "track_id": "T-001",
+                        "weapon_prep_sec": 2.0,
+                        "flight_time_sec": 4.0,
+                        "history": [
+                            {"t": 0.0, "x": 10.0, "y": 18.0},
+                            {"t": 0.1, "x": 10.4, "y": 18.6},
+                            {"t": 0.2, "x": 10.9, "y": 19.1},
+                            {"t": 0.3, "x": 11.3, "y": 19.7},
+                            {"t": 0.4, "x": 11.8, "y": 20.2},
+                        ],
+                    }
+                ]
+            }
+        },
+    }
+
+
 class ExecutionControlCoreTest(unittest.TestCase):
     def test_mine_association_rules_from_fixture(self):
         records = load_training_records()
@@ -35,7 +71,7 @@ class ExecutionControlCoreTest(unittest.TestCase):
         self.assertIn(top["consequent"]["action"], {"precision_strike", "area_suppression", "observe_and_hold"})
 
     def test_match_rules_for_strike_situation(self):
-        rules = load_or_mine_rules(refresh=True)
+        rules = load_or_mine_rules()
         items = discretize_situation(
             {
                 "threat_score": 0.75,
@@ -81,25 +117,7 @@ class ExecutionControlCoreTest(unittest.TestCase):
         payload = run_execution_control(
             {
                 "phase": "strike",
-                "results": {
-                    "threat_evaluation": {"output_data": {"priority_score": 0.75}},
-                    "perception_detection": {"output_data": {"detections": [{"conf": 0.9}]}},
-                    "resource_allocation": {"output_data": {"readiness": 0.85}},
-                    "communication": {"output_data": {"delivery_rate": 0.9}},
-                    "data_fusion": {
-                        "output_data": {
-                            "track_history": [
-                                {
-                                    "track_id": "T-001",
-                                    "history": [
-                                        {"t": 0.0, "x": 10.0, "y": 18.0},
-                                        {"t": 0.4, "x": 11.8, "y": 20.2},
-                                    ],
-                                }
-                            ]
-                        }
-                    },
-                },
+                "results": approved_strike_results(),
             }
         )
         output_data = payload["output_data"]
@@ -144,7 +162,9 @@ class ExecutionControlCommanderIntegrationTest(unittest.TestCase):
 
     def test_build_task_payload_artillery_uses_execution_command(self):
         context = self.commander.initial_workflow_context()
-        ec_result = run_execution_control({"phase": "strike", "results": {}})
+        ec_result = run_execution_control(
+            {"phase": "strike", "results": approved_strike_results()}
+        )
         context["execution_control_result"] = [{"value": ec_result, "status": "completed"}]
         payload, stream = self.commander.build_task_payload("artillery", context, activatity_index=3)
         command = payload["input"]["execution_command"]
@@ -155,7 +175,9 @@ class ExecutionControlCommanderIntegrationTest(unittest.TestCase):
 
     def test_build_standard_results_reads_execution_control_latency(self):
         context = self.commander.initial_workflow_context()
-        ec_result = run_execution_control({"phase": "strike", "results": {}})
+        ec_result = run_execution_control(
+            {"phase": "strike", "results": approved_strike_results()}
+        )
         context["execution_control_result"] = [{"value": ec_result, "status": "completed"}]
         results = build_standard_results_from_context(context, latest_value=CommanderAgent._latest_context_value)
         self.assertEqual(
@@ -231,7 +253,7 @@ class ExecutionControlLocalRuntimeTest(unittest.TestCase):
             "work_item": "wf-local-ec:2:execution_control",
             "command": "plan_strike_control",
             "required_skill": "plan_strike_control",
-            "input": {"phase": "strike", "results": {}},
+            "input": {"phase": "strike", "results": approved_strike_results()},
             "output_hint": "execution_control_result",
         }
         ec_response, _events = runtime.execute("execution_control", ec_payload)
@@ -243,13 +265,79 @@ class ExecutionControlLocalRuntimeTest(unittest.TestCase):
             "command": ec_value["output_data"]["commands"][0]["action"],
             "required_skill": "suppress_beach_sector_A",
             "input": {
+                "coordinates": "120.5E, 35.1N",
                 "execution_command": ec_value["output_data"]["commands"][0],
+                "execution_control_result": ec_value,
             },
             "output_hint": "strike_result",
         }
         strike_response, _stream_events = runtime.execute("artillery", artillery_payload, stream=True)
         strike_value = strike_response["output"]["strike_result"]
         self.assertEqual(strike_value["output_data"]["target_id"], ec_value["output_data"]["commands"][0]["target_id"])
+        self.assertEqual(
+            strike_value["output_data"]["execution_mode"], "rule_based_simulation"
+        )
+        self.assertFalse(strike_value["output_data"]["is_real_execution"])
+
+        evaluator_payload = {
+            "schema_version": "1.0",
+            "workflow_id": "wf-local-ec",
+            "work_item": "wf-local-ec:4:evaluator",
+            "command": "evaluate_strike",
+            "required_skill": "evaluate_strike",
+            "input": {
+                "coordinates": "120.5E, 35.1N",
+                "strike_result": [{"value": strike_value}],
+            },
+            "output_hint": "eval_score",
+        }
+        eval_response, _events = runtime.execute("evaluator", evaluator_payload)
+        evaluation = eval_response["output"]["structured_evaluation_result"]
+        self.assertEqual(evaluation["assessment_status"], "complete")
+        self.assertFalse(evaluation["is_real_evaluation"])
+        self.assertGreater(eval_response["output"]["eval_score"], 0)
+
+        closed_loop_results = approved_strike_results()
+        closed_loop_results["execution_control"] = ec_value
+        closed_loop_results["artillery"] = strike_value
+        closed_loop_payload = {
+            "schema_version": "1.0",
+            "workflow_id": "wf-local-ec",
+            "work_item": "wf-local-ec:5:closed_loop",
+            "command": "closed_loop_optimization",
+            "required_skill": "closed_loop_optimization",
+            "input": {
+                "results": closed_loop_results,
+                "targets": [
+                    {
+                        "target_id": strike_value["output_data"]["target_id"],
+                        "damage_probability": strike_value["output_data"]["damage_probability"],
+                        "detection_confidence": 0.9,
+                        "threat_score": 0.75,
+                        "velocity_norm": 0.4,
+                        "uncertainty": 0.1,
+                        "ammo_need": 0.2,
+                        "is_real_execution": False,
+                    }
+                ],
+                "target_count": 1,
+                "cycles": 1,
+                "feature_mode": "strict",
+                "enforce_min_target_count": False,
+            },
+            "output_hint": "closed_loop_result",
+        }
+        closed_response, _events = runtime.execute("closed_loop", closed_loop_payload)
+        closed_output = closed_response["output"]["closed_loop_result"]["output_data"]
+        feature_values = closed_output["closed_loop_optimization"]["history"][0][
+            "mission_assessment"
+        ]["feature_values"]
+        self.assertAlmostEqual(
+            feature_values["damage_rate"],
+            strike_value["output_data"]["damage_probability"],
+            places=4,
+        )
+        self.assertTrue(closed_output["execution_gate"]["meets_execution_requirement"])
 
     def test_artillery_and_assault_helpers_require_execution_command_fields(self):
         payload = {

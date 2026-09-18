@@ -1340,6 +1340,7 @@ class BPELWorkflowTest(unittest.TestCase):
                 workflow="bpel",
                 workflow_file=str(workflow_path),
                 state_dir=temp_dir,
+                mock_eval_score=75,
                 max_activity_workers=2,
             )
             calls = []

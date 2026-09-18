@@ -1162,24 +1162,32 @@ class CommanderAgent:
                 if work_item:
                     self.workflow_context.setdefault("agent_results", {})[work_item] = deepcopy(response)
 
-    def ask_llm(self, battle_log: list):
+    def ask_llm(self, battle_log: list, eval_score=None):
         log_str = "\n".join(battle_log)
         if self.mock_decision:
             return f"MOCK_LOCAL_DECISION: {self.mock_decision}"
 
         if self.mode == "local" or not self.api_key:
-            score = self.mock_eval_score if self.mock_eval_score is not None else 40
+            score = eval_score
+            if score is None:
+                score = self.mock_eval_score
+            if score is None:
+                return (
+                    "LOCAL_DECISION: No effect-evaluation score is available. "
+                    "ABORT ASSAULT and keep the workflow pending for evidence."
+                )
+            score = float(score)
             if score >= 60:
                 return (
-                    f"MOCK_LLM_DECISION: Destroy rate is {score}%. "
+                    f"RULE_BASED_DECISION: Simulated effect score is {score}%. "
                     "ASSAULT. Beachhead defenses are sufficiently suppressed. "
-                    "(Local/mock decision)"
+                    "(Local deterministic decision)"
                 )
             return (
-                f"MOCK_LLM_DECISION: Destroy rate is {score}%. "
+                f"RULE_BASED_DECISION: Simulated effect score is {score}%. "
                 "The beachhead defenses are too strong. ABORT ASSAULT. "
                 "Initiate RE-PLAN and call in bomber support. "
-                "(Local/mock decision)"
+                "(Local deterministic decision)"
             )
             
         try:
@@ -1931,6 +1939,12 @@ class CommanderAgent:
                 "input": {
                     "coordinates": context["coordinates"],
                     "intensity": "high",
+                    "authorization": deepcopy(context.get("authorization", {})),
+                    "simulation_profile": (
+                        context.get("mission_input", {}).get("simulation_profile")
+                        if isinstance(context.get("mission_input"), dict)
+                        else None
+                    ),
                     "execution_command": execution_command,
                     "execution_commands": commands,
                     "recon_report": self._context_entries(context, "recon_report"),
@@ -1959,7 +1973,11 @@ class CommanderAgent:
                     "coordinates": context["coordinates"],
                     "recon_report": self._context_entries(context, "recon_report"),
                     "strike_result": self._context_entries(context, "strike_result"),
-                    "mock_eval_score": self.mock_eval_score if self.mock_eval_score is not None else 40,
+                    **(
+                        {"mock_eval_score": self.mock_eval_score}
+                        if self.mock_eval_score is not None
+                        else {}
+                    ),
                 },
                 "context": context_snapshot,
                 "attachments": attachment_snapshot(context.get("attachments", [])),
@@ -1989,6 +2007,12 @@ class CommanderAgent:
                 "required_skills": ["capture_beachhead"],
                 "input": {
                     "coordinates": context["coordinates"],
+                    "authorization": deepcopy(context.get("authorization", {})),
+                    "simulation_profile": (
+                        context.get("mission_input", {}).get("simulation_profile")
+                        if isinstance(context.get("mission_input"), dict)
+                        else None
+                    ),
                     "execution_command": execution_command,
                     "execution_commands": commands,
                     "recon_report": self._context_entries(context, "recon_report"),
@@ -2021,6 +2045,8 @@ class CommanderAgent:
             # artifacts. Do not silently manufacture the legacy 50-target
             # fixture when the upstream simulation produced fewer targets.
             simulation = self._latest_context_value(context, "execution_simulation_result")
+            if not isinstance(simulation, dict):
+                simulation = self._latest_context_value(context, "execution_control_result")
             if isinstance(simulation, dict):
                 sim_data = simulation.get("output_data") if isinstance(simulation.get("output_data"), dict) else simulation
                 commands = sim_data.get("commands") if isinstance(sim_data.get("commands"), list) else []
@@ -2029,6 +2055,45 @@ class CommanderAgent:
                     for command in commands
                     if isinstance(command, dict) and command.get("target_id")
                 ]
+            strike = self._latest_context_value(context, "strike_result")
+            strike_output = (
+                strike.get("output_data")
+                if isinstance(strike, dict) and isinstance(strike.get("output_data"), dict)
+                else strike
+            )
+            if isinstance(strike_output, dict):
+                evidence = strike_output.get("evidence")
+                valid_simulation_effect = (
+                    strike_output.get("execution_mode") == "rule_based_simulation"
+                    and strike_output.get("is_real_execution") is False
+                    and isinstance(evidence, dict)
+                    and evidence.get("type") == "simulation"
+                    and evidence.get("sha256")
+                    and strike_output.get("damage_probability") is not None
+                )
+                if valid_simulation_effect:
+                    target_id = strike_output.get("target_id")
+                    targets = input_data.setdefault("targets", [])
+                    target = next(
+                        (
+                            item
+                            for item in targets
+                            if isinstance(item, dict) and item.get("target_id") == target_id
+                        ),
+                        None,
+                    )
+                    if target is None and target_id:
+                        target = {"target_id": target_id}
+                        targets.append(target)
+                    if target is not None:
+                        target.update(
+                            {
+                                "damage_probability": strike_output["damage_probability"],
+                                "damage_evidence": deepcopy(evidence),
+                                "effect_source": "rule_based_simulation",
+                                "is_real_execution": False,
+                            }
+                        )
             if not input_data.get("targets"):
                 mission = context.get("mission_input")
                 contacts = mission.get("contacts") if isinstance(mission, dict) else []
@@ -2294,8 +2359,22 @@ class CommanderAgent:
                 error=response_error,
                 duration_ms=duration_ms,
             )
+            structured_evaluation = output.get("structured_evaluation_result")
+            if isinstance(structured_evaluation, dict):
+                self._append_output_collection(
+                    context,
+                    "effect_evaluation_result",
+                    structured_evaluation,
+                    activity_id=activity_id,
+                    work_item=work_item,
+                    role=role,
+                    output=output,
+                    status=response_status,
+                    error=response_error,
+                    duration_ms=duration_ms,
+                )
             context["battle_log"].append(
-                f"[Eval Report] Effectiveness matches {output_value}% destruction rate."
+                f"[Eval Report] Tagged simulation effect score is {output_value}%."
             )
         elif role == "assault":
             target_key = output_key or "assault_result"
@@ -3422,8 +3501,11 @@ class CommanderAgent:
                     self._normalize_authorization(context.get("authorization"))
                 )
                 input_payload["agent_request"] = planning_input
-            if dispatch_key == "evaluator" or activatity.required_skill == "evaluate_strike":
-                input_payload["mock_eval_score"] = self.mock_eval_score if self.mock_eval_score is not None else 40
+            if (
+                dispatch_key == "evaluator"
+                or activatity.required_skill == "evaluate_strike"
+            ) and self.mock_eval_score is not None:
+                input_payload["mock_eval_score"] = self.mock_eval_score
 
             payload = {
                 "schema_version": PROTOCOL_VERSION,
@@ -3488,7 +3570,10 @@ class CommanderAgent:
 
     def _execute_bpel_invoke(self, activatity: BPELActivatity, context: dict):
         if activatity.role == "commander":
-            decision = self.ask_llm(context["battle_log"])
+            decision = self.ask_llm(
+                context["battle_log"],
+                self._latest_context_value(context, "eval_score"),
+            )
             with self._checkpoint_lock:
                 parsed_decision = self.parse_commander_decision(decision)
                 self._append_output_collection(
@@ -3745,7 +3830,10 @@ class CommanderAgent:
                 context["last_work_item"] = f"{self.workflow_id}:{activatity_index}:decision"
                 self._save_workflow_checkpoint(context, status="running", current_activatity=current_activatity)
 
-                decision = self.ask_llm(context["battle_log"])
+                decision = self.ask_llm(
+                    context["battle_log"],
+                    self._latest_context_value(context, "eval_score"),
+                )
                 parsed_decision = self.parse_commander_decision(decision)
                 self._append_output_collection(
                     context,

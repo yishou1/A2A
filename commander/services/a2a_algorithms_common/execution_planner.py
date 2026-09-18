@@ -291,6 +291,18 @@ def run_planner(arguments: dict) -> dict:
 
     results = extract_upstream_results(arguments)
     context = _safe_dict(arguments.get("context"))
+    compliance = _result_block(results, "compliance_authorization", "authorization")
+    compliance_out = _safe_dict(compliance.get("output_data")) or compliance
+    compliance_decision = str(
+        compliance_out.get("decision") or compliance_out.get("status") or ""
+    ).lower()
+    approved_for_handoff = compliance_out.get("approved_for_demo_handoff")
+    execution_blocked = (
+        compliance_decision
+        in {"blocked", "review_required", "pending_review", "denied"}
+        or not compliance_decision
+        or approved_for_handoff is False
+    )
     situation, missing_fields = build_situation(results, phase=phase, context=context)
     tracks_source = build_track_histories(results)
     max_tracks = config.get("max_tracks")
@@ -324,6 +336,13 @@ def run_planner(arguments: dict) -> dict:
                 "commands": [],
                 "tracks": tracks,
                 "prediction_details": prediction_details,
+                "authorization": {
+                    "decision": compliance_decision or None,
+                    "approved_for_demo_handoff": approved_for_handoff,
+                    "execution_blocked": True,
+                    "reason": "missing required upstream Agent results",
+                },
+                "execution_mode": "input_required",
                 "latency_ms": latency_ms,
             },
             "accuracy": 0.0,
@@ -336,19 +355,21 @@ def run_planner(arguments: dict) -> dict:
     if max_rules is not None:
         matched_rules = matched_rules[: int(max_rules)]
 
-    commands = synthesize_commands(
-        phase=phase,
-        matched_rules=matched_rules,
-        prediction_details=prediction_details,
-        default_executor_role=default_executor_role,
-    )
-    if not commands:
-        commands = synthesize_plan_commands(
+    commands = []
+    if not execution_blocked:
+        commands = synthesize_commands(
             phase=phase,
-            results=results,
             matched_rules=matched_rules,
+            prediction_details=prediction_details,
             default_executor_role=default_executor_role,
         )
+        if not commands:
+            commands = synthesize_plan_commands(
+                phase=phase,
+                results=results,
+                matched_rules=matched_rules,
+                default_executor_role=default_executor_role,
+            )
 
     groups: Dict[str, List[str]] = {}
     for command in commands:
@@ -359,7 +380,7 @@ def run_planner(arguments: dict) -> dict:
     output_data = {
         "phase": phase,
         "situation": situation,
-        "assessment_status": "ready",
+        "assessment_status": "authorization_required" if execution_blocked else "ready",
         "missing_fields": [],
         "matched_items": sorted(current_items),
         "commands": commands,
@@ -373,6 +394,17 @@ def run_planner(arguments: dict) -> dict:
         "latency_ms": latency_ms,
         "matched_rules": matched_rules,
         "prediction_details": prediction_details,
+        "authorization": {
+            "decision": compliance_decision or None,
+            "approved_for_demo_handoff": approved_for_handoff,
+            "execution_blocked": execution_blocked,
+            "reason": (
+                "human approval required before execution"
+                if execution_blocked
+                else "approved"
+            ),
+        },
+        "execution_mode": "preview_only" if execution_blocked else "simulation",
         "algorithm_profile": profile,
         "profile_config": config,
     }

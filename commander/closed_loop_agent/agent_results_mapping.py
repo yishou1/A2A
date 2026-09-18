@@ -541,7 +541,9 @@ def build_standard_results_from_context(
     if recon_report is not None:
         results["recon"] = {"output_data": {"report": recon_report}}
     if strike_result is not None:
-        results["artillery"] = {"output_data": {"result": strike_result}}
+        strike_payload = _safe_dict(strike_result)
+        strike_output = _safe_dict(strike_payload.get("output_data")) or strike_payload
+        results["artillery"] = {"output_data": strike_output}
     if eval_score is not None:
         results["evaluator"] = {"output_data": {"eval_score": eval_score}}
     if assault_result is not None:

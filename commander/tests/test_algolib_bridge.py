@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import unittest
 from unittest import mock
 
@@ -289,15 +290,19 @@ class DamageInputModeInterfaceTest(unittest.TestCase):
 
 class AgentRuntimeSdkTest(unittest.TestCase):
     def test_from_agent_builds_registration_metadata(self):
-        agent = ExecutionControlAgent(port=18017)
-        runtime = AgentRuntimeSDK.from_agent(agent, heartbeat_interval=5.0)
-        metadata = runtime.build_registration_metadata()
-        self.assertEqual(metadata.get("role"), "execution_control")
-        self.assertIn("skill_ids", metadata)
-        self.assertTrue(metadata.get("skill_ids"))
-        heartbeat = runtime.heartbeat_metadata()
-        self.assertIn("status", heartbeat)
-        self.assertIn("agent_run_state", heartbeat)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            agent = ExecutionControlAgent(
+                port=18017,
+                idempotency_db_path=os.path.join(temp_dir, "agent.db"),
+            )
+            runtime = AgentRuntimeSDK.from_agent(agent, heartbeat_interval=5.0)
+            metadata = runtime.build_registration_metadata()
+            self.assertEqual(metadata.get("role"), "execution_control")
+            self.assertIn("skill_ids", metadata)
+            self.assertTrue(metadata.get("skill_ids"))
+            heartbeat = runtime.heartbeat_metadata()
+            self.assertIn("status", heartbeat)
+            self.assertIn("agent_run_state", heartbeat)
 
 
 class DirectClientMockTest(unittest.TestCase):

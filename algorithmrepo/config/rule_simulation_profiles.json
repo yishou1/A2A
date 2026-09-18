@@ -1,0 +1,47 @@
+{
+  "low": {
+    "minimum_intel_confidence": 0.55,
+    "minimum_resource_readiness": 0.55,
+    "minimum_communication_quality": 0.50,
+    "maximum_threat_pressure": 0.90,
+    "success_threshold": 0.55,
+    "partial_threshold": 0.40,
+    "threat_penalty_weight": 0.20,
+    "weights": {
+      "intel_confidence": 0.30,
+      "resource_readiness": 0.30,
+      "communication_quality": 0.25,
+      "target_completeness": 0.15
+    }
+  },
+  "medium": {
+    "minimum_intel_confidence": 0.70,
+    "minimum_resource_readiness": 0.65,
+    "minimum_communication_quality": 0.65,
+    "maximum_threat_pressure": 0.85,
+    "success_threshold": 0.65,
+    "partial_threshold": 0.50,
+    "threat_penalty_weight": 0.25,
+    "weights": {
+      "intel_confidence": 0.30,
+      "resource_readiness": 0.30,
+      "communication_quality": 0.25,
+      "target_completeness": 0.15
+    }
+  },
+  "high": {
+    "minimum_intel_confidence": 0.82,
+    "minimum_resource_readiness": 0.78,
+    "minimum_communication_quality": 0.80,
+    "maximum_threat_pressure": 0.75,
+    "success_threshold": 0.75,
+    "partial_threshold": 0.60,
+    "threat_penalty_weight": 0.30,
+    "weights": {
+      "intel_confidence": 0.30,
+      "resource_readiness": 0.30,
+      "communication_quality": 0.25,
+      "target_completeness": 0.15
+    }
+  }
+}
