@@ -885,6 +885,20 @@ class MediaCaptureRuntime:
             }
             if required_hit_targets - hit_target_ids:
                 continue
+            assessed_target_ids = {
+                str(event.get("target_threat_id") or event.get("target_ref") or "")
+                for event in engine.events
+                if isinstance(event, dict)
+                and event.get("type") == "damage_assessment_confirmed"
+                and (event.get("target_threat_id") or event.get("target_ref"))
+            }
+            required_assessed_targets = {
+                str(value)
+                for value in parameters.get("required_damage_assessment_target_ids") or []
+                if value
+            }
+            if required_assessed_targets - assessed_target_ids:
+                continue
             if not self._task_ready(plan, engine.tasks, elapsed, branch):
                 continue
             product_type = _product_type(plan)

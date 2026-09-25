@@ -105,11 +105,12 @@ def test_tactical_symbols_keep_affiliation_frames_north_up() -> None:
 
     assert 'class="symbol-body"' in symbols
     assert 'transform="rotate(' in symbols
-    assert 'return prefix + "Surface"' in map_script
-    assert 'prefix + "MissileSite"' in map_script
-    assert '? "hostile" : "unknown"' in map_script
-    assert "civilianSurface" in map_script
+    assert 'return prefix + suffix' in symbols
+    assert 'suffix = "MissileSite"' in symbols
+    assert '? "hostile" : "unknown"' in symbols
+    assert 'return SymbolLibrary.trackKind(track)' in map_script
     assert "SymbolLibrary.svg(kind, heading)" in map_script
+    assert 'class="damage-overlay"' in symbols
     for platform_kind in (
         "merchant", "escort", "aew", "uav", "shoreRadar", "satellite", "uavSwarm",
         "j16", "wz10", "commandCenter", "missileSite", "aircraftCarrier",

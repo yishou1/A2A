@@ -158,23 +158,7 @@ window.PlatformMap = (function () {
   }
 
   function trackKind(track) {
-    var assessment = track.agent_assessment || {};
-    var classification = String(track.classification || "").toUpperCase();
-    var domain = String(track.domain_hint || track.domain || "").toLowerCase();
-    if (assessment.damage_state === "destroyed" || assessment.engagement_status === "destroyed") {
-      return "destroyed";
-    }
-    if (assessment.damage_state === "impact_pending" || assessment.engagement_status === "pending_assessment") {
-      return "impact";
-    }
-    if (assessment.source && /FISHING|CIVILIAN|MERCHANT/.test(classification)) return "civilianSurface";
-    var prefix = assessment.status === "confirmed" && /high|hostile|threat|威胁|敌/i.test(
-      String(assessment.level || assessment.label || "")
-    ) ? "hostile" : "unknown";
-    if (/COASTAL_MISSILE_SITE|MISSILE_SITE|MISSILE_BATTERY/.test(classification)) return prefix + "MissileSite";
-    if (/ground|land/.test(domain)) return prefix + "Ground";
-    if (/air|aviation/.test(domain)) return prefix + "Air";
-    return prefix + "Surface";
+    return SymbolLibrary.trackKind(track);
   }
 
   function trackAssessmentLabel(track) {
@@ -193,8 +177,8 @@ window.PlatformMap = (function () {
   }
 
   function trackLabelClass(kind) {
-    if (kind === "destroyed") return "destroyed-label";
-    if (kind === "impact") return "impact-label";
+    if (/^destroyed/.test(kind)) return "destroyed-label";
+    if (/^impact/.test(kind)) return "impact-label";
     var affiliation = SymbolLibrary.affiliation(kind);
     if (affiliation === "hostile") return "threat-label";
     if (affiliation === "civilian") return "civilian-label";
@@ -202,8 +186,8 @@ window.PlatformMap = (function () {
   }
 
   function trackTrailStyle(kind) {
-    if (kind === "destroyed") return {color: "#9aa7ad", opacity: 0.20, weight: 1.1, dashArray: "2 6"};
-    if (kind === "impact") return {color: "#d2ad76", opacity: 0.30, weight: 1.25, dashArray: "3 5"};
+    if (/^destroyed/.test(kind)) return {color: "#9aa7ad", opacity: 0.20, weight: 1.1, dashArray: "2 6"};
+    if (/^impact/.test(kind)) return {color: "#d2ad76", opacity: 0.30, weight: 1.25, dashArray: "3 5"};
     var affiliation = SymbolLibrary.affiliation(kind);
     if (affiliation === "hostile") return {color: "#c58f89", opacity: 0.28, weight: 1.2, dashArray: "3 6"};
     if (affiliation === "civilian") return {color: "#8db7ab", opacity: 0.22, weight: 1.1, dashArray: "2 7"};
@@ -478,7 +462,7 @@ window.PlatformMap = (function () {
   }
 
   function ownTrailStyle(asset) {
-    var kind = ownKind(asset);
+    var kind = displayedOwnKind(asset);
     if (kind === "satellite") return {color: "#b8a7cf", opacity: 0.20, weight: 1.1, dashArray: "4 8", points: 36, smooth: true};
     if (kind === "uavSwarm" || kind === "loiterUav") return {color: "#9bbdc7", opacity: 0.32, weight: 1.25, dashArray: "3 5", points: 48, smooth: true};
     if (asset.domain === "air") return {color: "#9fb9c1", opacity: 0.30, weight: 1.25, dashArray: "4 6", points: 54, smooth: true};
@@ -726,19 +710,60 @@ window.PlatformMap = (function () {
     if (layer && map && map.hasLayer(layer)) map.removeLayer(layer);
   }
 
-  function showWeaponImpact(weaponId, impactPosition) {
-    if (!map || processedWeaponImpacts[weaponId]) return;
+  function weaponKind(weapon) {
+    return SymbolLibrary.weaponKind ? SymbolLibrary.weaponKind(weapon) : "weapon";
+  }
+
+  function weaponKindLabel(kind) {
+    if (kind === "cruiseMissile") return "巡航导弹";
+    if (kind === "airGroundMissile") return "空地导弹";
+    if (kind === "oneWayWeapon") return "一次性无人机";
+    return "武器";
+  }
+
+  function weaponImpactGroupKey(weapon) {
+    var chainId = String(weapon.coordination_chain_id || "");
+    var targetId = String(weapon.target_track_id || weapon.target_threat_id || "target");
+    var impactTime = Number(weapon.planned_time_on_target_sec || weapon.impact_sim_time || 0);
+    return chainId ? chainId + ":" + targetId : targetId + ":" + Math.round(impactTime / 10);
+  }
+
+  function weaponImpactIcon(kind, memberIndex, memberCount) {
+    var count = Math.max(1, Number(memberCount || 1));
+    var index = Math.max(0, Number(memberIndex || 0));
+    var distance = count > 1 ? 17 : 0;
+    var angle = count > 1 ? (-Math.PI / 2 + (Math.PI * 2 * index / count)) : 0;
+    var offsetX = Math.round(Math.cos(angle) * distance);
+    var offsetY = Math.round(Math.sin(angle) * distance);
+    var badge = count > 1
+      ? '<b style="position:absolute;left:39px;top:-7px;padding:1px 4px;border:1px solid #ffd070;border-radius:3px;background:#31180e;color:#ffe3a1;font:700 9px/13px Consolas,monospace;white-space:nowrap">协同 ' +
+        (index + 1) + "/" + count + "</b>"
+      : "";
+    return L.divIcon({
+      className: "weapon-impact-marker",
+      html: '<span style="position:absolute;inset:0;transform:translate(' + offsetX + "px," + offsetY + 'px)">' +
+        '<span class="weapon-impact-effect"><i class="impact-core"></i><i class="impact-ring impact-ring-one"></i><i class="impact-ring impact-ring-two"></i><i class="impact-sparks"></i></span>' +
+        badge + '<span style="position:absolute;left:40px;top:10px;color:#ffe0a8;font:600 9px/12px Consolas,monospace;white-space:nowrap">' +
+        escapeHtml(weaponKindLabel(kind)) + "</span></span>",
+      iconSize: [54, 54],
+      iconAnchor: [27, 27],
+    });
+  }
+
+  function showWeaponImpact(weaponId, impactPosition, options) {
+    if (!map) return;
+    options = options || {};
+    var impactIcon = weaponImpactIcon(options.kind, options.index, options.count);
+    if (processedWeaponImpacts[weaponId]) {
+      if (weaponImpactLayers[weaponId]) weaponImpactLayers[weaponId].setIcon(impactIcon);
+      return;
+    }
     processedWeaponImpacts[weaponId] = true;
     var layer = L.marker([impactPosition.lat, impactPosition.lng], {
       interactive: false,
       keyboard: false,
       zIndexOffset: 1200,
-      icon: L.divIcon({
-        className: "weapon-impact-marker",
-        html: '<span class="weapon-impact-effect"><i class="impact-core"></i><i class="impact-ring impact-ring-one"></i><i class="impact-ring impact-ring-two"></i><i class="impact-sparks"></i></span>',
-        iconSize: [54, 54],
-        iconAnchor: [27, 27],
-      }),
+      icon: impactIcon,
     }).addTo(map);
     weaponImpactLayers[weaponId] = layer;
     window.setTimeout(function () {
@@ -1458,6 +1483,20 @@ window.PlatformMap = (function () {
     scheduleOwnLabelLayout();
 
     var seenWeapons = {};
+    var activeImpactGroups = {};
+    (weapons || []).forEach(function (weapon) {
+      var impactAt = Number(weapon.impact_sim_time);
+      var currentElapsed = Number(elapsedSec);
+      if (String(weapon.status || "").toLowerCase() !== "hit" ||
+          !Number.isFinite(impactAt) || !Number.isFinite(currentElapsed) ||
+          currentElapsed < impactAt || currentElapsed - impactAt > 90) return;
+      var groupKey = weaponImpactGroupKey(weapon);
+      if (!activeImpactGroups[groupKey]) activeImpactGroups[groupKey] = [];
+      activeImpactGroups[groupKey].push(String(weapon.id || weapon.weapon_id || ""));
+    });
+    Object.keys(activeImpactGroups).forEach(function (key) {
+      activeImpactGroups[key].sort();
+    });
     (weapons || []).forEach(function (weapon) {
       var id = weapon.id || weapon.weapon_id;
       var pos = position(weapon);
@@ -1468,7 +1507,12 @@ window.PlatformMap = (function () {
         var currentElapsed = Number(elapsedSec);
         if (Number.isFinite(impactAt) && Number.isFinite(currentElapsed) &&
             currentElapsed >= impactAt && currentElapsed - impactAt <= 90) {
-          showWeaponImpact(id, pos);
+          var impactMembers = activeImpactGroups[weaponImpactGroupKey(weapon)] || [String(id)];
+          showWeaponImpact(id, pos, {
+            kind: weaponKind(weapon),
+            index: Math.max(0, impactMembers.indexOf(String(id))),
+            count: impactMembers.length,
+          });
         } else {
           processedWeaponImpacts[id] = true;
         }
@@ -1479,17 +1523,22 @@ window.PlatformMap = (function () {
       // do not place a live weapon symbol at the carrier's position early.
       if (status === "scheduled") return;
       seenWeapons[id] = true;
+      var currentWeaponKind = weaponKind(weapon);
+      var currentWeaponLabel = weaponKindLabel(currentWeaponKind) + " · " + (weapon.status || "飞行中");
       if (!weaponMarkers[id]) {
         weaponMarkers[id] = L.marker([pos.lat, pos.lng], {
-          icon: icon("weapon", weapon.heading, 28),
+          icon: icon(currentWeaponKind, weapon.heading, currentWeaponKind === "oneWayWeapon" ? 31 : 28),
         }).addTo(map);
-        weaponMarkers[id]._amosIconKind = "weapon";
-        weaponMarkers[id]._amosIconSize = 28;
-        bindLabel(weaponMarkers[id], "武器 · " + (weapon.status || "飞行中"), "threat-label");
+        weaponMarkers[id]._amosIconKind = currentWeaponKind;
+        weaponMarkers[id]._amosIconSize = currentWeaponKind === "oneWayWeapon" ? 31 : 28;
+        bindLabel(weaponMarkers[id], currentWeaponLabel, "threat-label");
       } else {
         moveMarker(weaponMarkers[id], pos);
-        updateMarkerIcon(weaponMarkers[id], "weapon", weapon.heading, 28);
-        updateMarkerLabel(weaponMarkers[id], "武器 · " + (weapon.status || "飞行中"));
+        updateMarkerIcon(
+          weaponMarkers[id], currentWeaponKind, weapon.heading,
+          currentWeaponKind === "oneWayWeapon" ? 31 : 28
+        );
+        updateMarkerLabel(weaponMarkers[id], currentWeaponLabel);
       }
       updateMarkerPopup(weaponMarkers[id], "<b>" + escapeHtml(weapon.weapon_type || id) +
         "</b><br>状态 " + escapeHtml(weapon.status || "unknown") +
@@ -1511,7 +1560,7 @@ window.PlatformMap = (function () {
       var pos = position(track);
       var kind = trackKind(track);
       var heading = Number(track.heading || track.heading_deg || 0);
-      if (kind === "destroyed") destroyedTrackIds[id] = true;
+      if (/^destroyed/.test(kind)) destroyedTrackIds[id] = true;
       seenTracks[id] = true;
       if (!trackMarkers[id]) {
         var currentTrackIconSize = trackIconSize(kind);

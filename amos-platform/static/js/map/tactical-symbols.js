@@ -42,19 +42,40 @@ window.TacticalSymbols = (function () {
 
   function trackKind(track) {
     var assessment = track.agent_assessment || {};
+    var damageState = String(assessment.damage_state || assessment.engagement_status || "").toLowerCase();
     var domain = String(track.domain_hint || track.domain || "").toLowerCase();
-    var civilian = /civil|merchant|民用|商船/i.test(String(assessment.label || assessment.category || "")) ||
+    var classification = String(track.classification || "");
+    var civilian = /civil|merchant|民用|商船/i.test(
+      String(assessment.label || assessment.category || "") + " " + classification
+    ) ||
+      (Boolean(assessment.source) && /fishing/i.test(classification)) ||
       track.ais_match === true;
     var prefix = civilian ? "civilian" : (isHostile(track) ? "hostile" : "unknown");
-    if (/coastal_missile_site|missile_site|missile_battery/i.test(String(track.classification || ""))) {
-      return prefix + "MissileSite";
-    }
-    if (/mobile_sam|sam_launcher|air_defen[cs]e_launcher/i.test(String(track.classification || ""))) return prefix + "MobileSam";
-    if (/mobile_radar|radar_vehicle|early_warning_radar/i.test(String(track.classification || ""))) return prefix + "RadarVehicle";
-    if (/runway|airfield_operating_surface/i.test(String(track.classification || ""))) return prefix + "Runway";
-    if (/command_(facility|vehicle)|hardened_command|mobile_c2/i.test(String(track.classification || ""))) return prefix + "GroundCommand";
-    if (/ground|land/.test(domain)) return prefix + "Ground";
-    return prefix + (/air|aviation/.test(domain) ? "Air" : "Surface");
+    var suffix = "Surface";
+    if (/coastal_missile_site|missile_site|missile_battery/i.test(classification)) suffix = "MissileSite";
+    else if (/mobile_sam|sam_launcher|air_defen[cs]e_launcher/i.test(classification)) suffix = "MobileSam";
+    else if (/mobile_coastal_air_defen[cs]e|mobile_radar|radar_vehicle|early_warning_radar/i.test(classification)) suffix = "RadarVehicle";
+    else if (/runway|airfield_operating_surface/i.test(classification)) suffix = "Runway";
+    else if (/command_(facility|vehicle)|hardened_command|mobile_c2/i.test(classification)) suffix = "GroundCommand";
+    else if (/ground|land/.test(domain)) suffix = "Ground";
+    else if (/air|aviation/.test(domain)) suffix = "Air";
+    if (damageState === "destroyed") return "destroyed" + suffix;
+    if (damageState === "impact_pending" || damageState === "pending_assessment") return "impact" + suffix;
+    return prefix + suffix;
+  }
+
+  function weaponKind(weapon) {
+    var identity = [
+      weapon && weapon.id,
+      weapon && weapon.type,
+      weapon && weapon.weapon_type,
+      weapon && weapon.category,
+      weapon && weapon.source_asset_id,
+    ].join(" ").toUpperCase();
+    if (/ONEWAY|ONE[-_ ]?WAY|LOITER|SUICIDE|自杀式|巡飞|战斗部/.test(identity)) return "oneWayWeapon";
+    if (/AIR[-_ ]?TO[-_ ]?GROUND|\bAGM\b|CARRIER[-_ ]?AGM|空地/.test(identity)) return "airGroundMissile";
+    if (/CRUISE|LACM|LAND[-_ ]?ATTACK|巡航/.test(identity)) return "cruiseMissile";
+    return "weapon";
   }
 
   function silhouette(kind, palette) {
@@ -113,13 +134,25 @@ window.TacticalSymbols = (function () {
       return '<path d="M28 3 35 36 28 53 21 36Z" fill="' + f + '" stroke="' + s + '" stroke-width="2.2"/>' +
         '<path d="M21 36 12 45l11-3m12-6 9 9-11-3M28 8v30" fill="none" stroke="' + d + '" stroke-width="1.6"/>';
     }
+    if (kind === "cruiseMissile") {
+      return '<path d="M28 3 34 18 33 35 39 45 34 48 28 42 22 48 17 45 23 35 22 18Z" fill="' + f + '" stroke="' + s + '" stroke-width="2"/>' +
+        '<path d="M11 28 23 23h10l12 5-12 3H23Zm17-20v34M22 48h12" fill="none" stroke="' + d + '" stroke-width="1.5"/>';
+    }
+    if (kind === "airGroundMissile") {
+      return '<path d="M28 3 33 14 33 38 39 47 33 45 28 53 23 45 17 47 23 38 23 14Z" fill="' + f + '" stroke="' + s + '" stroke-width="2"/>' +
+        '<path d="M28 7v39M20 24h16M23 38h10" fill="none" stroke="' + d + '" stroke-width="1.5"/><circle cx="28" cy="17" r="2.2" fill="' + d + '"/>';
+    }
+    if (kind === "oneWayWeapon") {
+      return '<path d="M28 4 34 19 49 27 46 34 34 30 32 44 38 50H18l6-6-2-14-12 4-3-7 15-8Z" fill="' + f + '" stroke="' + s + '" stroke-width="2"/>' +
+        '<path d="M17 25h22M28 5v39m-6 2 6 7 6-7" fill="none" stroke="' + d + '" stroke-width="1.5"/><path d="m24 31 4-5 4 5-4 5Z" fill="' + d + '"/>';
+    }
     if (kind === "impact") {
-      return '<path d="M10 35h36l-7 12H17Z" fill="' + f + '" stroke="' + s + '" stroke-width="2"/>' +
-        '<path d="M15 13l26 29M41 13 15 42" stroke="' + d + '" stroke-width="2.8"/><circle cx="28" cy="28" r="7" fill="none" stroke="' + s + '" stroke-width="1.7"/>';
+      return '<path d="m28 5 5 14 14-6-7 13 12 7-15 2 2 15-11-10-11 10 2-15-15-2 12-7-7-13 14 6Z" fill="' + f + '" stroke="' + s + '" stroke-width="2"/>' +
+        '<circle cx="28" cy="28" r="7" fill="none" stroke="' + d + '" stroke-width="2"/>';
     }
     if (kind === "destroyed") {
-      return '<path d="M10 35h36l-8 12H18Z" fill="' + f + '" stroke="' + s + '" stroke-width="2"/>' +
-        '<path d="M15 12l26 30M41 12 15 42" stroke="' + d + '" stroke-width="3.2"/><path d="M13 50q7 3 14 0t14 0" fill="none" stroke="' + s + '" stroke-width="1.5"/>';
+      return '<path d="M9 39 16 19l12-9 13 8 6 21-10 9H19Z" fill="' + f + '" stroke="' + s + '" stroke-width="2" stroke-dasharray="3 2"/>' +
+        '<path d="M15 14 42 43M42 14 15 43" stroke="' + d + '" stroke-width="3.2"/><circle cx="28" cy="28" r="8" fill="none" stroke="' + s + '" stroke-width="1.5"/>';
     }
     if (kind === "merchant") {
       return '<path d="M28 3 38 39 34 48 28 53 22 48 18 39Z" fill="' + f + '" stroke="' + s + '" stroke-width="2.2"/>' +
@@ -178,8 +211,9 @@ window.TacticalSymbols = (function () {
   }
 
   function affiliation(kind) {
-    if (kind === "impact" || kind === "destroyed") return kind;
-    if (kind === "weapon") return "friendly";
+    if (/^impact/.test(kind)) return "impact";
+    if (/^destroyed/.test(kind)) return "destroyed";
+    if (/^(weapon|cruiseMissile|airGroundMissile|oneWayWeapon)$/.test(kind)) return "friendly";
     if (/^hostile/.test(kind)) return "hostile";
     if (/^unknown/.test(kind)) return "unknown";
     if (/^civilian/.test(kind)) return "civilian";
@@ -189,12 +223,14 @@ window.TacticalSymbols = (function () {
   function svg(kind) {
     var side = affiliation(kind);
     var palette = palettes[side];
+    var destroyed = /^destroyed/.test(kind);
+    var impacted = /^impact/.test(kind);
     var frame = side === "hostile"
       ? '<path d="M28 1 55 28 28 55 1 28Z" fill="none" stroke="' + palette.stroke + '" stroke-width="1.7" opacity=".86"/>'
       : (side === "unknown"
         ? '<path d="M12 3h32l9 9v32l-9 9H12l-9-9V12Z" fill="none" stroke="' + palette.stroke + '" stroke-width="1.7" opacity=".86"/>'
         : '<rect x="2" y="2" width="52" height="52" rx="' + (side === "friendly" ? "7" : "1") + '" fill="none" stroke="' + palette.stroke + '" stroke-width="1.7" opacity=".86"/>');
-    var baseKind = kind.replace(/^(unknown|hostile|civilian)/, "");
+    var baseKind = kind.replace(/^(unknown|hostile|civilian|destroyed|impact)/, "");
     if (baseKind === "Air") baseKind = "aircraft";
     if (baseKind === "Ground") baseKind = "ground";
     if (baseKind === "MissileSite") baseKind = "missileSite";
@@ -205,11 +241,25 @@ window.TacticalSymbols = (function () {
     if (baseKind === "Surface") {
       baseKind = side === "civilian" ? "merchant" : (side === "hostile" ? "fastCraft" : "surfaceContact");
     }
-    if (!/^(unknown|hostile|civilian)/.test(kind)) baseKind = kind;
+    if (!/^(unknown|hostile|civilian|destroyed|impact)/.test(kind)) baseKind = kind;
+    if (destroyed && !baseKind) baseKind = "destroyed";
+    if (impacted && !baseKind) baseKind = "impact";
     var heading = Number(arguments.length > 1 ? arguments[1] : 0) || 0;
     return '<svg viewBox="0 0 56 56" role="img" aria-hidden="true">' + frame +
-      '<g class="symbol-body" transform="rotate(' + heading + ' 28 28)">' + silhouette(baseKind, palette) + '</g></svg>';
+      '<g class="symbol-body" transform="rotate(' + heading + ' 28 28)">' + silhouette(baseKind, palette) + '</g>' +
+      (destroyed && baseKind !== "destroyed"
+        ? '<g class="damage-overlay"><path d="M13 13 43 43M43 13 13 43" fill="none" stroke="' + palette.detail + '" stroke-width="4.2" stroke-linecap="round"/><circle cx="28" cy="28" r="18" fill="none" stroke="' + palette.stroke + '" stroke-width="1.6" stroke-dasharray="4 3"/></g>'
+        : '') +
+      (impacted && baseKind !== "impact"
+        ? '<g class="impact-overlay"><circle cx="28" cy="28" r="18" fill="none" stroke="' + palette.stroke + '" stroke-width="2.2" stroke-dasharray="3 3"/><path d="m28 7 3 14 13-5-9 11 12 6-14 1 2 14-7-10-7 10 2-14-14-1 12-6-9-11 13 5Z" fill="none" stroke="' + palette.detail + '" stroke-width="1.8"/></g>'
+        : '') + '</svg>';
   }
 
-  return {ownKind: ownKind, trackKind: trackKind, svg: svg, affiliation: affiliation};
+  return {
+    ownKind: ownKind,
+    trackKind: trackKind,
+    weaponKind: weaponKind,
+    svg: svg,
+    affiliation: affiliation,
+  };
 })();

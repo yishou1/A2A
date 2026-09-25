@@ -444,11 +444,33 @@ class SimEngine:
                 phase_route = phase.get("route")
                 if phase.get("position_mode") == "timed_ground_track" and isinstance(phase_route, list):
                     current_position = asset.get("position") or {}
-                    timed_points = [{
-                        "lat": float(current_position.get("lat", 0) or 0),
-                        "lng": float(current_position.get("lng", 0) or 0),
-                        "at_sec": at_sec,
-                    }, *[dict(point) for point in phase_route]]
+                    route_points = [dict(point) for point in phase_route]
+                    # A synthetic "current position" point with the same
+                    # timestamp as the first declared track point breaks the
+                    # strictly-increasing time check below and silently drops
+                    # the spacecraft onto uniform arc-length motion (its
+                    # displayed speed then disagrees with the declared pass
+                    # profile).  When the platform already sits on the track
+                    # entry — the normal case for a staged orbital pass —
+                    # register the declared points directly.
+                    first_route_point = next(
+                        (point for point in route_points if isinstance(point, dict)), None
+                    )
+                    at_entry = first_route_point is not None and (
+                        abs(float(current_position.get("lat", 0) or 0)
+                            - float(first_route_point.get("lat", 0) or 0)) < 1e-4
+                        and abs(float(current_position.get("lng", 0) or 0)
+                            - float(first_route_point.get("lng", 0) or 0)) < 1e-4
+                    )
+                    timed_points = (
+                        list(route_points)
+                        if at_entry
+                        else [{
+                            "lat": float(current_position.get("lat", 0) or 0),
+                            "lng": float(current_position.get("lng", 0) or 0),
+                            "at_sec": at_sec,
+                        }, *route_points]
+                    )
                     asset["_timed_ground_track"] = {
                         "start_sec": at_sec,
                         "end_sec": float(phase.get("track_end_sec", at_sec) or at_sec),
@@ -606,6 +628,25 @@ class SimEngine:
         wp_events = self.waypoint_nav.tick(self.assets, dt)
         for ev in wp_events:
             self.events.append(ev)
+
+        # 平台到达声明的最终回收航路点（保持注册的空航迹）后完成回收：
+        # 停车、置 recovered 状态并发射事件，供检查点条件与前端叙事使用。
+        for asset_id, asset in self.assets.items():
+            if not asset.get("_recover_on_arrival"):
+                continue
+            if self.waypoint_nav.routes.get(asset_id):
+                continue
+            asset.pop("_recover_on_arrival", None)
+            asset["status"] = "recovered"
+            asset["_cruise_speed_kts"] = 0.0
+            asset["speed_kts"] = 0.0
+            self.events.append({
+                "type": "aircraft_recovered",
+                "asset_id": asset_id,
+                "recovery_kind": "deck",
+                "sim_time": round(float(self.clock.get("elapsed_sec", 0) or 0), 2),
+                "timestamp": time.time(),
+            })
 
         # 2. Unrouted mobile assets continue by dead reckoning. Scripted route
         # completion never reaches this branch because exhausted hold routes
@@ -816,6 +857,43 @@ class SimEngine:
             if w.get("status") == "scheduled":
                 launch_at = float(w.get("scheduled_launch_time", 0) or 0)
                 now = float(self.clock.get("elapsed_sec", 0) or 0)
+                # A coordinated time-on-target weapon is only a release plan
+                # until its own launch time. Keep that plan physically
+                # attached to the live source platform instead of leaving a
+                # hidden weapon entity at the position where authorization
+                # happened. When a coarse simulation tick crosses the
+                # release time, interpolate the platform trail so the weapon
+                # still starts at the actual launcher position at that time.
+                source_asset = self.assets.get(str(w.get("source_asset_id") or ""))
+                if source_asset is not None:
+                    source_position = source_asset.get("position") or source_asset
+                    launch_lat = float(source_position.get("lat", w.get("lat", 0)) or 0)
+                    launch_lng = float(source_position.get("lng", w.get("lng", 0)) or 0)
+                    if now + 1e-9 >= launch_at:
+                        history = list(source_asset.get("_history_path") or [])
+                        if len(history) >= 2:
+                            before = next((
+                                point for point in reversed(history)
+                                if float(point.get("sim_time", 0) or 0) <= launch_at
+                            ), None)
+                            after = next((
+                                point for point in history
+                                if float(point.get("sim_time", 0) or 0) >= launch_at
+                            ), None)
+                            if before is not None and after is not None:
+                                before_time = float(before.get("sim_time", launch_at) or launch_at)
+                                after_time = float(after.get("sim_time", launch_at) or launch_at)
+                                fraction = (
+                                    0.0 if after_time <= before_time else
+                                    max(0.0, min(1.0, (launch_at - before_time) / (after_time - before_time)))
+                                )
+                                launch_lat = float(before.get("lat", launch_lat)) + (
+                                    float(after.get("lat", launch_lat)) - float(before.get("lat", launch_lat))
+                                ) * fraction
+                                launch_lng = float(before.get("lng", launch_lng)) + (
+                                    float(after.get("lng", launch_lng)) - float(before.get("lng", launch_lng))
+                                ) * fraction
+                    w["lat"], w["lng"] = launch_lat, launch_lng
                 if now + 1e-9 < launch_at:
                     w["eta_sec"] = round(
                         launch_at - now + float(w.get("flight_time_sec", 0) or 0), 1,
@@ -823,6 +901,33 @@ class SimEngine:
                     continue
                 w["status"] = "in_flight"
                 w["launch_time"] = launch_at
+                w["launch_position"] = {"lat": w["lat"], "lng": w["lng"]}
+                target = self.threats.get(str(w.get("target_threat_id") or ""))
+                speed = float(w.get("speed_kts", 0) or 0)
+                if target is not None and speed > 0:
+                    actual_flight_time = self.waypoint_nav._haversine(
+                        float(w["lat"]), float(w["lng"]),
+                        float(target.get("lat", 0)), float(target.get("lng", 0)),
+                    ) / speed * 3600.0
+                    w["flight_time_sec"] = actual_flight_time
+                    w["eta_sec"] = round(actual_flight_time, 1)
+                deferred_egress = w.pop("_deferred_post_launch", None)
+                if isinstance(deferred_egress, dict):
+                    source_asset_id = str(w.get("source_asset_id") or "")
+                    if self._apply_post_launch_maneuver(
+                        source_asset_id,
+                        deferred_egress.get("route"),
+                        deferred_egress.get("behavior"),
+                        started_at=launch_at,
+                    ):
+                        self.events.append({
+                            "type": "post_launch_egress_started",
+                            "asset_ids": [source_asset_id],
+                            "weapon_ids": [wid],
+                            "target_track_id": deferred_egress.get("target_track_id"),
+                            "sim_time": round(launch_at, 2),
+                            "timestamp": time.time(),
+                        })
                 weapon_dt = min(float(dt), max(0.0, now - launch_at))
             if w.get("status") != "in_flight":
                 finished_weapons.append(wid)
@@ -1974,8 +2079,26 @@ class SimEngine:
                 })
                 track.agent_assessment = assessment
             self._return_follow_assets_after_strike(target_track_id)
-            post_bda_routes = (self._engagement_policy or {}).get("post_bda_routes") or {}
-            post_bda_behaviors = (self._engagement_policy or {}).get("post_bda_behaviors") or {}
+            policy = self._engagement_policy or {}
+            post_bda_routes = policy.get("post_bda_routes") or {}
+            post_bda_behaviors = policy.get("post_bda_behaviors") or {}
+            routes_by_target = policy.get("post_bda_routes_by_target") or {}
+            behaviors_by_target = policy.get("post_bda_behaviors_by_target") or {}
+            # When a scenario opts into target-specific recovery, only the
+            # assessed target (or an explicit wildcard) may trigger a route.
+            # Scenarios using the legacy global maps retain their behaviour.
+            if isinstance(routes_by_target, dict) and routes_by_target:
+                post_bda_routes = (
+                    routes_by_target.get(truth_id)
+                    or routes_by_target.get("*")
+                    or {}
+                )
+            if isinstance(behaviors_by_target, dict) and behaviors_by_target:
+                post_bda_behaviors = (
+                    behaviors_by_target.get(truth_id)
+                    or behaviors_by_target.get("*")
+                    or {}
+                )
             rerouted_assets = []
             if isinstance(post_bda_routes, dict):
                 for route_asset_id, route in post_bda_routes.items():
@@ -2005,11 +2128,16 @@ class SimEngine:
                     if behavior.get("alt_ft") is not None:
                         asset_position = asset.get("position") or asset
                         asset_position["alt_ft"] = float(behavior.get("alt_ft") or 0)
+                    # 到达最终回收航路点后转为已回收（发 aircraft_recovered 事件），
+                    # 供导演的 recovered_asset_ids 条件和"甲板回收完成"叙事使用。
+                    asset["_recover_on_arrival"] = bool(behavior.get("recover_on_arrival"))
                     rerouted_assets.append(route_asset_id)
             self.events.append({
                 "type": "damage_assessment_confirmed",
                 "weapon_id": weapon.get("id"),
                 "target_track_id": target_track_id,
+                "target_threat_id": truth_id,
+                "target_ref": truth_id,
                 "damage_state": assessed_damage,
                 "observer_asset_id": observer_id,
                 "position": {"lat": weapon.get("lat"), "lng": weapon.get("lng")},
@@ -2021,6 +2149,8 @@ class SimEngine:
                     "type": "post_bda_return_started",
                     "asset_ids": rerouted_assets,
                     "target_track_id": target_track_id,
+                    "target_threat_id": truth_id,
+                    "target_ref": truth_id,
                     "sim_time": round(now, 2),
                     "timestamp": time.time(),
                 })
@@ -2142,6 +2272,33 @@ class SimEngine:
         if not assessment.get("source") or assessment.get("status") != "confirmed":
             return {"eligible": False, "reason": "目标尚未完成后端敌方识别"}
         policy = self._engagement_policy or {}
+        elapsed = float(self.clock.get("elapsed_sec", 0) or 0)
+        maximum_track_age = policy.get("maximum_track_age_sec")
+        if maximum_track_age is not None:
+            track_times = [
+                float(ref.get("sim_time"))
+                for ref in getattr(track, "source_refs", []) or []
+                if isinstance(ref, dict) and ref.get("sim_time") is not None
+            ]
+            last_track_time = getattr(track, "last_sim_time", None)
+            if last_track_time is not None:
+                track_times.append(float(last_track_time))
+            if not track_times or elapsed - max(track_times) > max(0.0, float(maximum_track_age)):
+                return {"eligible": False, "reason": "目标航迹已过期，需重新获取传感器观测"}
+        maximum_assessment_age = policy.get("maximum_assessment_age_sec")
+        if maximum_assessment_age is not None:
+            assessed_at = assessment.get("source_simulation_time_sec")
+            if assessed_at is None or elapsed - float(assessed_at) > max(
+                0.0, float(maximum_assessment_age),
+            ):
+                return {"eligible": False, "reason": "目标识别评估已过期，需重新完成后端确认"}
+        minimum_comms_strength = policy.get("minimum_comms_strength")
+        if minimum_comms_strength is not None:
+            source_asset = self.assets.get(str(asset_id)) or {}
+            health = source_asset.get("health") or {}
+            comms_strength = health.get("comms_strength")
+            if comms_strength is None or float(comms_strength) < float(minimum_comms_strength):
+                return {"eligible": False, "reason": "发射平台通信链路质量不足"}
         classification = str(getattr(track, "classification", "UNKNOWN") or "UNKNOWN").upper()
         protected = [str(value).upper() for value in policy.get("protected_classifications") or []]
         if classification == "UNKNOWN" or any(value in classification for value in protected):
@@ -2179,7 +2336,6 @@ class SimEngine:
             }
             if (str(asset_id), str(weapon_name)) not in assigned_pairs:
                 return {"eligible": False, "reason": "该目标必须使用已分配的专用火力单元"}
-            elapsed = float(self.clock.get("elapsed_sec", 0) or 0)
             not_before = max(0.0, float(assignment.get("not_before_sec", 0) or 0))
             if elapsed < not_before:
                 return {
@@ -2201,11 +2357,34 @@ class SimEngine:
                         completed_targets.add(str(completed_target))
                 if required_targets - completed_targets:
                     return {"eligible": False, "reason": "必须先完成第一波全部固定目标攻击"}
-            if assignment.get("requires_damage_assessment") and not any(
-                event.get("type") == "damage_assessment_confirmed"
-                for event in self.events
-            ):
-                return {"eligible": False, "reason": "必须先完成第一波攻击毁伤评估"}
+            if assignment.get("requires_damage_assessment"):
+                assessment_events = [
+                    event for event in self.events
+                    if event.get("type") == "damage_assessment_confirmed"
+                ]
+                assessed_targets: set[str] = set()
+                for event in assessment_events:
+                    target_ref = str(
+                        event.get("target_threat_id") or event.get("target_ref") or ""
+                    )
+                    if not target_ref and event.get("target_track_id"):
+                        assessed_track = self.sensor_fusion.tracks.get(
+                            str(event["target_track_id"]),
+                        )
+                        target_ref = str(
+                            self._truth_target_for_track(assessed_track) or "",
+                        ) if assessed_track is not None else ""
+                    if not target_ref and event.get("weapon_id"):
+                        assessed_weapon = self.weapons.get(str(event["weapon_id"])) or {}
+                        target_ref = str(assessed_weapon.get("target_threat_id") or "")
+                    if target_ref:
+                        assessed_targets.add(target_ref)
+                assessment_ready = (
+                    required_targets.issubset(assessed_targets)
+                    if required_targets else bool(assessment_events)
+                )
+                if not assessment_ready:
+                    return {"eligible": False, "reason": "必须先完成第一波攻击毁伤评估"}
         if truth_target_id in set(policy.get("protected_truth_ids") or []):
             return {"eligible": False, "reason": "目标命中任务禁射保护规则"}
         threat = self.threats.get(truth_target_id) or {}
@@ -2234,6 +2413,44 @@ class SimEngine:
             "threat_level": threat_level,
             "_truth_target_id": truth_target_id,
         }
+
+    def _apply_post_launch_maneuver(
+        self,
+        asset_id: str,
+        route: Any,
+        behavior: Any,
+        *,
+        started_at: float,
+    ) -> bool:
+        """Put one launcher on its declared egress route after real release."""
+        asset = self.assets.get(str(asset_id or ""))
+        waypoints = [dict(point) for point in (route or []) if isinstance(point, dict)]
+        if asset is None or not waypoints:
+            return False
+        behavior = behavior if isinstance(behavior, dict) else {}
+        # ``route_mode: loop`` lets a post-strike platform hold a racetrack
+        # near the release station instead of flying a one-way egress leg.
+        self.waypoint_nav.set_route(
+            asset_id, waypoints, mode=str(behavior.get("route_mode") or "hold"),
+        )
+        asset["status"] = "active"
+        asset["_current_behavior"] = str(
+            behavior.get("behavior") or "post_launch_egress"
+        )
+        asset["_current_behavior_label"] = str(
+            behavior.get("label") or "发射后脱离"
+        )
+        asset["_behavior_phase_started_at"] = float(started_at)
+        asset["_cruise_speed_kts"] = float(
+            behavior.get("speed_kts", asset.get("_cruise_speed_kts", 1)) or 1
+        )
+        asset["speed_kts"] = max(
+            1.0, float(asset.get("_cruise_speed_kts", 1) or 1),
+        )
+        if behavior.get("alt_ft") is not None:
+            asset_position = asset.get("position") or asset
+            asset_position["alt_ft"] = float(behavior.get("alt_ft") or 0)
+        return True
 
     def fire_weapon_at_track(
         self,
@@ -2483,10 +2700,15 @@ class SimEngine:
             }
             if (coordinated or {}).get("multi_target"):
                 for launch_result in launch_results:
+                    launch_track = self.sensor_fusion.tracks.get(
+                        str(launch_result.get("target_track_id") or ""),
+                    )
                     self.events.append({
                         **event_base,
                         "type": "authorized_fire_command",
                         "target_track_id": launch_result.get("target_track_id"),
+                        "target_threat_id": self._truth_target_for_track(launch_track)
+                        if launch_track is not None else None,
                     })
                 self.events.append({
                     **event_base,
@@ -2501,10 +2723,17 @@ class SimEngine:
                     **event_base,
                     "type": "authorized_fire_command",
                     "target_track_id": track_id,
+                    "target_threat_id": truth_target_id,
                 })
             post_launch_routes = policy.get("post_launch_routes") or {}
             post_launch_behaviors = policy.get("post_launch_behaviors") or {}
             rerouted_assets = []
+            weapons_by_asset = {
+                str(item.get("asset_id") or ""): self.weapons.get(
+                    str(item.get("weapon_id") or "")
+                )
+                for item in launch_results
+            }
             target_specific_assets = (
                 {item["asset_id"] for item in launch_results}
                 if target_assignment else None
@@ -2520,26 +2749,25 @@ class SimEngine:
                     waypoints = [dict(point) for point in route if isinstance(point, dict)]
                     if not waypoints:
                         continue
-                    self.waypoint_nav.set_route(route_asset_id, waypoints, mode="hold")
-                    asset["status"] = "active"
                     behavior = (
                         post_launch_behaviors.get(route_asset_id)
                         if isinstance(post_launch_behaviors, dict) else None
                     ) or {}
-                    asset["_current_behavior"] = str(behavior.get("behavior") or "post_launch_egress")
-                    asset["_current_behavior_label"] = str(behavior.get("label") or "发射后脱离")
-                    asset["_behavior_phase_started_at"] = float(self.clock.get("elapsed_sec", 0) or 0)
-                    asset["_cruise_speed_kts"] = float(
-                        behavior.get("speed_kts", asset.get("_cruise_speed_kts", 1)) or 1
-                    )
-                    asset["speed_kts"] = max(
-                        1.0,
-                        float(asset.get("_cruise_speed_kts", 1) or 1),
-                    )
-                    if behavior.get("alt_ft") is not None:
-                        asset_position = asset.get("position") or asset
-                        asset_position["alt_ft"] = float(behavior.get("alt_ft") or 0)
-                    rerouted_assets.append(route_asset_id)
+                    launched_weapon = weapons_by_asset.get(route_asset_id)
+                    if launched_weapon is not None and launched_weapon.get("status") == "scheduled":
+                        launched_weapon["_deferred_post_launch"] = {
+                            "route": waypoints,
+                            "behavior": dict(behavior),
+                            "target_track_id": launched_weapon.get("target_track_id") or track_id,
+                        }
+                        continue
+                    if self._apply_post_launch_maneuver(
+                        route_asset_id,
+                        waypoints,
+                        behavior,
+                        started_at=float(self.clock.get("elapsed_sec", 0) or 0),
+                    ):
+                        rerouted_assets.append(route_asset_id)
             if rerouted_assets:
                 self.events.append({
                     "type": "post_launch_egress_started",
@@ -2718,6 +2946,7 @@ class SimEngine:
                 "domain": "air" if spec.category in ("anti-air", "anti-radiation") else "air",
                 "lat": alat,
                 "lng": alng,
+                "launch_position": {"lat": alat, "lng": alng},
                 "heading": heading,
                 "speed_kts": spec.speed_kts,
                 "source_asset_id": asset_id,

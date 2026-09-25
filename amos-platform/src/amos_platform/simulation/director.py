@@ -56,10 +56,17 @@ class DirectorService:
         self._lock = threading.RLock()
         self._auto_stop = threading.Event()
         self._auto_thread: threading.Thread | None = None
+        # A stopped worker may still be inside a slow backend callback after
+        # join(timeout=1).  The generation prevents that old worker from
+        # resuming against a newly configured run when the shared stop event is
+        # cleared for the replacement worker.
+        self._auto_generation = 0
         self._scenario: dict[str, Any] | None = None
         self._checkpoint_index = -1
         self._reached: list[dict[str, Any]] = []
         self._actions: list[dict[str, Any]] = []
+        self._stale_sweep_at = 0.0
+        self._auth_target_missing_since = 0.0
         self._state: dict[str, Any] = {
             "scenario_id": None,
             "run_id": None,
@@ -169,6 +176,8 @@ class DirectorService:
         if not isinstance(checkpoint, dict):
             return
         analysis_status = str(checkpoint.get("analysis_status") or "").lower()
+        if analysis_status == "submitting" and checkpoint.get("analysis_blocking", True):
+            raise DirectorError("checkpoint analysis submission is not completed")
         if analysis_status not in self.FAILED_ANALYSIS_STATUSES:
             return
         detail = checkpoint.get("analysis_error")
@@ -243,70 +252,148 @@ class DirectorService:
             str(value) for value in conditions.get("weapon_hit_target_ids") or []
         ).issubset(hit_target_ids):
             return False
+        assessed_target_ids = {
+            str(event.get("target_threat_id") or event.get("target_ref"))
+            for event in engine.events
+            if isinstance(event, dict)
+            and event.get("type") == "damage_assessment_confirmed"
+            and (event.get("target_threat_id") or event.get("target_ref"))
+        }
+        required_assessed_targets = {
+            str(value)
+            for key in ("damage_assessed_target_ids", "damage_assessment_target_ids")
+            for value in conditions.get(key) or []
+        }
+        if not required_assessed_targets.issubset(assessed_target_ids):
+            return False
+        recovered_asset_ids: set[str] = set()
+        for event in engine.events:
+            if not isinstance(event, dict) or event.get("type") not in {
+                "asset_recovered", "aircraft_recovered", "carrier_recovery_completed",
+            }:
+                continue
+            recovered_asset_ids.update(
+                str(value)
+                for value in [event.get("asset_id"), *(event.get("asset_ids") or [])]
+                if value
+            )
+        if not set(
+            str(value) for value in conditions.get("recovered_asset_ids") or []
+        ).issubset(recovered_asset_ids):
+            return False
         return True
 
-    def _reach_checkpoint(self, checkpoint: dict[str, Any]) -> dict[str, Any]:
+    def _reach_checkpoint(
+        self, checkpoint: dict[str, Any], *, defer_submission: bool = False,
+    ) -> dict[str, Any]:
         engine = self.runtime.get_engine()
-        self._checkpoint_index += 1
-        engine.clock["director_checkpoint_id"] = checkpoint.get("checkpoint_id")
-        self._apply_fault_requests(checkpoint)
-        analysis_status = "not_requested"
-        callback_result: dict[str, Any] | None = None
-        if checkpoint.get("submit_analysis"):
-            analysis_status = "submission_unavailable"
-            if self.checkpoint_callback is not None:
-                try:
-                    callback_result = self.checkpoint_callback({
-                        "scenario_id": self._state["scenario_id"],
-                        "run_id": self._state["run_id"],
-                        "branch": self._state["branch"],
-                        "seed": self._state["seed"],
-                        "checkpoint_id": checkpoint.get("checkpoint_id"),
-                    }) or {}
-                    if callback_result.get("workflow_id"):
-                        analysis_status = "submitted"
-                    elif callback_result.get("error"):
-                        analysis_status = "submission_failed"
-                    else:
-                        analysis_status = "submission_unverified"
-                except Exception as exc:  # callback failure is recorded, never converted into success
-                    analysis_status = "submission_failed"
-                    callback_result = {"error": f"{type(exc).__name__}: {exc}"}
-        reached = {
-            "checkpoint_id": checkpoint.get("checkpoint_id"),
-            "title": checkpoint.get("title"),
-            "reached_at_sec": round(float(engine.clock.get("elapsed_sec", 0) or 0), 3),
-            "analysis_status": analysis_status,
-            # Authorization belongs to a concrete reached checkpoint.  Do not
-            # start an operator gate merely because the timeline entered the
-            # ENGAGE phase before the evidence/analysis checkpoint was ready.
-            "requires_operator_action": bool(checkpoint.get("requires_operator_action")),
-            "operator_action_type": str(
-                checkpoint.get("operator_action_type") or "fire"
-            ),
-            "engagement_wave": (
-                int(checkpoint["engagement_wave"])
-                if checkpoint.get("engagement_wave") is not None
-                else None
-            ),
-        }
-        if callback_result:
-            reached["submission"] = deepcopy(callback_result)
-        reached["analysis_blocking"] = bool(
-            checkpoint.get("block_until_analysis_complete", True)
-        )
-        self._reached.append(reached)
-        self._state["current_checkpoint"] = reached
-        self._state["awaiting_analysis"] = analysis_status in {
-            "submitted", "running",
-        } and bool(reached["analysis_blocking"])
-        self._state["director_status"] = (
-            "awaiting_analysis" if self._state["awaiting_analysis"] else "checkpoint_reached"
-        )
-        engine.clock["director_status"] = self._state["director_status"]
-        engine.clock["director_analysis_status"] = analysis_status
-        self._record("checkpoint_reached", checkpoint_id=reached["checkpoint_id"], analysis_status=analysis_status)
+        with self._lock:
+            context = {
+                "scenario_id": self._state["scenario_id"],
+                "run_id": str(self._state.get("run_id") or ""),
+                "branch": self._state["branch"],
+                "seed": self._state["seed"],
+                "checkpoint_id": checkpoint.get("checkpoint_id"),
+            }
+            generation = self._auto_generation
+            callback = self.checkpoint_callback
+            self._checkpoint_index += 1
+            engine.clock["director_checkpoint_id"] = checkpoint.get("checkpoint_id")
+            self._apply_fault_requests(checkpoint)
+            submit = bool(checkpoint.get("submit_analysis")) and callback is not None
+            analysis_status = (
+                "submitting" if submit else
+                "submission_unavailable" if checkpoint.get("submit_analysis") else
+                "not_requested"
+            )
+            # Publish the concrete checkpoint before releasing the lock. Both
+            # synchronous and deferred submissions must write back to this
+            # object, never to whatever run/checkpoint happens to be current
+            # after a slow gateway round trip.
+            reached = {
+                "checkpoint_id": checkpoint.get("checkpoint_id"),
+                "title": checkpoint.get("title"),
+                "reached_at_sec": round(float(engine.clock.get("elapsed_sec", 0) or 0), 3),
+                "analysis_status": analysis_status,
+                # Authorization belongs to a concrete reached checkpoint.  Do not
+                # start an operator gate merely because the timeline entered the
+                # ENGAGE phase before the evidence/analysis checkpoint was ready.
+                "requires_operator_action": bool(checkpoint.get("requires_operator_action")),
+                "operator_action_type": str(
+                    checkpoint.get("operator_action_type") or "fire"
+                ),
+                "engagement_wave": (
+                    int(checkpoint["engagement_wave"])
+                    if checkpoint.get("engagement_wave") is not None
+                    else None
+                ),
+            }
+            reached["analysis_blocking"] = bool(
+                checkpoint.get("block_until_analysis_complete", True)
+            )
+            self._reached.append(reached)
+            self._state["current_checkpoint"] = reached
+            self._state["awaiting_analysis"] = analysis_status in {
+                "submitting", "submitted", "running",
+            } and bool(reached["analysis_blocking"])
+            self._state["director_status"] = (
+                "awaiting_analysis" if self._state["awaiting_analysis"] else "checkpoint_reached"
+            )
+            engine.clock["director_status"] = self._state["director_status"]
+            engine.clock["director_analysis_status"] = analysis_status
+            self._record("checkpoint_reached", checkpoint_id=reached["checkpoint_id"], analysis_status=analysis_status)
+        if submit:
+            if defer_submission:
+                threading.Thread(
+                    target=self._complete_checkpoint_submission,
+                    args=(callback, context, reached, generation),
+                    daemon=True, name="amos-checkpoint-submit",
+                ).start()
+            else:
+                self._complete_checkpoint_submission(callback, context, reached, generation)
         return reached
+
+    def _complete_checkpoint_submission(
+        self, callback: CheckpointCallback, context: dict[str, Any],
+        reached: dict[str, Any], generation: int,
+    ) -> None:
+        # Network I/O is deliberately outside the director lock.
+        try:
+            callback_result = callback(context) or {}
+            if callback_result.get("workflow_id"):
+                analysis_status = "submitted"
+            elif callback_result.get("error"):
+                analysis_status = "submission_failed"
+            else:
+                analysis_status = "submission_unverified"
+        except Exception as exc:
+            analysis_status = "submission_failed"
+            callback_result = {"error": f"{type(exc).__name__}: {exc}"}
+        with self._lock:
+            engine = self.runtime.get_engine()
+            if (
+                str(self._state.get("run_id") or "") != context["run_id"]
+                or str(engine.clock.get("run_id") or "") != context["run_id"]
+                or not any(item is reached for item in self._reached)
+            ):
+                return
+            # Keep a late submission discoverable for history polling, but
+            # never change a replacement checkpoint or override stop/pause.
+            if callback_result:
+                reached["submission"] = deepcopy(callback_result)
+            reached["analysis_status"] = analysis_status
+            if (
+                self._state.get("current_checkpoint") is not reached
+                or generation != self._auto_generation
+            ):
+                return
+            awaiting = analysis_status in {"submitted", "running"} and bool(
+                reached.get("analysis_blocking")
+            )
+            self._state["awaiting_analysis"] = awaiting
+            engine.clock["director_analysis_status"] = analysis_status
+            if self._state.get("director_status") in {"checkpoint_reached", "awaiting_analysis"}:
+                self._set_status("awaiting_analysis" if awaiting else "checkpoint_reached")
 
     def _current_phase(self) -> str | None:
         engine = self.runtime.get_engine()
@@ -321,16 +408,34 @@ class DirectorService:
         return reached[-1] if reached else None
 
     def _has_authorized_engagement(self, *, since_sec: float = 0.0) -> bool:
+        # ``reached_at_sec`` is rounded to three decimals while weapon events
+        # round their sim_time to two, so an authorization issued at the exact
+        # paused gate instant can compare one millisecond "early" and make the
+        # director wait forever for an authorization it already has.  Compare
+        # at the event's own precision.
+        boundary = round(float(since_sec), 2)
         return any(
             isinstance(event, dict)
             and event.get("type") == "authorized_fire_command"
             and event.get("command_source") == "operator"
-            and float(event.get("sim_time", 0) or 0) >= float(since_sec)
+            and round(float(event.get("sim_time", 0) or 0), 2) >= boundary
             for event in self.runtime.get_engine().events
         )
 
     def _authorization_gate_required(self) -> bool:
         return self._authorization_stage() in {"warning", "fire"}
+
+    def _authorization_candidate_exists(self) -> bool:
+        """Return whether the reached wave has a current operator-visible target."""
+        checkpoint = self._state.get("current_checkpoint") or {}
+        expected_wave = checkpoint.get("engagement_wave") if isinstance(checkpoint, dict) else None
+        for track in self.runtime.get_engine().get_operator_state().get("fused_tracks") or []:
+            if track.get("engagement_eligible") is not True:
+                continue
+            action = track.get("engagement_action") or {}
+            if expected_wave is None or int(action.get("wave", 0) or 0) == int(expected_wave):
+                return True
+        return False
 
     def _authorization_stage(self) -> str | None:
         policy = (self._scenario or {}).get("engagement_policy") or {}
@@ -428,27 +533,26 @@ class DirectorService:
         self.runtime.get_engine()._director_motion_limit_sec = None
 
     def _poll_current_analysis(self, *, resume_on_success: bool) -> str:
-        """Poll analysis while serializing mutations of the director state.
+        """Fetch the backend view unlocked, then mutate director state locked.
 
-        The auto-monitor thread and the HTTP ``/director/state`` route can run
-        at the same time.  Without this guard, the monitor updates the current
-        checkpoint while ``state()`` is deep-copying it, producing
-        ``dictionary changed size during iteration`` and a misleading Gateway
-        unavailable error in the browser.
+        The backend round trip (brief while live, full projection at the
+        terminal poll) can take seconds.  Holding the director lock across it
+        stalls ``/director/state`` and every other lock user for the whole
+        gateway call, which the operator sees as the whole scenario freezing
+        at every analysis checkpoint.  Only the bookkeeping in
+        ``_apply_analysis_view`` is serialized, so ``state()`` still
+        deep-copies a consistent checkpoint dict.
         """
         with self._lock:
-            return self._poll_current_analysis_locked(
-                resume_on_success=resume_on_success,
-            )
-
-    def _poll_current_analysis_locked(self, *, resume_on_success: bool) -> str:
-        checkpoint = self._state.get("current_checkpoint")
-        if not isinstance(checkpoint, dict):
-            return "none"
-        submission = checkpoint.get("submission")
-        workflow_id = submission.get("workflow_id") if isinstance(submission, dict) else None
-        if not workflow_id or self.workflow_state_callback is None:
-            return "manual"
+            checkpoint = self._state.get("current_checkpoint")
+            if not isinstance(checkpoint, dict):
+                return "none"
+            submission = checkpoint.get("submission")
+            workflow_id = submission.get("workflow_id") if isinstance(submission, dict) else None
+            if not workflow_id or self.workflow_state_callback is None:
+                return "manual"
+            expected_run_id = str(self._state.get("run_id") or "")
+            generation = self._auto_generation
         try:
             try:
                 # Light first: while the workflow is live, poll only the small
@@ -459,19 +563,138 @@ class DirectorService:
                 # Older callback signature: full view on every poll.
                 view = self.workflow_state_callback(str(workflow_id))
         except Exception as exc:
-            checkpoint["analysis_status"] = "backend_unreachable"
-            checkpoint["analysis_error"] = f"{type(exc).__name__}: {exc}"
-            self._state["last_error"] = checkpoint["analysis_error"]
-            self._state["awaiting_analysis"] = True
-            self._set_status("awaiting_analysis", analysis_status="backend_unreachable")
+            with self._lock:
+                if generation != self._auto_generation:
+                    return "stale_generation"
+                self._mark_analysis_unreachable(
+                    checkpoint, exc, expected_run_id=expected_run_id,
+                )
             return "pending"
+        with self._lock:
+            if str(self._state.get("run_id") or "") != expected_run_id:
+                return "stale_run"
+            if generation != self._auto_generation:
+                return "stale_generation"
+            return self._apply_analysis_view(
+                view,
+                checkpoint=checkpoint,
+                resume_on_success=resume_on_success,
+                expected_run_id=expected_run_id,
+            )
+
+    def _mark_analysis_unreachable(
+        self, checkpoint: dict[str, Any], exc: Exception, *, expected_run_id: str,
+    ) -> None:
+        if (
+            str(self._state.get("run_id") or "") != expected_run_id
+            or str(self.runtime.get_engine().clock.get("run_id") or "") != expected_run_id
+        ):
+            return
+        # The view belongs to the checkpoint captured before the fetch; the
+        # monitor may already have moved on to a newer one.
+        if self._state.get("current_checkpoint") is not checkpoint:
+            return
+        checkpoint["analysis_status"] = "backend_unreachable"
+        checkpoint["analysis_error"] = f"{type(exc).__name__}: {exc}"
+        self._state["last_error"] = checkpoint["analysis_error"]
+        blocking = bool(checkpoint.get("analysis_blocking", True))
+        self._state["awaiting_analysis"] = blocking
+        if (
+            blocking
+            and not self._state.get("awaiting_authorization")
+            and self._state.get("director_status") != "paused"
+        ):
+            self._set_status("awaiting_analysis", analysis_status="backend_unreachable")
+
+    def _poll_stale_checkpoints(self, run_id: str) -> None:
+        """补漏轮询：推进到下一检查点后，回头确认旧检查点的终态。
+
+        后端工作流完成时若导演已经推进，旧检查点的分析状态会永远停在
+        submitted/running——前端分析面板的第一项就会一直转圈。这里对历史
+        条目做记账式更新，不影响当前运行的状态机。
+        """
+        if self.workflow_state_callback is None:
+            return
+        current = self._state.get("current_checkpoint")
+        for reached in list(self._reached):
+            if reached is current:
+                continue
+            if reached.get("analysis_status") not in {
+                "submitted", "running", "backend_unreachable",
+            }:
+                continue
+            submission = reached.get("submission")
+            workflow_id = (
+                submission.get("workflow_id") if isinstance(submission, dict) else None
+            )
+            if not workflow_id:
+                continue
+            try:
+                try:
+                    view = self.workflow_state_callback(str(workflow_id), light=True)
+                except TypeError:
+                    view = self.workflow_state_callback(str(workflow_id))
+            except Exception:
+                return  # 网关暂时不可达时留到下一轮
+            with self._lock:
+                if str(self._state.get("run_id") or "") != run_id:
+                    return
+                self._apply_analysis_view(
+                    view,
+                    checkpoint=reached,
+                    resume_on_success=False,
+                    expected_run_id=run_id,
+                    bookkeeping_only=True,
+                )
+                return  # 每轮只补一个，避免占用轮询预算
+
+    def _apply_analysis_view(
+        self,
+        view: dict[str, Any],
+        *,
+        checkpoint: dict[str, Any],
+        resume_on_success: bool,
+        expected_run_id: str,
+        bookkeeping_only: bool = False,
+    ) -> str:
+        # Operate on the checkpoint dict captured before the backend fetch:
+        # if the monitor reached a newer checkpoint while the view was in
+        # flight, the stale view must never mutate it.
+        # ``bookkeeping_only`` 只更新历史检查点自身的分析状态，绝不影响
+        # 当前运行的状态机（暂停/恢复/全局错误都不触发）。
+        blocking = bool(checkpoint.get("analysis_blocking", True))
+        submission = checkpoint.get("submission")
+        workflow_id = (
+            submission.get("workflow_id") if isinstance(submission, dict) else None
+        ) or str(view.get("workflow_id") or "")
+
+        # A backend status request can outlive scenario reset/configuration.
+        # Never let its terminal result mutate the replacement run.
+        if (
+            str(self._state.get("run_id") or "") != expected_run_id
+            or str(self.runtime.get_engine().clock.get("run_id") or "") != expected_run_id
+        ):
+            return "stale_run"
+        if not bookkeeping_only and self._state.get("current_checkpoint") is not checkpoint:
+            # History is finalized separately by _poll_stale_checkpoints;
+            # this response has no authority over the current state machine.
+            return "stale_checkpoint"
 
         workflow_status = str(view.get("status") or "unknown").lower()
         checkpoint["workflow_status"] = workflow_status
         if not view.get("terminal"):
             checkpoint["analysis_status"] = "running" if workflow_status == "running" else "submitted"
-            self._state["awaiting_analysis"] = True
-            self._set_status("awaiting_analysis", analysis_status=checkpoint["analysis_status"])
+            if bookkeeping_only:
+                return "pending"
+            # A nonblocking checkpoint keeps the demonstration flowing while
+            # the agents work; only blocking ones surface awaiting_analysis.
+            self._state["awaiting_analysis"] = blocking
+            if (
+                blocking
+                and not self._state.get("awaiting_authorization")
+                and self._state.get("director_status") != "paused"
+            ):
+                self._set_status("awaiting_analysis", analysis_status=checkpoint["analysis_status"])
             return "pending"
 
         counts = ((view.get("orchestration") or {}).get("counts") or {})
@@ -490,6 +713,14 @@ class DirectorService:
                 (view.get("recovery") or {}).get("reason")
                 or f"workflow ended with status {workflow_status}"
             )
+            if bookkeeping_only:
+                self._record(
+                    "checkpoint_analysis_failed",
+                    checkpoint_id=checkpoint.get("checkpoint_id"),
+                    workflow_id=workflow_id,
+                    workflow_status=workflow_status,
+                )
+                return "failed"
             self._state["last_error"] = checkpoint["analysis_error"]
             self._state["awaiting_analysis"] = False
             self._clear_analysis_motion_limit()
@@ -511,6 +742,13 @@ class DirectorService:
 
         checkpoint["analysis_status"] = "completed"
         checkpoint["analysis_completed_at"] = _now_iso()
+        if bookkeeping_only:
+            self._record(
+                "checkpoint_analysis_completed",
+                checkpoint_id=checkpoint.get("checkpoint_id"),
+                workflow_id=workflow_id,
+            )
+            return "completed"
         self._state["awaiting_analysis"] = False
         self._state["last_error"] = None
         self._clear_analysis_motion_limit()
@@ -520,13 +758,27 @@ class DirectorService:
         self.runtime.get_engine().unlock_speed_for_confirmation(
             "analysis_motion", restore=True
         )
-        self._set_status("auto_running" if resume_on_success else "paused", analysis_status="completed")
+        authorization_pending = (
+            bool(self._state.get("awaiting_authorization"))
+            or self._authorization_gate_required()
+        )
+        operator_paused = self._state.get("director_status") in {"paused", "stopped"}
+        can_resume = resume_on_success and not authorization_pending and not operator_paused
+        if authorization_pending:
+            self.runtime.get_engine().pause()
+            next_status = (
+                "awaiting_authorization" if self._state.get("awaiting_authorization") else
+                "checkpoint_reached"
+            )
+        else:
+            next_status = "auto_running" if can_resume else "paused"
+        self._set_status(next_status, analysis_status="completed")
         self._record(
             "checkpoint_analysis_completed",
             checkpoint_id=checkpoint.get("checkpoint_id"),
             workflow_id=workflow_id,
         )
-        if resume_on_success:
+        if can_resume:
             self.runtime.get_engine().resume()
         self.runtime.record_director_state(self.state())
         return "completed"
@@ -600,10 +852,12 @@ class DirectorService:
         while not self._checkpoint_satisfied(checkpoint):
             elapsed = float(engine.clock.get("elapsed_sec", 0) or 0)
             if elapsed >= max_elapsed or engine.clock.get("lifecycle") == "completed":
-                self._set_status("error")
-                self._state["last_error"] = f"checkpoint conditions not satisfied: {checkpoint.get('checkpoint_id')}"
-                self.runtime.record_director_state(self.state())
-                raise DirectorError(self._state["last_error"])
+                with self._lock:
+                    self._set_status("error")
+                    self._state["last_error"] = f"checkpoint conditions not satisfied: {checkpoint.get('checkpoint_id')}"
+                    error_message = str(self._state["last_error"])
+                    self.runtime.record_director_state(self.state())
+                raise DirectorError(error_message)
             # Thirty simulated seconds keeps at least two samples per formal
             # acquisition window while making hour-scale checkpoint advances
             # practical. SimEngine splits the step at every private schedule
@@ -618,45 +872,128 @@ class DirectorService:
         self._reach_checkpoint(checkpoint)
         return self.state()
 
-    def _auto_monitor(self) -> None:
+    def _auto_monitor(self, generation: int | None = None, run_id: str | None = None) -> None:
+        generation = self._auto_generation if generation is None else generation
+        run_id = str(self._state.get("run_id") or "") if run_id is None else run_id
         try:
             while not self._auto_stop.wait(0.05):
+                if generation != self._auto_generation or str(self._state.get("run_id") or "") != run_id:
+                    return
                 engine = self.runtime.get_engine()
+                if str(engine.clock.get("run_id") or "") != run_id:
+                    return
                 current = self._state.get("current_checkpoint")
                 if isinstance(current, dict) and current.get("analysis_status") in {
                     "submitted", "running", "backend_unreachable",
-                } and current.get("analysis_blocking", True):
-                    # Analysis still in flight and the story clock has reached
-                    # the analysis motion limit: instead of freezing the left
-                    # panel in place, drop the hard clamp so the scene keeps
-                    # moving while the agents work. With the follow-launch
-                    # confirmation dialog pending the demo speed (e.g. 32x)
-                    # continues; otherwise playback holds 1x until the
-                    # analysis completes (or fails) restores the demo speed.
-                    limit = getattr(engine, "_director_motion_limit_sec", None)
-                    if (
-                        limit is not None
-                        and engine.clock.get("running")
-                        and float(engine.clock.get("elapsed_sec", 0) or 0)
-                        >= float(limit) - 1e-6
-                    ):
-                        self._clear_analysis_motion_limit()
-                        if engine.follow_confirmation_pending():
-                            # While the follow-launch confirmation dialog is
-                            # open, keep the operator demo speed (e.g. 32x)
-                            # during the analysis instead of crawling at 1x.
-                            self._record("analysis_motion_continue", limit_sec=float(limit))
-                        else:
-                            engine.lock_speed_for_confirmation("analysis_motion")
-                            self._record("analysis_motion_slowdown", limit_sec=float(limit))
+                }:
+                    # Nonblocking checkpoints are still polled: the terminal
+                    # poll is what projects the completed workflow back into
+                    # the engine (agent assessments, task evidence).  Without
+                    # it the downstream capture tasks expire and later gates
+                    # (e.g. the ENGAGE authorization popup) never open.
+                    blocking = bool(current.get("analysis_blocking", True))
+                    if blocking:
+                        # Analysis still in flight and the story clock has reached
+                        # the analysis motion limit: instead of freezing the left
+                        # panel in place, drop the hard clamp so the scene keeps
+                        # moving while the agents work. With the follow-launch
+                        # confirmation dialog pending the demo speed (e.g. 32x)
+                        # continues; otherwise playback holds 1x until the
+                        # analysis completes (or fails) restores the demo speed.
+                        limit = getattr(engine, "_director_motion_limit_sec", None)
+                        if (
+                            limit is not None
+                            and engine.clock.get("running")
+                            and float(engine.clock.get("elapsed_sec", 0) or 0)
+                            >= float(limit) - 1e-6
+                        ):
+                            self._clear_analysis_motion_limit()
+                            if engine.follow_confirmation_pending():
+                                # While the follow-launch confirmation dialog is
+                                # open, keep the operator demo speed (e.g. 32x)
+                                # during the analysis instead of crawling at 1x.
+                                self._record("analysis_motion_continue", limit_sec=float(limit))
+                            else:
+                                engine.lock_speed_for_confirmation("analysis_motion")
+                                self._record("analysis_motion_slowdown", limit_sec=float(limit))
                     result = self._poll_current_analysis(resume_on_success=True)
+                    if generation != self._auto_generation or str(self._state.get("run_id") or "") != run_id:
+                        return
+                    if result.startswith("stale_"):
+                        continue
                     if result in {"pending", "failed"}:
                         if result == "failed":
                             return
-                        continue
+                        # A blocking checkpoint keeps waiting for the backend;
+                        # a nonblocking one stays live, so fall through and let
+                        # the demonstration continue ticking.
+                        if blocking:
+                            continue
+
+                now = time.monotonic()
+                if now - self._stale_sweep_at >= 2.0:
+                    self._stale_sweep_at = now
+                    self._poll_stale_checkpoints(run_id)
+                if generation != self._auto_generation or str(self._state.get("run_id") or "") != run_id:
+                    return
 
                 authorization_stage = self._authorization_stage()
+                if authorization_stage is None:
+                    self._auth_target_missing_since = 0.0
                 if authorization_stage in {"warning", "fire"}:
+                    current_checkpoint = self._state.get("current_checkpoint")
+                    if (
+                        isinstance(current_checkpoint, dict)
+                        and current_checkpoint.get("requires_operator_action")
+                        and not self._authorization_candidate_exists()
+                    ):
+                        analysis_status = str(current_checkpoint.get("analysis_status") or "")
+                        if analysis_status in {"submitting", "submitted", "running", "backend_unreachable"}:
+                            # Missing eligibility is expected until the
+                            # relevant workflow has returned and been projected.
+                            # Keep the gate paused; wall-clock gateway latency
+                            # is not evidence that the scenario has failed.
+                            self._auth_target_missing_since = 0.0
+                            engine.pause()
+                            continue
+                        if analysis_status in self.FAILED_ANALYSIS_STATUSES:
+                            with self._lock:
+                                submission = current_checkpoint.get("submission") or {}
+                                self._state["last_error"] = str(
+                                    current_checkpoint.get("analysis_error")
+                                    or submission.get("error")
+                                    or "当前检查点分析未成功完成，请重试分析或重置场景"
+                                )
+                                self._state["awaiting_authorization"] = False
+                                self._state["authorization_stage"] = None
+                                self._set_status("error", analysis_status=analysis_status)
+                                engine.pause()
+                                self.runtime.record_director_state(self.state())
+                            return
+                        # 开火命令与投影/轮询并发时，"无可用目标"可能只是
+                        # 一次过渡态快照（例如事件刚落、资格尚未重算）。
+                        # 只有缺失持续一小段时间才判死整个演示。
+                        missing_for = now - self._auth_target_missing_since
+                        if self._auth_target_missing_since == 0.0 or missing_for < 0.5:
+                            if self._auth_target_missing_since == 0.0:
+                                self._auth_target_missing_since = now
+                            continue
+                        with self._lock:
+                            self._state["awaiting_authorization"] = False
+                            self._state["authorization_stage"] = None
+                            self._state["last_error"] = (
+                                "后端分析已完成，但当前波次没有满足识别、证据与交战规则的目标；"
+                                "请检查投影结果或进入重规划"
+                            )
+                            self._set_status("error", analysis_status="target_unavailable")
+                            engine.pause()
+                            self._record(
+                                "authorization_target_unavailable",
+                                checkpoint_id=(self._state.get("current_checkpoint") or {}).get("checkpoint_id"),
+                            )
+                            self.runtime.record_director_state(self.state())
+                        return
+                    self._auth_target_missing_since = 0.0
                     if (
                         not self._state.get("awaiting_authorization")
                         or self._state.get("authorization_stage") != authorization_stage
@@ -730,8 +1067,18 @@ class DirectorService:
                     pause_on_reach = bool(checkpoint.get("pause", True))
                     if pause_on_reach and not continue_during_analysis:
                         engine.pause()
+                    # Self-locking: the gateway submission inside must not
+                    # hold the director lock, or /director/state stalls.  For
+                    # operator-action gates the submission additionally runs
+                    # in the background so the authorization dialog appears
+                    # immediately instead of after the gateway round trip.
+                    self._reach_checkpoint(
+                        checkpoint,
+                        defer_submission=bool(checkpoint.get("requires_operator_action")),
+                    )
                     with self._lock:
-                        self._reach_checkpoint(checkpoint)
+                        if generation != self._auto_generation or str(self._state.get("run_id") or "") != run_id:
+                            return
                         if continue_during_analysis and self._state.get("awaiting_analysis"):
                             self._arm_analysis_motion_limit()
                         elif pause_on_reach:
@@ -742,17 +1089,26 @@ class DirectorService:
                     return
         finally:
             with self._lock:
-                self._auto_thread = None
+                if self._auto_thread is threading.current_thread():
+                    self._auto_thread = None
 
     def _stop_auto_thread(self, *, pause: bool) -> None:
-        self._auto_stop.set()
-        thread = self._auto_thread
+        # Serialize cancellation with result application, but never hold the
+        # lock while joining a worker that may need it to finish.
+        with self._lock:
+            self._auto_generation += 1
+            generation = self._auto_generation
+            self._auto_stop.set()
+            thread = self._auto_thread
         if thread and thread is not threading.current_thread():
             thread.join(timeout=1.0)
-        self._auto_thread = None
-        if pause:
-            self.runtime.get_engine().pause()
-        self._leave_authorization_wait()
+        with self._lock:
+            if generation != self._auto_generation:
+                return
+            self._auto_thread = None
+            if pause:
+                self.runtime.get_engine().pause()
+            self._leave_authorization_wait()
 
     def action(self, action: str, *, step_sec: Any = 1.0) -> dict[str, Any]:
         """Apply a director action and return the operator-safe director state."""
@@ -770,8 +1126,8 @@ class DirectorService:
                 self._set_status("running")
                 self._state["awaiting_analysis"] = False
         elif action == "pause":
-            engine.pause()
             with self._lock:
+                engine.pause()
                 self._set_status("paused")
         elif action == "step_tick":
             try:
@@ -781,38 +1137,50 @@ class DirectorService:
             engine.step(value)
             with self._lock:
                 checkpoint = self._next_checkpoint()
-                if checkpoint and self._checkpoint_satisfied(checkpoint):
-                    self._reach_checkpoint(checkpoint)
-                else:
+                satisfied = checkpoint is not None and self._checkpoint_satisfied(checkpoint)
+            if satisfied:
+                # Self-locking; the gateway submission inside must not hold
+                # the director lock.
+                self._reach_checkpoint(checkpoint)
+            else:
+                with self._lock:
                     self._set_status("paused")
         elif action == "advance_checkpoint":
             with self._lock:
                 current = self._state.get("current_checkpoint")
-                if isinstance(current, dict) and current.get("analysis_status") in {
+                needs_poll = isinstance(current, dict) and current.get("analysis_status") in {
                     "submitted", "running", "backend_unreachable",
-                } and current.get("analysis_blocking", True):
-                    analysis_result = self._poll_current_analysis(resume_on_success=False)
-                    if analysis_result == "pending":
-                        raise DirectorError("checkpoint analysis is not completed")
-                    if analysis_result == "failed":
-                        raise DirectorError(str(self._state.get("last_error") or "checkpoint analysis failed"))
-                result = self._advance_checkpoint()
-                self._record(action)
-                result = self.state()
-                result["last_action"] = action
-                self.runtime.record_director_state(result)
-                return result
-        elif action == "refresh_analysis":
+                } and current.get("analysis_blocking", True)
+            if needs_poll:
+                # The backend poll runs unlocked so concurrent state reads
+                # stay responsive; the mutations inside are lock-protected.
+                analysis_result = self._poll_current_analysis(resume_on_success=False)
+                if analysis_result.startswith("stale_"):
+                    raise DirectorError("运行或检查点已变化，请刷新状态后重试")
+                if analysis_result == "pending":
+                    raise DirectorError("checkpoint analysis is not completed")
+                if analysis_result == "failed":
+                    raise DirectorError(str(self._state.get("last_error") or "checkpoint analysis failed"))
+            # Steps the engine locally and reaches the checkpoint through the
+            # self-locking _reach_checkpoint (gateway call outside the lock).
+            self._advance_checkpoint()
             with self._lock:
-                analysis_result = self._poll_current_analysis(
-                    resume_on_success=False
-                )
-                result = self.state()
-                result["analysis_poll_result"] = analysis_result
-                result["last_action"] = action
+                self._record(action)
+            result = self.state()
+            result["last_action"] = action
+            self.runtime.record_director_state(result)
+            return result
+        elif action == "refresh_analysis":
+            analysis_result = self._poll_current_analysis(
+                resume_on_success=False
+            )
+            with self._lock:
                 self._record(action, analysis_poll_result=analysis_result)
-                self.runtime.record_director_state(result)
-                return result
+            result = self.state()
+            result["analysis_poll_result"] = analysis_result
+            result["last_action"] = action
+            self.runtime.record_director_state(result)
+            return result
         elif action == "start_auto":
             if self._auto_thread and self._auto_thread.is_alive():
                 raise DirectorError("automatic demonstration is already running")
@@ -821,7 +1189,15 @@ class DirectorService:
             with self._lock:
                 self._set_status("auto_running")
                 self._state["awaiting_analysis"] = False
-                self._auto_thread = threading.Thread(target=self._auto_monitor, daemon=True, name="amos-director")
+                self._auto_generation += 1
+                generation = self._auto_generation
+                run_id = str(self._state.get("run_id") or "")
+                self._auto_thread = threading.Thread(
+                    target=self._auto_monitor,
+                    args=(generation, run_id),
+                    daemon=True,
+                    name="amos-director",
+                )
                 self._auto_thread.start()
         elif action == "stop_auto":
             self._stop_auto_thread(pause=True)
