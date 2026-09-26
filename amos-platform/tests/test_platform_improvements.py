@@ -418,11 +418,13 @@ def test_live_renderers_do_not_rebuild_unchanged_panels_or_map_layers() -> None:
     assert "顺序流程容器" in workflow
     assert "showWeaponImpact" in map_script
     assert "impact_sim_time" in map_script
-    assert 'return "civilianSurface"' in map_script
-    assert 'return "destroyed"' in map_script
+    assert "SymbolLibrary.trackKind(track)" in map_script
+    assert '/^destroyed/.test(kind)' in map_script
     assert "updateDestroyedImpactMarkers" in map_script
     assert "destroyedImpactMarkers" in map_script
-    assert 'return "impact"' in map_script
+    assert 'return "impact" + suffix' in (
+        ROOT / "static/js/map/tactical-symbols.js"
+    ).read_text(encoding="utf-8")
     assert "damage_assessment_confirmed" in map_script
 
 

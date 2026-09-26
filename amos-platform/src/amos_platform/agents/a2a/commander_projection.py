@@ -17,6 +17,19 @@ PROTECTED_OBJECT_CLASSES = {
     "merchant_vessel",
 }
 
+# These fields describe effects already produced by the simulation execution
+# loop.  A later Commander classification refresh may enrich the assessment,
+# but must never roll an impacted/destroyed track back to an intact state.
+EXECUTION_ASSESSMENT_FIELDS = {
+    "damage_state",
+    "engagement_status",
+    "behavior_state",
+    "behavior_label",
+    "assessment_observer",
+    "impact_sim_time",
+    "assessed_sim_time",
+}
+
 
 def _first_mapping_with(node: Any, keys: set[str]) -> dict[str, Any]:
     if isinstance(node, dict):
@@ -377,7 +390,14 @@ def apply_commander_assessments(
         while previous_phase != track.kill_chain_phase:
             previous_phase = track.kill_chain_phase
             track._advance_kill_chain()
+        existing_assessment = dict(getattr(track, "agent_assessment", {}) or {})
+        execution_state = {
+            key: existing_assessment[key]
+            for key in EXECUTION_ASSESSMENT_FIELDS
+            if key in existing_assessment
+        }
         assessment_record = {
+            **execution_state,
             "status": status,
             "label": {"high": "高风险", "medium": "关注", "low": "低风险"}.get(level, "已评估"),
             "score": assessment.get("score"),

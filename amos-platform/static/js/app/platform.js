@@ -40,6 +40,9 @@ window.Platform = (function () {
   var authorizationWeaponName = null;
   var authorizationSubmitting = false;
   var authorizationPreviousFocus = null;
+  var authorizationDeferredKey = null;
+  var authorizationDeferredUntil = 0;
+  var AUTHORIZATION_REMINDER_MS = 15000;
   var storyHeroGeneration = 0;
   var storyHeroTarget = null;
   var activeStoryCueId = null;
@@ -572,6 +575,8 @@ window.Platform = (function () {
       currentMediaId = null;
       activeWorkflowStoryContext = null;
       authorizationPromptKey = null;
+      authorizationDeferredKey = null;
+      authorizationDeferredUntil = 0;
       authorizationSubmitting = false;
       closeAuthorizationDialog();
       resetEvidenceProducts();
@@ -649,7 +654,7 @@ window.Platform = (function () {
       speedGroup.classList.toggle("speed-locked", speedLocked);
       speedGroup.setAttribute("aria-busy", pendingSpeedRequests > 0 ? "true" : "false");
       speedGroup.title = speedLocked
-        ? "等待武器授权期间暂停，授权完成后恢复 " +
+        ? "等待武器授权：仿真暂停在阶段边界，授权后恢复 " +
           Number(clock.speed_resume_value || speedResumeValue || 1) + "×"
         : "仿真倍率";
     }
@@ -825,6 +830,20 @@ window.Platform = (function () {
     authorizationPreviousFocus = null;
   }
 
+  function deferAuthorizationDialog() {
+    if (authorizationSubmitting) return;
+    if (authorizationMode === "fire" || authorizationMode === "warn") {
+      authorizationDeferredKey = authorizationPromptKey;
+      authorizationDeferredUntil = Date.now() + AUTHORIZATION_REMINDER_MS;
+      authorizationPromptKey = null;
+      var status = document.getElementById("status-text");
+      if (status) {
+        status.textContent = "已选择稍后决定；仿真仍暂停在授权点，15 秒后再次提示";
+      }
+    }
+    closeAuthorizationDialog();
+  }
+
   function showAuthorizationDialog(trackId, options) {
     options = options || {};
     var track = trackById(trackId);
@@ -858,7 +877,7 @@ window.Platform = (function () {
     var cancelButton = document.getElementById("authorization-cancel");
     if (cancelButton) {
       cancelButton.disabled = false;
-      cancelButton.textContent = options.cancelText || "暂不打击";
+      cancelButton.textContent = options.cancelText || "稍后决定（15秒后提醒）";
     }
     dialog.hidden = false;
     dialog.classList.add("open");
@@ -871,6 +890,8 @@ window.Platform = (function () {
     var status = directorState && (directorState.director_status || directorState.status);
     var awaiting = status === "awaiting_authorization" || Boolean(directorState && directorState.awaiting_authorization);
     if (!awaiting) {
+      authorizationDeferredKey = null;
+      authorizationDeferredUntil = 0;
       var dialog = document.getElementById("authorization-dialog");
       if (
         dialog && !dialog.hidden && !authorizationSubmitting &&
@@ -889,6 +910,11 @@ window.Platform = (function () {
     var checkpointId = typeof checkpoint === "object" ? checkpoint.checkpoint_id : checkpoint;
     var runId = directorState.run_id || latestState && latestState.clock && latestState.clock.run_id || "run";
     var key = [runId, checkpointId || "ENGAGE", stage, target.id || target.track_id].join(":");
+    if (key === authorizationDeferredKey) {
+      if (Date.now() < authorizationDeferredUntil) return;
+      authorizationDeferredKey = null;
+      authorizationDeferredUntil = 0;
+    }
     if (key === authorizationPromptKey) return;
     if (stage === "warning") {
       if (showAuthorizationDialog(target.id || target.track_id, {
@@ -899,7 +925,7 @@ window.Platform = (function () {
         actionLabel: "警告内容",
         actionValue: "立即停止航行并驶离警戒海域",
         confirmText: "发出警告",
-        cancelText: "暂不处置"
+        cancelText: "稍后处置（15秒后提醒）"
       })) authorizationPromptKey = key;
       return;
     }
@@ -925,7 +951,7 @@ window.Platform = (function () {
       actionLabel: action.coordinated ? "协同武器链" : "拟用武器",
       actionValue: action.actionLabel,
       confirmText: waveLabel ? ("授权" + waveLabel + "打击") : "确认打击",
-      cancelText: "暂不打击"
+      cancelText: "稍后决定（15秒后提醒）"
     } : {
       mode: "fire",
       assetId: action.assetId,
@@ -936,6 +962,7 @@ window.Platform = (function () {
       actionLabel: action.coordinated ? "协同武器链" : "拟用武器",
       actionValue: action.actionLabel,
       confirmText: waveLabel ? ("授权" + waveLabel + "打击") : "确认打击",
+      cancelText: "稍后决定（15秒后提醒）",
     })) authorizationPromptKey = key;
   }
 
@@ -1142,7 +1169,7 @@ window.Platform = (function () {
       error: "异常", ready: "就绪", empty: "就绪",
     })[lifecycle] || "就绪";
     if (directorStatus === "awaiting_authorization") {
-      statusText = "等待操作员授权，仿真已暂停";
+      statusText = "等待操作员授权，仿真已暂停在阶段边界；稍后决定将再次提示";
       modeText = "待授权";
     } else if (followLaunchPrompt()) {
       statusText = "等待无人机派遣确认，仿真按当前倍率继续";
@@ -1396,6 +1423,8 @@ window.Platform = (function () {
       directorWorkflowId = null;
       handledDirectorCheckpoint = null;
       authorizationPromptKey = null;
+      authorizationDeferredKey = null;
+      authorizationDeferredUntil = 0;
       authorizationSubmitting = false;
       closeAuthorizationDialog();
       renderDirectorState(state);
@@ -1467,7 +1496,7 @@ window.Platform = (function () {
       var button = event.target.closest("[data-story-media-id]");
       if (button) showMedia(button.dataset.storyMediaId);
     });
-    document.getElementById("authorization-cancel").addEventListener("click", closeAuthorizationDialog);
+    document.getElementById("authorization-cancel").addEventListener("click", deferAuthorizationDialog);
     document.getElementById("authorization-confirm").addEventListener("click", function () {
       if (authorizationMode === "launch_follow_uav") {
         issueFollowUavLaunch(authorizationTrackId, authorizationAssetId);
@@ -1492,7 +1521,7 @@ window.Platform = (function () {
         closeKnowledgeGraph();
       }
       if (event.key === "Escape" && !document.getElementById("authorization-dialog").hidden) {
-        closeAuthorizationDialog();
+        deferAuthorizationDialog();
       }
     });
     document.querySelectorAll(".speed-btn").forEach(function (button) {

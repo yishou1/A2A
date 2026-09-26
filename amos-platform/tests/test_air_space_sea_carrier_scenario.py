@@ -106,6 +106,7 @@ def _visible_from(scenario: dict, asset_id: str) -> float:
 
 
 def _apply_airfield_assessments(engine: SimEngine) -> None:
+    workflow_id = f"wf-asc-test-{int(float(engine.clock['elapsed_sec']))}"
     tracking_rows = []
     threat_rows = []
     for track in engine.sensor_fusion.tracks.values():
@@ -127,7 +128,7 @@ def _apply_airfield_assessments(engine: SimEngine) -> None:
     projection = apply_commander_assessments(
         engine,
         {
-            "workflow_id": "wf-asc-test",
+            "workflow_id": workflow_id,
             "status": "completed",
             "result": {
                 "outputs": {
@@ -170,7 +171,7 @@ def test_carrier_scenario_uses_individual_resources_and_complete_offline_media()
     }
     assert {item["threat_id"] for item in scenario["threats"]} == set(CLASSIFICATIONS)
     assert all(int(item.get("member_count", 1) or 1) == 1 for item in scenario["asset_profiles"])
-    assert len(scenario["media_cues"]) == 9
+    assert len(scenario["media_cues"]) == 11
     assert scenario["map_display"]["space_visual_speed_factor"] == 0.035
     assert scenario["map_display"]["default_layers"]["coordination"] is True
     assert scenario["map_display"]["coordination_link_types"] == ["weapon"]
@@ -181,6 +182,9 @@ def test_carrier_scenario_uses_individual_resources_and_complete_offline_media()
         "CV-01", "UAV-ONEWAY-01", "UAV-ISR-01", "UAV-STRIKE-01",
     ]
     assert scenario["map_display"]["asset_label_aliases"]["UAV-ONEWAY-01"] == "自杀无人机 OW-01"
+    assert scenario["map_display"]["asset_label_aliases"]["UAV-STRIKE-01"] == (
+        "攻击无人机 STRIKE-01（群符号）"
+    )
     assert scenario["map_display"]["asset_icon_kinds"] == {
         "UAV-STRIKE-01": "uavSwarm",
     }
@@ -188,8 +192,18 @@ def test_carrier_scenario_uses_individual_resources_and_complete_offline_media()
         "UAV-STRIKE-01": 32,
     }
     assert len(scenario["map_display"]["space_ground_tracks"]) == 2
+    for track in scenario["map_display"]["space_ground_tracks"]:
+        assert max(point["lat"] for point in track["points"]) - min(
+            point["lat"] for point in track["points"]
+        ) >= 2.8
+        assert max(point["lng"] for point in track["points"]) - min(
+            point["lng"] for point in track["points"]
+        ) >= 3.6
     assert scenario["map_display"]["space_node_asset_ids"] == ["SAT-COM-A2S-01"]
     assert len(scenario["space_operations"]["passes"]) == 2
+    assert scenario["space_operations"]["intelligence_products"][1]["product_id"] == (
+        "ASC-MEDIA-07"
+    )
     assert scenario["concept_maturity"] == "public-capability-inspired_near-future_exercise"
     assert scenario["asset_motion_windows"]["UAV-ONEWAY-01"]["launch_from_asset"] == "CV-01"
     roles = {item["asset_id"]: item["role"] for item in scenario["assets"]}
@@ -225,14 +239,18 @@ def test_carrier_scenario_uses_individual_resources_and_complete_offline_media()
     assert {item["asset_id"] for item in assignments["COASTAL-AIRFIELD-01"]["participants"]} == {"CV-01", "UAV-ONEWAY-01"}
     assert assignments["COASTAL-AIRFIELD-01"]["participants"][1]["expend_source_asset"] is True
     assert assignments["MOBILE-COASTAL-AD-01"]["asset_id"] == "UAV-STRIKE-01"
+    assert scenario["engagement_policy"]["maximum_track_age_sec"] == 600
+    assert scenario["engagement_policy"]["maximum_assessment_age_sec"] == 3000
+    assert scenario["engagement_policy"]["minimum_comms_strength"] == 60
+    assert scenario["engagement_policy"]["maximum_assessment_age_sec"] == 3000
     checkpoints = {
         item["checkpoint_id"]: item for item in scenario["demo_checkpoints"]
     }
     assert checkpoints["ASC-CP-WAVE2"]["min_elapsed_sec"] == 4560
-    assert checkpoints["ASC-CP-WAVE2"]["conditions"]["event_types_emitted"] == [
-        "damage_assessment_confirmed"
-    ]
     assert checkpoints["ASC-CP-WAVE2"]["conditions"]["weapon_hit_target_ids"] == [
+        "COASTAL-AIRFIELD-01"
+    ]
+    assert checkpoints["ASC-CP-WAVE2"]["conditions"]["damage_assessment_target_ids"] == [
         "COASTAL-AIRFIELD-01"
     ]
     assert checkpoints["ASC-CP-WAVE1"]["engagement_wave"] == 1
@@ -240,10 +258,29 @@ def test_carrier_scenario_uses_individual_resources_and_complete_offline_media()
         "ASC-MEDIA-06"
     ]
     assert checkpoints["ASC-CP-WAVE2"]["engagement_wave"] == 2
-    assert checkpoints["ASC-CP-CLOSE"]["operator_action_type"] == "review"
+    assert checkpoints["ASC-CP-CLOSE"].get("requires_operator_action") is not True
+    assert "operator_action_type" not in checkpoints["ASC-CP-CLOSE"]
     assert checkpoints["ASC-CP-CLOSE"]["conditions"]["weapon_hit_target_ids"] == [
         "COASTAL-AIRFIELD-01", "MOBILE-COASTAL-AD-01",
     ]
+    assert checkpoints["ASC-CP-CLOSE"]["conditions"]["damage_assessment_target_ids"] == [
+        "COASTAL-AIRFIELD-01", "MOBILE-COASTAL-AD-01",
+    ]
+    capture_by_media = {
+        item["media_id"]: item for item in scenario["capture_plans"]
+    }
+    assert capture_by_media["ASC-MEDIA-10"]["target_refs"] == [
+        "MOBILE-COASTAL-AD-01"
+    ]
+    assert capture_by_media["ASC-MEDIA-10"]["capture_parameters"][
+        "required_weapon_hit_target_ids"
+    ] == ["MOBILE-COASTAL-AD-01"]
+    assert capture_by_media["ASC-MEDIA-10"]["capture_parameters"][
+        "required_damage_assessment_target_ids"
+    ] == ["MOBILE-COASTAL-AD-01"]
+    assert capture_by_media["ASC-MEDIA-09"]["capture_parameters"][
+        "required_damage_assessment_target_ids"
+    ] == ["COASTAL-AIRFIELD-01", "MOBILE-COASTAL-AD-01"]
 
 
 def test_satellites_traverse_the_complete_local_ground_track_during_access() -> None:
@@ -413,6 +450,7 @@ def test_target_specific_weapons_wave_gate_and_one_way_asset_conversion() -> Non
         for event in engine.events
     )
     assert "ASC-MEDIA-08" in engine.media_capture.captured_media_ids
+    _apply_airfield_assessments(engine)
     mobile_track = _track_by_truth(engine, "MOBILE-COASTAL-AD-01")
     assert mobile_track["engagement_eligible"] is True
     action = mobile_track["engagement_action"]
@@ -433,8 +471,38 @@ def test_target_specific_weapons_wave_gate_and_one_way_asset_conversion() -> Non
         "source": "commander_workflow",
         "status": "completed",
     }
-    _advance(engine, 5520)
+    _advance(engine, 5760)
+    assessed_targets = {
+        event.get("target_threat_id")
+        for event in engine.events
+        if event.get("type") == "damage_assessment_confirmed"
+    }
+    assert assessed_targets == {
+        "COASTAL-AIRFIELD-01", "MOBILE-COASTAL-AD-01",
+    }
+    assert "ASC-MEDIA-10" in engine.media_capture.captured_media_ids
     assert "ASC-MEDIA-09" in engine.media_capture.captured_media_ids
+    assert engine.assets["UAV-STRIKE-01"]["_current_behavior"] == (
+        "post_launch_carrier_recovery"
+    )
+    assert engine.assets["UAV-ISR-01"]["_current_behavior"] == "carrier_recovery"
+    assert engine.assets["AEW-01"]["_current_behavior"] == "carrier_recovery"
+
+
+def test_wave_one_remains_authorizable_after_real_backend_checkpoint_delay() -> None:
+    scenario = get_scenario(SCENARIO_ID)
+    assert scenario is not None
+    engine = SimEngine(seed=int(scenario["default_seed"]))
+    engine.load_scenario(scenario)
+    engine.clock["run_id"] = "run-asc-assessment-age"
+
+    _advance(engine, 2193)
+    _apply_airfield_assessments(engine)
+    _advance(engine, 3920)
+
+    airfield = _track_by_truth(engine, "COASTAL-AIRFIELD-01")
+    assert airfield["engagement_eligible"] is True
+    assert airfield["engagement_action"]["wave"] == 1
 
 
 def test_bda_media_never_appears_before_a_real_weapon_hit() -> None:
@@ -447,6 +515,7 @@ def test_bda_media_never_appears_before_a_real_weapon_hit() -> None:
     _advance(engine, 4800)
 
     assert "ASC-MEDIA-08" not in engine.media_capture.captured_media_ids
+    assert "ASC-MEDIA-10" not in engine.media_capture.captured_media_ids
     assert "ASC-MEDIA-09" not in engine.media_capture.captured_media_ids
 
 
@@ -494,12 +563,12 @@ def test_second_wave_release_route_is_written_only_by_radar_fire_command() -> No
         if phase["behavior"] == "standoff_weapon_hold"
     )
     standoff_labels = {point["label"] for point in standoff["route"]}
-    held_labels = {
+    return_labels = {
         point["label"]
         for point in scenario["engagement_policy"]["post_launch_routes"]["UAV-STRIKE-01"]
     }
     # The two routes must be tellable apart, or this test proves nothing.
-    assert not (standoff_labels & held_labels)
+    assert not (standoff_labels & return_labels)
 
     def fly(fire: bool) -> tuple[SimEngine, set[str], str]:
         engine = SimEngine(seed=int(scenario["default_seed"]))
@@ -510,6 +579,7 @@ def test_second_wave_release_route_is_written_only_by_radar_fire_command() -> No
         _authorize_wave_one(engine)
         _advance(engine, 4570)
         if fire:
+            _apply_airfield_assessments(engine)
             track = _track_by_truth(engine, "MOBILE-COASTAL-AD-01")
             action = track["engagement_action"]
             result = engine.fire_weapon_at_track(
@@ -529,8 +599,8 @@ def test_second_wave_release_route_is_written_only_by_radar_fire_command() -> No
     assert withheld.assets["UAV-STRIKE-01"]["_ammo"]["舰载无人机空地导弹"] == 1
 
     released, labels, behavior = fly(fire=True)
-    assert labels <= held_labels, labels
-    assert behavior == "radar_missile_release_and_egress"
+    assert labels <= return_labels, labels
+    assert behavior == "post_launch_carrier_recovery"
     assert released.assets["UAV-STRIKE-01"]["position"]["alt_ft"] == 7000
     assert released.assets["UAV-STRIKE-01"]["_ammo"]["舰载无人机空地导弹"] == 0
 
@@ -547,6 +617,7 @@ def test_delayed_second_wave_still_attacks_radar_with_missile_uav() -> None:
     _authorize_wave_one(engine)
 
     _advance(engine, 5000)
+    _apply_airfield_assessments(engine)
     asset = engine.assets["UAV-STRIKE-01"]
     assert asset["status"] == "active"
     assert asset["_ammo"]["舰载无人机空地导弹"] == 1
@@ -576,7 +647,7 @@ def test_delayed_second_wave_still_attacks_radar_with_missile_uav() -> None:
     )
 
 
-def test_first_wave_bda_keeps_isr_on_station_until_the_recovery_window() -> None:
+def test_first_wave_bda_keeps_isr_on_station_until_the_second_target_bda() -> None:
     scenario = get_scenario(SCENARIO_ID)
     assert scenario is not None
     engine = SimEngine(seed=int(scenario["default_seed"]))
@@ -593,8 +664,9 @@ def test_first_wave_bda_keeps_isr_on_station_until_the_recovery_window() -> None
         for event in engine.events
     )
     assert engine.assets["UAV-ISR-01"]["_current_behavior"] == "post_strike_bda_orbit"
-    _advance(engine, 5040)
-    assert engine.assets["UAV-ISR-01"]["_current_behavior"] == "carrier_recovery"
+    _advance(engine, 5600)
+    assert engine.assets["UAV-ISR-01"]["_current_behavior"] == "post_strike_bda_orbit"
+    assert engine.assets["AEW-01"]["_current_behavior"] == "wave2_condition_assessment"
 
 
 def test_scenario_stays_consistent_when_no_backend_assessment_ever_arrives() -> None:
@@ -628,9 +700,9 @@ def test_scenario_stays_consistent_when_no_backend_assessment_ever_arrives() -> 
     assert payload["_current_behavior"] == "wave1_terminal_hold"
     assert payload["status"] == "active"
     assert payload["_ammo"]["自杀式无人机战斗部"] == 1
-    # UAV-STRIKE-01 still recovers on schedule; withholding the decision does
-    # not strand it in the standoff hold.
-    assert engine.assets["UAV-STRIKE-01"]["_current_behavior"] == "post_launch_carrier_recovery"
+    # Without a second-wave fire command there is no artificial clock-driven
+    # return: the armed platform remains in its declared safe standoff hold.
+    assert engine.assets["UAV-STRIKE-01"]["_current_behavior"] == "standoff_weapon_hold"
 
     threat = engine.threats["MOBILE-COASTAL-AD-01"]
     closest = min(

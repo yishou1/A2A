@@ -31,8 +31,10 @@ CHECKSUMS = {
     "04-uav-ir-mobile-targets.png": "152987a90fde6385c0d2781d435666b104cea4350fac9e3bef07c2efc19fd085",
     "05-target-weapon-allocation.svg": "70bbd31ca963804e9f27d8639a79e29a02d6cd2df7fadd931c7b6e7ac62601ab",
     "06-weapon-chain.svg": "e419cd59809ec39913259cf75aa06b9152812ea6d5be45369add9b46aec139c4",
+    "07-satellite-revisit-track.svg": "7b0676674efe234eddafe7b19e20a53ba78bfb92f5c52627410af0eabfc6ad2a",
     "08-post-strike-sar-bda.png": "3d59a45dbdfdc4488ec32e7f597e45dcbb4e936b55151df8baf70d1c682f639c",
-    "09-recovery-summary.svg": "a9f91ce6c6d9a043b47f48a40bbcee936d3b21e983b94d10955aee4149d42b34",
+    "09-recovery-summary.svg": "cb85dae2c8bba100ef6e6b8500ec5504060ef6c227601930b24dc9e953ed380f",
+    "10-mobile-radar-bda.svg": "5925bc9eec09b4f2fe69aa149ceb1acfe1ec6349d6835ff37dcc84261c9bdf0a",
 }
 
 
@@ -49,11 +51,13 @@ def _media_cues() -> list[dict[str, Any]]:
         ("ASC-MEDIA-01", "01-satellite-sar-airfield.png", 360, "FIND", "卫星 SAR 发现疑似滨海机场", "一次真实过境形成虚构滨海机场、沿海道路活动和民用港区的宽域 SAR 线索；目标属性由后端依据当前证据判断。", "SAT-A2S-01/ORBITAL-SAR", "radar", "derived_sensor_product"),
         ("ASC-MEDIA-02", "02-uav-eo-airfield.png", 1260, "FIX", "舰载侦察无人机光电复核", "UAV-ISR-01 从海上安全距离回传稳定光电帧，复核机场跑道和与民用港区的安全间隔。", "UAV-ISR-01/EO-IR", "eo_ir", "raw_sensor_frame"),
         ("ASC-MEDIA-03", "03-intelligence-datalink.svg", 1800, "TRACK", "星—舰—预警机情报共享完成", "卫星与侦察无人机数据在 CV-01 完成时标对齐、完整性校验和航迹融合；AEW-01 负责空中战术协同与数据链中继。", "CV-01/C2-FUSION", "telemetry", "command_product"),
+        ("ASC-MEDIA-07", "07-satellite-revisit-track.svg", 1800, "TRACK", "侦察卫星02接力复访产品", "第二颗低轨侦察卫星在独立访问窗口形成第二时相航迹更新，并经通信中继下传；卫星离场后，已下传产品继续按有效期参与融合。", "SAT-A2S-02/ORBITAL-SAR", "radar", "derived_sensor_product"),
         ("ASC-MEDIA-04", "04-uav-ir-mobile-targets.png", 2160, "TRACK", "红外持续跟踪机动岸防单元", "UAV-ISR-01 以白热红外持续观察一辆沿海公路机动的雷达/防空单元，并同步校验其与民用港区的空间间隔。", "UAV-ISR-01/EO-IR", "eo_ir", "raw_sensor_frame"),
         ("ASC-MEDIA-05", "05-target-weapon-allocation.svg", 2700, "TARGET", "按目标分配独立打击资源", "机场由 CV-01 的舰载对陆巡航导弹与 UAV-ONEWAY-01 协同打击；机动雷达车只分配给 UAV-STRIKE-01 的空地导弹；民用港区始终列为禁射保护对象。", "CV-01/TARGET-ALLOCATION", "telemetry", "command_product"),
         ("ASC-MEDIA-06", "06-weapon-chain.svg", 3180, "ENGAGE", "双目标分波次武器链就绪", "第一波由航母巡航导弹与自杀式无人机协同攻击机场；第二波只在机场毁伤评估后，由导弹攻击无人机打击仍具威胁且远离民用港区的机动雷达车。", "CV-01/WEAPON-CHAIN", "telemetry", "command_product"),
         ("ASC-MEDIA-08", "08-post-strike-sar-bda.png", 4380, "ASSESS", "机场跑道变化检测与毁伤评估", "UAV-ISR-01 对机场跑道实施复查，变化产品只用于判断模拟跑道拒止效果，民用港区始终排除在目标集合之外。", "UAV-ISR-01/SAR", "radar", "raw_sensor_frame"),
-        ("ASC-MEDIA-09", "09-recovery-summary.svg", 5520, "ASSESS", "双目标效果确认与资源核销", "机场和机动雷达车均须出现实际命中记录；侦察、导弹攻击无人机和预警机按甲板调度分批返航，自杀式无人机按一次性资源核销。", "CV-01/RECOVERY-STATUS", "telemetry", "command_product"),
+        ("ASC-MEDIA-10", "10-mobile-radar-bda.svg", 5400, "ASSESS", "机动雷达车攻击后独立毁伤评估", "UAV-ISR-01 对第二波机动雷达车实施攻击后复查；该结论只绑定雷达车，不复用机场毁伤结果，也不包含民用港区。", "UAV-ISR-01/EO-IR", "eo_ir", "raw_sensor_frame"),
+        ("ASC-MEDIA-09", "09-recovery-summary.svg", 5760, "ASSESS", "双目标毁伤闭环与返航序列", "机场和机动雷达车均完成各自的命中后复查与毁伤评估后，系统才发布资源核销结果并启动可回收航空器返航序列；不将返航启动表述为已经着舰。", "CV-01/RECOVERY-STATUS", "telemetry", "command_product"),
     )
     return [
         media_record(
@@ -84,7 +88,9 @@ def _capture_contract() -> tuple[list[dict[str, Any]], list[dict[str, Any]], lis
         sensor_capability("ASC-CAP-ISR-IR", "UAV-ISR-01", "EO-IR", sensor_type="infrared", modalities=["eo_ir"], configured_sensor="EO-IR", parameters={"effective_range_nm": 24, "polarity": "white_hot", "resolution_px": [1672, 941]}),
         sensor_capability("ASC-CAP-ALLOC", "CV-01", "TARGET-ALLOCATION", sensor_type="command_status", modalities=["telemetry"], source_kind="command_system", parameters={"current_time_only": True, "target_deconfliction": True}),
         sensor_capability("ASC-CAP-CHAIN", "CV-01", "WEAPON-CHAIN", sensor_type="command_status", modalities=["telemetry"], source_kind="command_system", parameters={"current_time_only": True, "simulation_execution_only": True}),
+        sensor_capability("ASC-CAP-SAT-REVISIT", "SAT-A2S-02", "ORBITAL-SAR", sensor_type="spaceborne_sar", modalities=["radar"], configured_sensor="ORBITAL-SAR", parameters={"swath_width_km": 150, "ground_sample_distance_m": 3, "source_sensors": ["ORBITAL-SAR"]}),
         sensor_capability("ASC-CAP-BDA", "UAV-ISR-01", "SAR", sensor_type="airborne_sar", modalities=["radar"], configured_sensor="SAR", parameters={"effective_range_nm": 32, "ground_sample_distance_m": 1.2, "source_sensors": ["SAR"]}),
+        sensor_capability("ASC-CAP-BDA-MOBILE", "UAV-ISR-01", "EO-IR", sensor_type="electro_optical", modalities=["eo_ir"], configured_sensor="EO-IR", parameters={"effective_range_nm": 32, "horizontal_fov_deg": 12, "source_sensors": ["EO-IR"]}),
         sensor_capability("ASC-CAP-RECOVERY", "CV-01", "RECOVERY-STATUS", sensor_type="command_status", modalities=["telemetry"], source_kind="command_system", parameters={"current_time_only": True, "resource_accounting": True}),
     ]
     by_id = {item["capability_id"]: item for item in capabilities}
@@ -92,12 +98,14 @@ def _capture_contract() -> tuple[list[dict[str, Any]], list[dict[str, Any]], lis
         ("ASC-MEDIA-00", "ASC-TASK-00", "ASC-CAP-EXT", "ingest", 0, 1, []),
         ("ASC-MEDIA-01", "ASC-TASK-01", "ASC-CAP-SAT-SAR", "derive", 300, 420, list(TARGET_IDS)),
         ("ASC-MEDIA-02", "ASC-TASK-02", "ASC-CAP-ISR-EO", "capture", 1200, 1320, ["COASTAL-AIRFIELD-01", "CIVILIAN-PORT-01"]),
+        ("ASC-MEDIA-07", "ASC-TASK-07", "ASC-CAP-SAT-REVISIT", "derive", 1720, 1900, list(TARGET_IDS)),
         ("ASC-MEDIA-03", "ASC-TASK-03", "ASC-CAP-C2-FUSION", "command_product", 1740, 1860, list(TARGET_IDS)),
         ("ASC-MEDIA-04", "ASC-TASK-04", "ASC-CAP-ISR-IR", "capture", 2100, 2220, ["MOBILE-COASTAL-AD-01", "CIVILIAN-PORT-01"]),
         ("ASC-MEDIA-05", "ASC-TASK-05", "ASC-CAP-ALLOC", "command_product", 2640, 2760, list(TARGET_IDS)),
         ("ASC-MEDIA-06", "ASC-TASK-06", "ASC-CAP-CHAIN", "command_product", 3120, 3240, list(TARGET_IDS)),
         ("ASC-MEDIA-08", "ASC-TASK-08", "ASC-CAP-BDA", "capture", 4320, 4800, ["COASTAL-AIRFIELD-01"]),
-        ("ASC-MEDIA-09", "ASC-TASK-09", "ASC-CAP-RECOVERY", "command_product", 5460, 5580, list(TARGET_IDS)),
+        ("ASC-MEDIA-10", "ASC-TASK-10", "ASC-CAP-BDA-MOBILE", "capture", 5340, 5820, ["MOBILE-COASTAL-AD-01"]),
+        ("ASC-MEDIA-09", "ASC-TASK-09", "ASC-CAP-RECOVERY", "command_product", 5700, 5940, list(TARGET_IDS)),
     )
     tasks = [sensor_task(task_id, by_id[capability_id], task_type=task_type, start_sec=start, end_sec=end, target_refs=targets, branch_ids=["*"]) for media_id, task_id, capability_id, task_type, start, end, targets in specs]
     tasks_by_media = {media_id: task for (media_id, *_), task in zip(specs, tasks)}
@@ -107,11 +115,13 @@ def _capture_contract() -> tuple[list[dict[str, Any]], list[dict[str, Any]], lis
         "ASC-MEDIA-01": {"renderer_type": "radar_ppi", "swath_width_km": 160, "ground_sample_distance_m": 3, "registration_group": "ASC-AIRFIELD", "resolution_px": [1672, 941], "data_source": "sensor_observations"},
         "ASC-MEDIA-02": {"effective_range_nm": 60, "horizontal_fov_deg": 16, "point_at_target": True, "resolution_px": [1672, 941]},
         "ASC-MEDIA-03": {"renderer_type": "network_topology", "required_source_media_ids": ["ASC-MEDIA-01", "ASC-MEDIA-02"], "data_source": "network_and_track_state"},
-        "ASC-MEDIA-04": {"effective_range_nm": 24, "polarity": "white_hot", "point_at_target": True, "resolution_px": [1672, 941]},
+        "ASC-MEDIA-04": {"effective_range_nm": 24, "polarity": "white_hot", "point_at_target": True, "registration_group": "ASC-MOBILE-AD", "resolution_px": [1672, 941]},
         "ASC-MEDIA-05": {"renderer_type": "resource_status", "data_source": "task_state", "assignment_mode": "target_specific"},
         "ASC-MEDIA-06": {"renderer_type": "execution_state", "data_source": "task_state", "simulation_execution_only": True},
+        "ASC-MEDIA-07": {"renderer_type": "radar_ppi", "swath_width_km": 150, "ground_sample_distance_m": 3, "registration_group": "ASC-REVISIT", "resolution_px": [1600, 900], "data_source": "sensor_observations", "revisit_of_media_id": "ASC-MEDIA-01"},
         "ASC-MEDIA-08": {"effective_range_nm": 32, "ground_sample_distance_m": 1.2, "registration_group": "ASC-AIRFIELD", "reference_media_id": "ASC-MEDIA-01", "resolution_px": [1672, 941], "data_source": "sensor_observations", "point_at_target": True, "required_event_types": ["weapon_hit"], "required_weapon_hit_target_ids": ["COASTAL-AIRFIELD-01"]},
-        "ASC-MEDIA-09": {"renderer_type": "resource_status", "data_source": "task_state", "resource_accounting": True, "required_event_types": ["weapon_hit"], "required_weapon_hit_target_ids": ["COASTAL-AIRFIELD-01", "MOBILE-COASTAL-AD-01"]},
+        "ASC-MEDIA-10": {"effective_range_nm": 32, "horizontal_fov_deg": 12, "registration_group": "ASC-MOBILE-AD", "reference_media_id": "ASC-MEDIA-04", "resolution_px": [1600, 900], "data_source": "sensor_observations", "point_at_target": True, "required_event_types": ["weapon_hit", "damage_assessment_confirmed"], "required_weapon_hit_target_ids": ["MOBILE-COASTAL-AD-01"], "required_damage_assessment_target_ids": ["MOBILE-COASTAL-AD-01"]},
+        "ASC-MEDIA-09": {"renderer_type": "resource_status", "data_source": "task_state", "resource_accounting": True, "required_event_types": ["damage_assessment_confirmed"], "required_weapon_hit_target_ids": ["COASTAL-AIRFIELD-01", "MOBILE-COASTAL-AD-01"], "required_damage_assessment_target_ids": ["COASTAL-AIRFIELD-01", "MOBILE-COASTAL-AD-01"]},
     }
     captures = [
         capture_plan(
@@ -130,19 +140,19 @@ def _timeline() -> list[dict[str, Any]]:
         {"cue_id": "ASC-CUE-02", "at_sec": 360, "phase": "FIND", "level": "INFO", "title": "卫星过境产品形成机场宽域线索", "description": "卫星已离开本地地图；其一次过境 SAR 产品发现跑道、沿海道路活动和民用港区，所有地面接触保持未知属性。", "media_ids": ["ASC-MEDIA-01"], "functional_agent_ids": ["A1"], "model_requirement_ids": ["M01", "M15", "M17"], "function_ids": ["KC-01", "KC-08"]},
         {"cue_id": "ASC-CUE-03", "at_sec": 720, "phase": "FIX", "level": "INFO", "title": "预警机与侦察无人机先行升空", "description": "AEW-01 先建立海上预警与战术协同席位，UAV-ISR-01 随后实施目标复核；两类攻击无人机继续留在甲板待命。", "media_ids": [], "functional_agent_ids": ["A1", "A3"], "model_requirement_ids": ["M06", "M19"], "function_ids": ["KC-04", "KC-05"]},
         {"cue_id": "ASC-CUE-04", "at_sec": 1260, "phase": "FIX", "level": "INFO", "title": "光电复核固定设施布局", "description": "侦察无人机确认跑道、固定雷达与加固设施的空间关系，但不在传感器端直接给出敌我结论。", "media_ids": ["ASC-MEDIA-02"], "functional_agent_ids": ["A1", "A2"], "model_requirement_ids": ["M05", "M07", "M20"], "function_ids": ["KC-06", "KC-07", "KC-09", "KC-10"]},
-        {"cue_id": "ASC-CUE-04A", "at_sec": 1740, "phase": "TRACK", "level": "INFO", "title": "第二颗低轨卫星接替复访", "description": "侦察卫星02进入后续访问窗口，经通信中继卫星向CV-01下传区域变化与航迹更新；首颗卫星的SAR产品继续按有效期参与融合。", "media_ids": [], "functional_agent_ids": ["A1", "A2"], "model_requirement_ids": ["M15", "M19"], "function_ids": []},
+        {"cue_id": "ASC-CUE-04A", "at_sec": 1800, "phase": "TRACK", "level": "INFO", "title": "第二颗低轨卫星接替复访", "description": "侦察卫星02在独立访问窗口形成第二时相产品，经通信中继卫星向CV-01下传区域变化与航迹更新；首颗卫星的SAR产品继续按有效期参与融合。", "media_ids": ["ASC-MEDIA-07"], "functional_agent_ids": ["A1", "A2"], "model_requirement_ids": ["M15", "M19"], "function_ids": []},
         {"cue_id": "ASC-CUE-05", "at_sec": 2160, "phase": "TRACK", "level": "WARNING", "title": "侦察完成并持续跟踪岸防单元", "description": "CV-01 完成星、舰、机情报融合；UAV-ISR-01 已分别复核机场、机动岸防单元和民用港区，AEW-01 持续承担空中战术协同与数据链中继。", "media_ids": ["ASC-MEDIA-03", "ASC-MEDIA-04"], "functional_agent_ids": ["A1", "A2", "A3"], "model_requirement_ids": ["M02", "M10", "M11", "M19"], "function_ids": ["KC-11", "KC-12", "KC-13", "KC-14", "KC-15"]},
-        {"cue_id": "ASC-CUE-05A", "at_sec": 2400, "phase": "TRACK", "level": "INFO", "title": "攻击无人机群进入防区外待战航线", "description": "完成机动目标发现后，UAV-STRIKE-01 才从航母起飞，以无人机群符号进入雷达车防区外待战航线；此时只保持跟踪，不释放武器。", "media_ids": [], "functional_agent_ids": ["A2", "A3", "A5"], "model_requirement_ids": ["M13", "M16", "M19"], "function_ids": ["KC-18", "KC-19"]},
+        {"cue_id": "ASC-CUE-05A", "at_sec": 2400, "phase": "TRACK", "level": "INFO", "title": "导弹攻击无人机进入防区外待战航线", "description": "机动岸防单元由后续复访和舰载侦察补充发现，且第一波首先处理固定机场目标；确认该单元仍具威胁后，UAV-STRIKE-01 才从航母起飞进入防区外待战航线。地图使用机群符号增强辨识，但后端只建模一个编号明确的逻辑仿真实体。", "media_ids": [], "functional_agent_ids": ["A2", "A3", "A5"], "model_requirement_ids": ["M13", "M16", "M19"], "function_ids": ["KC-18", "KC-19"]},
         {"cue_id": "ASC-CUE-06", "at_sec": 2700, "phase": "TARGET", "level": "WARNING", "title": "按目标完成差异化分配", "description": "机场分配航母巡航导弹与自杀式无人机，机动雷达车分配导弹攻击无人机；民用港区列入禁射清单。", "media_ids": ["ASC-MEDIA-05"], "functional_agent_ids": ["A3", "A4", "A5"], "model_requirement_ids": ["M09", "M10", "M11", "M13", "M14"], "function_ids": ["KC-16", "KC-17", "KC-18", "KC-20", "KC-21"]},
         {"cue_id": "ASC-CUE-06A", "at_sec": 2880, "phase": "TARGET", "level": "INFO", "title": "自杀式无人机进入机场攻击等待航线", "description": "机场完成目标分配后，UAV-ONEWAY-01 才从航母起飞并进入海上安全等待区；第一波授权前不得转入末端攻击。", "media_ids": [], "functional_agent_ids": ["A3", "A5", "A6"], "model_requirement_ids": ["M13", "M14", "M16"], "function_ids": ["KC-20", "KC-21"]},
         {"cue_id": "ASC-CUE-07", "at_sec": 3180, "phase": "ENGAGE", "level": "CRITICAL", "title": "双目标分波次武器链建立", "description": "第一波机场双节点打击和第二波雷达车导弹打击均已完成目标去重、航路与保护区检查。", "media_ids": ["ASC-MEDIA-06"], "functional_agent_ids": ["A6"], "model_requirement_ids": ["M03", "M13", "M16"], "function_ids": ["KC-22", "KC-23"]},
         {"cue_id": "ASC-CUE-08", "at_sec": 3390, "phase": "ENGAGE", "level": "CRITICAL", "title": "第一波等待操作员明确授权", "description": "完成民用港区保护区、证据时效和目标去重检查后，系统在授权检查点弹出真实操作员确认窗口；资料区不再用静态图片模拟授权按钮。", "media_ids": [], "functional_agent_ids": ["A5", "A6"], "model_requirement_ids": ["M04", "M13", "M16"], "function_ids": ["KC-24"]},
         {"cue_id": "ASC-CUE-08B", "at_sec": 3900, "phase": "ASSESS", "level": "INFO", "title": "侦察无人机持续监视第一波目标区", "description": "UAV-ISR-01 保持对机场的连续成像；只有收到第一波真实命中事件后才形成变化检测结论。UAV-STRIKE-01 同期保持雷达车当前航迹和第二波待战状态。", "media_ids": [], "functional_agent_ids": ["A2", "A6"], "model_requirement_ids": ["M18"], "function_ids": ["KC-25", "KC-27"]},
-        {"cue_id": "ASC-CUE-09", "at_sec": 4380, "phase": "ASSESS", "level": "INFO", "title": "侦察无人机实施第一波毁伤评估", "description": "当前 SAR 变化产品确认固定目标效果，并判定机动威胁是否仍需第二波补充打击。", "media_ids": ["ASC-MEDIA-08"], "functional_agent_ids": ["A2", "A6"], "model_requirement_ids": ["M18"], "function_ids": ["KC-02", "KC-25", "KC-27"]},
+        {"cue_id": "ASC-CUE-09", "at_sec": 4380, "phase": "ASSESS", "level": "INFO", "title": "侦察无人机实施第一波毁伤评估", "description": "当前 SAR 变化产品只确认机场固定目标效果；机动雷达车仍由持续跟踪证据和防区外约束决定是否进入第二波，不复用机场毁伤结论。", "media_ids": ["ASC-MEDIA-08"], "functional_agent_ids": ["A2", "A6"], "model_requirement_ids": ["M18"], "function_ids": ["KC-02", "KC-25", "KC-27"]},
         {"cue_id": "ASC-CUE-10", "at_sec": 4560, "phase": "ENGAGE", "level": "WARNING", "title": "导弹攻击无人机等待第二波授权", "description": "机场毁伤评估成立后才开放第二波弹窗。UAV-STRIKE-01 只能攻击持续跟踪、远离民用港区且仍具威胁的机动雷达车；失联、证据过期或授权撤销时保持防区外等待。", "media_ids": [], "functional_agent_ids": ["A4", "A5", "A6"], "model_requirement_ids": ["M13", "M14", "M16"], "function_ids": ["KC-24", "KC-26"]},
-        {"cue_id": "ASC-CUE-10A", "at_sec": 5040, "phase": "ASSESS", "level": "INFO", "title": "侦察无人机进入首个甲板回收窗口", "description": "UAV-ISR-01 结束变化检测与证据提交后最先返航，让出甲板；CV-01 自此保持迎风起降跑道航向，后续回收与撤离同日完成。", "media_ids": [], "functional_agent_ids": ["A2", "A6"], "model_requirement_ids": ["M18"], "function_ids": ["KC-28"]},
-        {"cue_id": "ASC-CUE-10B", "at_sec": 5340, "phase": "ASSESS", "level": "INFO", "title": "双目标命中记录汇总", "description": "系统分别核对机场与机动雷达车的武器命中事件；缺少任一目标记录时不得进入剧本完成状态。", "media_ids": [], "functional_agent_ids": ["A3", "A6"], "model_requirement_ids": ["M14", "M19"], "function_ids": ["KC-28"]},
-        {"cue_id": "ASC-CUE-11", "at_sec": 5520, "phase": "ASSESS", "level": "INFO", "title": "甲板窗口内分批回收可回收资源", "description": "侦察与导弹攻击无人机先后返航，AEW-01 最后结束空中指挥并回收；自杀式无人机完成一次性资源核销，特遣群撤离。", "media_ids": ["ASC-MEDIA-09"], "functional_agent_ids": ["A3", "A6"], "model_requirement_ids": ["M14", "M18"], "function_ids": ["KC-28"]},
+        {"cue_id": "ASC-CUE-10A", "at_sec": 5040, "phase": "ASSESS", "level": "INFO", "title": "侦察无人机保持双目标评估值班", "description": "UAV-ISR-01 不按固定时刻提前返航：若第二波尚未授权或尚未形成雷达车命中记录，则继续维持机动目标航迹和攻击后复查能力。", "media_ids": [], "functional_agent_ids": ["A2", "A6"], "model_requirement_ids": ["M18"], "function_ids": ["KC-28"]},
+        {"cue_id": "ASC-CUE-10B", "at_sec": 5400, "phase": "ASSESS", "level": "INFO", "title": "第二波机动目标独立毁伤评估", "description": "收到雷达车实际命中事件后，UAV-ISR-01 形成目标专属的攻击后复查产品；缺少该目标当前观测和毁伤结论时，不得以机场结果代替。", "media_ids": ["ASC-MEDIA-10"], "functional_agent_ids": ["A2", "A6"], "model_requirement_ids": ["M18"], "function_ids": ["KC-02", "KC-25", "KC-27"]},
+        {"cue_id": "ASC-CUE-11", "at_sec": 5760, "phase": "ASSESS", "level": "INFO", "title": "双目标毁伤闭环后启动返航序列", "description": "机场与机动雷达车分别完成命中后复查和毁伤评估后，导弹攻击无人机、侦察无人机与预警机才依次启动返航；自杀式无人机按一次性资源核销。系统只声明返航开始，不模拟尚未实现的着舰完成状态。", "media_ids": ["ASC-MEDIA-09"], "functional_agent_ids": ["A3", "A6"], "model_requirement_ids": ["M14", "M18"], "function_ids": ["KC-28"]},
     ]
 
 
@@ -178,20 +188,26 @@ def _phase(
 def build_air_space_sea_carrier_strike_scenario() -> dict[str, Any]:
     orbital_tracks = {
         "SAT-A2S-01": [
-            {"lat": 17.55, "lng": 121.05, "at_sec": 240, "label": "LOCAL-VIEW-ENTRY"},
+            {"lat": 16.82, "lng": 120.18, "at_sec": 240, "label": "REGIONAL-TRACK-ENTRY"},
+            {"lat": 17.30, "lng": 120.72, "at_sec": 265, "label": "LOCAL-VIEW-ENTRY"},
             {"lat": 17.86, "lng": 121.34, "at_sec": 290, "label": "AO-ENTRY-PROJECTION"},
             {"lat": 17.95, "lng": 121.46, "at_sec": 310, "label": "GROUND-TRACK-SW"},
             {"lat": 18.24, "lng": 121.88, "at_sec": 360, "label": "SAR-SWATH-CENTER"},
             {"lat": 18.54, "lng": 122.30, "at_sec": 430, "label": "AO-EXIT-PROJECTION"},
-            {"lat": 18.82, "lng": 122.75, "at_sec": 590, "label": "LOCAL-VIEW-EXIT"},
+            {"lat": 18.86, "lng": 122.78, "at_sec": 510, "label": "LOCAL-VIEW-EXIT"},
+            {"lat": 19.28, "lng": 123.34, "at_sec": 555, "label": "REGIONAL-TRACK-NORTHEAST"},
+            {"lat": 19.68, "lng": 123.88, "at_sec": 599, "label": "REGIONAL-TRACK-EXIT"},
         ],
         "SAT-A2S-02": [
-            {"lat": 17.52, "lng": 121.12, "at_sec": 1680, "label": "REVISIT-LOCAL-VIEW-ENTRY"},
+            {"lat": 16.78, "lng": 120.24, "at_sec": 1680, "label": "REVISIT-REGIONAL-ENTRY"},
+            {"lat": 17.27, "lng": 120.80, "at_sec": 1700, "label": "REVISIT-LOCAL-VIEW-ENTRY"},
             {"lat": 17.74, "lng": 121.46, "at_sec": 1720, "label": "REVISIT-AO-ENTRY"},
             {"lat": 17.88, "lng": 121.60, "at_sec": 1740, "label": "REVISIT-GROUND-TRACK-SW"},
             {"lat": 18.20, "lng": 121.96, "at_sec": 1800, "label": "REVISIT-SWATH-CENTER"},
             {"lat": 18.58, "lng": 122.42, "at_sec": 1900, "label": "REVISIT-AO-EXIT"},
-            {"lat": 18.84, "lng": 122.78, "at_sec": 2030, "label": "REVISIT-LOCAL-VIEW-EXIT"},
+            {"lat": 18.88, "lng": 122.82, "at_sec": 1960, "label": "REVISIT-LOCAL-VIEW-EXIT"},
+            {"lat": 19.31, "lng": 123.38, "at_sec": 2000, "label": "REVISIT-REGIONAL-NORTHEAST"},
+            {"lat": 19.72, "lng": 123.92, "at_sec": 2039, "label": "REVISIT-REGIONAL-EXIT"},
         ],
     }
     assets = [
@@ -260,10 +276,6 @@ def build_air_space_sea_carrier_strike_scenario() -> dict[str, Any]:
         (18.230, 122.665, "CARRIER-OPS-DOWNWIND-END"),
         (18.180, 122.680, "CARRIER-OPS-TURN-IN"),
     )
-    CV_WITHDRAWAL_ROUTE = _beat(
-        (18.12, 123.00, "CARRIER-WITHDRAWAL-1"),
-        (18.06, 123.18, "CARRIER-WITHDRAWAL-2"),
-    )
     DDG_ESM_PATROL = _beat(
         (18.490, 122.870, "DDG-NORTHWEST"),
         (18.545, 122.800, "DDG-ESM-NORTH-REACH"),
@@ -277,10 +289,6 @@ def build_air_space_sea_carrier_strike_scenario() -> dict[str, Any]:
         (18.440, 122.600, "DDG-GUARD-NORTHWEST"),
         (18.500, 122.700, "DDG-GUARD-NORTH"),
     )
-    DDG_WITHDRAWAL_ROUTE = _beat(
-        (18.40, 123.07, "DDG-WITHDRAWAL-1"),
-        (18.32, 123.23, "DDG-WITHDRAWAL-2"),
-    )
     FFG_INNER_SCREEN = _beat(
         (17.940, 122.590, "FFG-SOUTHWEST"),
         (17.870, 122.680, "FFG-INNER-SOUTH"),
@@ -292,10 +300,6 @@ def build_air_space_sea_carrier_strike_scenario() -> dict[str, Any]:
         (17.930, 122.760, "FFG-BDA-EAST"),
         (17.850, 122.830, "FFG-BDA-SOUTHEAST"),
         (17.790, 122.740, "FFG-BDA-SOUTH"),
-    )
-    FFG_WITHDRAWAL_ROUTE = _beat(
-        (17.94, 122.94, "FFG-WITHDRAWAL-1"),
-        (17.88, 123.12, "FFG-WITHDRAWAL-2"),
     )
     AEW_ORBIT = [
         (18.34, 122.66, "AEW-ORBIT-WEST"),
@@ -320,15 +324,8 @@ def build_air_space_sea_carrier_strike_scenario() -> dict[str, Any]:
         (18.18, 122.85, "ISR-RTB-3"),
     )
     UAV_STRIKE_STANDOFF_ROUTE = _rotate(air_routes["UAV-STRIKE-01"], 1)
-    # 释放后的待收航路是一条独立的、位于防区外释放线与航母之间的回收等待跑道，
-    # 首点取释放航线西端（开火时刻正在飞向的那一点），因此开火指令不会造成回头。
-    UAV_STRIKE_RELEASE_HOLD_ROUTE = _beat(
-        (18.165, 122.298, "STRIKE-01-RELEASE-EGRESS"),
-        (18.085, 122.440, "STRIKE-01-RECOVERY-HOLD-SOUTHWEST"),
-        (18.175, 122.580, "STRIKE-01-RECOVERY-HOLD-NORTHEAST"),
-        (18.240, 122.430, "STRIKE-01-RECOVERY-HOLD-NORTHWEST"),
-    )
     UAV_STRIKE_RECOVERY_ROUTE = _beat(
+        (18.165, 122.298, "STRIKE-01-RELEASE-EGRESS"),
         (18.14, 122.48, "STRIKE-01-RTB-1"),
         (18.16, 122.68, "STRIKE-01-RTB-2"),
         (18.18, 122.85, "STRIKE-01-RTB-3"),
@@ -346,7 +343,6 @@ def build_air_space_sea_carrier_strike_scenario() -> dict[str, Any]:
         _phase(2700, "target_allocation_cycle", "按目标类型完成差异化火力分配，保持接收窗口", 15, CV_FUSION_ROUTE, mode="loop"),
         _phase(3000, "carrier_strike_control_patrol", "转入迎风起降跑道，主导有人—无人双波次任务控制", 12, CV_FLIGHT_OPS_ROUTE, mode="loop"),
         _phase(4200, "wave2_decision_cycle", "依据第一波毁伤评估裁定第二波条件与回收顺序", 12, CV_RECOVERY_OPS_ROUTE, mode="loop"),
-        _phase(5700, "carrier_group_withdrawal", "完成全部航空器回收后向东侧外海撤离", 18, CV_WITHDRAWAL_ROUTE),
     ]
     # DDG-01：北侧区域防空警戒 → 前出北侧的对空搜索与电子侦察航线 →
     # 第一波武器链空域警戒（封锁西侧低空接近走廊）→ 向东撤离。
@@ -354,15 +350,13 @@ def build_air_space_sea_carrier_strike_scenario() -> dict[str, Any]:
         _phase(0, "area_air_defense_screen", "航母北侧区域防空警戒", 17, ship_routes["DDG-01"], mode="loop"),
         _phase(1260, "air_surveillance_and_esm_track", "预警机升空后前出北侧，执行对空搜索与电子侦察跟踪", 17, DDG_ESM_PATROL, mode="loop"),
         _phase(3360, "weapon_chain_air_guard", "第一波授权窗口转入武器链空域警戒，封锁西侧低空走廊", 18, DDG_GUARD_PATROL, mode="loop"),
-        _phase(5700, "escort_withdrawal_screen", "掩护航母向东撤离", 19, DDG_WITHDRAWAL_ROUTE),
     ]
     # FFG-01：南侧反潜警戒 → 随双波次任务控制向内侧重构屏护 →
     # 第一波毁伤评估窗口加强对海/对潜屏护 → 保持屏护向东撤离。
     behavior_phases["FFG-01"] = [
         _phase(0, "anti_submarine_screen", "航母南侧反潜警戒", 16, ship_routes["FFG-01"], mode="loop"),
         _phase(3000, "inner_screen_reposition", "随双波次任务控制向内侧重构反潜屏护", 15, FFG_INNER_SCREEN, mode="loop"),
-        _phase(4200, "bda_window_screen", "第一波毁伤评估窗口加强对海与对潜屏护", 15, FFG_BDA_SCREEN, mode="loop"),
-        _phase(5700, "escort_withdrawal_screen", "保持反潜屏护向东撤离", 18, FFG_WITHDRAWAL_ROUTE),
+        _phase(4200, "bda_window_screen", "毁伤评估与返航启动窗口加强对海与对潜屏护", 15, FFG_BDA_SCREEN, mode="loop"),
     ]
     # AEW-01：起飞 → 空中预警与战术协同基线 → 目标识别与航迹交接 →
     # 武器分配协调 → 第一波授权支援 → 第二波条件评估 → 最后返航。
@@ -373,8 +367,7 @@ def build_air_space_sea_carrier_strike_scenario() -> dict[str, Any]:
         _phase(1800, "air_borne_identification_and_handover", "对海空目标识别定性与航迹交接，向航母移交融合输入", 240, _rotate(_beat(*AEW_ORBIT), 3), mode="loop"),
         _phase(2700, "target_weapon_coordination", "按目标类型协调武器分配并消解空域航路冲突", 240, _beat(*AEW_ORBIT), mode="loop"),
         _phase(3360, "wave1_authorization_support", "为第一波防区外打击提供空域管制与链路中继", 240, _rotate(_beat(*AEW_ORBIT), 3), mode="loop"),
-        _phase(4200, "wave2_condition_assessment", "评估机场毁伤并协调导弹攻击无人机打击雷达车", 240, _beat(*AEW_ORBIT), mode="loop"),
-        _phase(5580, "carrier_recovery", "确认无人机回收窗口后最后返航", 285, AEW_RECOVERY_ROUTE),
+        _phase(4200, "wave2_condition_assessment", "评估机场毁伤并协调导弹攻击无人机打击雷达车；在第二目标完成毁伤评估前保持空中协同", 240, _beat(*AEW_ORBIT), mode="loop"),
     ]
     # UAV-ONEWAY-01：独立舰载自杀式无人机，只参与第一波机场打击；授权后由引擎
     # 按一次性资源核销，未授权时继续在海上安全等待区盘旋。
@@ -391,19 +384,17 @@ def build_air_space_sea_carrier_strike_scenario() -> dict[str, Any]:
         _phase(1500, "persistent_isr_orbit", "机场东侧外沿 SAR/光电/电子侦察盘旋", 120, air_routes["UAV-ISR-01"], mode="loop"),
         _phase(2160, "mobile_target_ir_track", "光电/红外持续跟踪机动岸防单元并保鲜证据时效", 120, _rotate(air_routes["UAV-ISR-01"], 2), mode="loop"),
         _phase(2700, "wave1_standoff_support", "为第一波防区外打击提供目标指示与保护区核查", 120, air_routes["UAV-ISR-01"], mode="loop"),
-        _phase(3900, "post_strike_bda_orbit", "第一波攻击后变化检测", 125, UAV_ISR_BDA_ROUTE, mode="loop"),
-        _phase(5040, "carrier_recovery", "完成综合评估后进入首个无人机回收窗口", 140, UAV_ISR_RECOVERY_ROUTE),
+        _phase(3900, "post_strike_bda_orbit", "持续实施机场变化检测，并为第二波机动目标保留攻击后复查能力", 125, UAV_ISR_BDA_ROUTE, mode="loop"),
     ]
     # UAV-STRIKE-01：挂载导弹待命 → 弹射起飞跟踪机动雷达车 → 等待第二波授权 →
-    # 甲板窗口返航。释放后的待收航路只由开火指令驱动的 post_launch_routes 写一次，
+    # 发射后立即外海脱离并返航。返航航路只由开火指令驱动的 post_launch_routes 写一次，
     # 这里刻意不设 3600 定时相位：相位每次应用都会无条件重设整条航路并把待飞序号
     # 拉回起点（WaypointNav.set_route），同一条几何被写第二次就会把已经飞出进度
     # 的资源拽回第一点。"同一航路、先到者定序"的说法不成立。
     behavior_phases["UAV-STRIKE-01"] = [
         _phase(0, "deck_standby", "挂载空地导弹在甲板待命", 0, [], status="staged"),
         _phase(2400, "carrier_launch", "机动雷达目标确认后从 CV-01 起飞进入防区外航线", 140, air_routes["UAV-STRIKE-01"], mode="loop", alt_ft=10000),
-        _phase(2700, "standoff_weapon_hold", "保持雷达车当前航迹并等待第二波攻击授权", 125, UAV_STRIKE_STANDOFF_ROUTE, mode="loop", alt_ft=8000),
-        _phase(5160, "post_launch_carrier_recovery", "第二波任务结束后沿东向航线返航", 145, UAV_STRIKE_RECOVERY_ROUTE, alt_ft=10000),
+        _phase(2700, "standoff_weapon_hold", "保持雷达车当前航迹并等待第二波攻击授权；未获授权时不提前返航", 125, UAV_STRIKE_STANDOFF_ROUTE, mode="loop", alt_ft=8000),
     ]
 
     visibility_windows = {
@@ -473,8 +464,8 @@ def build_air_space_sea_carrier_strike_scenario() -> dict[str, Any]:
     return {
         "schema_version": "amos.scenario.v2", "id": SCENARIO_ID,
         "name": "空天海舰载无人航空联合对陆演示",
-        "operator_brief": "本剧本按公开能力边界构造近未来联合演示。两颗低轨侦察卫星和舰载侦察无人机先完成虚构滨海机场、机动雷达车与民用港区的发现、复核和持续跟踪。目标确认后，攻击资源才依次进入待战位置。第一波真实授权弹窗确认后，航母巡航导弹与自杀式无人机协同攻击机场；机场毁伤评估成立后，第二波弹窗再请求由导弹攻击无人机打击仍具威胁的机动雷达车。两个威胁目标均须产生各自的实际命中记录才允许结束剧本。",
-        "description": "验证双低轨侦察星接力、通信卫星中继、有人预警指挥、舰载自杀式无人机、导弹攻击无人机、按目标分配、双波次授权、民用港区禁射和双目标效果闭环。",
+        "operator_brief": "本剧本按公开能力边界构造近未来联合演示。首颗低轨侦察卫星形成机场宽域线索，第二颗卫星复访与舰载侦察无人机再发现并持续跟踪后续出现的机动雷达/防空单元，同时确认民用港区保护边界。第一波真实授权弹窗确认后，航母巡航导弹与自杀式无人机协同攻击固定机场；机场目标完成独立毁伤评估后，第二波弹窗再请求由导弹攻击无人机打击仍具威胁且满足防区外约束的机动雷达车。两个威胁目标均须分别完成实际命中和攻击后毁伤评估，才启动可回收航空器返航序列。地图上的攻击无人机群图标只代表 UAV-STRIKE-01 这一个逻辑仿真实体。",
+        "description": "验证双低轨侦察星接力、通信卫星中继、有人预警指挥、舰载自杀式无人机、单逻辑实体攻击无人机、按目标分配、双波次授权、民用港区禁射、逐目标毁伤评估和事件驱动返航。",
         "scenario_type": "scripted_agent_demo",
         "concept_maturity": "public-capability-inspired_near-future_exercise",
         "realism_basis": {
@@ -482,12 +473,13 @@ def build_air_space_sea_carrier_strike_scenario() -> dict[str, Any]:
             "constraints": [
                 "自杀式无人机只攻击已分配的机场目标，授权后作为一次性资源核销。",
                 "空中战术协同由有人预警指挥机承担，航母任务节点保留任务级决策和授权链。",
-                "固定翼无人机仍按单一逻辑资源和分时甲板作业建模；攻击无人机只在地图上采用机群符号，便于演示识别。",
-                "机场和机动雷达车分属两个打击波次，任何目标都不能用另一个目标的命中记录代替。",
+                "固定翼无人机仍按单一逻辑资源和分时甲板作业建模；UAV-STRIKE-01 只在地图上采用机群符号，图标不代表多架成员、多弹齐射或群体算法。",
+                "机场先由首颗卫星和舰载侦察平台形成稳定识别；机动雷达/防空单元在第二颗卫星复访和持续红外跟踪后才进入目标链，因此列为机场毁伤评估之后的第二波。",
+                "攻击平台始终按防区外等待和受控航路建模；机场和机动雷达车分属两个打击波次，任何目标都不能用另一个目标的命中或毁伤结论代替。",
             ],
         },
         "theater": {"theater_id": "north_luzon_east_coast_carrier_training", "name": "北吕宋东岸—菲律宾海西部虚构空天海训练区", "location_profile": "fictional_training_area", "center": {"lat": 18.20, "lng": 122.34}, "zoom": 9, "ao": {"north": 19.15, "south": 17.45, "east": 123.35, "west": 121.30}},
-        "map_display": {"relief_manifest": "/static/assets/maps/taiwan-se-relief/manifest.json", "default_layers": {"sensors": False, "ao": True, "coordination": True}, "coordination_link_types": ["weapon"], "track_style": "tactical_joint", "base_surface": "coastal", "focus_bounds": {"north": 18.62, "south": 17.70, "east": 123.08, "west": 121.28}, "exclude_domains_from_focus": ["space"], "space_node_asset_ids": ["SAT-COM-A2S-01"], "space_visual_speed_factor": 0.035, "space_ground_tracks": [{"asset_id": "SAT-A2S-01", "label": "侦察卫星01完整星下轨迹", "access_start_sec": 240, "access_end_sec": 600, "color": "#9eb2c8", "points": [dict(point) for point in orbital_tracks["SAT-A2S-01"]]}, {"asset_id": "SAT-A2S-02", "label": "侦察卫星02完整接力星下轨迹", "access_start_sec": 1680, "access_end_sec": 2040, "color": "#9da7bf", "points": [dict(point) for point in orbital_tracks["SAT-A2S-02"]]}], "trail_window_sec": 240, "track_trail_window_sec": 360, "label_asset_ids": ["CV-01", "UAV-ONEWAY-01", "UAV-ISR-01", "UAV-STRIKE-01"], "asset_label_aliases": {"CV-01": "航母 CV-01", "UAV-ONEWAY-01": "自杀无人机 OW-01", "UAV-ISR-01": "侦察无人机 ISR-01", "UAV-STRIKE-01": "攻击无人机群 STRIKE-01"}, "asset_icon_kinds": {"UAV-STRIKE-01": "uavSwarm"}, "asset_icon_sizes": {"UAV-STRIKE-01": 32}, "trail_asset_ids": ["UAV-ONEWAY-01", "UAV-ISR-01", "UAV-STRIKE-01"]},
+        "map_display": {"relief_manifest": "/static/assets/maps/taiwan-se-relief/manifest.json", "default_layers": {"sensors": False, "ao": True, "coordination": True}, "coordination_link_types": ["weapon"], "track_style": "tactical_joint", "base_surface": "coastal", "focus_bounds": {"north": 18.62, "south": 17.70, "east": 123.08, "west": 121.28}, "exclude_domains_from_focus": ["space"], "space_node_asset_ids": ["SAT-COM-A2S-01"], "space_visual_speed_factor": 0.035, "space_ground_tracks": [{"asset_id": "SAT-A2S-01", "label": "侦察卫星01完整星下轨迹", "access_start_sec": 240, "access_end_sec": 600, "color": "#9eb2c8", "points": [dict(point) for point in orbital_tracks["SAT-A2S-01"]]}, {"asset_id": "SAT-A2S-02", "label": "侦察卫星02完整接力星下轨迹", "access_start_sec": 1680, "access_end_sec": 2040, "color": "#9da7bf", "points": [dict(point) for point in orbital_tracks["SAT-A2S-02"]]}], "trail_window_sec": 240, "track_trail_window_sec": 360, "label_asset_ids": ["CV-01", "UAV-ONEWAY-01", "UAV-ISR-01", "UAV-STRIKE-01"], "asset_label_aliases": {"CV-01": "航母 CV-01", "UAV-ONEWAY-01": "自杀无人机 OW-01", "UAV-ISR-01": "侦察无人机 ISR-01", "UAV-STRIKE-01": "攻击无人机 STRIKE-01（群符号）"}, "asset_icon_kinds": {"UAV-STRIKE-01": "uavSwarm"}, "asset_icon_sizes": {"UAV-STRIKE-01": 32}, "trail_asset_ids": ["UAV-ONEWAY-01", "UAV-ISR-01", "UAV-STRIKE-01"]},
         "space_operations": {
             "title": "空天支援 · 双星接力",
             "relay": {"asset_id": "SAT-COM-A2S-01", "label": "通信中继在线"},
@@ -497,7 +489,7 @@ def build_air_space_sea_carrier_strike_scenario() -> dict[str, Any]:
             ],
             "intelligence_products": [
                 {"product_id": "ASC-MEDIA-01", "label": "机场宽域SAR线索", "source_asset_id": "SAT-A2S-01", "captured_at_sec": 360, "received_at_sec": 390, "valid_until_sec": 1740},
-                {"product_id": "ASC-ORBITAL-REVISIT-01", "label": "接力复访航迹更新", "source_asset_id": "SAT-A2S-02", "captured_at_sec": 1740, "received_at_sec": 1800, "valid_until_sec": 2700},
+                {"product_id": "ASC-MEDIA-07", "label": "接力复访航迹更新", "source_asset_id": "SAT-A2S-02", "captured_at_sec": 1740, "received_at_sec": 1800, "valid_until_sec": 2700},
             ],
             "note": "卫星离场不删除已下传产品；超过有效期后由舰载侦察无人机当前观测接续。",
         },
@@ -514,9 +506,9 @@ def build_air_space_sea_carrier_strike_scenario() -> dict[str, Any]:
             {"sequence": 2, "at_sec": 960, "asset_id": "UAV-ISR-01", "operation": "launch", "purpose": "沿安全航路实施目标复核"},
             {"sequence": 3, "at_sec": 2400, "asset_id": "UAV-STRIKE-01", "operation": "launch", "purpose": "机动雷达目标确认后进入防区外待战航线"},
             {"sequence": 4, "at_sec": 2880, "asset_id": "UAV-ONEWAY-01", "operation": "launch", "purpose": "机场完成目标分配后进入第一波安全等待航线"},
-            {"sequence": 5, "at_sec": 5040, "asset_id": "UAV-ISR-01", "operation": "recover", "purpose": "完成毁伤评估后优先回收"},
-            {"sequence": 6, "at_sec": 5160, "asset_id": "UAV-STRIKE-01", "operation": "recover", "purpose": "攻击任务结束后回收"},
-            {"sequence": 7, "at_sec": 5580, "asset_id": "AEW-01", "operation": "recover", "purpose": "所有可回收无人机回收后结束空中指挥"},
+            {"sequence": 5, "after_event": "authorized_fire_command", "target_ref": "MOBILE-COASTAL-AD-01", "asset_id": "UAV-STRIKE-01", "operation": "return", "purpose": "第二波导弹离架后立即脱离并返航"},
+            {"sequence": 6, "after_event": "damage_assessment_confirmed", "target_ref": "MOBILE-COASTAL-AD-01", "asset_id": "UAV-ISR-01", "operation": "return", "purpose": "两个目标完成各自评估后启动返航"},
+            {"sequence": 7, "after_event": "damage_assessment_confirmed", "target_ref": "MOBILE-COASTAL-AD-01", "asset_id": "AEW-01", "operation": "return", "purpose": "第二目标评估完成后结束空中协同并返航"},
         ],
         "asset_visibility_windows": visibility_windows, "asset_ammo": asset_ammo,
         "asset_profiles": asset_profiles(assets), "physical_devices": physical_devices(assets, extra_devices),
@@ -554,13 +546,13 @@ def build_air_space_sea_carrier_strike_scenario() -> dict[str, Any]:
         "conditional_function_points": ["KC-03", "KC-26"],
         "function_runtime_triggers": {"KC-22": {"event": "authorized_fire_command", "offset_sec": 0}, "KC-23": {"event": "authorized_fire_command", "offset_sec": 5}, "KC-24": {"event": "authorized_fire_command", "offset_sec": 15}, "KC-25": {"event": "weapon_hit", "offset_sec": 0}, "KC-02": {"event": "weapon_hit", "offset_sec": 15}, "KC-27": {"event": "weapon_hit", "offset_sec": 30}, "KC-28": {"event": "damage_assessment_confirmed", "offset_sec": 0}},
         "demo_checkpoints": [
-            {"checkpoint_id": "ASC-CP-SAT", "title": "卫星机场线索就绪", "min_elapsed_sec": 390, "conditions": {"stable_track_count_at_least": 1, "media_ids_released": ["ASC-MEDIA-01"]}, "pause": False, "submit_analysis": True, "block_until_analysis_complete": True},
-            {"checkpoint_id": "ASC-CP-FIX", "title": "机场与民用港区复核输入就绪", "min_elapsed_sec": 1290, "conditions": {"stable_track_count_at_least": 2, "media_ids_released": ["ASC-MEDIA-02"]}, "pause": False, "submit_analysis": True, "block_until_analysis_complete": True},
-            {"checkpoint_id": "ASC-CP-TRACK", "title": "机动岸防单元跟踪输入就绪", "min_elapsed_sec": 2190, "conditions": {"stable_track_count_at_least": 3, "media_ids_released": ["ASC-MEDIA-04"]}, "pause": False, "submit_analysis": True, "block_until_analysis_complete": True},
-            {"checkpoint_id": "ASC-CP-PLAN", "title": "差异化火力分配就绪", "min_elapsed_sec": 2730, "conditions": {"stable_track_count_at_least": 3, "media_ids_released": ["ASC-MEDIA-04"]}, "pause": False, "submit_analysis": True, "block_until_analysis_complete": True},
-            {"checkpoint_id": "ASC-CP-WAVE1", "title": "第一波固定目标打击等待授权", "min_elapsed_sec": 3390, "conditions": {"media_ids_released": ["ASC-MEDIA-06"]}, "pause": True, "submit_analysis": True, "block_until_analysis_complete": True, "requires_operator_action": True, "engagement_wave": 1},
-            {"checkpoint_id": "ASC-CP-WAVE2", "title": "第二波机动目标补充打击决策", "min_elapsed_sec": 4560, "conditions": {"media_ids_released": ["ASC-MEDIA-08"], "event_types_emitted": ["damage_assessment_confirmed"], "weapon_hit_target_ids": ["COASTAL-AIRFIELD-01"]}, "pause": True, "submit_analysis": True, "block_until_analysis_complete": True, "requires_operator_action": True, "engagement_wave": 2},
-            {"checkpoint_id": "ASC-CP-CLOSE", "title": "双目标效果确认与分批回收完成", "min_elapsed_sec": 5850, "conditions": {"media_ids_released": ["ASC-MEDIA-09"], "weapon_hit_target_ids": ["COASTAL-AIRFIELD-01", "MOBILE-COASTAL-AD-01"]}, "pause": True, "submit_analysis": True, "block_until_analysis_complete": True, "requires_operator_action": True, "operator_action_type": "review"},
+            {"checkpoint_id": "ASC-CP-SAT", "title": "卫星机场线索就绪", "min_elapsed_sec": 390, "conditions": {"stable_track_count_at_least": 1, "media_ids_released": ["ASC-MEDIA-01"]}, "pause": False, "submit_analysis": True, "block_until_analysis_complete": False},
+            {"checkpoint_id": "ASC-CP-FIX", "title": "机场与民用港区复核输入就绪", "min_elapsed_sec": 1290, "conditions": {"stable_track_count_at_least": 2, "media_ids_released": ["ASC-MEDIA-02"]}, "pause": False, "submit_analysis": True, "block_until_analysis_complete": False},
+            {"checkpoint_id": "ASC-CP-TRACK", "title": "机动岸防单元跟踪输入就绪", "min_elapsed_sec": 2190, "conditions": {"stable_track_count_at_least": 3, "media_ids_released": ["ASC-MEDIA-04"]}, "pause": False, "submit_analysis": True, "block_until_analysis_complete": False},
+            {"checkpoint_id": "ASC-CP-PLAN", "title": "差异化火力分配就绪", "min_elapsed_sec": 2730, "conditions": {"stable_track_count_at_least": 3, "media_ids_released": ["ASC-MEDIA-04"]}, "pause": False, "submit_analysis": True, "block_until_analysis_complete": False},
+            {"checkpoint_id": "ASC-CP-WAVE1", "title": "第一波固定目标打击等待授权", "min_elapsed_sec": 3390, "conditions": {"media_ids_released": ["ASC-MEDIA-06"]}, "pause": True, "submit_analysis": True, "block_until_analysis_complete": False, "requires_operator_action": True, "engagement_wave": 1},
+            {"checkpoint_id": "ASC-CP-WAVE2", "title": "第二波机动目标补充打击决策", "min_elapsed_sec": 4560, "conditions": {"media_ids_released": ["ASC-MEDIA-08"], "damage_assessment_target_ids": ["COASTAL-AIRFIELD-01"], "weapon_hit_target_ids": ["COASTAL-AIRFIELD-01"]}, "pause": True, "submit_analysis": True, "block_until_analysis_complete": False, "requires_operator_action": True, "engagement_wave": 2},
+            {"checkpoint_id": "ASC-CP-CLOSE", "title": "双目标毁伤闭环与返航序列已启动", "min_elapsed_sec": 5760, "conditions": {"media_ids_released": ["ASC-MEDIA-08", "ASC-MEDIA-10", "ASC-MEDIA-09"], "weapon_hit_target_ids": ["COASTAL-AIRFIELD-01", "MOBILE-COASTAL-AD-01"], "damage_assessment_target_ids": ["COASTAL-AIRFIELD-01", "MOBILE-COASTAL-AD-01"]}, "pause": True, "submit_analysis": True, "block_until_analysis_complete": False},
         ],
         "fault_injections": [{"fault_id": "ASC-FAULT-DATALINK", "type": "communication_degradation", "target": "UAV-ONEWAY-01", "at_checkpoint": "ASC-CP-PLAN", "status": "available"}, {"fault_id": "ASC-FAULT-ISR", "type": "resource_unavailable", "target": "UAV-ISR-01", "at_checkpoint": "ASC-CP-FIX", "status": "available"}],
         "expected_branches": [
@@ -587,19 +579,37 @@ def build_air_space_sea_carrier_strike_scenario() -> dict[str, Any]:
             "authorized_asset_ids": ["CV-01", "UAV-ONEWAY-01", "UAV-STRIKE-01"],
             "authorized_weapons": ["舰载对陆巡航导弹", "自杀式无人机战斗部", "舰载无人机空地导弹"],
             "protected_classifications": ["CIVILIAN", "HOSPITAL", "SCHOOL", "RESIDENTIAL", "FRIENDLY"], "protected_truth_ids": ["CIVILIAN-PORT-01"], "protected_asset_buffer_nm": 2.5,
+            "maximum_track_age_sec": 600,
+            # 身份识别在 TRACK 阶段由后端确认，第一、第二波授权之间仍由
+            # UAV-ISR-01 持续刷新航迹。用 3000 秒覆盖双波次决策周期，
+            # maximum_track_age_sec=600 继续保证当前传感器观测不过期。
+            "maximum_assessment_age_sec": 3000,
+            "minimum_comms_strength": 60,
             "max_salvos_per_track": 1, "bda_not_before_sec": 4140, "bda_observer_asset_ids": ["UAV-ISR-01"], "stochastic_damage_assessment": True,
             "action_label": "目标专用武器链", "authorization_message": "是否授权当前目标对应的专用火力单元执行模拟打击？",
             "target_engagements": target_engagements,
             # 发射后与毁伤确认后的航路刻意不放进 behavior_phases：它们是"开火指令"
             # 和"已确认毁伤"驱动的事件反应，不是到点就动的定时器。
-            "post_launch_routes": {"UAV-STRIKE-01": UAV_STRIKE_RELEASE_HOLD_ROUTE},
-            "post_launch_behaviors": {"UAV-STRIKE-01": {"behavior": "radar_missile_release_and_egress", "label": "雷达车打击导弹离架，攻击无人机群立即向外海脱离并准备返航", "speed_kts": 145, "alt_ft": 7000}},
-            # 第一波毁伤确认时侦察机仍须为第二波机动目标保持跟踪，不能被通用
-            # post-BDA 回调提前送回航母；它在 T+5040 的明确甲板窗口再返航。
-            "post_bda_routes": {"CV-01": CV_RECOVERY_OPS_ROUTE},
-            "post_bda_behaviors": {"CV-01": {"behavior": "carrier_recovery_operations", "label": "保持迎风起降跑道的回收作业航向直至全部资源回收", "speed_kts": 12}},
+            "post_launch_routes": {"UAV-STRIKE-01": UAV_STRIKE_RECOVERY_ROUTE},
+            "post_launch_behaviors": {"UAV-STRIKE-01": {"behavior": "post_launch_carrier_recovery", "label": "雷达车打击导弹离架，攻击无人机立即向外海脱离并返航", "speed_kts": 145, "alt_ft": 7000}},
+            # 第一波BDA只使航母转入持续回收作业航向；侦察机和预警机必须继续支援
+            # 第二波，直到雷达车的目标专属BDA成立后才启动返航。
+            "post_bda_routes_by_target": {
+                "COASTAL-AIRFIELD-01": {"CV-01": CV_RECOVERY_OPS_ROUTE},
+                "MOBILE-COASTAL-AD-01": {
+                    "UAV-ISR-01": UAV_ISR_RECOVERY_ROUTE,
+                    "AEW-01": AEW_RECOVERY_ROUTE,
+                },
+            },
+            "post_bda_behaviors_by_target": {
+                "COASTAL-AIRFIELD-01": {"CV-01": {"behavior": "carrier_recovery_operations", "label": "第一波毁伤确认后保持迎风回收作业航向", "speed_kts": 12}},
+                "MOBILE-COASTAL-AD-01": {
+                    "UAV-ISR-01": {"behavior": "carrier_recovery", "label": "第二目标毁伤评估完成后返航", "speed_kts": 140, "alt_ft": 10000},
+                    "AEW-01": {"behavior": "carrier_recovery", "label": "第二目标毁伤评估完成后结束空中协同并返航", "speed_kts": 285, "alt_ft": 12000},
+                },
+            },
         },
-        "agent_plan": {"mode": "commander_workflow", "steps": ["submit_current_snapshot", "execute_a1_a6_workflow", "fuse_space_air_intelligence", "coordinate_crewed_uncrewed_air_plan", "allocate_target_specific_weapons", "review_protected_zone", "request_wave1_airfield_authorization", "assess_airfield_effects", "request_wave2_radar_authorization", "verify_both_target_hits", "recover_reusable_assets"], "commander_options": {"mission_type": "air_space_sea_carrier_split_target_strike", "task_goal": "识别虚构滨海机场、机动雷达车及民用港区；第一波由航母巡航导弹与自杀式无人机协同攻击机场，机场毁伤评估后第二波由导弹攻击无人机打击雷达车，形成目标唯一、可审计的双目标闭环。", "analysis_guidance": "机场只使用航母巡航导弹与自杀式无人机；机动雷达车只使用导弹攻击无人机。两波均须明确授权，第二波须在机场毁伤评估后执行；民用港区始终禁射，禁止用单一目标的结果冒充双目标完成。", "knowledge_base": ["本剧本属于公开能力启发的近未来联合演示。", "所有资源均按独立编号建模，不使用抽象群体代替实际单机。", "卫星只以短时过境形成线索，已下传产品按有效期使用。", "CV-01保留任务级决策与授权链，AEW-01负责空中预警、识别、协同和数据链中继。", "UAV-ISR-01负责持续侦察和毁伤评估。", "UAV-ONEWAY-01是独立舰载自杀式攻击无人机，只参与第一波机场打击，授权后核销。", "CV-01的巡航导弹与UAV-ONEWAY-01共同攻击机场。", "UAV-STRIKE-01携带空地导弹，只在第二波攻击机动雷达车并在任务后回收。", "民用港区始终禁射。", "两个威胁目标均出现实际命中记录后才能完成剧本。", "任一目标进入保护区、当前航迹失效或链路中断时，必须中止攻击并返回重规划。"]}},
+        "agent_plan": {"mode": "commander_workflow", "steps": ["submit_current_snapshot", "execute_a1_a6_workflow", "fuse_space_air_intelligence", "coordinate_crewed_uncrewed_air_plan", "allocate_target_specific_weapons", "review_protected_zone", "request_wave1_airfield_authorization", "assess_airfield_effects", "request_wave2_radar_authorization", "assess_mobile_radar_effects", "verify_target_specific_damage_assessments", "start_reusable_asset_return_sequence"], "commander_options": {"mission_type": "air_space_sea_carrier_split_target_strike", "task_goal": "识别虚构滨海机场、机动雷达车及民用港区；第一波由航母巡航导弹与自杀式无人机协同攻击机场，机场毁伤评估后第二波由导弹攻击无人机打击后续发现且仍具威胁的雷达车；两个目标分别完成攻击后评估后启动返航序列。", "analysis_guidance": "机场只使用航母巡航导弹与自杀式无人机；机动雷达车只使用导弹攻击无人机。两波均须明确授权，第二波须在机场毁伤评估后执行；两个目标必须分别完成毁伤评估，民用港区始终禁射，不得用单一目标的命中或毁伤结论冒充双目标闭环。", "knowledge_base": ["本剧本属于公开能力启发的近未来联合演示。", "所有资源均按独立编号建模，不使用抽象群体代替实际单机。", "UAV-STRIKE-01在地图上使用机群符号，但后端只有一个逻辑实体、一套状态和一枚空地导弹。", "卫星只以短时过境形成线索，第二颗卫星形成独立复访产品；已下传产品按有效期使用。", "CV-01保留任务级决策与授权链，AEW-01负责空中预警、识别、协同和数据链中继。", "UAV-ISR-01负责持续侦察和两个目标各自的毁伤评估。", "机动雷达/防空单元在第二颗卫星复访及持续红外跟踪后才进入目标链，且攻击平台须保持防区外等待，因此列为机场毁伤评估后的第二波。", "UAV-ONEWAY-01是独立舰载自杀式攻击无人机，只参与第一波机场打击，授权后核销。", "CV-01的巡航导弹与UAV-ONEWAY-01共同攻击机场。", "UAV-STRIKE-01携带一枚空地导弹，只在第二波攻击机动雷达车；未获授权时保持待战，导弹离架后立即脱离返航。", "民用港区始终禁射。", "两个威胁目标均完成各自的实际命中和毁伤评估后才能关闭剧本。", "任一目标进入保护区、当前航迹失效或链路中断时，必须中止攻击并返回重规划。"]}},
         "events": [item["title"] for item in timeline],
     }
 

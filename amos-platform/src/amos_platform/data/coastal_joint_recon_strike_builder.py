@@ -162,7 +162,7 @@ def _timeline() -> list[dict[str, Any]]:
         {"cue_id": "CJR-CUE-07", "at_sec": 3300, "phase": "ENGAGE", "level": "CRITICAL", "title": "四节点武器链建立并等待授权", "description": "舰载巡航导弹、歼-16防区外弹药、攻击无人机01和02的四条独立通道已完成同一到达时刻规划；仅在保护区核验和人工授权后执行。", "media_ids": ["CJR-MEDIA-06"], "functional_agent_ids": ["A6"], "model_requirement_ids": ["M03", "M13", "M16"], "function_ids": ["KC-22", "KC-23", "KC-24"]},
         {"cue_id": "CJR-CUE-08", "at_sec": 4200, "phase": "ASSESS", "level": "INFO", "title": "无侦-10实施攻击后复查", "description": "无侦-10保持目标区观测，只有实际命中和当前 SAR/光电证据同时存在时才确认毁伤。", "media_ids": [], "functional_agent_ids": ["A2", "A6"], "model_requirement_ids": ["M18"], "function_ids": ["KC-25", "KC-27"]},
         {"cue_id": "CJR-CUE-09", "at_sec": 4500, "phase": "ASSESS", "level": "INFO", "title": "形成毁伤评估与闭环建议", "description": "后端基于无侦-10的攻击前后变化产品评估效果，并决定结束、补充侦察或重新规划。", "media_ids": ["CJR-MEDIA-07"], "functional_agent_ids": ["A6"], "model_requirement_ids": ["M14", "M18"], "function_ids": ["KC-02", "KC-28"]},
-        {"cue_id": "CJR-CUE-10", "at_sec": 4800, "phase": "ASSESS", "level": "INFO", "title": "任务资源返航与保障舰回收", "description": "海上联合指挥舰离开发射阵位，无侦-10完成复查后返航；歼-16沿空中返航线撤离，两架攻击无人机沿南北回收航线返回保障舰，并在保障舰最终回收点完成甲板回收。", "media_ids": [], "functional_agent_ids": ["A3", "A6"], "model_requirement_ids": ["M14"], "function_ids": ["KC-28"]},
+        {"cue_id": "CJR-CUE-10", "at_sec": 4800, "phase": "ASSESS", "level": "INFO", "title": "任务资源返航与保障舰回收", "description": "海上联合指挥舰离开发射阵位，无侦-10完成复查后返航；歼-16沿空中返航线撤离，两架攻击无人机在各自释放阵位附近盘旋等待毁伤评估确认，评估完成后返回保障舰并在最终回收点完成甲板回收。", "media_ids": [], "functional_agent_ids": ["A3", "A6"], "model_requirement_ids": ["M14"], "function_ids": ["KC-28"]},
     ]
 
 
@@ -280,11 +280,13 @@ def build_coastal_joint_recon_strike_scenario() -> dict[str, Any]:
             {"lat": 22.25, "lng": 123.55, "at_sec": 590, "label": "LOCAL-VIEW-EXIT"},
         ],
         "SAT-RECON-02": [
+            # 过境点时刻按弧长等比重排：星下点全程匀速（约 2848 节），
+            # 避免分段速度突变；起止时刻与过境/可见窗口（1680/2040）保持一致。
             {"lat": 19.40, "lng": 119.95, "at_sec": 1680, "label": "REVISIT-LOCAL-VIEW-ENTRY"},
-            {"lat": 20.04, "lng": 121.24, "at_sec": 1740, "label": "REVISIT-AO-ENTRY"},
-            {"lat": 20.22, "lng": 121.66, "at_sec": 1780, "label": "REVISIT-GROUND-TRACK-SW"},
-            {"lat": 20.43, "lng": 122.04, "at_sec": 1820, "label": "REVISIT-SWATH-CENTER"},
-            {"lat": 20.72, "lng": 122.46, "at_sec": 1860, "label": "REVISIT-AO-EXIT"},
+            {"lat": 20.04, "lng": 121.24, "at_sec": 1784, "label": "REVISIT-AO-ENTRY"},
+            {"lat": 20.22, "lng": 121.66, "at_sec": 1817, "label": "REVISIT-GROUND-TRACK-SW"},
+            {"lat": 20.43, "lng": 122.04, "at_sec": 1848, "label": "REVISIT-SWATH-CENTER"},
+            {"lat": 20.72, "lng": 122.46, "at_sec": 1886, "label": "REVISIT-AO-EXIT"},
             {"lat": 22.30, "lng": 123.60, "at_sec": 2030, "label": "REVISIT-LOCAL-VIEW-EXIT"},
         ],
     }
@@ -453,7 +455,7 @@ def build_coastal_joint_recon_strike_scenario() -> dict[str, Any]:
         "schema_version": "amos.scenario.v2",
         "id": SCENARIO_ID,
         "name": "临海多域协同侦察与精确打击",
-        "operator_brief": "1艘海上联合指挥舰进入巴士海峡虚构任务海域后，低轨侦察卫星01在首个访问窗口形成待识别离岛接触，侦察卫星02在后续窗口接力复访，通信中继卫星持续保障星—舰链路；已经下传的情报产品在有效期内继续参与融合，不因卫星离开地图而消失。1架无侦-10按SAR、光电和电子侦察顺序复核；1架歼-16承担空中战术指挥和防区外打击；攻击无人机01、02沿北、南两条独立航路抵达释放阵位。后端完成识别与保护区审查、操作员授权后，四个火力节点按同一到达时刻实施模拟攻击，随后歼-16分路撤离，两架攻击无人机沿保障舰回收航线返回并完成甲板回收，由无侦-10单机完成毁伤复查。",
+        "operator_brief": "1艘海上联合指挥舰进入巴士海峡虚构任务海域后，低轨侦察卫星01在首个访问窗口形成待识别离岛接触，侦察卫星02在后续窗口接力复访，通信中继卫星持续保障星—舰链路；已经下传的情报产品在有效期内继续参与融合，不因卫星离开地图而消失。1架无侦-10按SAR、光电和电子侦察顺序复核；1架歼-16承担空中战术指挥和防区外打击；攻击无人机01、02沿北、南两条独立航路抵达释放阵位。后端完成识别与保护区审查、操作员授权后，四个火力节点按同一到达时刻实施模拟攻击，随后歼-16分路撤离，两架攻击无人机在释放阵位附近盘旋等待毁伤评估确认，评估完成后返回保障舰完成甲板回收，由无侦-10单机完成毁伤复查。",
         "description": "验证两颗低轨侦察卫星接力过境、通信卫星持续中继、情报产品时效管理、单机侦察、海上任务指挥、空中战术指挥、四节点协同武器链、人工授权、分路撤离和毁伤评估闭环。",
         "scenario_type": "scripted_agent_demo",
         "theater": {"theater_id": "bashi_channel_adjacent_joint_training", "name": "台湾南部—菲律宾北部毗邻海域虚构联合训练区", "location_profile": "fictional_training_area", "center": {"lat": 20.49, "lng": 122.13}, "zoom": 8, "ao": {"north": 21.06, "south": 20.01, "east": 122.93, "west": 121.07}},
@@ -533,7 +535,7 @@ def build_coastal_joint_recon_strike_scenario() -> dict[str, Any]:
         "timeline": timeline,
         "media_cues": bind_media_consumers(_media_cues(), timeline),
         "cover_media_id": "CJR-MEDIA-00",
-        "demo_controls": {"recommended_speed": 32, "duration_sec": 5100, "auto_agent_interval_sec": 600, "show_truth": False, "latest_visual_only": True, "auto_stop": True, "advance_while_analyzing": True},
+        "demo_controls": {"recommended_speed": 32, "duration_sec": 5750, "auto_agent_interval_sec": 600, "show_truth": False, "latest_visual_only": True, "auto_stop": True, "advance_while_analyzing": True},
         "default_seed": 61023,
         "supported_modes": ["integration", "demonstration"],
         "functional_agents": scenario_agents(),
@@ -598,20 +600,22 @@ def build_coastal_joint_recon_strike_scenario() -> dict[str, Any]:
                     {"lat": 20.82, "lng": 122.70, "label": "J16-RTB"},
                 ],
                 "ATTACK-UAV-01": [
-                    {"lat": 20.20, "lng": 122.25, "label": "UAV01-EGRESS"},
-                    {"lat": 20.23, "lng": 122.24, "label": "UAV01-FIRE-AREA-RENDEZVOUS"},
-                    {"lat": 20.20, "lng": 122.40, "label": "UAV01-SUPPORT-SHIP-APPROACH"},
+                    {"lat": 20.34, "lng": 122.06, "label": "UAV01-LOITER-SOUTH"},
+                    {"lat": 20.48, "lng": 122.10, "label": "UAV01-LOITER-NORTH"},
+                    {"lat": 20.55, "lng": 122.04, "label": "UAV01-LOITER-NORTHWEST"},
+                    {"lat": 20.43, "lng": 122.16, "label": "UAV01-LOITER-EAST"},
                 ],
                 "ATTACK-UAV-02": [
-                    {"lat": 20.10, "lng": 122.15, "label": "UAV02-EGRESS"},
-                    {"lat": 20.23, "lng": 122.24, "label": "UAV02-FIRE-AREA-RENDEZVOUS"},
-                    {"lat": 20.20, "lng": 122.40, "label": "UAV02-SUPPORT-SHIP-APPROACH"},
+                    {"lat": 20.38, "lng": 122.09, "label": "UAV02-LOITER-NORTH"},
+                    {"lat": 20.27, "lng": 122.05, "label": "UAV02-LOITER-SOUTHWEST"},
+                    {"lat": 20.34, "lng": 122.16, "label": "UAV02-LOITER-EAST"},
+                    {"lat": 20.49, "lng": 122.14, "label": "UAV02-LOITER-NORTHEAST"},
                 ],
             },
             "post_launch_behaviors": {
                 "J16-01": {"behavior": "post_launch_egress", "label": "发射后高速脱离返航", "speed_kts": 480},
-                "ATTACK-UAV-01": {"behavior": "north_axis_recovery_to_support_ship", "label": "北路攻击后返回保障舰", "speed_kts": 130},
-                "ATTACK-UAV-02": {"behavior": "south_axis_recovery_to_support_ship", "label": "南路攻击后返回保障舰", "speed_kts": 130},
+                "ATTACK-UAV-01": {"behavior": "north_axis_post_strike_loiter", "label": "攻击后保持北路阵位盘旋，等待毁伤评估确认后返航", "speed_kts": 130, "route_mode": "loop"},
+                "ATTACK-UAV-02": {"behavior": "south_axis_post_strike_loiter", "label": "攻击后保持南路阵位盘旋，等待毁伤评估确认后返航", "speed_kts": 130, "route_mode": "loop"},
             },
             "post_bda_routes": {
                 "WZ10-01": [
@@ -634,13 +638,18 @@ def build_coastal_joint_recon_strike_scenario() -> dict[str, Any]:
             "post_bda_behaviors": {
                 "WZ10-01": {"behavior": "reconnaissance_return", "label": "完成毁伤复查后返航", "speed_kts": 190},
                 "SEA-C2-01": {"behavior": "command_ship_recovery", "label": "离开发射阵位并撤收", "speed_kts": 14},
-                "ATTACK-UAV-01": {"behavior": "north_axis_recovered_to_support_ship", "label": "北路无人机返保障舰回收", "speed_kts": 130},
-                "ATTACK-UAV-02": {"behavior": "south_axis_recovered_to_support_ship", "label": "南路无人机返保障舰回收", "speed_kts": 130},
+                "ATTACK-UAV-01": {"behavior": "north_axis_recovered_to_support_ship", "label": "北路无人机返保障舰并完成甲板回收", "speed_kts": 130, "recover_on_arrival": True},
+                "ATTACK-UAV-02": {"behavior": "south_axis_recovered_to_support_ship", "label": "南路无人机返保障舰并完成甲板回收", "speed_kts": 130, "recover_on_arrival": True},
             },
             "coordinated_engagement": {
                 "chain_id": "CJR-WEAPON-CHAIN-01",
                 "coordination_mode": "time_on_target",
                 "arrival_tolerance_sec": 20,
+                # 四个平台在各自真实待战航线上持续机动，武器速度也不同。
+                # 授权时按当前阵位反算发射时刻；全航线采样所需最大错开发射
+                # 约 103 秒，保留 180 秒计划裕度，避免默认 90 秒在正常阵位
+                # 误判为“需要重新规划”，同时仍约束为同一波次协同到达。
+                "max_launch_stagger_sec": 180,
                 "participants": [
                     {"asset_id": "SEA-C2-01", "weapon_name": "舰载对陆巡航导弹", "role": "maritime_strike_lead"},
                     {"asset_id": "J16-01", "weapon_name": "空地防区外弹药", "role": "air_tactical_command_and_strike"},
@@ -661,7 +670,7 @@ def build_coastal_joint_recon_strike_scenario() -> dict[str, Any]:
                     "海上联合指挥舰承担任务级指挥和舰载对陆主火力；歼-16长机承担空中战术指挥及防区外打击角色。",
                     "攻击无人机01和02分别执行北、南突入，不得合并为抽象群体；两机只能在目标确认、保护区审查和操作员授权后进入执行状态。",
                     "四个火力节点必须按同一到达时刻协调，任一节点超出射程或到达时差超限均不得执行。",
-                    "发射后歼-16立即执行空中脱离航线，攻击无人机01和02先回到火力区保障舰会合航线，毁伤评估完成后随海上联合指挥与无人机保障舰撤至最终回收点并完成甲板回收。",
+                    "发射后歼-16立即执行空中脱离航线，攻击无人机01和02保持在各自释放阵位附近的盘旋航线等待毁伤评估，评估确认后返回保障舰并在最终回收点完成甲板回收。",
                 ],
             },
         },

@@ -20,6 +20,31 @@ def _advance(engine: SimEngine, elapsed_sec: float) -> None:
         engine._tick(min(30, elapsed_sec - float(engine.clock["elapsed_sec"])))
 
 
+def test_satellite_revisit_moves_at_constant_speed() -> None:
+    """SAT-RECON-02 过境全程匀速：不得出现分段变速或瞬移。"""
+    scenario = get_scenario(SCENARIO_ID)
+    assert scenario is not None
+    engine = SimEngine(seed=int(scenario["default_seed"]))
+    engine.load_scenario(scenario)
+    samples: list[tuple[float, float]] = []
+    step = 35
+    elapsed = 1685
+    while elapsed <= 2025:
+        _advance(engine, elapsed)
+        position = engine.assets["SAT-RECON-02"]["position"]
+        samples.append((float(position["lat"]), float(position["lng"])))
+        elapsed += step
+    legs = [
+        distance_nm(a[0], a[1], b[0], b[1]) for a, b in zip(samples, samples[1:])
+    ]
+    mean_leg = sum(legs) / len(legs)
+    expected = 2848.0 * step / 3600.0  # 匀速 2848 节对应的每步位移
+    assert abs(mean_leg - expected) < expected * 0.05
+    for leg in legs:
+        # 匀速容差：导航/取整误差之外不允许明显的变速或跳变
+        assert abs(leg - mean_leg) < mean_leg * 0.12, legs
+
+
 def _apply_ground_site_assessment(engine: SimEngine, workflow_id: str = "wf-cjr") -> str:
     track = next(iter(engine.sensor_fusion.tracks.values()))
     projection = apply_commander_assessments(
@@ -83,6 +108,7 @@ def test_coastal_joint_force_package_and_backend_contract_are_complete() -> None
     assert len(scenario["function_point_coverage"]) == 28
     assert len(scenario["coordination_links"]) == 11
     assert len(scenario["engagement_policy"]["coordinated_engagement"]["participants"]) == 4
+    assert scenario["engagement_policy"]["coordinated_engagement"]["max_launch_stagger_sec"] == 180
     assert scenario["map_display"]["default_layers"]["coordination"] is True
     assert scenario["map_display"]["coordination_link_types"] == ["weapon"]
     assert scenario["map_display"]["trail_window_sec"] == 240
@@ -174,7 +200,9 @@ def test_backend_assessment_unlocks_four_individual_weapon_nodes_without_truth_l
     engine = SimEngine(seed=int(scenario["default_seed"]))
     engine.load_scenario(scenario)
     engine.clock["run_id"] = "run-cjr-test"
-    _advance(engine, 3340)
+    # T+3600 used to exceed the engine's implicit 90-second launch stagger
+    # even though all four nodes were following their valid release orbits.
+    _advance(engine, 3600)
     track_id = _apply_ground_site_assessment(engine)
 
     operator = engine.get_operator_state()
@@ -199,25 +227,72 @@ def test_backend_assessment_unlocks_four_individual_weapon_nodes_without_truth_l
     assert {item["asset_id"] for item in launched["participants"]} == {
         "SEA-C2-01", "J16-01", "ATTACK-UAV-01", "ATTACK-UAV-02",
     }
+    weapons_by_asset = {
+        item["source_asset_id"]: item for item in engine.weapons.values()
+    }
+    assert weapons_by_asset["J16-01"]["status"] == "in_flight"
     assert engine.waypoint_nav.get_route("J16-01")[-1]["label"] == "J16-RTB"
-    assert engine.waypoint_nav.get_route("ATTACK-UAV-01")[-1]["label"] == "UAV01-RECOVERY"
-    assert engine.waypoint_nav.get_route("ATTACK-UAV-02")[-1]["label"] == "UAV02-RECOVERY"
     assert engine.assets["J16-01"]["_current_behavior"] == "post_launch_egress"
-    assert engine.assets["ATTACK-UAV-01"]["_current_behavior"] == "north_axis_egress"
-    assert engine.assets["ATTACK-UAV-02"]["_current_behavior"] == "south_axis_egress"
     assert engine.assets["J16-01"]["speed_kts"] == 480
-    assert engine.assets["ATTACK-UAV-01"]["speed_kts"] == 130
-    assert engine.assets["ATTACK-UAV-02"]["speed_kts"] == 130
+    # The two delayed-release UAV weapons remain attached to their real
+    # launchers.  Their aircraft must continue the declared release orbits,
+    # rather than beginning an egress before the weapon has left the rail.
+    delayed_loiters = {
+        "ATTACK-UAV-01": ("north_release_station_orbit", "north_axis_post_strike_loiter"),
+        "ATTACK-UAV-02": ("south_release_station_orbit", "south_axis_post_strike_loiter"),
+    }
+    for asset_id, (hold_behavior, _) in delayed_loiters.items():
+        weapon = weapons_by_asset[asset_id]
+        asset = engine.assets[asset_id]
+        assert weapon["status"] == "scheduled"
+        assert asset["_current_behavior"] == hold_behavior
+        assert distance_nm(
+            weapon["lat"], weapon["lng"],
+            asset["position"]["lat"], asset["position"]["lng"],
+        ) < 0.01
     assert any(
         item.get("type") == "post_launch_egress_started"
-        and set(item.get("asset_ids") or []) == {"J16-01", "ATTACK-UAV-01", "ATTACK-UAV-02"}
+        and item.get("asset_ids") == ["J16-01"]
         for item in engine.events
     )
+    for asset_id, (_, loiter_behavior) in sorted(
+        delayed_loiters.items(),
+        key=lambda row: float(weapons_by_asset[row[0]]["scheduled_launch_time"]),
+    ):
+        weapon = weapons_by_asset[asset_id]
+        _advance(engine, float(weapon["scheduled_launch_time"]))
+        asset = engine.assets[asset_id]
+        launch_position = weapon["launch_position"]
+        assert weapon["status"] == "in_flight"
+        assert distance_nm(
+            launch_position["lat"], launch_position["lng"],
+            asset["position"]["lat"], asset["position"]["lng"],
+        ) < 0.01
+        # 攻击后不返航：保持在释放阵位附近的盘旋航线等待毁伤评估。
+        assert asset["_current_behavior"] == loiter_behavior
+        assert engine.waypoint_nav.get_mode(asset_id) == "loop"
+        loiter_labels = {
+            "UAV01-LOITER-SOUTH", "UAV01-LOITER-NORTH",
+            "UAV01-LOITER-NORTHWEST", "UAV01-LOITER-EAST",
+        } if asset_id == "ATTACK-UAV-01" else {
+            "UAV02-LOITER-NORTH", "UAV02-LOITER-SOUTHWEST",
+            "UAV02-LOITER-EAST", "UAV02-LOITER-NORTHEAST",
+        }
+        assert {point["label"] for point in engine.waypoint_nav.get_route(asset_id)} == loiter_labels
+        assert any(
+            item.get("type") == "post_launch_egress_started"
+            and item.get("asset_ids") == [asset_id]
+            and item.get("weapon_ids") == [weapon["id"]]
+            for item in engine.events
+        )
+    assert engine.assets["ATTACK-UAV-01"]["_current_behavior"] == "north_axis_post_strike_loiter"
+    assert engine.assets["ATTACK-UAV-02"]["_current_behavior"] == "south_axis_post_strike_loiter"
+    assert engine.assets["ATTACK-UAV-01"]["speed_kts"] == 130
+    assert engine.assets["ATTACK-UAV-02"]["speed_kts"] == 130
     planned_arrivals = {
         item["planned_time_on_target_sec"] for item in engine.weapons.values()
     }
     assert len(planned_arrivals) == 1
-    assert any(item["status"] == "scheduled" for item in engine.weapons.values())
     assert find_truth_leaks(launched) == []
 
     duplicate = engine.fire_weapon_at_track(
@@ -266,12 +341,30 @@ def test_backend_assessment_unlocks_four_individual_weapon_nodes_without_truth_l
     assert engine.assets["SEA-C2-01"]["_current_behavior"] == "command_ship_recovery"
     assert any(
         item.get("type") == "post_bda_return_started"
-        and set(item.get("asset_ids") or []) == {"WZ10-01", "SEA-C2-01"}
+        and set(item.get("asset_ids") or []) == {
+            "WZ10-01", "SEA-C2-01", "ATTACK-UAV-01", "ATTACK-UAV-02",
+        }
         for item in engine.events
     )
+    # 两架攻击无人机在毁伤确认后转入保障舰甲板回收航线。
+    assert engine.waypoint_nav.get_route("ATTACK-UAV-01")[-1]["label"] == "SEA-C2-RECOVERY-DECK"
+    assert engine.waypoint_nav.get_route("ATTACK-UAV-02")[-1]["label"] == "SEA-C2-RECOVERY-DECK"
+    assert engine.assets["ATTACK-UAV-01"]["_current_behavior"] == "north_axis_recovered_to_support_ship"
+    assert engine.assets["ATTACK-UAV-02"]["_current_behavior"] == "south_axis_recovered_to_support_ship"
     assert "CJR-MEDIA-07" in {
         item["media_id"] for item in engine.media_capture.public_captures()
     }
+    # 两架攻击无人机在 BDA 后返回保障舰，到达最终回收点完成甲板回收。
+    # 5720 覆盖从盘旋环最远端出发的最坏飞行时间（BDA≈4510 + ~1075s + 余量）。
+    _advance(engine, 5720)
+    for asset_id in ("ATTACK-UAV-01", "ATTACK-UAV-02"):
+        assert engine.assets[asset_id]["status"] == "recovered", asset_id
+        assert engine.assets[asset_id]["speed_kts"] == 0.0, asset_id
+    assert {
+        item.get("asset_id")
+        for item in engine.events
+        if item.get("type") == "aircraft_recovered"
+    } == {"ATTACK-UAV-01", "ATTACK-UAV-02"}
 
 
 def test_multimodal_evidence_releases_a_backend_classification_candidate() -> None:

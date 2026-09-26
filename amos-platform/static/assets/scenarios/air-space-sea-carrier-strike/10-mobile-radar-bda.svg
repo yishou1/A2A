@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <rect width="1600" height="900" fill="#07151f"/>
+  <text x="70" y="82" fill="#eefbff" font-family="sans-serif" font-size="38" font-weight="700">机动雷达车 · 攻击后独立毁伤评估</text>
+  <text x="70" y="126" fill="#9fcbd8" font-family="sans-serif" font-size="22">UAV-ISR-01 复查第二波目标；结论仅绑定机动雷达车，不替代机场目标评估</text>
+  <g font-family="sans-serif">
+    <rect x="70" y="180" width="660" height="520" rx="24" fill="#102732" stroke="#4c9db5" stroke-width="3"/>
+    <text x="110" y="235" fill="#dff7ff" font-size="28" font-weight="700">攻击前参考 · IR / TRACK</text>
+    <rect x="110" y="275" width="580" height="350" rx="12" fill="#15232b" stroke="#355868" stroke-width="2"/>
+    <path d="M135 510C240 470 320 505 425 450S570 390 665 425" fill="none" stroke="#536d72" stroke-width="20" opacity=".7"/>
+    <g transform="translate(370 405)"><rect x="-72" y="-20" width="144" height="58" rx="10" fill="#c7d9d2" opacity=".9"/><circle cx="-48" cy="45" r="17" fill="#718784"/><circle cx="48" cy="45" r="17" fill="#718784"/><path d="M0-22V-94M0-94L-38-58M0-94L38-58" fill="none" stroke="#f1fff9" stroke-width="10" stroke-linecap="round"/><circle r="26" fill="none" stroke="#f8d684" stroke-width="7" opacity=".8"/></g>
+    <text x="110" y="670" fill="#94bbc7" font-size="21">参考帧：已确认机动目标及其道路背景</text>
+    <rect x="870" y="180" width="660" height="520" rx="24" fill="#102732" stroke="#ff9a68" stroke-width="3"/>
+    <text x="910" y="235" fill="#dff7ff" font-size="28" font-weight="700">攻击后复查 · EO/IR / BDA</text>
+    <rect x="910" y="275" width="580" height="350" rx="12" fill="#15232b" stroke="#5f493f" stroke-width="2"/>
+    <path d="M935 510C1040 470 1120 505 1225 450S1370 390 1465 425" fill="none" stroke="#536d72" stroke-width="20" opacity=".7"/>
+    <g transform="translate(1170 415)" opacity=".7"><path d="M-80 35L-48-18L62-5L83 42Z" fill="#857b70"/><circle cx="-48" cy="45" r="14" fill="#4c5351"/><circle cx="48" cy="45" r="14" fill="#4c5351"/><path d="M-25-18L40-78M40-78L-2-70" fill="none" stroke="#a69b8d" stroke-width="8" stroke-linecap="round"/></g>
+    <circle cx="1170" cy="415" r="92" fill="none" stroke="#ff8559" stroke-width="5" stroke-dasharray="15 10"/>
+    <path d="M1105 350L1235 480M1235 350L1105 480" stroke="#ff8559" stroke-width="8" opacity=".8"/>
+    <text x="910" y="670" fill="#ffd0bd" font-size="21">当前帧：命中后变化与威胁状态独立判读</text>
+  </g>
+  <g font-family="sans-serif" font-size="22"><rect x="205" y="750" width="1190" height="72" rx="15" fill="#0f2c38" stroke="#4c9db5" stroke-width="2"/><text x="250" y="795" fill="#8ce9b8">闭环条件：第二波实际命中 + 当前传感器复查 + 目标专属毁伤结论</text></g>
+  <text x="800" y="865" fill="#88aebb" font-family="monospace" font-size="20" text-anchor="middle">SIMULATION PRODUCT · FICTIONAL TRAINING AREA · OFFLINE ASSET</text>
+</svg>
