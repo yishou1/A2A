@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+import os
 import sqlite3
+from unittest.mock import patch
 
-from amos_platform.agents.a2a.workflow_run_store import get_workflow_run_store
+from amos_platform.agents.a2a.workflow_run_store import WorkflowRunStore, get_workflow_run_store
 from amos_platform.api.app_factory import create_app
 from amos_platform.data.scenario_repository import get_scenario
 from amos_platform.runtime.platform_runtime import PlatformRuntime
@@ -24,6 +26,52 @@ def _context(run_id: str = "run-archive-1") -> dict:
         "agent_backend": "gateway",
         "started_at": "2026-08-11T01:02:03Z",
     }
+
+
+def test_run_manifest_retention_prunes_oldest_rows(tmp_path) -> None:
+    with patch.dict(os.environ, {
+        "AMOS_RUN_RETENTION_COUNT": "2",
+        "AMOS_RUN_RETENTION_BYTES": "1000000",
+        "AMOS_RUN_RETENTION_DAYS": "30",
+    }):
+        store = RunManifestStore(tmp_path / "retained.sqlite3")
+        for index in range(3):
+            store.begin_run(_context(f"run-retained-{index}"))
+
+    assert store.get("run-retained-0") is None
+    assert store.get("run-retained-2") is not None
+    assert store.stats()["items"] == 2
+
+
+def test_run_manifest_retention_prunes_existing_rows_on_open(tmp_path) -> None:
+    database_path = tmp_path / "retained-on-open.sqlite3"
+    with patch.dict(os.environ, {
+        "AMOS_RUN_RETENTION_COUNT": "3",
+        "AMOS_RUN_RETENTION_BYTES": "1000000",
+        "AMOS_RUN_RETENTION_DAYS": "30",
+    }):
+        store = RunManifestStore(database_path)
+        for index in range(3):
+            store.begin_run(_context(f"run-on-open-{index}"))
+    with patch.dict(os.environ, {
+        "AMOS_RUN_RETENTION_COUNT": "2",
+        "AMOS_RUN_RETENTION_BYTES": "1000000",
+        "AMOS_RUN_RETENTION_DAYS": "30",
+    }):
+        reopened = RunManifestStore(database_path)
+
+    assert reopened.stats()["items"] == 2
+    assert reopened.get("run-on-open-0") is None
+
+
+def test_workflow_run_cache_has_count_and_byte_limits() -> None:
+    store = WorkflowRunStore(max_runs=10, max_bytes=100)
+    store.put("wf-1", {"blob": "a" * 70})
+    store.put("wf-2", {"blob": "b" * 70})
+
+    assert store.get("wf-1") == {}
+    assert store.get("wf-2")["blob"] == "b" * 70
+    assert store.stats()["bytes"] <= 100
 
 
 def test_sqlite_manifest_persists_complete_acceptance_evidence(tmp_path) -> None:

@@ -16,6 +16,7 @@ from registry.nacos_manager import NacosRegistry
 from telemetry import traced_method
 from workflow_payloads import normalize_attachments
 from workflow_state_store import WorkflowStateStore, new_workflow_id, utc_now_iso
+from bounded_cache import env_positive_int, process_rss_bytes
 
 
 class WorkflowManager:
@@ -55,6 +56,9 @@ class WorkflowManager:
         self._executor = ThreadPoolExecutor(max_workers=self.max_workflows)
         self._lock = threading.RLock()
         self._jobs: dict[str, dict] = {}
+        self.max_terminal_history = env_positive_int(
+            "A2A_MANAGER_TERMINAL_HISTORY", 32
+        )
         self._closed = False
 
     def submit_workflow(self, **kwargs) -> dict:
@@ -153,11 +157,35 @@ class WorkflowManager:
         )
         with self._lock:
             self._jobs[workflow_id]["future"] = future
+        future.add_done_callback(
+            lambda _future, finished_id=workflow_id: self._finalize_job(finished_id)
+        )
         return self.get_workflow(workflow_id)
 
     def list_workflows(self) -> list[dict]:
         with self._lock:
             return [self._job_snapshot(job) for job in self._jobs.values()]
+
+    def workflow_count(self) -> int:
+        """Return the workflow count without copying workflow result payloads."""
+        with self._lock:
+            return len(self._jobs)
+
+    def memory_metrics(self) -> dict:
+        with self._lock:
+            statuses: dict[str, int] = {}
+            for job in self._jobs.values():
+                status = str(job.get("status") or "unknown")
+                statuses[status] = statuses.get(status, 0) + 1
+            jobs = len(self._jobs)
+        checkpoint_stats = getattr(self.state_store, "stats", lambda: {})()
+        return {
+            "process_rss_bytes": process_rss_bytes(),
+            "retained_jobs": jobs,
+            "max_terminal_history": self.max_terminal_history,
+            "jobs_by_status": statuses,
+            "checkpoint_store": checkpoint_stats,
+        }
 
     def get_workflow(self, workflow_id: str, include_checkpoint: bool = False) -> dict:
         with self._lock:
@@ -314,7 +342,6 @@ class WorkflowManager:
                 current_activity=context.get("current_activity") or context.get("current_activatity"),
                 last_error=context.get("last_error"),
                 trace_count=len(context.get("trace", [])),
-                result=deepcopy(context.get("workflow_result")),
             )
         except Exception as exc:
             self._update_job(
@@ -326,18 +353,46 @@ class WorkflowManager:
             raise
         finally:
             if self.lease_manager is not None:
-                self.lease_manager.release_workflow(workflow_id)
+                self.lease_manager.release_workflow(
+                    workflow_id, cleanup_agents=True
+                )
 
     def _update_job(self, workflow_id: str, **updates) -> None:
         with self._lock:
             self._jobs[workflow_id].update(updates)
 
+    def _finalize_job(self, workflow_id: str) -> None:
+        """Drop heavy terminal references and retain bounded metadata only."""
+        terminal_states = {"completed", "failed", "error", "cancelled", "paused"}
+        with self._lock:
+            job = self._jobs.get(workflow_id)
+            if job is None:
+                return
+            job.pop("future", None)
+            job.pop("result", None)
+            job.pop("attachments", None)
+            terminal_ids = [
+                key
+                for key, value in self._jobs.items()
+                if str(value.get("status") or "").lower() in terminal_states
+            ]
+            while len(terminal_ids) > self.max_terminal_history:
+                expired = terminal_ids.pop(0)
+                if expired != workflow_id:
+                    self._jobs.pop(expired, None)
+
     @staticmethod
     def _job_snapshot(job: dict) -> dict:
+        """Return manager metadata only.
+
+        Terminal ``result`` values can be several megabytes.  Status, list and
+        health endpoints never need that payload; consumers retrieve the
+        persisted checkpoint exactly once when they need terminal evidence.
+        """
         return {
             key: deepcopy(value)
             for key, value in job.items()
-            if key != "future"
+            if key not in {"future", "result"}
         }
 
 

@@ -482,6 +482,23 @@ def test_execution_workspace_inspects_current_run_workflows_and_real_activity_de
     assert 'String(view.workflow_id || "") !== String(activeWorkflowId || "")' in workflow
 
 
+def test_workflow_history_uses_checkpoint_identity_before_live_phase() -> None:
+    workflow = (ROOT / "static/js/workflow/commander-workflow.js").read_text(
+        encoding="utf-8"
+    )
+
+    checkpoint_lookup = workflow.index(
+        "for (var i = 0; i < workflowTasks.length; i += 1)"
+    )
+    live_phase_fallback = workflow.index(
+        'if (phase === "FIND" || phase === "FIX") return "OBSERVE";'
+    )
+    assert checkpoint_lookup < live_phase_fallback
+    assert '"MAR-CP-PLAN", "CJR-CP-PLAN", "ASC-CP-PLAN"' in workflow
+    assert '"MAR-CP-ENGAGE", "MAR-CP-CLOSE"' in workflow
+    assert "slot.id = id;" in workflow
+
+
 def test_algorithm_coverage_uses_runtime_backend_catalog() -> None:
     html = (ROOT / "templates/dashboard.html").read_text(encoding="utf-8")
     api_script = (ROOT / "static/js/api/platform-api.js").read_text(encoding="utf-8")

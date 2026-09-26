@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from html import escape
 import json
+import os
 from pathlib import Path
 import sqlite3
 from threading import RLock
@@ -118,7 +119,22 @@ class RunManifestStore:
         self.db_path = Path(db_path).expanduser().resolve()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = RLock()
+        self.retention_count = self._env_limit("AMOS_RUN_RETENTION_COUNT", 256)
+        self.retention_bytes = self._env_limit(
+            "AMOS_RUN_RETENTION_BYTES", 256 * 1024 * 1024
+        )
+        self.retention_days = self._env_limit("AMOS_RUN_RETENTION_DAYS", 30)
         self._initialize()
+        with self._lock, self._connect() as connection:
+            self._enforce_retention(connection, protected_run_id=None)
+            connection.commit()
+
+    @staticmethod
+    def _env_limit(name: str, default: int) -> int:
+        try:
+            return max(1, int(os.environ.get(name, default)))
+        except (TypeError, ValueError):
+            return max(1, int(default))
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db_path, timeout=10.0)
@@ -140,7 +156,8 @@ class RunManifestStore:
                     final_status TEXT,
                     started_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
-                    manifest_json TEXT NOT NULL
+                    manifest_json TEXT NOT NULL,
+                    manifest_bytes INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE INDEX IF NOT EXISTS idx_run_manifests_started
                     ON run_manifests(started_at DESC, run_id DESC);
@@ -148,10 +165,32 @@ class RunManifestStore:
                     ON run_manifests(scenario_id, started_at DESC);
                 """
             )
+            columns = {
+                row[1] for row in connection.execute(
+                    "PRAGMA table_info(run_manifests)"
+                ).fetchall()
+            }
+            if "manifest_bytes" not in columns:
+                connection.execute(
+                    "ALTER TABLE run_manifests "
+                    "ADD COLUMN manifest_bytes INTEGER NOT NULL DEFAULT 0"
+                )
+            connection.execute(
+                "UPDATE run_manifests "
+                "SET manifest_bytes=length(CAST(manifest_json AS BLOB)) "
+                "WHERE manifest_bytes=0"
+            )
 
     @staticmethod
     def _row_values(manifest: dict[str, Any]) -> tuple[Any, ...]:
         lifecycle = manifest.get("lifecycle") or {}
+        encoded = json.dumps(
+            manifest,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
         return (
             manifest["run_id"],
             manifest.get("scenario_id"),
@@ -161,7 +200,8 @@ class RunManifestStore:
             lifecycle.get("final_status"),
             manifest.get("started_at") or _now_iso(),
             manifest.get("updated_at") or _now_iso(),
-            json.dumps(manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False),
+            encoded,
+            len(encoded.encode("utf-8")),
         )
 
     def _write(self, connection: sqlite3.Connection, manifest: dict[str, Any]) -> None:
@@ -169,8 +209,8 @@ class RunManifestStore:
             """
             INSERT INTO run_manifests (
                 run_id, scenario_id, seed, mode, branch, final_status,
-                started_at, updated_at, manifest_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                started_at, updated_at, manifest_json, manifest_bytes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(run_id) DO UPDATE SET
                 scenario_id=excluded.scenario_id,
                 seed=excluded.seed,
@@ -179,7 +219,8 @@ class RunManifestStore:
                 final_status=excluded.final_status,
                 started_at=excluded.started_at,
                 updated_at=excluded.updated_at,
-                manifest_json=excluded.manifest_json
+                manifest_json=excluded.manifest_json,
+                manifest_bytes=excluded.manifest_bytes
             """,
             self._row_values(manifest),
         )
@@ -207,6 +248,7 @@ class RunManifestStore:
             manifest["updated_at"] = _now_iso()
             manifest = _clone(manifest)
             self._write(connection, manifest)
+            self._enforce_retention(connection, protected_run_id=key)
             connection.commit()
             return deepcopy(manifest)
 
@@ -239,8 +281,56 @@ class RunManifestStore:
         with self._lock, self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             self._write(connection, manifest)
+            self._enforce_retention(connection, protected_run_id=run_id)
             connection.commit()
         return deepcopy(manifest)
+
+    def _enforce_retention(
+        self, connection: sqlite3.Connection, *, protected_run_id: str | None
+    ) -> int:
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=self.retention_days)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        rows = connection.execute(
+            "SELECT run_id, manifest_bytes, updated_at FROM run_manifests "
+            "ORDER BY updated_at DESC, run_id DESC"
+        ).fetchall()
+        kept_count = 0
+        kept_bytes = 0
+        expired: list[str] = []
+        for row in rows:
+            run_key = str(row["run_id"])
+            size = max(0, int(row[1] or 0))
+            keep = run_key == protected_run_id or (
+                str(row["updated_at"] or "") >= cutoff
+                and kept_count < self.retention_count
+                and kept_bytes + size <= self.retention_bytes
+            )
+            if keep:
+                kept_count += 1
+                kept_bytes += size
+            else:
+                expired.append(run_key)
+        if expired:
+            connection.executemany(
+                "DELETE FROM run_manifests WHERE run_id=?",
+                [(run_key,) for run_key in expired],
+            )
+        return len(expired)
+
+    def stats(self) -> dict[str, int]:
+        with self._lock, self._connect() as connection:
+            count, encoded_bytes = connection.execute(
+                "SELECT count(*), coalesce(sum(manifest_bytes), 0) "
+                "FROM run_manifests"
+            ).fetchone()
+        return {
+            "items": int(count or 0),
+            "bytes": int(encoded_bytes or 0),
+            "max_items": self.retention_count,
+            "max_bytes": self.retention_bytes,
+            "retention_days": self.retention_days,
+        }
 
     def record_lifecycle(
         self,

@@ -453,6 +453,40 @@ def test_backend_selects_workflow_from_current_f2t2ea_phase(elapsed, expected) -
     assert backend["workflow_file"].endswith(expected)
 
 
+@pytest.mark.parametrize(
+    ("scenario_id", "checkpoint_id", "elapsed", "expected"),
+    [
+        ("maritime-convoy-air-defense", "MAR-CP-PLAN", 3630, "decide_workflow.bpel"),
+        ("coastal-joint-recon-strike", "CJR-CP-PLAN", 2730, "decide_workflow.bpel"),
+        ("air-space-sea-carrier-strike", "ASC-CP-SAT", 390, "observe_workflow.bpel"),
+        ("air-space-sea-carrier-strike", "ASC-CP-TRACK", 2190, "orient_workflow.bpel"),
+        ("air-space-sea-carrier-strike", "ASC-CP-PLAN", 2730, "decide_workflow.bpel"),
+        ("air-space-sea-carrier-strike", "ASC-CP-WAVE1", 3390, "act_workflow.bpel"),
+        ("air-space-sea-carrier-strike", "ASC-CP-WAVE2", 4560, "act_workflow.bpel"),
+        ("air-space-sea-carrier-strike", "ASC-CP-CLOSE", 5850, "act_workflow.bpel"),
+    ],
+)
+def test_backend_checkpoint_identity_wins_over_live_phase(
+    scenario_id, checkpoint_id, elapsed, expected
+) -> None:
+    scenario = get_scenario(scenario_id)
+    engine = SimEngine()
+    engine.load_scenario(scenario)
+    engine.clock.update({
+        "run_id": f"run-checkpoint-{checkpoint_id}",
+        "scenario_id": scenario_id,
+        "elapsed_sec": elapsed,
+        "director_checkpoint_id": checkpoint_id,
+    })
+
+    mission = CommanderBridge(mode="gateway").build_workflow_payload(
+        scenario, {}, engine
+    )
+
+    assert mission["mission_input"]["stage_transfer"]["checkpoint_id"] == checkpoint_id
+    assert mission["workflow_file"].endswith(expected)
+
+
 def test_direct_commander_mode_remains_explicit_diagnostic_path() -> None:
     scenario = get_scenario(SCENARIO_ID)
     engine = SimEngine()

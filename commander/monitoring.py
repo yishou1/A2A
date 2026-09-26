@@ -39,6 +39,21 @@ class SupervisorMonitor:
             ["severity"],
             registry=self.registry,
         )
+        self.process_rss = Gauge(
+            "a2a_commander_process_rss_bytes",
+            "Commander manager resident memory",
+            registry=self.registry,
+        )
+        self.retained_jobs = Gauge(
+            "a2a_commander_retained_jobs",
+            "Commander in-memory workflow metadata records",
+            registry=self.registry,
+        )
+        self.checkpoint_bytes = Gauge(
+            "a2a_commander_checkpoint_bytes",
+            "Encoded bytes retained in the workflow checkpoint store",
+            registry=self.registry,
+        )
 
     def snapshot(self, manager) -> dict:
         workflows = manager.list_workflows()
@@ -46,11 +61,18 @@ class SupervisorMonitor:
         leases = manager.list_agent_leases()
         alerts = evaluate_alerts(workflows, agents)
         self._update_metrics(workflows, agents, leases, alerts)
+        memory = manager.memory_metrics()
+        self.process_rss.set(memory.get("process_rss_bytes") or 0)
+        self.retained_jobs.set(memory.get("retained_jobs") or 0)
+        self.checkpoint_bytes.set(
+            (memory.get("checkpoint_store") or {}).get("bytes") or 0
+        )
         return {
             "workflows": workflows,
             "agents": agents,
             "leases": leases,
             "alerts": alerts,
+            "memory": memory,
             "summary": {
                 "workflow_count": len(workflows),
                 "agent_count": len(agents),

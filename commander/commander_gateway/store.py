@@ -36,6 +36,48 @@ class FileGatewayStore:
         ):
             directory.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self.package_retention_count = self._env_limit(
+            "GATEWAY_PACKAGE_RETENTION_COUNT", 128
+        )
+        self.package_retention_bytes = self._env_limit(
+            "GATEWAY_PACKAGE_RETENTION_BYTES", 2 * 1024 * 1024 * 1024
+        )
+        self.workflow_retention_count = self._env_limit(
+            "GATEWAY_WORKFLOW_RETENTION_COUNT", 128
+        )
+        self.workflow_retention_bytes = self._env_limit(
+            "GATEWAY_WORKFLOW_RETENTION_BYTES", 512 * 1024 * 1024
+        )
+        self.idempotency_retention_count = self._env_limit(
+            "GATEWAY_IDEMPOTENCY_RETENTION_COUNT", 128
+        )
+        with self._lock:
+            self._prune_directory(
+                self.packages_dir,
+                max_items=self.package_retention_count,
+                max_bytes=self.package_retention_bytes,
+                protected=set(),
+                remove_checksum=True,
+            )
+            self._prune_directory(
+                self.workflows_dir,
+                max_items=self.workflow_retention_count,
+                max_bytes=self.workflow_retention_bytes,
+                protected=set(),
+            )
+            self._prune_directory(
+                self.idempotency_dir,
+                max_items=self.idempotency_retention_count,
+                max_bytes=64 * 1024 * 1024,
+                protected=set(),
+            )
+
+    @staticmethod
+    def _env_limit(name: str, default: int) -> int:
+        try:
+            return max(1, int(os.environ.get(name, default)))
+        except (TypeError, ValueError):
+            return max(1, int(default))
 
     @staticmethod
     def _safe_component(value: str) -> str:
@@ -69,6 +111,13 @@ class FileGatewayStore:
             self._atomic_write(self.packages_dir / f"{package_id}.json", body)
             self._atomic_write(
                 self.packages_dir / f"{package_id}.sha256", checksum.encode("ascii")
+            )
+            self._prune_directory(
+                self.packages_dir,
+                max_items=self.package_retention_count,
+                max_bytes=self.package_retention_bytes,
+                protected={package_id},
+                remove_checksum=True,
             )
         return package_id, checksum, body
 
@@ -106,6 +155,12 @@ class FileGatewayStore:
             self._atomic_write(
                 self.workflows_dir / f"{workflow_id}.json",
                 canonical_json_bytes(record),
+            )
+            self._prune_directory(
+                self.workflows_dir,
+                max_items=self.workflow_retention_count,
+                max_bytes=self.workflow_retention_bytes,
+                protected={workflow_id},
             )
 
     def read_workflow(self, workflow_id: str) -> dict:
@@ -146,6 +201,12 @@ class FileGatewayStore:
                 self.idempotency_dir / f"{digest}.json",
                 canonical_json_bytes(record),
             )
+            self._prune_directory(
+                self.idempotency_dir,
+                max_items=self.idempotency_retention_count,
+                max_bytes=64 * 1024 * 1024,
+                protected={digest},
+            )
 
     def read_idempotency(self, digest: str) -> dict | None:
         digest = self._safe_component(digest)
@@ -179,3 +240,59 @@ class FileGatewayStore:
 
     def list_idempotency(self) -> list[str]:
         return sorted(path.stem for path in self.idempotency_dir.glob("*.json"))
+
+    def _prune_directory(
+        self,
+        directory: Path,
+        *,
+        max_items: int,
+        max_bytes: int,
+        protected: set[str],
+        remove_checksum: bool = False,
+    ) -> None:
+        files = sorted(
+            directory.glob("*.json"),
+            key=lambda path: (path.stat().st_mtime_ns, path.name),
+            reverse=True,
+        )
+        kept_items = 0
+        kept_bytes = 0
+        for path in files:
+            size = path.stat().st_size
+            keep = path.stem in protected or (
+                kept_items < max_items and kept_bytes + size <= max_bytes
+            )
+            if keep:
+                kept_items += 1
+                kept_bytes += size
+                continue
+            path.unlink(missing_ok=True)
+            if remove_checksum:
+                path.with_suffix(".sha256").unlink(missing_ok=True)
+
+    @staticmethod
+    def _directory_stats(directory: Path) -> dict[str, int]:
+        files = list(directory.glob("*.json"))
+        return {
+            "items": len(files),
+            "bytes": sum(path.stat().st_size for path in files),
+        }
+
+    def stats(self) -> dict[str, dict[str, int]]:
+        with self._lock:
+            return {
+                "packages": {
+                    **self._directory_stats(self.packages_dir),
+                    "max_items": self.package_retention_count,
+                    "max_bytes": self.package_retention_bytes,
+                },
+                "workflows": {
+                    **self._directory_stats(self.workflows_dir),
+                    "max_items": self.workflow_retention_count,
+                    "max_bytes": self.workflow_retention_bytes,
+                },
+                "idempotency": {
+                    **self._directory_stats(self.idempotency_dir),
+                    "max_items": self.idempotency_retention_count,
+                },
+            }

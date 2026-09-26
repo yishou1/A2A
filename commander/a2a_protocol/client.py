@@ -99,6 +99,15 @@ class A2AClient:
         res.raise_for_status()
         return res.json()
 
+    def cleanup_workflow(self, workflow_id: str):
+        """Release transient Agent state for a terminal workflow."""
+        endpoint = (self.agent_card or {}).get(
+            "workflowCleanupEndpoint", "/workflows/{workflow_id}/cache"
+        ).replace("{workflow_id}", str(workflow_id))
+        res = self.http.delete(f"{self.base_url}{endpoint}", timeout=self.timeout)
+        res.raise_for_status()
+        return res.json()
+
     def exchange_coordination(self, message: Dict[str, Any]):
         """Exchange an Agent-local CBBA message over the existing A2A channel."""
         if not self.jwt_token:

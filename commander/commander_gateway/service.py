@@ -23,6 +23,7 @@ from commander_gateway.schemas import (
     WorkflowSubmitV1,
 )
 from commander_gateway.store import FileGatewayStore, canonical_json_bytes
+from bounded_cache import BoundedLRUCache, env_positive_int, process_rss_bytes
 
 
 def utc_now() -> str:
@@ -298,6 +299,8 @@ _SENSITIVE_PREFIXES = ("agent", "a2a", "commander")
 
 
 class GatewayService:
+    _TERMINAL_STATES = {"completed", "failed", "error", "cancelled", "paused"}
+
     def __init__(
         self,
         config: GatewayConfig,
@@ -311,6 +314,12 @@ class GatewayService:
         self.amos = amos_client or AmosClient(config)
         self.commander = commander_client or CommanderClient(config)
         self._submit_lock = threading.RLock()
+        self._terminal_projection_cache = BoundedLRUCache(
+            max_items=env_positive_int("GATEWAY_TERMINAL_CACHE_MAX_ITEMS", 12),
+            max_bytes=env_positive_int(
+                "GATEWAY_TERMINAL_CACHE_MAX_BYTES", 128 * 1024 * 1024
+            ),
+        )
 
     @staticmethod
     def _validate_provenance(payload: dict, label: str) -> None:
@@ -543,6 +552,7 @@ class GatewayService:
                 raise exc
 
     def _finish_submission(self, workflow_id: str, upstream: dict) -> CommanderProjectionV1:
+        self._terminal_projection_cache.pop(workflow_id, None)
         record = self._read_workflow(workflow_id)
         projection = self._projection(record)
         projection = projection.model_copy(
@@ -768,37 +778,61 @@ class GatewayService:
         return result
 
     def get_projection(self, workflow_id: str) -> CommanderProjectionV1:
-        record = self._read_workflow(workflow_id)
-        upstream = self.commander.get_workflow(workflow_id)
-        try:
-            work_list = self._checkpoint_list(
-                self.commander.get_work_list(workflow_id), "work_list"
-            )
-        except UpstreamError as exc:
-            if exc.status_code != 404:
-                raise
-            work_list = []
-        try:
-            trace = self._checkpoint_list(self.commander.get_trace(workflow_id), "trace")
-        except UpstreamError as exc:
-            if exc.status_code != 404:
-                raise
-            trace = []
+        cached_terminal = self._terminal_projection_cache.get(workflow_id)
+        if cached_terminal is not None:
+            return cached_terminal
 
+        record = self._read_workflow(workflow_id)
+        current_projection = self._projection(record)
+
+        brief = getattr(self.commander, "get_workflow_brief", None)
+        upstream = (
+            brief(workflow_id)
+            if callable(brief)
+            else self.commander.get_workflow(workflow_id)
+        )
+        state = str(upstream.get("status") or current_projection.status).lower()
+        checkpoint: dict[str, Any] = {}
+        work_list: list[Any] = []
+        trace: list[Any] = []
         result: dict[str, Any] = {}
-        if str(upstream.get("status") or "").lower() == "completed":
+
+        if state in self._TERMINAL_STATES or state == "checkpoint_only":
             try:
-                result = self._resolved_workflow_result(
-                    self.commander.get_checkpoint(workflow_id)
+                checkpoint = self.commander.get_checkpoint(workflow_id)
+            except UpstreamError as exc:
+                if exc.status_code != 404:
+                    raise
+            context = checkpoint.get("context") if isinstance(checkpoint, dict) else None
+            if isinstance(context, dict):
+                work_list = self._checkpoint_list(context.get("work_list"), "work_list")
+                trace = self._checkpoint_list(context.get("trace"), "trace")
+                state = str(
+                    checkpoint.get("status")
+                    or context.get("workflow_status")
+                    or state
+                ).lower()
+                if state == "completed":
+                    result = self._resolved_workflow_result(checkpoint)
+        else:
+            try:
+                work_list = self._checkpoint_list(
+                    self.commander.get_work_list(workflow_id), "work_list"
+                )
+            except UpstreamError as exc:
+                if exc.status_code != 404:
+                    raise
+            try:
+                trace = self._checkpoint_list(
+                    self.commander.get_trace(workflow_id), "trace"
                 )
             except UpstreamError as exc:
                 if exc.status_code != 404:
                     raise
 
-        projection = self._projection(record)
-        updated = projection.model_copy(
+        updated = current_projection.model_copy(
             update={
-                "status": str(upstream.get("status", projection.status)),
+                "status": state,
                 "work_list": work_list,
                 "trace": trace,
                 "result": result,
@@ -808,6 +842,8 @@ class GatewayService:
         )
         record["projection"] = updated.model_dump(mode="json")
         self.store.save_workflow(workflow_id, record)
+        if state in self._TERMINAL_STATES:
+            self._terminal_projection_cache[workflow_id] = updated.model_copy(deep=True)
         return updated
 
     def get_brief(self, workflow_id: str) -> dict:
@@ -836,8 +872,11 @@ class GatewayService:
         return self._get_checkpoint_field(workflow_id, "trace")
 
     def _get_checkpoint_field(self, workflow_id: str, field: str) -> list:
+        cached_terminal = self._terminal_projection_cache.get(workflow_id)
+        if cached_terminal is not None:
+            return copy.deepcopy(getattr(cached_terminal, field))
+
         record = self._read_workflow(workflow_id)
-        upstream = self.commander.get_workflow(workflow_id)
         call = (
             self.commander.get_work_list
             if field == "work_list"
@@ -852,10 +891,8 @@ class GatewayService:
         current_projection = self._projection(record)
         projection = current_projection.model_copy(
             update={
-                "status": str(upstream.get("status") or current_projection.status),
                 field: value,
-                "updated_at": str(upstream.get("updated_at") or utc_now()),
-                "last_error": upstream.get("last_error"),
+                "updated_at": utc_now(),
             }
         )
         record["projection"] = projection.model_dump(mode="json")
@@ -863,6 +900,7 @@ class GatewayService:
         return value
 
     def resume(self, workflow_id: str) -> CommanderProjectionV1:
+        self._terminal_projection_cache.pop(workflow_id, None)
         record = self._read_workflow(workflow_id)
         payload = copy.deepcopy(record["commander_payload"])
         payload.pop("workflow_id", None)
@@ -912,6 +950,12 @@ class GatewayService:
         status = "ok" if healthy else "degraded"
         return (200 if healthy else 503), {
             "status": status,
-            "gateway": {"status": "ok", "single_worker_only": True},
+            "gateway": {
+                "status": "ok",
+                "single_worker_only": True,
+                "process_rss_bytes": process_rss_bytes(),
+                "terminal_cache": self._terminal_projection_cache.stats(),
+                "retention": self.store.stats(),
+            },
             "dependencies": dependencies,
         }

@@ -26,7 +26,21 @@ class WorkflowStateStore:
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self.database_path = self.base_dir / "workflow_state.db"
         self._lock = threading.RLock()
+        self.retention_count = self._env_limit(
+            "A2A_CHECKPOINT_RETENTION_COUNT", 128
+        )
+        self.retention_bytes = self._env_limit(
+            "A2A_CHECKPOINT_RETENTION_BYTES", 1024 * 1024 * 1024
+        )
         self._initialize_database()
+        self._enforce_retention(protected_workflow_id=None)
+
+    @staticmethod
+    def _env_limit(name: str, default: int) -> int:
+        try:
+            return max(1, int(os.environ.get(name, default)))
+        except (TypeError, ValueError):
+            return max(1, int(default))
 
     @contextlib.contextmanager
     def _connect(self):
@@ -49,10 +63,26 @@ class WorkflowStateStore:
                 CREATE TABLE IF NOT EXISTS workflow_checkpoints (
                     workflow_id TEXT PRIMARY KEY,
                     state_json TEXT NOT NULL,
+                    state_bytes INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
                 """
+            )
+            columns = {
+                row[1] for row in connection.execute(
+                    "PRAGMA table_info(workflow_checkpoints)"
+                ).fetchall()
+            }
+            if "state_bytes" not in columns:
+                connection.execute(
+                    "ALTER TABLE workflow_checkpoints "
+                    "ADD COLUMN state_bytes INTEGER NOT NULL DEFAULT 0"
+                )
+            connection.execute(
+                "UPDATE workflow_checkpoints "
+                "SET state_bytes=length(CAST(state_json AS BLOB)) "
+                "WHERE state_bytes=0"
             )
 
     def state_path(self, workflow_id: str) -> Path:
@@ -93,13 +123,20 @@ class WorkflowStateStore:
                 connection.execute(
                     """
                     INSERT INTO workflow_checkpoints(
-                        workflow_id, state_json, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?)
+                        workflow_id, state_json, state_bytes, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(workflow_id) DO UPDATE SET
                         state_json=excluded.state_json,
+                        state_bytes=excluded.state_bytes,
                         updated_at=excluded.updated_at
                     """,
-                    (workflow_id, encoded, payload["created_at"], payload["updated_at"]),
+                    (
+                        workflow_id,
+                        encoded,
+                        len(encoded.encode("utf-8")),
+                        payload["created_at"],
+                        payload["updated_at"],
+                    ),
                 )
 
             tmp_path = path.with_suffix(path.suffix + f".{uuid4().hex}.tmp")
@@ -109,16 +146,63 @@ class WorkflowStateStore:
                 os.fsync(tmp_file.fileno())
 
             last_error = None
+            replaced = False
             for attempt in range(8):
                 try:
                     os.replace(tmp_path, path)
-                    return
+                    replaced = True
+                    break
                 except PermissionError as exc:
                     last_error = exc
                     time.sleep(0.05 * (attempt + 1))
+            if replaced:
+                self._enforce_retention(protected_workflow_id=workflow_id)
+                return
             with contextlib.suppress(FileNotFoundError, PermissionError):
                 tmp_path.unlink()
             raise last_error
+
+    def _enforce_retention(self, *, protected_workflow_id: str | None) -> int:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT workflow_id, state_bytes FROM workflow_checkpoints "
+                "ORDER BY updated_at DESC, workflow_id DESC"
+            ).fetchall()
+            kept_count = 0
+            kept_bytes = 0
+            expired: list[str] = []
+            for workflow_id, encoded_bytes in rows:
+                size = max(0, int(encoded_bytes or 0))
+                keep = workflow_id == protected_workflow_id or (
+                    kept_count < self.retention_count
+                    and kept_bytes + size <= self.retention_bytes
+                )
+                if keep:
+                    kept_count += 1
+                    kept_bytes += size
+                else:
+                    expired.append(str(workflow_id))
+            if expired:
+                connection.executemany(
+                    "DELETE FROM workflow_checkpoints WHERE workflow_id=?",
+                    [(workflow_id,) for workflow_id in expired],
+                )
+        for workflow_id in expired:
+            self.state_path(workflow_id).unlink(missing_ok=True)
+        return len(expired)
+
+    def stats(self) -> dict[str, int]:
+        with self._lock, self._connect() as connection:
+            count, encoded_bytes = connection.execute(
+                "SELECT count(*), coalesce(sum(state_bytes), 0) "
+                "FROM workflow_checkpoints"
+            ).fetchone()
+        return {
+            "items": int(count or 0),
+            "bytes": int(encoded_bytes or 0),
+            "max_items": self.retention_count,
+            "max_bytes": self.retention_bytes,
+        }
 
     def delete(self, workflow_id: str) -> None:
         with self._lock:

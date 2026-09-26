@@ -4,6 +4,8 @@ import tempfile
 import threading
 import time
 import unittest
+import os
+from unittest.mock import patch
 
 from commander_agent.workflow_manager import CommanderWorkflowManager
 from workflow_state_store import WorkflowStateStore
@@ -60,6 +62,57 @@ class FakeCommander:
 
 
 class CommanderWorkflowManagerTest(unittest.TestCase):
+    def test_terminal_jobs_release_heavy_fields_and_are_bounded(self):
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ, {"A2A_MANAGER_TERMINAL_HISTORY": "2"}
+        ):
+            manager = CommanderWorkflowManager(
+                mode="local",
+                state_dir=temp_dir,
+                commander_factory=FakeCommander,
+            )
+            try:
+                for index in range(3):
+                    workflow_id = f"wf-{index}"
+                    manager._jobs[workflow_id] = {
+                        "workflow_id": workflow_id,
+                        "status": "completed",
+                        "finished_at": str(index),
+                        "future": object(),
+                        "result": {"blob": "x" * 1000},
+                        "attachments": [{"blob": "y" * 1000}],
+                    }
+                    manager._finalize_job(workflow_id)
+
+                self.assertEqual(list(manager._jobs), ["wf-1", "wf-2"])
+                for job in manager._jobs.values():
+                    self.assertNotIn("future", job)
+                    self.assertNotIn("result", job)
+                    self.assertNotIn("attachments", job)
+            finally:
+                manager.shutdown()
+
+    def test_lightweight_snapshots_exclude_terminal_result_payloads(self):
+        FakeCommander.reset()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = CommanderWorkflowManager(
+                mode="local",
+                state_dir=temp_dir,
+                commander_factory=FakeCommander,
+            )
+            try:
+                manager._jobs["wf-large"] = {
+                    "workflow_id": "wf-large",
+                    "status": "completed",
+                    "result": {"blob": "x" * 100_000},
+                    "future": None,
+                }
+                self.assertEqual(manager.workflow_count(), 1)
+                self.assertNotIn("result", manager.get_workflow("wf-large"))
+                self.assertNotIn("result", manager.list_workflows()[0])
+            finally:
+                manager.shutdown()
+
     def test_thread_pool_limits_concurrency_and_checkpoints_are_independent(self):
         FakeCommander.reset()
         with tempfile.TemporaryDirectory() as temp_dir:

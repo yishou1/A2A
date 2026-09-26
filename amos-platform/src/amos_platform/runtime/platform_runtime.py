@@ -146,11 +146,18 @@ class PlatformRuntime:
                     submission = archived
                     get_workflow_run_store().put(workflow_id, submission)
         projection: dict[str, Any] = {}
-        work_list: Any = {}
-        trace: Any = {}
+        embedded_work_list = status.get("work_list")
+        embedded_trace = status.get("trace")
+        work_list: Any = embedded_work_list if isinstance(embedded_work_list, list) else {}
+        trace: Any = embedded_trace if isinstance(embedded_trace, list) else {}
         if not status.get("error"):
-            work_list = bridge.get_work_list(workflow_id)
-            trace = bridge.get_workflow_trace(workflow_id)
+            # Gateway projections already contain both collections.  Reusing
+            # them avoids two extra HTTP requests (and, historically, two
+            # extra full-checkpoint reads) for every browser refresh.
+            if not isinstance(embedded_work_list, list):
+                work_list = bridge.get_work_list(workflow_id)
+            if not isinstance(embedded_trace, list):
+                trace = bridge.get_workflow_trace(workflow_id)
             if str(status.get("status") or "").lower() == "completed":
                 projection = apply_commander_assessments(
                     self.get_engine(),

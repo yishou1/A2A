@@ -72,9 +72,10 @@ def build_workflow_manager_app(
             "status": "ok",
             "mode": workflow_manager.mode,
             "max_workflows": workflow_manager.max_workflows,
-            "workflow_count": len(workflow_manager.list_workflows()),
+            "workflow_count": workflow_manager.workflow_count(),
             "active_leases": len(workflow_manager.list_agent_leases()),
             "agent_count": len(workflow_manager.list_agents()),
+            "memory": workflow_manager.memory_metrics(),
         }
 
     @app.get("/supervisor", response_class=HTMLResponse)

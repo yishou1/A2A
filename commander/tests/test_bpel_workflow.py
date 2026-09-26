@@ -2,6 +2,7 @@ import os
 import tempfile
 import time
 import unittest
+from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
 
@@ -325,6 +326,81 @@ class BPELWorkflowTest(unittest.TestCase):
                 "closed_loop_decision_advisor",
             )
             self.assertEqual(activities["closed_loop"]["algorithm_invocations"][0]["duration_ms"], 11.0)
+
+    def test_large_runtime_evidence_is_summarized_and_aliases_are_deduplicated(self):
+        large_input = {"history": ["track-state"] * 5000}
+        invocation = {
+            "algorithm_id": "mission_feature_adapter",
+            "request_id": "REQ-LARGE",
+            "input": large_input,
+            "inputs": deepcopy(large_input),
+            "output": {"score": 0.9},
+            "outputs": {"score": 0.9},
+            "duration_ms": 4.0,
+        }
+        upstream_invocation = {
+            "algorithm_id": "upstream-only",
+            "request_id": "REQ-UPSTREAM",
+        }
+        invocation["input"]["algorithm_invocations"] = [upstream_invocation]
+        invocation["inputs"] = deepcopy(invocation["input"])
+        output = {
+            "algorithm_invocations": [invocation],
+            "algorithm_calls": [deepcopy(invocation)],
+        }
+
+        records = CommanderAgent._runtime_records_from_output(output)
+
+        self.assertEqual(list(records), ["algorithm_invocations"])
+        self.assertEqual(len(records["algorithm_invocations"]), 1)
+        compact = records["algorithm_invocations"][0]
+        self.assertEqual(compact["algorithm_id"], "mission_feature_adapter")
+        self.assertNotIn("input", compact)
+        self.assertNotIn("inputs", compact)
+        self.assertNotIn("outputs", compact)
+        self.assertIn("input_summary", compact)
+        self.assertEqual(compact["output"], {"score": 0.9})
+
+    def test_large_activity_request_keeps_summary_instead_of_raw_input(self):
+        snapshot = CommanderAgent._task_request_snapshot({
+            "command": "closed_loop_optimization",
+            "input": {"history": ["state"] * 5000},
+        })
+
+        self.assertNotIn("input", snapshot)
+        self.assertGreater(snapshot["input_size_bytes"], 16 * 1024)
+        self.assertEqual(len(snapshot["input_sha256"]), 64)
+        self.assertEqual(snapshot["input_summary"]["type"], "dict")
+
+    def test_terminal_context_drops_value_output_and_runtime_alias_duplicates(self):
+        value = {"output_data": {"blob": "x" * 20_000}}
+        context = {
+            "workflow_status": "completed",
+            "effect_evaluation_result": [{
+                "value": value,
+                "output": {"effect_evaluation_result": deepcopy(value)},
+            }],
+            "algorithm_invocations": [{
+                "algorithm_id": "closed_loop_decision_advisor",
+                "input": {"blob": "y" * 20_000},
+                "inputs": {"blob": "y" * 20_000},
+                "output": {"action": "monitor"},
+                "outputs": {"action": "monitor"},
+            }],
+            "algorithm_calls": [{
+                "algorithm_id": "closed_loop_decision_advisor",
+            }],
+        }
+
+        compact = CommanderAgent._compact_terminal_evidence(context)
+        entry = compact["effect_evaluation_result"][0]
+        invocation = compact["algorithm_invocations"][0]
+        self.assertNotIn("output", entry)
+        self.assertEqual(entry["output_ref"], "value")
+        self.assertNotIn("algorithm_calls", compact)
+        self.assertNotIn("input", invocation)
+        self.assertNotIn("inputs", invocation)
+        self.assertNotIn("outputs", invocation)
 
     def test_decide_phase_builds_valid_planning_and_compliance_contracts(self):
         with tempfile.TemporaryDirectory() as temp_dir:

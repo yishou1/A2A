@@ -72,6 +72,27 @@ def test_health_exposes_near_real_agent_runtime_fields():
     assert "processed_task_count" in body
     assert "cached_work_item_count" in body
     assert "algorithm_provider" in body
+    assert isinstance(body["process_rss_bytes"], int)
+    assert body["cache"]["task_responses"]["max_items"] == 16
+
+
+def test_cleanup_workflow_releases_track_agent_caches(monkeypatch):
+    monkeypatch.setattr(main, "_save_state_snapshot", lambda: None)
+    main.reset_runtime_state()
+    main.runtime.capture_work_list({
+        "workflow_id": "wf-cleanup",
+        "work_list": [{"activity_id": "activity-1"}],
+    })
+    main.runtime.set_task_response(
+        "wf-cleanup:activity-1",
+        {"workflow_id": "wf-cleanup", "status": "completed"},
+    )
+    main.runtime.set_stream_events("wf-cleanup:activity-1", ["event"])
+
+    body = main.cleanup_workflow_cache("wf-cleanup")
+
+    assert body["removed"] == 3
+    assert body["cache"]["workflow_work_lists"]["items"] == 0
 
 
 def test_ready_endpoint_reports_dispatch_readiness():
