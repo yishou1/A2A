@@ -458,6 +458,8 @@ def test_backend_selects_workflow_from_current_f2t2ea_phase(elapsed, expected) -
     [
         ("maritime-convoy-air-defense", "MAR-CP-PLAN", 3630, "decide_workflow.bpel"),
         ("coastal-joint-recon-strike", "CJR-CP-PLAN", 2730, "decide_workflow.bpel"),
+        ("coastal-joint-recon-strike", "CJR-CP-ENGAGE", 3330, "engage_workflow.bpel"),
+        ("coastal-joint-recon-strike", "CJR-CP-CLOSE", 4530, "assess_workflow.bpel"),
         ("air-space-sea-carrier-strike", "ASC-CP-SAT", 390, "observe_workflow.bpel"),
         ("air-space-sea-carrier-strike", "ASC-CP-TRACK", 2190, "orient_workflow.bpel"),
         ("air-space-sea-carrier-strike", "ASC-CP-PLAN", 2730, "decide_workflow.bpel"),

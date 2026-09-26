@@ -112,6 +112,8 @@ class BPELWorkflowTest(unittest.TestCase):
                 "task_scheduling", "decision_planning", "compliance_authorization",
             ],
             "act_workflow.bpel": ["simulation_execution", "closed_loop"],
+            "engage_workflow.bpel": ["simulation_execution"],
+            "assess_workflow.bpel": ["closed_loop"],
         }
 
         for filename, roles in expected.items():

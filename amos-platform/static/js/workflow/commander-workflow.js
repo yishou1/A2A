@@ -29,10 +29,10 @@ window.PlatformWorkflow = (function () {
   var submitting = false;
   var notifiedTerminalKey = null;
   var workflowTasks = [
-    {phase:"OBSERVE", label:"观察与识别", subtitle:"第1阶段", checkpoints:["MAR-CP-PERCEPTION", "AMP-CP-PERCEPTION", "BOR-CP-DETECT"]},
-    {phase:"ORIENT", label:"航迹评估", subtitle:"第2阶段", checkpoints:["MAR-CP-ASSESS", "AMP-CP-ASSESS", "BOR-CP-TRACK"]},
-    {phase:"DECIDE", label:"方案决策", subtitle:"第3阶段", checkpoints:["MAR-CP-PLAN", "AMP-CP-PLAN", "BOR-CP-LINK", "BOR-CP-PLAN"]},
-    {phase:"ACT", label:"执行与复核", subtitle:"第4阶段", checkpoints:["MAR-CP-CLOSE", "AMP-CP-BDA", "AMP-CP-CLOSE", "BOR-CP-CLOSE"]},
+    {phase:"OBSERVE", label:"观察与识别", subtitle:"第1阶段", checkpoints:["MAR-CP-PERCEPTION", "CJR-CP-CUE", "AMP-CP-PERCEPTION", "BOR-CP-DETECT"]},
+    {phase:"ORIENT", label:"航迹评估", subtitle:"第2阶段", checkpoints:["MAR-CP-ASSESS", "CJR-CP-IDENTIFY", "CJR-CP-FUSION", "AMP-CP-ASSESS", "BOR-CP-TRACK"]},
+    {phase:"DECIDE", label:"方案决策", subtitle:"第3阶段", checkpoints:["MAR-CP-PLAN", "CJR-CP-PLAN", "ASC-CP-PLAN", "AMP-CP-PLAN", "BOR-CP-LINK", "BOR-CP-PLAN"]},
+    {phase:"ACT", label:"执行与复核", subtitle:"第4阶段", checkpoints:["MAR-CP-ENGAGE", "MAR-CP-CLOSE", "CJR-CP-ENGAGE", "CJR-CP-CLOSE", "AMP-CP-BDA", "AMP-CP-CLOSE", "BOR-CP-CLOSE"]},
   ];
 
   function escapeHtml(value) {
@@ -106,7 +106,7 @@ window.PlatformWorkflow = (function () {
   }
 
   function activityKey(item) {
-    return String(item && (item.activity_id || item.work_item || ("activity-" + item.index)) || "");
+    return String(item && (item._timeline_activity_key || item.activity_id || item.work_item || ("activity-" + item.index)) || "");
   }
 
   function workflowCheckpoint(submission) {
@@ -118,13 +118,13 @@ window.PlatformWorkflow = (function () {
     var stage = submission && submission.stage_transfer || {};
     var phase = String(stage.phase || submission && submission.phase || "").toUpperCase();
     var checkpoint = String(stage.checkpoint_id || submission && submission.checkpoint_id || "").toUpperCase();
+    for (var i = 0; i < workflowTasks.length; i += 1) {
+      if ((workflowTasks[i].checkpoints || []).indexOf(checkpoint) >= 0) return workflowTasks[i].phase;
+    }
     if (phase === "FIND" || phase === "FIX") return "OBSERVE";
     if (phase === "TRACK") return "ORIENT";
     if (phase === "TARGET") return "DECIDE";
     if (phase === "ENGAGE" || phase === "ASSESS") return "ACT";
-    for (var i = 0; i < workflowTasks.length; i += 1) {
-      if ((workflowTasks[i].checkpoints || []).indexOf(checkpoint) >= 0) return workflowTasks[i].phase;
-    }
     if (/-(PERCEPTION|DETECT)$/.test(checkpoint)) return "OBSERVE";
     if (/-(ASSESS|TRACK)$/.test(checkpoint)) return "ORIENT";
     if (/-(PLAN|LINK)$/.test(checkpoint)) return "DECIDE";
@@ -287,7 +287,10 @@ window.PlatformWorkflow = (function () {
       var live = viewCache[id] || {};
       var slotPhase = workflowPhaseKey(submissions[id] || live.submission || {});
       var slot = slots.find(function (item) { return item.task.phase === slotPhase; });
-      if (slot) slot.ids.push(id);
+      if (slot) {
+        slot.ids.push(id);
+        slot.id = id;
+      }
     });
     slots.forEach(function (slot) {
       slot.ids.sort(function (left, right) {
@@ -355,6 +358,11 @@ window.PlatformWorkflow = (function () {
       archivedViews.forEach(function (view) {
         if (view && view.workflow_id) viewCache[String(view.workflow_id)] = view;
       });
+      if (lastView && String(lastView.workflow_id || "") === String(workflowId || "")) {
+        // The coastal strike's Engage and Assess checkpoints are separate
+        // backend workflows, but belong to one user-facing execution page.
+        renderActivities(lastView);
+      }
       document.dispatchEvent(new CustomEvent("amos:workflow-view-history", {
         detail: {run_id: requestedRunId, views: archivedViews.filter(Boolean)},
       }));
@@ -680,6 +688,7 @@ window.PlatformWorkflow = (function () {
     var title = document.getElementById("wf-detail-title");
     var badge = document.getElementById("wf-detail-status");
     if (!root || !title || !badge) return;
+    view = buildTimelineView(view);
     var rows = view && view.orchestration && view.orchestration.activities || [];
     var activity = rows.find(function (row) { return activityKey(row) === selectedActivityId; });
     var details = view && view.activity_details || {};
@@ -752,10 +761,67 @@ window.PlatformWorkflow = (function () {
       }).join("") + '</div>' : '<div class="workflow-detail-empty">后端未上报该活动的执行事件</div>') + '</div>';
   }
 
+  function buildTimelineView(view) {
+    if (!view || !view.workflow_id || !runManifest) return view;
+    var currentCheckpoint = workflowCheckpoint(view.submission || {});
+    var coastalExecutionCheckpoints = ["CJR-CP-ENGAGE", "CJR-CP-CLOSE"];
+    if (coastalExecutionCheckpoints.indexOf(String(currentCheckpoint || "")) < 0) return view;
+
+    var ids = (runManifest.workflow_ids || []).map(String);
+    if (ids.indexOf(String(view.workflow_id)) < 0) ids.push(String(view.workflow_id));
+    var candidates = ids.map(function (id) { return viewCache[id]; }).filter(function (candidate) {
+      return candidate && coastalExecutionCheckpoints.indexOf(
+        String(workflowCheckpoint(candidate.submission || {}) || "")
+      ) >= 0;
+    });
+    if (candidates.length < 2) return view;
+
+    var combinedActivities = [];
+    var combinedTrace = [];
+    var combinedDetails = {};
+    candidates.forEach(function (candidate) {
+      var candidateId = String(candidate.workflow_id || "");
+      var phaseContext = workflowPhaseContext(candidate);
+      var activities = candidate.orchestration && candidate.orchestration.activities || [];
+      activities.forEach(function (activity) {
+        var sourceKey = String(activity.activity_id || activity.work_item || ("activity-" + activity.index));
+        var timelineKey = candidateId + "::" + sourceKey;
+        combinedActivities.push(Object.assign({}, activity, {
+          index: combinedActivities.length + 1,
+          _timeline_activity_key: timelineKey,
+          _timeline_workflow_id: candidateId,
+          _timeline_phase_context: phaseContext,
+        }));
+        var details = candidate.activity_details || {};
+        var detail = details[sourceKey] || details[String(activity.activity_id || "")] ||
+          details[String(activity.work_item || "")];
+        if (detail) combinedDetails[timelineKey] = detail;
+      });
+      (candidate.orchestration && candidate.orchestration.trace || []).forEach(function (event) {
+        combinedTrace.push(Object.assign({_timeline_workflow_id: candidateId}, event));
+      });
+    });
+
+    return Object.assign({}, view, {
+      orchestration: Object.assign({}, view.orchestration || {}, {
+        activities: combinedActivities,
+        trace: combinedTrace,
+        counts: {
+          total: combinedActivities.length,
+          completed: combinedActivities.filter(function (item) { return item.status === "completed"; }).length,
+          running: combinedActivities.filter(function (item) { return item.status === "running"; }).length,
+          failed: combinedActivities.filter(function (item) { return item.status === "failed" || item.status === "error"; }).length,
+        },
+      }),
+      activity_details: combinedDetails,
+    });
+  }
+
   function renderActivities(view) {
     var root = document.getElementById("wf-activity-list");
     var traceRoot = document.getElementById("wf-trace-list");
     if (!root || !traceRoot) return;
+    view = buildTimelineView(view);
     var orchestration = view && view.orchestration || {};
     var rows = orchestration.activities || [];
     var currentActivity = view && view.current_activity;
@@ -824,12 +890,14 @@ window.PlatformWorkflow = (function () {
       var phaseLabel = phaseContext.label || "阶段未上报";
       var detail = view && view.activity_details && view.activity_details[activityKey(item)];
       var timing = activityTimingLabel(item, detail);
+      var itemPhaseContext = item._timeline_phase_context || phaseContext;
+      var itemPhaseLabel = itemPhaseContext.label || "阶段未上报";
       return '<button type="button" class="workflow-activity ' + escapeHtml(state) + (activityKey(item) === selectedActivityId ? " selected" : "") +
         '" data-activity-id="' + escapeHtml(activityKey(item)) + '" aria-pressed="' + (activityKey(item) === selectedActivityId) + '">' +
         '<span class="workflow-step-index">' + String(item.index || 0).padStart(2, "0") + '</span>' +
         '<span class="workflow-activity-body"><b>' + escapeHtml(title) + '</b>' +
         '<small class="workflow-activity-agent">' + escapeHtml(executor) + escapeHtml(dependency) + '</small>' +
-        '<small class="workflow-activity-phase">' + escapeHtml(phaseLabel) + '</small>' +
+        '<small class="workflow-activity-phase">' + escapeHtml(itemPhaseLabel) + '</small>' +
         (timing ? '<small class="workflow-activity-timing">' + escapeHtml(timing) + '</small>' : '') +
         '<small class="workflow-activity-desc">' + escapeHtml(description) + '</small>' +
         (item.error ? '<em>' + escapeHtml(item.error) + '</em>' : '') +
@@ -848,9 +916,9 @@ window.PlatformWorkflow = (function () {
           phaseContext
         ),
         status: selectedActivity.status || "pending",
-        ooda: phaseContext.ooda,
-        f2: phaseContext.f2,
-        label: phaseContext.label,
+        ooda: (selectedActivity._timeline_phase_context || phaseContext).ooda,
+        f2: (selectedActivity._timeline_phase_context || phaseContext).f2,
+        label: (selectedActivity._timeline_phase_context || phaseContext).label,
       } : null,
     }));
 
@@ -1303,10 +1371,13 @@ window.PlatformWorkflow = (function () {
     }
     if (!lastView || !id) return false;
     if (targetWorkflowId && String(lastView.workflow_id || "") !== String(targetWorkflowId)) return false;
-    var rows = lastView.orchestration && lastView.orchestration.activities || [];
+    var timelineView = buildTimelineView(lastView);
+    var rows = timelineView.orchestration && timelineView.orchestration.activities || [];
     var target = rows.find(function (item) {
-      return activityKey(item) === String(id) || String(item.activity_id || "") === String(id) ||
-        String(item.work_item || "") === String(id);
+      var fromWorkflow = !targetWorkflowId || !item._timeline_workflow_id ||
+        String(item._timeline_workflow_id) === String(targetWorkflowId);
+      return fromWorkflow && (activityKey(item) === String(id) || String(item.activity_id || "") === String(id) ||
+        String(item.work_item || "") === String(id));
     });
     if (!target) return false;
     selectedActivityId = activityKey(target);
