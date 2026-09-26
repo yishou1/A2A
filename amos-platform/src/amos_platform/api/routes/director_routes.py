@@ -34,7 +34,7 @@ def register_director_routes(bp: Any) -> None:
 
     @bp.route("/api/v1/director/state", methods=["GET"])
     def director_state():
-        return ok(get_director().state())
+        return ok(get_director().state(summary=request.args.get("summary") == "1"))
 
     @bp.route("/api/v1/director/action", methods=["POST"])
     def director_action():

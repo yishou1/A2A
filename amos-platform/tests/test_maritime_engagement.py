@@ -196,6 +196,7 @@ def test_post_strike_capture_observes_destroyed_target_without_recreating_track(
     assert "MAR-MEDIA-07" not in engine.media_capture.captured_media_ids
 
     engine._apply_damage(engine.threats[truth_id], "destroyed")
+    engine.events.append({"type": "damage_assessment_confirmed", "target_threat_id": truth_id})
     engine.sensor_fusion.tracks.pop(hostile.id, None)
     engine._tick(1.0)
 
@@ -416,7 +417,7 @@ def test_follow_uav_keeps_a_stable_trailing_station_and_slows_near_it() -> None:
     assert 1.0 <= uav["speed_kts"] < uav["_cruise_speed_kts"]
 
 
-def test_confirm_uav_stays_visible_for_post_strike_assessment_media() -> None:
+def test_confirm_uav_captures_damage_evidence_and_returns_immediately() -> None:
     scenario = get_scenario(SCENARIO_ID)
     assert scenario is not None
     engine = SimEngine(seed=int(scenario["default_seed"]))
@@ -455,6 +456,8 @@ def test_confirm_uav_stays_visible_for_post_strike_assessment_media() -> None:
         weapon_name="舰载反舰导弹",
         authorized=True,
     )
+    story_at_fire = engine.clock["scenario_elapsed_sec"]
+    engine.set_director_story_hold(True)
     for _ in range(6):
         engine._tick(30.0)
         if engine.weapons[launched["weapon_id"]]["status"] != "in_flight":
@@ -463,21 +466,16 @@ def test_confirm_uav_stays_visible_for_post_strike_assessment_media() -> None:
     assert engine.weapons[launched["weapon_id"]]["damage_state"] == "impact_pending"
     engine._tick(120.0)
     assert engine.weapons[launched["weapon_id"]]["damage_state"] == "destroyed"
-    assert uav.get("_follow_returning_home") is not True
+    assert engine.clock["scenario_elapsed_sec"] == story_at_fire
+    assert "MAR-MEDIA-07" in engine.media_capture.captured_media_ids
+    assert uav.get("_follow_returning_home") is True
     assert uav.get("_operator_follow_visible") is True
+    assert engine.waypoint_nav.get_route("UAV-CONFIRM-01")[0]["label"] == "RETURN"
+    engine.set_director_story_hold(False)
 
     engine._tick(max(0.0, 4560.0 - float(engine.clock["elapsed_sec"])))
 
     assert "MAR-MEDIA-07" in engine.media_capture.captured_media_ids
-    assert any(
-        asset["id"] == "UAV-CONFIRM-01"
-        for asset in engine.get_operator_state()["assets"]
-    )
-
-    engine.clock["elapsed_sec"] = 4589.0
-    engine._tick(1.0)
-    assert uav.get("_follow_returning_home") is True
-    assert engine.waypoint_nav.get_route("UAV-CONFIRM-01")[0]["label"] == "RETURN"
 
     duration_sec = float(scenario["demo_controls"]["duration_sec"])
     while engine.clock["elapsed_sec"] < duration_sec and uav["status"] != "staged":

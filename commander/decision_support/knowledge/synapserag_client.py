@@ -34,6 +34,8 @@ class SynapseRagClient:
         request_id: str,
         purpose: str,
         top_k: int,
+        context: dict[str, str] | None = None,
+        explain_level: str = "detailed",
     ) -> RagResult:
         headers = {"Content-Type": "application/json"}
         if self.api_token:
@@ -43,6 +45,8 @@ class SynapseRagClient:
             "request_id": request_id,
             "purpose": purpose,
             "top_k": max(1, min(10, top_k)),
+            "context": {key: value for key, value in (context or {}).items() if value},
+            "explain": {"enabled": True, "level": explain_level},
             "queries": [
                 {"query_id": item.query_id, "text": item.text}
                 for item in queries

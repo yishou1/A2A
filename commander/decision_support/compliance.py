@@ -717,6 +717,12 @@ def _retrieve_compliance_evidence(
         queries,
         purpose="compliance",
         request_id=request.request_id,
+        context={
+            "workflow_id": request.request_id,
+            "task_id": "规则审查",
+            "work_item_id": "compliance_authorization_core",
+            "agent_id": "compliance_authorization_agent",
+        },
     )
 
 

@@ -175,10 +175,25 @@ window.PlatformPanels = (function () {
 
   // ── Alert List ─────────────────────────────────────────────
 
+  function isSimulationControlAlert(alert) {
+    var msg = String(alert && alert.msg || "");
+    return msg === "仿真已启动" ||
+      msg === "仿真已停止" ||
+      msg === "仿真已暂停" ||
+      msg === "仿真已恢复" ||
+      msg === "仿真完成，保留最终态势" ||
+      msg.indexOf("仿真速度:") === 0 ||
+      msg.indexOf("信息仿真") === 0;
+  }
+
   function updateAlerts(alerts) {
     var container = document.getElementById("alert-list");
     var badge = document.getElementById("alert-count-badge");
     if (!container) return;
+
+    alerts = (alerts || []).filter(function (item) {
+      return !isSimulationControlAlert(item);
+    });
 
     if (!alerts || !alerts.length) {
       setHtmlIfChanged(container, '<div class="track-empty">暂无事件或告警</div>');
@@ -649,7 +664,8 @@ window.PlatformPanels = (function () {
   function renderKillChainRuntime(state, scenario) {
     var root = document.getElementById("kill-chain-runtime-view");
     if (!root || !scenario) return;
-    var elapsed = Number(state && state.clock && state.clock.elapsed_sec || 0);
+    var elapsed = Number(state && state.clock &&
+      (state.clock.scenario_elapsed_sec != null ? state.clock.scenario_elapsed_sec : state.clock.elapsed_sec) || 0);
     var cueRows = Array.isArray(scenario.function_point_schedule) && scenario.function_point_schedule.length ? scenario.function_point_schedule : (Array.isArray(scenario.timeline) ? scenario.timeline : []);
     var releasedCueById = ((state && state.scenario_story && state.scenario_story.timeline) || []).reduce(function (result, cue) {
       if (cue && cue.cue_id) result[String(cue.cue_id)] = cue;

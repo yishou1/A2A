@@ -151,6 +151,14 @@ export ALGOLIB_FUNCTION_CATALOG_PATH="${ALGOLIB_FUNCTION_CATALOG_PATH:-$COMMANDE
 export ALGORITHM_LIBRARY_ENABLED=true
 export ALGORITHM_LIBRARY_REQUIRED=true
 export A2A_FORCE_ALGOLIB_FIRST="${A2A_FORCE_ALGOLIB_FIRST:-1}"
+export RAG_BACKEND="${RAG_BACKEND:-synapserag}"
+export SYNAPSERAG_BASE_URL="${SYNAPSERAG_BASE_URL:-http://127.0.0.1:8000}"
+export SYNAPSERAG_TRANSPORT="${SYNAPSERAG_TRANSPORT:-direct}"
+export SYNAPSERAG_TRACE_ENABLED="${SYNAPSERAG_TRACE_ENABLED:-true}"
+export SYNAPSERAG_EMBEDDING_BASE_URL="${SYNAPSERAG_EMBEDDING_BASE_URL:-${LOCAL_QWEN_BASE_URL:-http://127.0.0.1:11435/v1}}"
+export SYNAPSERAG_EMBEDDING_MODEL="${SYNAPSERAG_EMBEDDING_MODEL:-qwen3-embedding:0.6b}"
+export SYNAPSERAG_QA_BASE_URL="${SYNAPSERAG_QA_BASE_URL:-${LOCAL_QWEN_BASE_URL:-http://127.0.0.1:11435/v1}}"
+export SYNAPSERAG_QA_MODEL="${SYNAPSERAG_QA_MODEL:-${LOCAL_QWEN_MODEL_NAME:-qwen3:1.7b}}"
 export TASK_SCHEDULING_USE_ALGOLIB=true
 export TIA_ALGOLIB_CALL_MODE=run
 export TIA_ALGORITHM_PLANNER="$([[ "${ENABLE_LLM:-false}" == "true" ]] && echo llm || echo fixed)"
@@ -295,6 +303,16 @@ for item in sys.argv[1:]:
     if path.exists() and path.is_file():
         path.unlink()
 PY
+fi
+
+if [[ "${RAG_BACKEND,,}" == "synapserag" ]]; then
+  if curl --noproxy '*' -fsS --max-time 2 "$SYNAPSERAG_BASE_URL/api/health" >/dev/null 2>&1; then
+    echo "[running] SynapseRAG endpoint at $SYNAPSERAG_BASE_URL"
+  else
+    echo "[rag] starting SynapseRAG endpoint"
+    start_service synapserag "$ROOT_DIR" "$SYNAPSERAG_BASE_URL/api/health" \
+      env SYNAPSERAG_PYTHON="$A2A_PYTHON" bash scripts/start_synapserag.sh
+  fi
 fi
 
 mapfile -t ALGORITHM_CARD_ROWS < <(algorithm_card_rows)

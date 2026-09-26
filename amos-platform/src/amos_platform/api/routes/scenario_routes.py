@@ -141,7 +141,7 @@ def register_scenario_routes(bp: Any) -> None:
             return err(404, f"scenario not found: {scenario_id}"), 404
         engine = get_engine()
         active = engine.clock.get("scenario_id") == scenario_id
-        elapsed = float(engine.clock.get("elapsed_sec", 0) or 0) if active else -1.0
+        elapsed = float(engine.clock.get("scenario_elapsed_sec", engine.clock.get("elapsed_sec", 0)) or 0) if active else -1.0
         story = engine.scenario_story if active else build_internal_story(scenario)
         branch = (
             (str(engine.clock.get("scenario_branch") or "") or None)
@@ -152,6 +152,7 @@ def register_scenario_routes(bp: Any) -> None:
             story,
             elapsed,
             branch=branch,
+            capture_elapsed_sec=(float(engine.clock.get("elapsed_sec", 0) or 0) if active else -1.0),
         )
         excluded = {
             "threats", "events", "timeline", "media_cues", "asset_routes", "asset_route_modes",

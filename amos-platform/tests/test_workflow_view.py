@@ -1552,3 +1552,50 @@ def test_previous_run_result_is_not_applied_to_current_tracks() -> None:
     assert projection["status"] == "stale_run"
     assert projection["applied_count"] == 0
     assert track.agent_assessment["status"] == "pending"
+
+
+def test_director_resumes_only_after_workflow_snapshot_is_frozen(monkeypatch) -> None:
+    from amos_platform.agents.a2a.workflow_submission import submit_current_workflow
+    from amos_platform.runtime.platform_runtime import PlatformRuntime
+
+    runtime = PlatformRuntime()
+    runtime.get_director().configure(
+        scenario_id="maritime-convoy-air-defense",
+        mode="demonstration",
+        branch="standard",
+        seed=33031,
+    )
+    engine = runtime.get_engine()
+    steps: list[str] = []
+    build_snapshot = engine.exchange.build_snapshot
+
+    def capture_snapshot(state):
+        result = build_snapshot(state)
+        steps.append("snapshot")
+        return result
+
+    monkeypatch.setattr(engine.exchange, "build_snapshot", capture_snapshot)
+
+    class FakeBridge:
+        mode = "direct"
+
+        def build_workflow_payload(self, *_args, **_kwargs):
+            return sample_payload()
+
+        def build_backend_submission(self, _mission, *, engine, overrides):
+            return {"run_id": engine.clock["run_id"], "chain_id": "test-chain"}
+
+        def submit_workflow(self, _payload):
+            steps.append("submit")
+            return {"workflow_id": "wf-snapshot-hook"}
+
+    result = submit_current_workflow(
+        {"scenario_id": "maritime-convoy-air-defense", "sim_context": True},
+        engine=engine,
+        bridge=FakeBridge(),
+        scenario_support={},
+        on_snapshot_captured=lambda: steps.append("resume"),
+    )
+
+    assert result["workflow_id"] == "wf-snapshot-hook"
+    assert steps == ["snapshot", "resume", "submit"]

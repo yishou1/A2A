@@ -67,6 +67,7 @@ class PlatformRuntime:
                     bridge=self.get_bridge(),
                     scenario_support=self.get_scenario_support(),
                     run_manifest_store=self.get_run_manifest_store(),
+                    on_snapshot_captured=context.get("on_snapshot_captured"),
                 )
 
             self._director = DirectorService(

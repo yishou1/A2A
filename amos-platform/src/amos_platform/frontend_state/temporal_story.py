@@ -60,6 +60,7 @@ def _item_released(
     story: dict[str, Any],
     elapsed: float,
     branch: str,
+    capture_elapsed: float,
 ) -> bool:
     if not _available_on_branch(item, branch):
         return False
@@ -70,7 +71,7 @@ def _item_released(
     }
     if captures or "captures" in story:
         capture = captures.get(str(item.get("media_id") or ""))
-        if not capture or float(capture.get("captured_at_sim_time", 0) or 0) > elapsed:
+        if not capture or float(capture.get("captured_at_sim_time", 0) or 0) > capture_elapsed:
             return False
     elif float(item.get("at_sec", 0) or 0) > elapsed:
         return False
@@ -85,9 +86,11 @@ def project_story_at_time(
     elapsed_sec: float,
     *,
     branch: str | None = None,
+    capture_elapsed_sec: float | None = None,
 ) -> dict[str, Any]:
     """Return the causally released part of a complete internal story."""
     elapsed = max(-1.0, float(elapsed_sec))
+    capture_elapsed = elapsed if capture_elapsed_sec is None else float(capture_elapsed_sec)
     active_branch = str(branch or story.get("default_branch") or "standard")
     all_timeline = list(story.get("timeline") or [])
     all_media = list(story.get("media_cues") or [])
@@ -98,7 +101,7 @@ def project_story_at_time(
     }
     released_media = []
     for item in all_media:
-        if not _item_released(item, story, elapsed, active_branch):
+        if not _item_released(item, story, elapsed, active_branch, capture_elapsed):
             continue
         capture = capture_by_media.get(str(item.get("media_id") or ""), {})
         released = {

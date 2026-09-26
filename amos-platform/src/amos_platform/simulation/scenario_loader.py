@@ -56,6 +56,16 @@ def load_scenario_into_engine(engine: Any, scenario: dict[str, Any], now_iso: An
     engine.mesh = MeshNetwork()
     engine.geofence = GeofenceManager()
     engine.clock["elapsed_sec"] = 0.0
+    if (scenario.get("demo_controls") or {}).get("elastic_timeline"):
+        engine.clock["scenario_elapsed_sec"] = 0.0
+    else:
+        engine.clock.pop("scenario_elapsed_sec", None)
+    engine._director_story_hold = False
+    engine._director_hold_elapsed_sec = 0.0
+    engine._director_hold_assets = {}
+    engine._director_hold_threats = {}
+    engine._director_hold_motion = {}
+    engine._director_hold_original_speeds = {}
     configured_speed = (scenario.get("demo_controls") or {}).get("recommended_speed", 1)
     engine.clock["speed"] = engine.normalize_speed(configured_speed)
     engine.clock["running"] = False

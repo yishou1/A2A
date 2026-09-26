@@ -213,6 +213,7 @@ select,input{
 
 /* Current-run workflow inspector */
 .workflow-task-history{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;margin-top:11px}
+.workflow-task-phase{display:flex;min-width:0;flex-direction:column;gap:4px}.workflow-task-phase-title{min-width:0;padding:0 2px 2px;color:#7d919c}.workflow-task-phase-title small,.workflow-task-phase-title b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.workflow-task-phase-title small{font-size:9px}.workflow-task-phase-title b{font-size:11px;color:#b8c7ce}
 .workflow-task-history button{display:flex;min-width:0;min-height:72px;flex-direction:column;align-items:flex-start;justify-content:center;gap:2px;padding:7px;border:1px solid #293c48;border-radius:4px;background:#09151d;color:#82939e;cursor:pointer;text-align:left}
 .workflow-task-history button:not(:disabled):hover{border-color:#456578;background:#0e202b}.workflow-task-history button:disabled{cursor:default;opacity:.58}
 .workflow-task-history button small,.workflow-task-history button b,.workflow-task-history button span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

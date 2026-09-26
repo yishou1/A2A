@@ -440,7 +440,9 @@ window.Platform = (function () {
     }
     latestStory = definition;
     if (state) latestState = state;
-    var elapsed = Number(state && state.clock && state.clock.elapsed_sec || 0);
+    var physicalElapsed = Number(state && state.clock && state.clock.elapsed_sec || 0);
+    var elapsed = Number(state && state.clock &&
+      (state.clock.scenario_elapsed_sec != null ? state.clock.scenario_elapsed_sec : state.clock.elapsed_sec) || 0);
     var reached = (definition.timeline || []).filter(function (cue) {
       return Number(cue.at_sec || 0) <= elapsed;
     });
@@ -462,7 +464,7 @@ window.Platform = (function () {
     document.getElementById("story-current-prompt").textContent = activeMedia
       ? (activeMedia.title || "观测资料") + " · " + activeSource.platformId + " / " + activeSource.sensorId + " · " + formatSimTime(activeSource.capturedAt)
       : "尚无可用传感器资料";
-    document.getElementById("story-elapsed").textContent = formatSimTime(elapsed);
+    document.getElementById("story-elapsed").textContent = formatSimTime(physicalElapsed);
     document.getElementById("story-media-count").textContent = availableMedia.length;
     document.getElementById("story-track-count").textContent = state && (state.fused_tracks || []).length || 0;
 
@@ -477,7 +479,8 @@ window.Platform = (function () {
     var item = latestStory && (latestStory.media_cues || []).find(function (entry) {
       return entry.media_id === mediaId;
     });
-    var elapsed = Number(latestState && latestState.clock && latestState.clock.elapsed_sec || 0);
+    var elapsed = Number(latestState && latestState.clock &&
+      (latestState.clock.scenario_elapsed_sec != null ? latestState.clock.scenario_elapsed_sec : latestState.clock.elapsed_sec) || 0);
     if (!item || Number(item.at_sec || 0) > elapsed) return;
     var source = sourceMetadata(item);
     var sourceLabels = {
@@ -646,7 +649,7 @@ window.Platform = (function () {
       speedGroup.classList.toggle("speed-locked", speedLocked);
       speedGroup.setAttribute("aria-busy", pendingSpeedRequests > 0 ? "true" : "false");
       speedGroup.title = speedLocked
-        ? "等待武器授权期间固定为 1×，授权完成后恢复 " +
+        ? "等待武器授权期间暂停，授权完成后恢复 " +
           Number(clock.speed_resume_value || speedResumeValue || 1) + "×"
         : "仿真倍率";
     }
@@ -1139,7 +1142,7 @@ window.Platform = (function () {
       error: "异常", ready: "就绪", empty: "就绪",
     })[lifecycle] || "就绪";
     if (directorStatus === "awaiting_authorization") {
-      statusText = "等待操作员授权，仿真以 1× 继续运行";
+      statusText = "等待操作员授权，仿真已暂停";
       modeText = "待授权";
     } else if (followLaunchPrompt()) {
       statusText = "等待无人机派遣确认，仿真按当前倍率继续";

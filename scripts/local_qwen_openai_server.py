@@ -31,6 +31,11 @@ class ChatRequest(BaseModel):
     reasoning_effort: str | None = None
 
 
+class EmbeddingsRequest(BaseModel):
+    model: str = "qwen3:1.7b"
+    input: str | list[str]
+
+
 def _resolve_device() -> str:
     requested = os.getenv("LOCAL_QWEN_DEVICE", "auto").strip().lower()
     if requested in {"cuda", "gpu"}:
@@ -97,6 +102,58 @@ def create_app(model_dir: Path, model_name: str) -> FastAPI:
     @app.get("/api/tags")
     def tags() -> dict[str, Any]:
         return {"models": [{"name": model_name, "model": model_name}]}
+
+    @app.get("/v1/models")
+    def models() -> dict[str, Any]:
+        return {
+            "object": "list",
+            "data": [{"id": model_name, "object": "model", "owned_by": "local"}],
+        }
+
+    @app.post("/v1/embeddings")
+    def embeddings(request: EmbeddingsRequest) -> dict[str, Any]:
+        if not state["ready"]:
+            raise HTTPException(status_code=503, detail="model is still loading")
+        tokenizer = state["tokenizer"]
+        model = state["model"]
+        texts = request.input if isinstance(request.input, list) else [request.input]
+        device = next(model.parameters()).device
+        with lock:
+            encoded = tokenizer(
+                [str(item) for item in texts],
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                max_length=int(os.getenv("LOCAL_QWEN_EMBEDDING_MAX_LENGTH", "512")),
+            )
+            encoded = {key: value.to(device) for key, value in encoded.items()}
+            with torch.inference_mode():
+                outputs = model(
+                    **encoded,
+                    output_hidden_states=True,
+                    use_cache=False,
+                )
+            hidden = outputs.hidden_states[-1].float()
+            mask = encoded["attention_mask"].unsqueeze(-1).float()
+            pooled = (hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1.0)
+            target_dim = int(os.getenv("LOCAL_QWEN_EMBEDDING_DIM", "1024"))
+            if target_dim > 0 and pooled.shape[1] != target_dim:
+                if pooled.shape[1] > target_dim:
+                    pooled = pooled[:, :target_dim]
+                else:
+                    pooled = torch.nn.functional.pad(pooled, (0, target_dim - pooled.shape[1]))
+            pooled = torch.nn.functional.normalize(pooled, p=2, dim=1)
+            vectors = pooled.cpu().tolist()
+        token_count = int(encoded["attention_mask"].sum().item())
+        return {
+            "object": "list",
+            "model": request.model or model_name,
+            "data": [
+                {"object": "embedding", "index": index, "embedding": vector}
+                for index, vector in enumerate(vectors)
+            ],
+            "usage": {"prompt_tokens": token_count, "total_tokens": token_count},
+        }
 
     @app.post("/v1/chat/completions")
     def chat_completions(request: ChatRequest) -> dict[str, Any]:
@@ -192,13 +249,51 @@ def _apply_chat_template(tokenizer: Any, messages: list[dict[str, str]]) -> str:
 
 def _json_object_or_raise(content: str) -> str:
     text = _strip_wrappers(content)
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=502, detail=f"model did not return JSON: {content[:500]}") from exc
+    candidates = [text]
+    repaired = _repair_json_object(text)
+    if repaired != text:
+        candidates.append(repaired)
+    candidates.append('{"entities":[],"triples":[],"keywords":[],"analysis":"local_json_fallback"}')
+    parsed = None
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+            break
+        except json.JSONDecodeError:
+            continue
+    if parsed is None:
+        raise HTTPException(status_code=502, detail=f"model did not return JSON: {content[:500]}")
     if not isinstance(parsed, dict):
-        raise HTTPException(status_code=502, detail="model JSON response is not an object")
+        parsed = {"items": parsed}
     return json.dumps(parsed, ensure_ascii=False, separators=(",", ":"))
+
+
+def _repair_json_object(text: str) -> str:
+    text = text.strip()
+    if not text:
+        return text
+    stack: list[str] = []
+    in_string = False
+    escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char in "{[":
+            stack.append("}" if char == "{" else "]")
+        elif char in "}]":
+            if stack and stack[-1] == char:
+                stack.pop()
+    if in_string:
+        text += '"'
+    return text + "".join(reversed(stack))
 
 
 def _strip_wrappers(content: str) -> str:

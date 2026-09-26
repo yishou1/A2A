@@ -65,6 +65,7 @@ def retrieve_rule_rag_result(
     purpose: str,
     top_k: int | None = None,
     request_id: str = "rag-request",
+    context: dict[str, str] | None = None,
     files: tuple[str, ...] = DEFAULT_KNOWLEDGE_FILES,
     document_scope: str | Iterable[str] | None = None,
     require_citations: bool = True,
@@ -89,6 +90,7 @@ def retrieve_rule_rag_result(
             request_id=request_id,
             purpose=purpose,
             top_k=final_top_k,
+            context=context,
         )
     if backend == "disabled":
         return failed_rag_result(

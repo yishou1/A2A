@@ -21,6 +21,7 @@ class RetrievalTraceStore:
         return connection
 
     def initialize(self) -> None:
+        self._recover_if_malformed()
         with self._connect() as connection:
             connection.execute(
                 """CREATE TABLE IF NOT EXISTS retrieval_runs (
@@ -44,6 +45,24 @@ class RetrievalTraceStore:
             connection.execute("CREATE INDEX IF NOT EXISTS idx_retrieval_workflow ON retrieval_runs(workflow_id, started_at DESC)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_retrieval_request ON retrieval_runs(request_id)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_retrieval_created ON retrieval_runs(started_at DESC)")
+
+    def _recover_if_malformed(self) -> None:
+        if not self.path.exists():
+            return
+        try:
+            with self._connect() as connection:
+                result = connection.execute("PRAGMA integrity_check").fetchone()
+            if result and str(result[0]).lower() == "ok":
+                return
+        except sqlite3.DatabaseError:
+            pass
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+        backup = self.path.with_name(f"{self.path.name}.corrupt-{timestamp}")
+        self.path.replace(backup)
+        for suffix in ("-wal", "-shm"):
+            sidecar = self.path.with_name(self.path.name + suffix)
+            if sidecar.exists():
+                sidecar.replace(backup.with_name(backup.name + suffix))
 
     def save(self, trace: Dict[str, Any]) -> None:
         serialized = json.dumps(trace, ensure_ascii=False, separators=(",", ":"))

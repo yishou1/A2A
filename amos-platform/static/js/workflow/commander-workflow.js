@@ -5,6 +5,8 @@ window.PlatformWorkflow = (function () {
   var options = {};
   var pollTimer = null;
   var healthTimer = null;
+  var historyTimer = null;
+  var pendingViewsInFlight = false;
   var workflowId = null;
   var activeWorkflowId = null;
   var workflowRunId = null;
@@ -27,10 +29,10 @@ window.PlatformWorkflow = (function () {
   var submitting = false;
   var notifiedTerminalKey = null;
   var workflowTasks = [
-    {phase:"OBSERVE", label:"观察与识别", subtitle:"Observe · Find/Fix", checkpoints:["MAR-CP-PERCEPTION", "AMP-CP-PERCEPTION", "BOR-CP-DETECT"]},
-    {phase:"ORIENT", label:"航迹评估", subtitle:"Orient · Track", checkpoints:["MAR-CP-ASSESS", "AMP-CP-ASSESS", "BOR-CP-TRACK"]},
-    {phase:"DECIDE", label:"方案决策", subtitle:"Decide · Target", checkpoints:["MAR-CP-PLAN", "AMP-CP-PLAN", "BOR-CP-LINK", "BOR-CP-PLAN"]},
-    {phase:"ACT", label:"执行与复核", subtitle:"Act · Engage/Assess", checkpoints:["MAR-CP-CLOSE", "AMP-CP-BDA", "AMP-CP-CLOSE", "BOR-CP-CLOSE"]},
+    {phase:"OBSERVE", label:"观察与识别", subtitle:"第1阶段", checkpoints:["MAR-CP-PERCEPTION", "AMP-CP-PERCEPTION", "BOR-CP-DETECT"]},
+    {phase:"ORIENT", label:"航迹评估", subtitle:"第2阶段", checkpoints:["MAR-CP-ASSESS", "AMP-CP-ASSESS", "BOR-CP-TRACK"]},
+    {phase:"DECIDE", label:"方案决策", subtitle:"第3阶段", checkpoints:["MAR-CP-PLAN", "AMP-CP-PLAN", "BOR-CP-LINK", "BOR-CP-PLAN"]},
+    {phase:"ACT", label:"执行与复核", subtitle:"第4阶段", checkpoints:["MAR-CP-CLOSE", "AMP-CP-BDA", "AMP-CP-CLOSE", "BOR-CP-CLOSE"]},
   ];
 
   function escapeHtml(value) {
@@ -270,23 +272,47 @@ window.PlatformWorkflow = (function () {
     (runManifest && runManifest.workflow_views || []).forEach(function (row) {
       if (row && row.workflow_id) archived[String(row.workflow_id)] = row;
     });
-    var slots = workflowTasks.map(function (task) { return {task:task, id:null}; });
+    var slots = workflowTasks.map(function (task) { return {task:task, ids:[]}; });
+    function workflowOrder(id) {
+      var submission = submissions[id] || (viewCache[id] || {}).submission || {};
+      var stage = submission.stage_transfer || {};
+      var windowStart = stage.window && stage.window.start_sec;
+      var ordinal = Number(stage.submission_ordinal);
+      if (stage.submission_ordinal != null && Number.isFinite(ordinal)) return ordinal;
+      var numericStart = Number(windowStart);
+      if (windowStart != null && Number.isFinite(numericStart)) return numericStart / 1000000;
+      return 999999;
+    }
     ids.forEach(function (id) {
       var live = viewCache[id] || {};
       var slotPhase = workflowPhaseKey(submissions[id] || live.submission || {});
       var slot = slots.find(function (item) { return item.task.phase === slotPhase; });
-      if (!slot) slot = slots.find(function (item) { return !item.id; });
-      if (slot && !slot.id) slot.id = id;
+      if (slot) slot.ids.push(id);
     });
+    slots.forEach(function (slot) {
+      slot.ids.sort(function (left, right) {
+        var orderDelta = workflowOrder(left) - workflowOrder(right);
+        return orderDelta || String(left).localeCompare(String(right));
+      });
+    });
+    function displayWorkflowId(slot) {
+      if (!slot.ids.length) return null;
+      var selected = slot.ids.find(function (id) { return String(id) === String(workflowId || ""); });
+      if (selected) return selected;
+      var active = slot.ids.find(function (id) { return String(id) === String(activeWorkflowId || ""); });
+      if (active) return active;
+      return slot.ids[slot.ids.length - 1];
+    }
     root.innerHTML = slots.map(function (slot) {
-      var id = slot.id;
+      var id = displayWorkflowId(slot);
       if (!id) {
         return '<button type="button" disabled><small>' + escapeHtml(slot.task.subtitle) + '</small><b>' +
           escapeHtml(slot.task.label) + '</b><span>未生成任务</span></button>';
       }
       var view = viewCache[id] || {};
       var record = archived[id] || {};
-      var state = view.status || record.status || "unknown";
+      var state = view.terminal ? view.status :
+        (record.terminal ? record.status : (view.status || record.status || "unknown"));
       var counts = view.orchestration && view.orchestration.counts || {};
       var activityCount = counts.total;
       if (activityCount == null && record.result && Array.isArray(record.result.cards)) activityCount = record.result.cards.length;
@@ -294,16 +320,16 @@ window.PlatformWorkflow = (function () {
       var meta = [statusLabel(state)];
       var submission = view.submission || submissions[id] || {};
       var checkpoint = workflowCheckpoint(submission);
-      var phaseKey = workflowPhaseKey(submission);
       if (activityCount != null) meta.push(activityCount + " 项活动");
       if (duration) meta.push(duration);
+      if (checkpoint) meta.push(checkpoint);
       var classes = [state];
       if (String(id) === String(workflowId || "")) classes.push("selected");
       if (String(id) === String(activeWorkflowId || "")) classes.push("current");
       return '<button type="button" class="' + escapeHtml(classes.join(" ")) + '" data-workflow-history="' +
         escapeHtml(id) + '" aria-pressed="' + (String(id) === String(workflowId || "")) + '"><small>' +
         escapeHtml(slot.task.subtitle) + '</small><b>' + escapeHtml(slot.task.label) + '</b><span>' +
-        escapeHtml([checkpoint || "未提供检查点", phaseKey ? "OODA · " + phaseKey : "未提供阶段", meta.join(" · ")].filter(Boolean).join(" · ")) + '</span></button>';
+        escapeHtml(meta.join(" · ")) + '</span></button>';
     }).join("");
   }
 
@@ -322,7 +348,7 @@ window.PlatformWorkflow = (function () {
       renderTaskHistory();
       var ids = (runManifest.workflow_ids || []).map(String);
       var archivedViews = await Promise.all(ids.map(function (id) {
-        if (viewCache[id]) return Promise.resolve(viewCache[id]);
+        if (viewCache[id] && viewCache[id].terminal) return Promise.resolve(viewCache[id]);
         return API.getWorkflowView(id).catch(function () { return null; });
       }));
       if (generation !== runHistoryGeneration || requestedRunId !== simulationRunId) return null;
@@ -343,6 +369,32 @@ window.PlatformWorkflow = (function () {
       return null;
     } finally {
       if (generation === runHistoryGeneration) historyLoadingRunId = null;
+    }
+  }
+
+  async function refreshPendingHistoryViews() {
+    if (!API || !simulationRunId || !runManifest || pendingViewsInFlight || historyLoadingRunId || viewLoadInFlight) return;
+    var requestedRunId = simulationRunId;
+    var generation = runHistoryGeneration;
+    var ids = (runManifest.workflow_ids || []).map(String).filter(function (id) {
+      return id !== String(activeWorkflowId || "") && (!viewCache[id] || !viewCache[id].terminal);
+    });
+    if (!ids.length) return;
+    pendingViewsInFlight = true;
+    try {
+      for (var i = 0; i < ids.length; i += 1) {
+        var id = ids[i];
+        var view;
+        try { view = await API.getWorkflowView(id); }
+        catch (error) { continue; }
+        if (generation !== runHistoryGeneration || requestedRunId !== simulationRunId) return;
+        if (!view || String(view.workflow_id || "") !== id) continue;
+        viewCache[id] = view;
+        renderTaskHistory();
+        if (String(workflowId || "") === id) renderView(view);
+      }
+    } finally {
+      pendingViewsInFlight = false;
     }
   }
 
@@ -803,7 +855,7 @@ window.PlatformWorkflow = (function () {
     }));
 
     var trace = (orchestration || {}).trace || [];
-    traceRoot.innerHTML = trace.length ? trace.slice().reverse().map(function (item) {
+    traceRoot.innerHTML = trace.length ? trace.map(function (item) {
       var traceRole = activityRoleDisplayName(item.role, [], phaseContext) || item.role;
       var traceMeta = [traceRole, item.agent, item.work_item, item.message].filter(Boolean).join(" · ");
       return '<div class="workflow-trace-row"><span>' + escapeHtml(item.timestamp || "—") + '</span><b>' + escapeHtml(item.event) + '</b><small>' +
@@ -1323,6 +1375,8 @@ window.PlatformWorkflow = (function () {
     checkHealth();
     if (healthTimer) clearInterval(healthTimer);
     healthTimer = setInterval(checkHealth, 10000);
+    if (historyTimer) clearInterval(historyTimer);
+    historyTimer = setInterval(function () { refreshPendingHistoryViews().catch(function () {}); }, 5000);
     renderSubmission(null);
     renderActivities({});
     renderResults({});

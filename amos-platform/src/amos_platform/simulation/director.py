@@ -56,6 +56,8 @@ class DirectorService:
         self._lock = threading.RLock()
         self._auto_stop = threading.Event()
         self._auto_thread: threading.Thread | None = None
+        self._analysis_speed_before: float | None = None
+        self._last_analysis_poll_at = 0.0
         self._scenario: dict[str, Any] | None = None
         self._checkpoint_index = -1
         self._reached: list[dict[str, Any]] = []
@@ -121,6 +123,8 @@ class DirectorService:
         engine.evaluate_media_captures()
         with self._lock:
             self._scenario = scenario
+            self._analysis_speed_before = None
+            self._last_analysis_poll_at = 0.0
             self._checkpoint_index = -1
             self._reached = []
             self._actions = []
@@ -195,7 +199,7 @@ class DirectorService:
 
     def _checkpoint_satisfied(self, checkpoint: dict[str, Any]) -> bool:
         engine = self.runtime.get_engine()
-        elapsed = float(engine.clock.get("elapsed_sec", 0) or 0)
+        elapsed = float(engine.clock.get("scenario_elapsed_sec", engine.clock.get("elapsed_sec", 0)) or 0)
         if elapsed < float(checkpoint.get("min_elapsed_sec", 0) or 0):
             return False
         conditions = checkpoint.get("conditions") or {}
@@ -245,38 +249,136 @@ class DirectorService:
             return False
         return True
 
-    def _reach_checkpoint(self, checkpoint: dict[str, Any]) -> dict[str, Any]:
+    def _submit_checkpoint_analysis(
+        self,
+        checkpoint_id: str,
+        *,
+        on_snapshot_captured: Callable[[], None] | None = None,
+        submission_context: dict[str, Any] | None = None,
+    ) -> tuple[str, dict[str, Any] | None]:
+        if self.checkpoint_callback is None:
+            return "submission_unavailable", None
+        context = dict(submission_context) if submission_context is not None else {
+            "scenario_id": self._state["scenario_id"],
+            "run_id": self._state["run_id"],
+            "branch": self._state["branch"],
+            "seed": self._state["seed"],
+            "checkpoint_id": checkpoint_id,
+        }
+        if on_snapshot_captured is not None:
+            context["on_snapshot_captured"] = on_snapshot_captured
+        try:
+            result = self.checkpoint_callback(context) or {}
+            if result.get("workflow_id"):
+                return "submitted", result
+            return ("submission_failed" if result.get("error") else "submission_unverified"), result
+        except Exception as exc:  # submission failures must never become success
+            return "submission_failed", {"error": f"{type(exc).__name__}: {exc}"}
+
+    def _submit_checkpoint_in_background(
+        self,
+        checkpoint: dict[str, Any],
+        *,
+        on_snapshot_captured: Callable[[], None] | None,
+    ) -> None:
+        """Submit a frozen checkpoint without blocking director status reads."""
+        run_id = str(self._state.get("run_id") or "")
+        checkpoint_id = str(checkpoint.get("checkpoint_id") or "")
+        context = {
+            key: self._state[key]
+            for key in ("scenario_id", "run_id", "branch", "seed")
+        }
+        context["checkpoint_id"] = checkpoint_id
+
+        def resume_current_run() -> None:
+            if (
+                on_snapshot_captured is not None
+                and self._state.get("run_id") == run_id
+                and self.runtime.get_engine().clock.get("run_id") == run_id
+            ):
+                on_snapshot_captured()
+
+        def submit() -> None:
+            status, result = self._submit_checkpoint_analysis(
+                checkpoint_id,
+                on_snapshot_captured=resume_current_run,
+                submission_context=context,
+            )
+            with self._lock:
+                if (
+                    self._state.get("run_id") != run_id
+                    or self._state.get("current_checkpoint") is not checkpoint
+                ):
+                    return
+                checkpoint["analysis_status"] = status
+                if result:
+                    checkpoint["submission"] = deepcopy(result)
+                if status == "submitted":
+                    self._state["awaiting_analysis"] = True
+                    self._set_status("awaiting_analysis", analysis_status=status)
+                else:
+                    self._state["last_error"] = str((result or {}).get("error") or "检查点分析提交失败")
+                    self._state["awaiting_analysis"] = False
+                    self._clear_analysis_motion_limit()
+                    self.runtime.get_engine().pause()
+                    self._set_status("error", analysis_status=status)
+                self._record(
+                    "checkpoint_analysis_submitted",
+                    checkpoint_id=checkpoint_id,
+                    analysis_status=status,
+                )
+                self.runtime.record_director_state(self.state())
+
+        threading.Thread(
+            target=submit,
+            daemon=True,
+            name=f"amos-submit-{checkpoint_id}",
+        ).start()
+
+    def _reach_checkpoint(
+        self,
+        checkpoint: dict[str, Any],
+        *,
+        on_snapshot_captured: Callable[[], None] | None = None,
+    ) -> dict[str, Any]:
+        previous = self._state.get("current_checkpoint")
+        if (
+            isinstance(previous, dict)
+            and previous.get("analysis_blocking", True)
+            and previous.get("analysis_status") != "completed"
+            and (
+                previous.get("analysis_after_authorization")
+                or isinstance(previous.get("submission"), dict)
+                and previous["submission"].get("workflow_id")
+            )
+        ):
+            raise DirectorError("checkpoint analysis is not completed")
         engine = self.runtime.get_engine()
         self._checkpoint_index += 1
         engine.clock["director_checkpoint_id"] = checkpoint.get("checkpoint_id")
+        reached_at_sec = round(float(engine.clock.get("elapsed_sec", 0) or 0), 3)
         self._apply_fault_requests(checkpoint)
-        analysis_status = "not_requested"
+        deferred = bool(checkpoint.get("submit_after_authorization"))
+        analysis_status = "awaiting_operator" if deferred else "not_requested"
         callback_result: dict[str, Any] | None = None
-        if checkpoint.get("submit_analysis"):
-            analysis_status = "submission_unavailable"
-            if self.checkpoint_callback is not None:
-                try:
-                    callback_result = self.checkpoint_callback({
-                        "scenario_id": self._state["scenario_id"],
-                        "run_id": self._state["run_id"],
-                        "branch": self._state["branch"],
-                        "seed": self._state["seed"],
-                        "checkpoint_id": checkpoint.get("checkpoint_id"),
-                    }) or {}
-                    if callback_result.get("workflow_id"):
-                        analysis_status = "submitted"
-                    elif callback_result.get("error"):
-                        analysis_status = "submission_failed"
-                    else:
-                        analysis_status = "submission_unverified"
-                except Exception as exc:  # callback failure is recorded, never converted into success
-                    analysis_status = "submission_failed"
-                    callback_result = {"error": f"{type(exc).__name__}: {exc}"}
+        async_submission = bool(
+            ((self._scenario or {}).get("demo_controls") or {}).get("elastic_timeline")
+            and threading.current_thread() is self._auto_thread
+        )
+        if checkpoint.get("submit_analysis") and not deferred:
+            if async_submission:
+                analysis_status = "submitting"
+            else:
+                analysis_status, callback_result = self._submit_checkpoint_analysis(
+                    str(checkpoint.get("checkpoint_id") or ""),
+                    on_snapshot_captured=on_snapshot_captured,
+                )
         reached = {
             "checkpoint_id": checkpoint.get("checkpoint_id"),
             "title": checkpoint.get("title"),
-            "reached_at_sec": round(float(engine.clock.get("elapsed_sec", 0) or 0), 3),
+            "reached_at_sec": reached_at_sec,
             "analysis_status": analysis_status,
+            "analysis_after_authorization": deferred,
             # Authorization belongs to a concrete reached checkpoint.  Do not
             # start an operator gate merely because the timeline entered the
             # ENGAGE phase before the evidence/analysis checkpoint was ready.
@@ -298,7 +400,7 @@ class DirectorService:
         self._reached.append(reached)
         self._state["current_checkpoint"] = reached
         self._state["awaiting_analysis"] = analysis_status in {
-            "submitted", "running",
+            "submitting", "submitted", "running",
         } and bool(reached["analysis_blocking"])
         self._state["director_status"] = (
             "awaiting_analysis" if self._state["awaiting_analysis"] else "checkpoint_reached"
@@ -306,11 +408,56 @@ class DirectorService:
         engine.clock["director_status"] = self._state["director_status"]
         engine.clock["director_analysis_status"] = analysis_status
         self._record("checkpoint_reached", checkpoint_id=reached["checkpoint_id"], analysis_status=analysis_status)
+        if async_submission and checkpoint.get("submit_analysis") and not deferred:
+            self._submit_checkpoint_in_background(
+                reached, on_snapshot_captured=on_snapshot_captured,
+            )
         return reached
+
+    def _submit_deferred_analysis(
+        self,
+        checkpoint: dict[str, Any],
+        *,
+        on_snapshot_captured: Callable[[], None] | None = None,
+    ) -> bool:
+        if not checkpoint.get("analysis_after_authorization"):
+            return True
+        if checkpoint.get("analysis_status") != "awaiting_operator":
+            return checkpoint.get("analysis_status") not in self.FAILED_ANALYSIS_STATUSES
+        checkpoint["analysis_status"] = "submitting"
+        self._state["awaiting_analysis"] = True
+        self._set_status("awaiting_analysis", analysis_status="submitting")
+        if (
+            ((self._scenario or {}).get("demo_controls") or {}).get("elastic_timeline")
+            and threading.current_thread() is self._auto_thread
+        ):
+            self._submit_checkpoint_in_background(
+                checkpoint, on_snapshot_captured=on_snapshot_captured,
+            )
+            return True
+        status, result = self._submit_checkpoint_analysis(
+            str(checkpoint.get("checkpoint_id") or ""),
+            on_snapshot_captured=on_snapshot_captured,
+        )
+        checkpoint["analysis_status"] = status
+        if result:
+            checkpoint["submission"] = deepcopy(result)
+        self._state["awaiting_analysis"] = status == "submitted"
+        self._set_status(
+            "awaiting_analysis" if self._state["awaiting_analysis"] else "error",
+            analysis_status=status,
+        )
+        self._record("checkpoint_analysis_submitted", checkpoint_id=checkpoint.get("checkpoint_id"), analysis_status=status)
+        if status != "submitted":
+            self._state["last_error"] = str((result or {}).get("error") or "交战分析提交失败")
+            self._clear_analysis_motion_limit()
+            self.runtime.get_engine().pause()
+        self.runtime.record_director_state(self.state())
+        return status == "submitted"
 
     def _current_phase(self) -> str | None:
         engine = self.runtime.get_engine()
-        elapsed = float(engine.clock.get("elapsed_sec", 0) or 0)
+        elapsed = float(engine.clock.get("scenario_elapsed_sec", engine.clock.get("elapsed_sec", 0)) or 0)
         branch = str(self._state.get("branch") or "")
         reached = [
             str(item.get("phase") or "").upper()
@@ -345,15 +492,23 @@ class DirectorService:
             )
         ):
             return None
+        analysis_complete = checkpoint.get("analysis_status") not in {
+            "submitting", "submitted", "running", "backend_unreachable", "failed",
+        }
+        if checkpoint.get("analysis_after_authorization") and checkpoint.get("analysis_status") == "awaiting_operator":
+            analysis_complete = True
         if not policy.get("requires_prior_warning"):
-            return "fire"
+            return "fire" if analysis_complete else "warning_wait"
         engine = self.runtime.get_engine()
         warnings = list(engine._engagement_warnings.values())
         if not warnings:
             return "warning"
         warning = warnings[-1]
         not_before = float(warning.get("fire_not_before_sec", 0) or 0)
-        if float(engine.clock.get("elapsed_sec", 0) or 0) < not_before:
+        if (
+            float(engine.clock.get("elapsed_sec", 0) or 0) < not_before
+            or not analysis_complete
+        ):
             return "warning_wait"
         return "fire"
 
@@ -418,6 +573,14 @@ class DirectorService:
 
     def _arm_analysis_motion_limit(self) -> None:
         engine = self.runtime.get_engine()
+        controls = (self._scenario or {}).get("demo_controls") or {}
+        if controls.get("elastic_timeline"):
+            if self._analysis_speed_before is None:
+                self._analysis_speed_before = float(engine.clock.get("speed", 1) or 1)
+            engine.set_director_story_hold(True)
+            engine.set_speed(float(controls.get("analysis_speed", 16) or 16))
+            self._record("analysis_motion_continues", speed=engine.clock["speed"], elastic_timeline=True)
+            return
         engine._director_motion_limit_sec = self._analysis_motion_limit()
         self._record(
             "analysis_motion_continues",
@@ -425,7 +588,12 @@ class DirectorService:
         )
 
     def _clear_analysis_motion_limit(self) -> None:
-        self.runtime.get_engine()._director_motion_limit_sec = None
+        engine = self.runtime.get_engine()
+        engine._director_motion_limit_sec = None
+        if self._analysis_speed_before is not None:
+            engine.set_director_story_hold(False)
+            engine.set_speed(self._analysis_speed_before)
+            self._analysis_speed_before = None
 
     def _poll_current_analysis(self, *, resume_on_success: bool) -> str:
         """Poll analysis while serializing mutations of the director state.
@@ -463,7 +631,8 @@ class DirectorService:
             checkpoint["analysis_error"] = f"{type(exc).__name__}: {exc}"
             self._state["last_error"] = checkpoint["analysis_error"]
             self._state["awaiting_analysis"] = True
-            self._set_status("awaiting_analysis", analysis_status="backend_unreachable")
+            status = "awaiting_authorization" if self._state.get("awaiting_authorization") else "awaiting_analysis"
+            self._set_status(status, analysis_status="backend_unreachable")
             return "pending"
 
         workflow_status = str(view.get("status") or "unknown").lower()
@@ -471,7 +640,8 @@ class DirectorService:
         if not view.get("terminal"):
             checkpoint["analysis_status"] = "running" if workflow_status == "running" else "submitted"
             self._state["awaiting_analysis"] = True
-            self._set_status("awaiting_analysis", analysis_status=checkpoint["analysis_status"])
+            status = "awaiting_authorization" if self._state.get("awaiting_authorization") else "awaiting_analysis"
+            self._set_status(status, analysis_status=checkpoint["analysis_status"])
             return "pending"
 
         counts = ((view.get("orchestration") or {}).get("counts") or {})
@@ -492,8 +662,11 @@ class DirectorService:
             )
             self._state["last_error"] = checkpoint["analysis_error"]
             self._state["awaiting_analysis"] = False
+            self._state["awaiting_authorization"] = False
+            self._state["authorization_stage"] = None
             self._clear_analysis_motion_limit()
             self.runtime.get_engine().pause()
+            self._leave_authorization_wait()
             # Clear the analysis crawl lock as well: a paused engine must not
             # inherit a lingering 1x lock when the operator resumes later.
             self.runtime.get_engine().unlock_speed_for_confirmation(
@@ -520,7 +693,11 @@ class DirectorService:
         self.runtime.get_engine().unlock_speed_for_confirmation(
             "analysis_motion", restore=True
         )
-        self._set_status("auto_running" if resume_on_success else "paused", analysis_status="completed")
+        status = (
+            "awaiting_authorization" if self._state.get("awaiting_authorization")
+            else "auto_running" if resume_on_success else "paused"
+        )
+        self._set_status(status, analysis_status="completed")
         self._record(
             "checkpoint_analysis_completed",
             checkpoint_id=checkpoint.get("checkpoint_id"),
@@ -623,37 +800,61 @@ class DirectorService:
             while not self._auto_stop.wait(0.05):
                 engine = self.runtime.get_engine()
                 current = self._state.get("current_checkpoint")
+                analysis_pending = False
                 if isinstance(current, dict) and current.get("analysis_status") in {
-                    "submitted", "running", "backend_unreachable",
+                    "submitting", "submitted", "running", "backend_unreachable",
                 } and current.get("analysis_blocking", True):
-                    # Analysis still in flight and the story clock has reached
-                    # the analysis motion limit: instead of freezing the left
-                    # panel in place, drop the hard clamp so the scene keeps
-                    # moving while the agents work. With the follow-launch
-                    # confirmation dialog pending the demo speed (e.g. 32x)
-                    # continues; otherwise playback holds 1x until the
-                    # analysis completes (or fails) restores the demo speed.
+                    # Hold the clock until the warning is issued. Its observation
+                    # period can then overlap the engagement analysis.
+                    if (
+                        not ((self._scenario or {}).get("demo_controls") or {}).get("elastic_timeline")
+                        and
+                        current.get("requires_operator_action")
+                        and not engine._engagement_warnings
+                        and engine.clock.get("running")
+                    ):
+                        engine.pause()
+                        self._clear_analysis_motion_limit()
+                        self._record("analysis_motion_paused", checkpoint_id=current.get("checkpoint_id"))
+                    # Other stages may animate within their current phase,
+                    # but must stop at the next phase boundary until analysis
+                    # completes. Continuing past that boundary makes later
+                    # checkpoints arrive too late for their own time windows.
                     limit = getattr(engine, "_director_motion_limit_sec", None)
                     if (
+                        not ((self._scenario or {}).get("demo_controls") or {}).get("elastic_timeline")
+                        and
                         limit is not None
                         and engine.clock.get("running")
                         and float(engine.clock.get("elapsed_sec", 0) or 0)
                         >= float(limit) - 1e-6
                     ):
+                        engine.pause()
                         self._clear_analysis_motion_limit()
-                        if engine.follow_confirmation_pending():
-                            # While the follow-launch confirmation dialog is
-                            # open, keep the operator demo speed (e.g. 32x)
-                            # during the analysis instead of crawling at 1x.
-                            self._record("analysis_motion_continue", limit_sec=float(limit))
-                        else:
-                            engine.lock_speed_for_confirmation("analysis_motion")
-                            self._record("analysis_motion_slowdown", limit_sec=float(limit))
-                    result = self._poll_current_analysis(resume_on_success=True)
-                    if result in {"pending", "failed"}:
-                        if result == "failed":
-                            return
-                        continue
+                        self._record("analysis_motion_paused", limit_sec=float(limit))
+                    wait_for_fire_authorization = bool(
+                        current.get("requires_operator_action")
+                        and str(current.get("operator_action_type") or "fire") == "fire"
+                        and (
+                            not engine._engagement_warnings
+                            or self._state.get("awaiting_authorization")
+                        )
+                    )
+                    now = time.monotonic()
+                    should_poll = (
+                        threading.current_thread() is not self._auto_thread
+                        or now - self._last_analysis_poll_at >= 0.75
+                    )
+                    if current.get("analysis_status") == "submitting" or not should_poll:
+                        result = "pending"
+                    else:
+                        self._last_analysis_poll_at = now
+                        result = self._poll_current_analysis(
+                            resume_on_success=not wait_for_fire_authorization
+                        )
+                    if result == "failed":
+                        return
+                    analysis_pending = result == "pending"
 
                 authorization_stage = self._authorization_stage()
                 if authorization_stage in {"warning", "fire"}:
@@ -705,15 +906,59 @@ class DirectorService:
                             if authorization_stage == "warning_wait" and engine._engagement_warnings
                             else None
                         )
-                        self._set_status("auto_running")
+                        self._set_status("awaiting_analysis" if analysis_pending else "auto_running")
                         self._leave_authorization_wait()
-                        self._record(
-                            "authorization_completed",
-                            phase="ENGAGE",
-                            authorization_stage=completed_stage,
-                        )
-                        engine.resume()
+                        if completed_by_event and checkpoint.get("analysis_after_authorization"):
+                            self._arm_analysis_motion_limit()
+                            self._record(
+                                "authorization_completed",
+                                phase="ENGAGE",
+                                authorization_stage=completed_stage,
+                            )
+                            if not self._submit_deferred_analysis(
+                                checkpoint, on_snapshot_captured=engine.resume,
+                            ):
+                                return
+                            analysis_pending = True
+                        elif analysis_pending:
+                            self._arm_analysis_motion_limit()
+                        if not completed_by_event or not checkpoint.get("analysis_after_authorization"):
+                            self._record(
+                                "authorization_completed",
+                                phase="ENGAGE",
+                                authorization_stage=completed_stage,
+                            )
+                        if not engine.clock.get("running") and checkpoint.get("analysis_status") != "submitting":
+                            engine.resume()
                         self.runtime.record_director_state(self.state())
+
+                current = self._state.get("current_checkpoint")
+                if (
+                    isinstance(current, dict)
+                    and current.get("analysis_after_authorization")
+                    and current.get("analysis_status") == "awaiting_operator"
+                ):
+                    # A direct API fire command may arrive outside the dialog.
+                    # It still needs the post-fire backend workflow.
+                    if self._has_authorized_engagement(
+                        since_sec=float(current.get("reached_at_sec", 0) or 0)
+                    ):
+                        engine.pause()
+                        self._arm_analysis_motion_limit()
+                        if not self._submit_deferred_analysis(
+                            current, on_snapshot_captured=engine.resume,
+                        ):
+                            return
+                        analysis_pending = True
+                        if not engine.clock.get("running") and current.get("analysis_status") != "submitting":
+                            engine.resume()
+                    else:
+                        continue
+
+                # The warning gate is independent of the backend workflow, but
+                # reaching the next checkpoint still requires its completion.
+                if analysis_pending:
+                    continue
 
                 checkpoint = self._next_checkpoint()
                 if checkpoint is None:
@@ -728,14 +973,40 @@ class DirectorService:
                 if self._checkpoint_satisfied(checkpoint):
                     continue_during_analysis = self._analysis_progress_enabled(checkpoint)
                     pause_on_reach = bool(checkpoint.get("pause", True))
-                    if pause_on_reach and not continue_during_analysis:
-                        engine.pause()
+                    operator_gate = bool(
+                        checkpoint.get("requires_operator_action")
+                        and str(checkpoint.get("operator_action_type") or "fire") == "fire"
+                    )
+                    # The submission callback can take wall-clock seconds.
+                    # Freeze simulated time before it captures and submits the
+                    # snapshot, then allow motion only under the phase limit.
+                    engine.pause(announce=operator_gate)
+                    if continue_during_analysis and not operator_gate:
+                        self._arm_analysis_motion_limit()
                     with self._lock:
-                        self._reach_checkpoint(checkpoint)
-                        if continue_during_analysis and self._state.get("awaiting_analysis"):
-                            self._arm_analysis_motion_limit()
-                        elif pause_on_reach:
+                        self._reach_checkpoint(
+                            checkpoint,
+                            on_snapshot_captured=(
+                                (lambda: engine.resume(announce=False))
+                                if continue_during_analysis and not operator_gate
+                                else None
+                            ),
+                        )
+                        current = self._state.get("current_checkpoint") or {}
+                        if current.get("analysis_status") in self.FAILED_ANALYSIS_STATUSES:
+                            self._clear_analysis_motion_limit()
                             engine.pause()
+                            self._set_status("error", analysis_status=current.get("analysis_status"))
+                            self.runtime.record_director_state(self.state())
+                            return
+                        if self._state.get("awaiting_analysis"):
+                            if continue_during_analysis and not operator_gate:
+                                if not engine.clock.get("running") and current.get("analysis_status") != "submitting":
+                                    engine.resume(announce=False)
+                        elif not pause_on_reach or (
+                            continue_during_analysis and not operator_gate
+                        ):
+                            engine.resume(announce=False)
                         self.runtime.record_director_state(self.state())
                     continue
                 if not engine.clock.get("running"):
@@ -764,6 +1035,22 @@ class DirectorService:
             self._ensure_checkpoint_can_advance()
         with self._lock:
             self._state["last_error"] = None
+            current = self._state.get("current_checkpoint")
+            if (
+                action in {"step_tick", "advance_checkpoint", "refresh_analysis"}
+                and isinstance(current, dict)
+                and current.get("analysis_after_authorization")
+                and current.get("analysis_status") == "awaiting_operator"
+            ):
+                authorized = self._has_authorized_engagement(
+                    since_sec=float(current.get("reached_at_sec", 0) or 0)
+                )
+                if not authorized and action != "refresh_analysis":
+                    raise DirectorError("operator fire authorization is required")
+                if authorized:
+                    engine.pause()
+                    if not self._submit_deferred_analysis(current):
+                        raise DirectorError(str(self._state.get("last_error") or "checkpoint submission failed"))
         if action == "start":
             engine.start() if engine.clock.get("lifecycle") == "ready" else engine.resume()
             with self._lock:
@@ -778,6 +1065,12 @@ class DirectorService:
                 value = float(step_sec)
             except (TypeError, ValueError) as exc:
                 raise DirectorError("step_sec must be a number") from exc
+            current = self._state.get("current_checkpoint")
+            if isinstance(current, dict) and current.get("analysis_blocking", True) and current.get("analysis_status") in {
+                "submitted", "running", "backend_unreachable",
+            }:
+                if self._poll_current_analysis(resume_on_success=False) == "pending":
+                    raise DirectorError("checkpoint analysis is not completed")
             engine.step(value)
             with self._lock:
                 checkpoint = self._next_checkpoint()
@@ -834,16 +1127,49 @@ class DirectorService:
         self.runtime.record_director_state(result)
         return result
 
-    def state(self) -> dict[str, Any]:
+    @staticmethod
+    def _checkpoint_summary(checkpoint: dict[str, Any]) -> dict[str, Any]:
+        keys = (
+            "checkpoint_id", "title", "reached_at_sec", "analysis_status",
+            "analysis_error", "analysis_after_authorization", "analysis_blocking",
+            "requires_operator_action", "operator_action_type", "engagement_wave",
+            "workflow_status", "analysis_completed_at",
+        )
+        result = {key: deepcopy(checkpoint[key]) for key in keys if key in checkpoint}
+        submission = checkpoint.get("submission")
+        if isinstance(submission, dict):
+            result["submission"] = {
+                key: submission[key]
+                for key in ("workflow_id", "error") if submission.get(key) is not None
+            }
+        return result
+
+    def state(self, *, summary: bool = False) -> dict[str, Any]:
         """Return state without unreached checkpoint conditions or future script."""
         with self._lock:
             engine = self.runtime.get_engine()
-            payload = deepcopy(self._state)
+            if summary:
+                payload = {
+                    key: deepcopy(value)
+                    for key, value in self._state.items()
+                    if key != "current_checkpoint"
+                }
+                current = self._state.get("current_checkpoint")
+                payload["current_checkpoint"] = (
+                    self._checkpoint_summary(current)
+                    if isinstance(current, dict) else None
+                )
+            else:
+                payload = deepcopy(self._state)
             payload["status"] = payload["director_status"]
             payload["elapsed_sec"] = round(float(engine.clock.get("elapsed_sec", 0) or 0), 3)
+            payload["scenario_elapsed_sec"] = round(float(engine.clock.get("scenario_elapsed_sec", engine.clock.get("elapsed_sec", 0)) or 0), 3)
             payload["simulation_lifecycle"] = engine.clock.get("lifecycle")
-            payload["reached_checkpoints"] = deepcopy(self._reached)
-            payload["action_log"] = deepcopy(self._actions)
+            payload["reached_checkpoints"] = (
+                [self._checkpoint_summary(item) for item in self._reached]
+                if summary else deepcopy(self._reached)
+            )
+            payload["action_log"] = deepcopy(self._actions[-10:] if summary else self._actions)
             payload["auto_running"] = bool(self._auto_thread and self._auto_thread.is_alive())
             return payload
 

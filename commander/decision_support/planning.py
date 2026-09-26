@@ -415,6 +415,12 @@ def enhance_plans_with_rag(
         queries,
         purpose="planning",
         request_id=request.request_id,
+        context={
+            "workflow_id": request.request_id,
+            "task_id": "方案生成",
+            "work_item_id": "decision_planning_core",
+            "agent_id": "decision_planning_agent",
+        },
     )
 
     evidence_by_rule: dict[str, list] = defaultdict(list)

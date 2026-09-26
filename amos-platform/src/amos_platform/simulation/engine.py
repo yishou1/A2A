@@ -133,6 +133,12 @@ class SimEngine:
         self._lock = threading.RLock()
         self._tick_interval = 0.5  # seconds wall clock
         self._director_motion_limit_sec: float | None = None
+        self._director_story_hold = False
+        self._director_hold_elapsed_sec = 0.0
+        self._director_hold_assets: dict[str, tuple[float, float]] = {}
+        self._director_hold_threats: dict[str, tuple[float, float]] = {}
+        self._director_hold_motion: dict[str, float] = {}
+        self._director_hold_original_speeds: dict[str, float] = {}
         self._speed_lock_reasons: set[str] = set()
         self._speed_before_lock: float | None = None
         self._engagement_warnings: dict[str, dict] = {}
@@ -171,6 +177,72 @@ class SimEngine:
             self.configure_seed(scenario.get("default_seed", self._seed) if seed is None else seed)
             load_scenario_into_engine(self, scenario, _now_iso)
 
+    def set_director_story_hold(self, enabled: bool) -> None:
+        """Keep scripted milestones still while the physical world continues."""
+        with self._lock:
+            if enabled and not self._director_story_hold:
+                self._director_hold_elapsed_sec = 0.0
+                self._director_hold_assets = {
+                    asset_id: (
+                        float((asset.get("position") or {}).get("lat", 0) or 0),
+                        float((asset.get("position") or {}).get("lng", 0) or 0),
+                    )
+                    for asset_id, asset in self.assets.items()
+                }
+                self._director_hold_threats = {
+                    threat_id: (float(threat.get("lat", 0) or 0), float(threat.get("lng", 0) or 0))
+                    for threat_id, threat in self.threats.items()
+                }
+                controls = self.scenario_story.get("demo_controls") or {}
+                motion = controls.get("analysis_hold_motion") or {}
+                story_time = float(self.clock.get("scenario_elapsed_sec", self.clock.get("elapsed_sec", 0)) or 0)
+                self._director_hold_motion = {}
+                self._director_hold_original_speeds = {}
+                if story_time < float(motion.get("until_story_sec", 0) or 0):
+                    radius_nm = float(motion.get("radius_nm", 0) or 0)
+                    speed_kts = float(motion.get("speed_kts", 0) or 0)
+                    if radius_nm > 0 and speed_kts > 0:
+                        self._director_hold_motion = {
+                            "radius_nm": radius_nm,
+                            "speed_kts": speed_kts,
+                            "heading_deg": float(motion.get("heading_deg", 0) or 0),
+                        }
+                        for asset_id in motion.get("asset_ids") or []:
+                            asset = self.assets.get(str(asset_id))
+                            if asset is None or asset.get("status") not in {"active", "operational"}:
+                                continue
+                            self._director_hold_original_speeds[str(asset_id)] = float(asset.get("speed_kts", 0) or 0)
+                            asset["speed_kts"] = speed_kts
+            elif not enabled and self._director_story_hold:
+                for asset_id, original_speed in self._director_hold_original_speeds.items():
+                    asset = self.assets.get(asset_id)
+                    if asset is not None:
+                        asset["speed_kts"] = original_speed
+                self._director_hold_assets = {}
+                self._director_hold_threats = {}
+                self._director_hold_motion = {}
+                self._director_hold_original_speeds = {}
+            self._director_story_hold = bool(enabled)
+            self.clock["scenario_waiting_for_analysis"] = bool(enabled)
+
+    @staticmethod
+    def _director_loiter_position(
+        anchor: tuple[float, float], elapsed: float, *, radius_nm: float = 0.08,
+        speed_kts: float = 4.0, heading_deg: float = 0.0,
+    ) -> tuple[float, float]:
+        """A compact real patrol orbit that preserves later sensor geometry."""
+        angular_distance = (elapsed * speed_kts / 3600.0) / radius_nm
+        forward_nm = radius_nm * math.sin(angular_distance)
+        left_nm = radius_nm * (1.0 - math.cos(angular_distance))
+        heading_rad = math.radians(heading_deg)
+        north_nm = forward_nm * math.cos(heading_rad) + left_nm * math.sin(heading_rad)
+        east_nm = forward_nm * math.sin(heading_rad) - left_nm * math.cos(heading_rad)
+        lat, lng = anchor
+        return (
+            round(lat + north_nm / 60.0, 6),
+            round(lng + east_nm / (60.0 * max(0.2, math.cos(math.radians(lat)))), 6),
+        )
+
     def start(self) -> None:
         """Start the simulation tick loop in a background daemon thread."""
         if self.clock.get("lifecycle") == "completed":
@@ -204,7 +276,7 @@ class SimEngine:
         self.alerts.append({"level": "INFO", "msg": "仿真已停止", "time": _now_iso()})
         self._notify_lifecycle()
 
-    def pause(self) -> None:
+    def pause(self, *, announce: bool = True) -> None:
         """Pause simulation (keeps state, stops ticking)."""
         self.clock["running"] = False
         if self.clock.get("lifecycle") != "completed":
@@ -214,10 +286,11 @@ class SimEngine:
             thread.join(timeout=self._tick_interval * 2 + 0.2)
             if not thread.is_alive():
                 self._thread = None
-        self.alerts.append({"level": "INFO", "msg": "仿真已暂停", "time": _now_iso()})
+        if announce:
+            self.alerts.append({"level": "INFO", "msg": "仿真已暂停", "time": _now_iso()})
         self._notify_lifecycle()
 
-    def resume(self) -> None:
+    def resume(self, *, announce: bool = True) -> None:
         """Resume simulation."""
         if self.clock.get("lifecycle") == "completed":
             self.clock["running"] = False
@@ -232,7 +305,8 @@ class SimEngine:
         self.clock["last_tick_error"] = None
         self._thread = threading.Thread(target=self._tick_loop, daemon=True)
         self._thread.start()
-        self.alerts.append({"level": "INFO", "msg": "仿真已恢复", "time": _now_iso()})
+        if announce:
+            self.alerts.append({"level": "INFO", "msg": "仿真已恢复", "time": _now_iso()})
         self._notify_lifecycle()
 
     def set_speed(self, multiplier: float) -> None:
@@ -312,33 +386,34 @@ class SimEngine:
     def _next_causal_boundary(self, current: float, target: float) -> float | None:
         """Return the next private schedule boundary inside ``(current, target)``."""
         candidates: list[float] = []
+        story_boundaries: list[float] = []
         for cue in self.scenario_story.get("timeline") or []:
-            candidates.append(float(cue.get("at_sec", 0) or 0))
+            story_boundaries.append(float(cue.get("at_sec", 0) or 0))
         for plan in self._scenario_capture_plans:
-            candidates.append(float(plan.get("at_sec", 0) or 0))
+            story_boundaries.append(float(plan.get("at_sec", 0) or 0))
         for task in self._scenario_task_schedule:
             window = task.get("window") if isinstance(task, dict) else None
             if isinstance(window, dict):
-                candidates.append(float(window.get("start_sec", 0) or 0))
+                story_boundaries.append(float(window.get("start_sec", 0) or 0))
                 if window.get("end_sec") is not None:
-                    candidates.append(float(window["end_sec"]))
+                    story_boundaries.append(float(window["end_sec"]))
         for asset in self.assets.values():
             window = asset.get("_motion_window") or {}
             if window:
-                candidates.append(float(window.get("start_sec", 0) or 0))
+                story_boundaries.append(float(window.get("start_sec", 0) or 0))
                 if window.get("end_sec") is not None:
-                    candidates.append(float(window["end_sec"]))
+                    story_boundaries.append(float(window["end_sec"]))
             phases = asset.get("_behavior_phases") or []
             next_index = int(asset.get("_next_behavior_phase_index", 0) or 0)
             for phase in phases[next_index:]:
                 if isinstance(phase, dict):
-                    candidates.append(float(phase.get("at_sec", 0) or 0))
+                    story_boundaries.append(float(phase.get("at_sec", 0) or 0))
         for threat in self.threats.values():
             window = threat.get("_observation_window") or {}
             if window:
-                candidates.append(float(window.get("start_sec", 0) or 0))
+                story_boundaries.append(float(window.get("start_sec", 0) or 0))
                 if window.get("end_sec") is not None:
-                    candidates.append(float(window["end_sec"]))
+                    story_boundaries.append(float(window["end_sec"]))
             script = threat.get("_behavior_script") or {}
             phase_index = threat.get("_behavior_phase")
             phases = script.get("phases") or []
@@ -348,6 +423,9 @@ class SimEngine:
                     remaining = float(duration) - float(threat.get("_phase_elapsed", 0) or 0)
                     if remaining > 0:
                         candidates.append(current + remaining)
+        if not self._director_story_hold:
+            story_now = float(self.clock.get("scenario_elapsed_sec", current) or 0)
+            candidates.extend(current + (value - story_now) for value in story_boundaries)
         eligible = [value for value in candidates if current + 1e-9 < value < target - 1e-9]
         return min(eligible) if eligible else None
 
@@ -362,8 +440,9 @@ class SimEngine:
         target = current + requested
         if self._director_motion_limit_sec is not None:
             target = min(target, float(self._director_motion_limit_sec))
-        if controls.get("auto_stop") and duration > 0:
-            target = min(target, duration)
+        if controls.get("auto_stop") and duration > 0 and not self._director_story_hold:
+            story_remaining = max(0.0, duration - float(self.clock.get("scenario_elapsed_sec", current) or 0))
+            target = min(target, current + story_remaining)
         while float(self.clock.get("elapsed_sec", 0) or 0) < target - 1e-9:
             current = float(self.clock.get("elapsed_sec", 0) or 0)
             segment_end = target
@@ -381,12 +460,17 @@ class SimEngine:
         """Execute one bounded physical step; callers use :meth:`_tick`."""
         controls = self.scenario_story.get("demo_controls") or {}
         duration = float(controls.get("duration_sec", 0) or 0)
-        if controls.get("auto_stop") and duration > 0:
-            remaining = max(0.0, duration - float(self.clock.get("elapsed_sec", 0) or 0))
+        if controls.get("auto_stop") and duration > 0 and not self._director_story_hold:
+            remaining = max(0.0, duration - float(self.clock.get("scenario_elapsed_sec", self.clock.get("elapsed_sec", 0)) or 0))
             dt = min(float(dt), remaining)
         if dt <= 0:
             return
         self.clock["elapsed_sec"] += dt
+        if self._director_story_hold:
+            self._director_hold_elapsed_sec += dt
+        if "scenario_elapsed_sec" in self.clock and not self._director_story_hold:
+            self.clock["scenario_elapsed_sec"] = float(self.clock.get("scenario_elapsed_sec", 0) or 0) + dt
+        scenario_elapsed = float(self.clock.get("scenario_elapsed_sec", self.clock["elapsed_sec"]) or 0)
         self._update_scenario_tasks()
 
         # Emit operator-visible scripted narrative cues once as simulation time advances.
@@ -402,7 +486,7 @@ class SimEngine:
             cue_id = str(cue.get("cue_id") or "")
             if not cue_id or cue_id in self._story_emitted:
                 continue
-            if self.clock["elapsed_sec"] < float(cue.get("at_sec") or 0.0):
+            if scenario_elapsed < float(cue.get("at_sec") or 0.0):
                 continue
             self._story_emitted.add(cue_id)
             self.scenario_story["current_cue_id"] = cue_id
@@ -430,6 +514,7 @@ class SimEngine:
         # patterns and maritime patrols without exposing future coordinates to
         # operator-facing state.
         current_sim_time = float(self.clock["elapsed_sec"])
+        current_scenario_time = scenario_elapsed
         for asset_id, asset in self.assets.items():
             phases = asset.get("_behavior_phases") or []
             next_index = int(asset.get("_next_behavior_phase_index", 0) or 0)
@@ -439,7 +524,7 @@ class SimEngine:
                     next_index += 1
                     continue
                 at_sec = float(phase.get("at_sec", 0) or 0)
-                if current_sim_time + 1e-9 < at_sec:
+                if current_scenario_time + 1e-9 < at_sec:
                     break
                 phase_route = phase.get("route")
                 if phase.get("position_mode") == "timed_ground_track" and isinstance(phase_route, list):
@@ -495,12 +580,12 @@ class SimEngine:
                 continue
             start_sec = float(window.get("start_sec", 0) or 0)
             end_raw = window.get("end_sec")
-            active_now = current_sim_time >= start_sec and (
-                end_raw is None or current_sim_time < float(end_raw)
+            active_now = current_scenario_time >= start_sec and (
+                end_raw is None or current_scenario_time < float(end_raw)
             )
             if window.get("activate_on_follow"):
                 active_now = bool(asset.get("_operator_follow_visible")) and (
-                    end_raw is None or current_sim_time < float(end_raw)
+                    end_raw is None or current_scenario_time < float(end_raw)
                 )
             # A behavior phase may set the scripted platform to ``active`` at
             # the same instant its motion window opens.  Apply the physical
@@ -603,7 +688,14 @@ class SimEngine:
             ), 1)
 
         # 1. Move assets along waypoint routes
-        wp_events = self.waypoint_nav.tick(self.assets, dt)
+        moving_assets = (
+            {
+                asset_id: asset for asset_id, asset in self.assets.items()
+                if asset.get("_follow_track_id") or asset.get("_follow_returning_home")
+            }
+            if self._director_story_hold else self.assets
+        )
+        wp_events = self.waypoint_nav.tick(moving_assets, dt)
         for ev in wp_events:
             self.events.append(ev)
 
@@ -613,7 +705,22 @@ class SimEngine:
         for aid, a in self.assets.items():
             if a["status"] not in ("operational", "active", "holding"):
                 continue
-            if aid not in self.waypoint_nav.get_all():
+            if self._director_story_hold and aid in self._director_hold_assets and aid not in moving_assets:
+                motion = self._director_hold_motion if aid in self._director_hold_original_speeds else {}
+                lat, lng = self._director_loiter_position(
+                    self._director_hold_assets[aid], self._director_hold_elapsed_sec,
+                    radius_nm=float(motion.get("radius_nm", 0.08)),
+                    speed_kts=float(motion.get("speed_kts", 4.0)),
+                    heading_deg=float(motion.get("heading_deg", 0.0)),
+                )
+                a["position"].update({"lat": lat, "lng": lng})
+                if motion:
+                    turn_deg = math.degrees(
+                        self._director_hold_elapsed_sec * motion["speed_kts"]
+                        / (3600.0 * motion["radius_nm"])
+                    )
+                    a["heading_deg"] = round((motion["heading_deg"] - turn_deg) % 360.0, 1)
+            elif aid not in self.waypoint_nav.get_all():
                 pos = a["position"]
                 distance_nm = max(0.0, float(a.get("speed_kts", 0) or 0)) * dt / 3600.0
                 if distance_nm > 0:
@@ -681,6 +788,11 @@ class SimEngine:
         for tid, t in list(self.threats.items()):
             if t.get("neutralized"):
                 continue
+            if self._director_story_hold and tid in self._director_hold_threats:
+                t["lat"], t["lng"] = self._director_loiter_position(
+                    self._director_hold_threats[tid], self._director_hold_elapsed_sec,
+                )
+                continue
             speed = t.get("speed_kts", 0)
             if speed <= 0:
                 continue
@@ -733,6 +845,8 @@ class SimEngine:
 
         # 3.3. Execute behavior scripts for threats with _behavior_script
         for tid, t in list(self.threats.items()):
+            if self._director_story_hold:
+                continue
             script = t.get("_behavior_script")
             if not script or t.get("neutralized") or t.get("_impact_pending"):
                 continue
@@ -1047,8 +1161,8 @@ class SimEngine:
         if len(self.alerts) > 100:
             self.alerts = self.alerts[-50:]
 
-        if controls.get("auto_stop") and duration > 0 and self.clock["elapsed_sec"] >= duration:
-            self.clock["elapsed_sec"] = duration
+        if controls.get("auto_stop") and duration > 0 and scenario_elapsed >= duration:
+            self.clock["scenario_elapsed_sec"] = duration
             if self.clock.get("running"):
                 self.clock["running"] = False
                 self.clock["lifecycle"] = "completed"
@@ -1154,7 +1268,7 @@ class SimEngine:
 
     def _update_asset_follow_tasks(self) -> None:
         """Retask scenario assets from public fused-track attributes only."""
-        elapsed = float(self.clock.get("elapsed_sec", 0) or 0)
+        elapsed = float(self.clock.get("scenario_elapsed_sec", self.clock.get("elapsed_sec", 0)) or 0)
         for task in self._scenario_asset_follow_tasks:
             asset_id = str(task.get("asset_id") or "")
             if not asset_id or asset_id not in self.assets:
@@ -1367,7 +1481,7 @@ class SimEngine:
             if not task.get("return_to_launch_after_strike", True):
                 continue
             return_after_sec = task.get("return_after_sec")
-            elapsed = float(self.clock.get("elapsed_sec", 0) or 0)
+            elapsed = float(self.clock.get("scenario_elapsed_sec", self.clock.get("elapsed_sec", 0)) or 0)
             if return_after_sec is not None and elapsed < float(return_after_sec):
                 asset["_follow_return_pending_track_id"] = target_track_id
                 asset["_follow_return_not_before_sec"] = float(return_after_sec)
@@ -1473,7 +1587,7 @@ class SimEngine:
 
     def _update_scenario_tasks(self) -> None:
         """Project only current/past scripted work; future schedule stays private."""
-        elapsed = float(self.clock.get("elapsed_sec", 0) or 0)
+        elapsed = float(self.clock.get("scenario_elapsed_sec", self.clock.get("elapsed_sec", 0)) or 0)
         branch = str(self.clock.get("scenario_branch") or self.scenario_story.get("default_branch") or "standard")
         captured = self.media_capture.captured_media_ids
         analysis = self.scenario_story.get("agent_analysis") or {}
@@ -1973,7 +2087,8 @@ class SimEngine:
                     "assessment_observer": observer_id,
                 })
                 track.agent_assessment = assessment
-            self._return_follow_assets_after_strike(target_track_id)
+            if assessed_damage == "destroyed":
+                self._return_follow_assets_after_strike(target_track_id)
             post_bda_routes = (self._engagement_policy or {}).get("post_bda_routes") or {}
             post_bda_behaviors = (self._engagement_policy or {}).get("post_bda_behaviors") or {}
             rerouted_assets = []

@@ -55,9 +55,9 @@ def _media_cues() -> list[dict[str, Any]]:
         ("MAR-MEDIA-04", "04-low-altitude-contact-ir.png", 2880, "TRACK", "渔船目标红外复核", "护航舰光电红外形成慢速海面接触的当前帧，供后端确认渔船身份并建立禁射约束。", "ESCORT-01/IR", "ir", "image/png"),
         ("MAR-MEDIA-05", "05-elint-interference.svg", 3600, "TARGET", "敌方目标辐射源复核", "护航舰电子侦察载荷冻结高速目标的当前频谱观测；环境背景频点与目标辐射源分开标注，供后端完成目标优先级、交战规则和武器方案审查。", "ESCORT-01/ELINT", "telemetry", "image/svg+xml"),
         ("MAR-MEDIA-06", "06-convoy-maneuver-current.svg", 3900, "ENGAGE", "无线电警告与攻击准备状态", "敌方识别、渔船排除和武器方案已经完成；到达交战检查点后先等待操作员下达无线电警告，观察期结束后再显示模拟开火确认。", "COMMANDER/EXECUTION", "telemetry", "image/svg+xml"),
-        ("MAR-MEDIA-07", "07-post-maneuver-observation.png", 4560, "ASSESS", "攻击后效果评估", "补充侦察无人机在目标东南约 1.49 海里处冻结光电画面，记录高速攻击艇已确认摧毁、停航并局部燃烧的状态；渔船位于镜头视场外且保持安全。", "UAV-CONFIRM-01/EO", "eo_ir", "image/png"),
+        ("MAR-MEDIA-07", "07-post-maneuver-observation.png", 2161, "ASSESS", "攻击后效果评估", "补充侦察无人机在确认高速攻击艇已摧毁时冻结光电画面，然后立即返航；渔船位于镜头视场外且保持安全。", "UAV-CONFIRM-01/EO", "eo_ir", "image/png"),
     )
-    return [
+    return sorted([
         media_record(
             MEDIA_ROOT, media_id, filename, at_sec=at_sec, phase=phase, title=title,
             caption=caption, sensor_id=sensor, modality=modality,
@@ -66,7 +66,7 @@ def _media_cues() -> list[dict[str, Any]]:
             product_type=PRODUCT_TYPES[media_id],
         )
         for media_id, filename, at_sec, phase, title, caption, sensor, modality, mime_type in rows
-    ]
+    ], key=lambda item: item["at_sec"])
 
 
 def _capture_contract() -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
@@ -105,7 +105,7 @@ def _capture_contract() -> tuple[list[dict[str, Any]], list[dict[str, Any]], lis
         ("MAR-TASK-04", "MAR-CAP-ESCORT-IR", "capture", 2820, 2910, ["CONTACT-FISHING-01"], ["*"]),
         ("MAR-TASK-05", "MAR-CAP-ESCORT-ELINT", "derive", 3540, 3630, ["CONTACT-HOSTILE-01"], ["*"]),
         ("MAR-TASK-06", "MAR-CAP-EXECUTION", "command_product", 3840, 3930, ["CONTACT-HOSTILE-01"], ["*"]),
-        ("MAR-TASK-07", "MAR-CAP-CONFIRM-EO", "capture", 4500, 4590, ["CONTACT-HOSTILE-01"], ["*"]),
+        ("MAR-TASK-07", "MAR-CAP-CONFIRM-EO", "capture", 2161, 5400, ["CONTACT-HOSTILE-01"], ["*"]),
     )
     tasks = [sensor_task(task_id, by_id[capability_id], task_type=task_type, start_sec=start,
                          end_sec=end, target_refs=targets, branch_ids=branches)
@@ -120,7 +120,7 @@ def _capture_contract() -> tuple[list[dict[str, Any]], list[dict[str, Any]], lis
         "MAR-MEDIA-04": {"effective_range_nm": 16, "horizontal_fov_deg": 1.0, "look_angle_deg": 0, "spectral_band_um": [8, 12], "point_at_target": True, "frame_crop": "stabilized_telephoto_roi", "resolution_px": [1672, 941]},
         "MAR-MEDIA-05": {"frequency_band_mhz": [500, 8000], "background_frequency_ranges_mhz": [[2400, 2500]], "observation_window_sec": 180, "bearing_error_deg": 4, "data_source": "sensor_observations", "renderer_type": "elint_spectrum"},
         "MAR-MEDIA-06": {"input_cutoff_sec": 3900, "simulation_execution_only": True, "data_source": "task_state", "renderer_type": "execution_state"},
-        "MAR-MEDIA-07": {"effective_range_nm": 12, "horizontal_fov_deg": 35, "look_angle_deg": 41.39, "point_at_target": True, "required_damage_state": "destroyed", "registration_group": "MAR-SURFACE-CONTACT-A", "reference_media_id": "MAR-MEDIA-03", "frame_role": "post_maneuver_eo", "subject_asset_ids": ["MERCHANT-01", "MERCHANT-02", "ESCORT-01"], "resolution_px": [1672, 941]},
+        "MAR-MEDIA-07": {"effective_range_nm": 12, "horizontal_fov_deg": 35, "look_angle_deg": 41.39, "point_at_target": True, "required_damage_state": "destroyed", "required_event_types": ["damage_assessment_confirmed"], "registration_group": "MAR-SURFACE-CONTACT-A", "reference_media_id": "MAR-MEDIA-03", "frame_role": "post_maneuver_eo", "subject_asset_ids": ["MERCHANT-01", "MERCHANT-02", "ESCORT-01"], "resolution_px": [1672, 941]},
     }
     captures = []
     for index, task in enumerate(tasks):
@@ -250,7 +250,6 @@ def build_maritime_convoy_air_defense_scenario() -> dict[str, Any]:
             "fallback_target_speed_kts": 31,
             "closure_gain_kts_per_nm": 12,
             "return_to_launch_after_strike": True,
-            "return_after_sec": 4590,
             "return_hide_distance_nm": 0.2,
         }],
         "asset_profiles": asset_profiles(assets),
@@ -267,7 +266,24 @@ def build_maritime_convoy_air_defense_scenario() -> dict[str, Any]:
         "assets": assets, "threats": threats,
         "protected_assets": [{"asset_id": "CONVOY-GROUP-01", "asset_name": "海上运输编队", "asset_type": "convoy", "lat": 22.08, "lon": 121.26, "alt": 0, "protection_radius_m": 18000, "criticality": 0.92, "status": "protected", "metadata": {"simulation_only": True, "location_profile": "fictional_training_area"}}],
         "timeline": timeline, "media_cues": media_cues, "cover_media_id": "MAR-MEDIA-00",
-        "demo_controls": {"recommended_speed": 32, "duration_sec": 5400, "auto_agent_interval_sec": 600, "show_truth": False, "latest_visual_only": True, "auto_stop": True, "advance_while_analyzing": True},
+        "demo_controls": {
+            "recommended_speed": 32,
+            "analysis_speed": 16,
+            "elastic_timeline": True,
+            "analysis_hold_motion": {
+                "until_story_sec": 3900,
+                "asset_ids": ["MERCHANT-01", "MERCHANT-02", "ESCORT-01"],
+                "radius_nm": 0.7,
+                "speed_kts": 8,
+                "heading_deg": 55,
+            },
+            "duration_sec": 5400,
+            "auto_agent_interval_sec": 600,
+            "show_truth": False,
+            "latest_visual_only": True,
+            "auto_stop": True,
+            "advance_while_analyzing": True,
+        },
         "default_seed": 33031, "supported_modes": ["integration", "demonstration"],
         "functional_agents": scenario_agents(), "required_agents": required_backend_roles(),
         "algorithm_coverage": planned_algorithms("clustering", "association", "linear_regression", "logistic_regression", "random_forest", "neural_network", "naive_bayes_network", "large_language_model", "retrieval_augmented_generation", "agent_collaboration", "federated_learning", "reinforcement_learning", "explainable_ai", "multimodal_fusion", "time_series_prediction", "real_time_object_detection", "change_detection", "multi_target_tracking", "graph_neural_network"),
@@ -286,10 +302,10 @@ def build_maritime_convoy_air_defense_scenario() -> dict[str, Any]:
             "KC-28": {"event": "damage_assessment_confirmed", "offset_sec": 0},
         },
         "demo_checkpoints": [
-            {"checkpoint_id": "MAR-CP-PERCEPTION", "title": "海空观测融合输入就绪", "min_elapsed_sec": 1470, "conditions": {"stable_track_count_at_least": 2, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["MAR-MEDIA-01", "MAR-MEDIA-02"]}, "pause": False, "submit_analysis": True, "block_until_analysis_complete": False},
-            {"checkpoint_id": "MAR-CP-ASSESS", "title": "敌方与渔船识别输入就绪", "min_elapsed_sec": 2910, "conditions": {"stable_track_count_at_least": 2, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["MAR-MEDIA-03", "MAR-MEDIA-04"]}, "pause": False, "submit_analysis": True, "block_until_analysis_complete": False},
-            {"checkpoint_id": "MAR-CP-PLAN", "title": "攻击方案与禁射约束输入就绪", "min_elapsed_sec": 3630, "conditions": {"media_ids_released": ["MAR-MEDIA-05"]}, "pause": False, "submit_analysis": True, "block_until_analysis_complete": False},
-            {"checkpoint_id": "MAR-CP-ENGAGE", "title": "无线电警告与模拟开火等待授权", "min_elapsed_sec": 3630, "conditions": {"media_ids_released": ["MAR-MEDIA-05"]}, "pause": True, "submit_analysis": True, "block_until_analysis_complete": False, "requires_operator_action": True, "operator_action_type": "fire"},
+            {"checkpoint_id": "MAR-CP-PERCEPTION", "title": "海空观测融合输入就绪", "min_elapsed_sec": 1470, "conditions": {"stable_track_count_at_least": 2, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["MAR-MEDIA-01", "MAR-MEDIA-02"]}, "pause": False, "submit_analysis": True, "block_until_analysis_complete": True},
+            {"checkpoint_id": "MAR-CP-ASSESS", "title": "敌方与渔船识别输入就绪", "min_elapsed_sec": 2910, "conditions": {"stable_track_count_at_least": 2, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["MAR-MEDIA-03", "MAR-MEDIA-04"]}, "pause": False, "submit_analysis": True, "block_until_analysis_complete": True},
+            {"checkpoint_id": "MAR-CP-PLAN", "title": "攻击方案与禁射约束输入就绪", "min_elapsed_sec": 3630, "conditions": {"media_ids_released": ["MAR-MEDIA-05"]}, "pause": False, "submit_analysis": True, "block_until_analysis_complete": True},
+            {"checkpoint_id": "MAR-CP-ENGAGE", "title": "无线电警告与模拟开火等待授权", "min_elapsed_sec": 3630, "conditions": {"media_ids_released": ["MAR-MEDIA-06"]}, "pause": True, "submit_analysis": True, "submit_after_authorization": True, "block_until_analysis_complete": True, "requires_operator_action": True, "operator_action_type": "fire"},
             {"checkpoint_id": "MAR-CP-CLOSE", "title": "毁伤评估与渔船安全复核就绪", "min_elapsed_sec": 4590, "conditions": {"media_ids_released": ["MAR-MEDIA-07"], "event_types_emitted": ["weapon_hit", "damage_assessment_confirmed"]}, "pause": True, "submit_analysis": True, "requires_operator_action": True, "operator_action_type": "review"},
         ],
         "fault_injections": [
