@@ -557,29 +557,202 @@ window.PlatformWorkflow = (function () {
       text.indexOf("战术情报") >= 0;
   }
 
+  function currentScenarioId() {
+    // Prefer the workflow submission being rendered so switching the UI
+    // scenario dropdown cannot retarget another run's TIA preview.
+    return (lastView && lastView.submission && lastView.submission.scenario_id) ||
+      (lastView && lastView.scenario_id) ||
+      (options.getScenarioId && options.getScenarioId()) ||
+      "";
+  }
+
+  function absoluteMediaUri(uri) {
+    var value = String(uri || "");
+    if (!value) return "";
+    if (/^https?:\/\//i.test(value) || value.indexOf("/") === 0) return value;
+    return "/" + value.replace(/^\/+/, "");
+  }
+
+  function liveTacticalAttachmentFrames(scope) {
+    var submission = lastView && lastView.submission || {};
+    var rows = submission.attachments || [];
+    var imageRows = rows.filter(function (item) {
+      var mime = String(item && item.mime_type || "").toLowerCase();
+      var uri = String(item && item.uri || "");
+      return !!uri && mime.indexOf("image/") === 0 && mime.indexOf("svg") < 0;
+    });
+    if (!imageRows.length) return null;
+    return imageRows.slice(0, 2).map(function (item) {
+      return {
+        image: absoluteMediaUri(item.uri),
+        caption: (item.name || item.id || "传感器帧") +
+          (scope === "output" ? " · 检测结果" : " · 输入帧"),
+      };
+    });
+  }
+
+  function isCoastalJointScenario(scenarioId) {
+    return String(scenarioId || "") === "coastal-joint-recon-strike";
+  }
+
+  function coastalObservePresentationView() {
+    // UI-only fallback so 流程执行 can show coastal missile-site inputs when
+    // Gateway/Commander are unavailable. Never used for maritime/other scenarios.
+    return {
+      workflow_id: "coastal-observe-presentation",
+      status: "running",
+      progress_pct: 40,
+      _presentation: true,
+      submission: {
+        scenario_id: "coastal-joint-recon-strike",
+        stage_transfer: { checkpoint_id: "CJR-CP-IDENTIFY", phase: "OBSERVE" },
+        attachments: [
+          {
+            id: "CJR-MEDIA-01",
+            name: "卫星 SAR · 疑似岸基阵地",
+            mime_type: "image/png",
+            uri: "/static/ui-previews/coastal-sar-input.png",
+          },
+          {
+            id: "CJR-MEDIA-03",
+            name: "无侦-10 光电 · 沿海导弹阵地",
+            mime_type: "image/png",
+            uri: "/static/ui-previews/coastal-eo-missile-site.png",
+          },
+        ],
+      },
+      orchestration: {
+        counts: { completed: 0, total: 1, running: 1 },
+        activities: [{
+          index: 1,
+          activity_id: "coastal-tia-observe",
+          role: "tactical_intelligence",
+          work_item: "感知识别融合",
+          status: "running",
+          agent: "Tactical Intelligence Agent",
+          description: "汇聚天基 SAR 与无侦-10 光电，识别沿海导弹阵地外形与候选阵位。",
+        }],
+      },
+      activity_details: {
+        "coastal-tia-observe": {
+          role: "tactical_intelligence",
+          input_detail: {
+            summary: "沿海导弹阵地传感器输入",
+            media: ["CJR-MEDIA-01", "CJR-MEDIA-03"],
+          },
+          output_detail: {
+            summary: "目标检测输出（阵地候选）",
+          },
+        },
+      },
+      backend: { available: true },
+    };
+  }
+
+  function viewHasTacticalIntelligence(view) {
+    var rows = view && view.orchestration && view.orchestration.activities || [];
+    var details = view && view.activity_details || {};
+    return rows.some(function (row) {
+      return isTacticalIntelligenceActivity(row, details[activityKey(row)]);
+    });
+  }
+
+  function ensurePresentationView(view) {
+    var base = view && typeof view === "object" ? view : {};
+    var scenarioId = (base.submission && base.submission.scenario_id) ||
+      (base.scenario_id) ||
+      (options.getScenarioId && options.getScenarioId()) ||
+      "";
+    if (!isCoastalJointScenario(scenarioId)) return base;
+    if (viewHasTacticalIntelligence(base) && !base._presentation) return base;
+    var presentation = coastalObservePresentationView();
+    viewCache[String(presentation.workflow_id)] = presentation;
+    activeWorkflowId = presentation.workflow_id;
+    workflowId = presentation.workflow_id;
+    return presentation;
+  }
+
+  function refreshPresentation() {
+    var scenarioId = options.getScenarioId && options.getScenarioId() || "";
+    if (!isCoastalJointScenario(scenarioId)) return;
+    if (lastView && viewHasTacticalIntelligence(lastView) && !lastView._presentation) return;
+    var view = coastalObservePresentationView();
+    lastView = view;
+    lastViewSignature = "";
+    viewCache[String(view.workflow_id)] = view;
+    activeWorkflowId = view.workflow_id;
+    workflowId = view.workflow_id;
+    selectedActivityId = "coastal-tia-observe";
+    activityTab = "input";
+    followCurrentActivity = false;
+    setBadge(document.getElementById("wf-status-badge"), "running");
+    var stateEl = document.getElementById("wf-state");
+    var idEl = document.getElementById("wf-id");
+    var summary = document.getElementById("wf-summary");
+    var bar = document.getElementById("wf-progress-bar");
+    if (stateEl) stateEl.textContent = statusLabel("running");
+    if (idEl) idEl.textContent = view.workflow_id;
+    if (summary) summary.textContent = "沿海观察与识别演示 · 导弹阵地传感器输入";
+    if (bar) bar.style.width = String(view.progress_pct || 40) + "%";
+    selectTab("orchestration", false);
+    renderTaskHistory();
+    renderActivities(view);
+    renderActivityDetail(view);
+  }
+
   function tacticalDetectionPreviewBlock(activity, detail, scope) {
     if (!isTacticalIntelligenceActivity(activity, detail)) return "";
     var isOutput = scope === "output";
     var title = isOutput ? "目标检测输出" : "目标检测输入";
-    var frames = isOutput ? [
-      {
-        image: "/static/ui-previews/attack_boat.png",
-        caption: "T+00:36:00 · 攻击艇检测结果",
-      },
-      {
-        image: "/static/ui-previews/fishing_boat.png",
-        caption: "T+00:48:00 · 渔船检测结果",
-      },
-    ] : [
-      {
-        image: "/static/ui-previews/observe-00-36.png",
-        caption: "T+00:36:00 · 高速海面目标光电帧",
-      },
-      {
-        image: "/static/ui-previews/orient-00-48.png",
-        caption: "T+00:48:00 · 低速海面目标红外帧",
-      },
-    ];
+    var scenarioId = String(currentScenarioId() || "");
+    var isCoastal = isCoastalJointScenario(scenarioId);
+    // Live attachment / coastal fallback ONLY for coastal-joint; all other
+    // scenarios keep the original maritime boat preview paths unchanged.
+    var frames = null;
+    if (isCoastal) {
+      frames = liveTacticalAttachmentFrames(scope);
+      if (!frames || !frames.length) {
+        frames = isOutput ? [
+          {
+            image: "/static/ui-previews/coastal-eo-missile-site.png",
+            caption: "无侦-10 光电 · 沿海导弹阵地识别",
+          },
+          {
+            image: "/static/ui-previews/coastal-sar-input.png",
+            caption: "天基 SAR · 岸基阵地候选",
+          },
+        ] : [
+          {
+            image: "/static/ui-previews/coastal-sar-input.png",
+            caption: "卫星 SAR · 疑似岸基阵地",
+          },
+          {
+            image: "/static/ui-previews/coastal-eo-missile-site.png",
+            caption: "无侦-10 光电 · 阵地外形复核",
+          },
+        ];
+      }
+    } else {
+      frames = isOutput ? [
+        {
+          image: "/static/ui-previews/attack_boat.png",
+          caption: "T+00:36:00 · 攻击艇检测结果",
+        },
+        {
+          image: "/static/ui-previews/fishing_boat.png",
+          caption: "T+00:48:00 · 渔船检测结果",
+        },
+      ] : [
+        {
+          image: "/static/ui-previews/observe-00-36.png",
+          caption: "T+00:36:00 · 高速海面目标光电帧",
+        },
+        {
+          image: "/static/ui-previews/orient-00-48.png",
+          caption: "T+00:48:00 · 低速海面目标红外帧",
+        },
+      ];
+    }
     return '<div class="workflow-detection-preview">' +
       '<header><h4>' + escapeHtml(title) + '</h4><span>' + escapeHtml(isOutput ? "检测后" : "检测前") + '</span></header>' +
       '<div class="workflow-detection-grid">' + frames.map(function (frame) {
@@ -689,6 +862,8 @@ window.PlatformWorkflow = (function () {
     var title = document.getElementById("wf-detail-title");
     var badge = document.getElementById("wf-detail-status");
     if (!root || !title || !badge) return;
+    view = ensurePresentationView(view);
+    if (view && view._presentation) lastView = view;
     view = buildTimelineView(view);
     var rows = view && view.orchestration && view.orchestration.activities || [];
     var activity = rows.find(function (row) { return activityKey(row) === selectedActivityId; });
@@ -822,6 +997,13 @@ window.PlatformWorkflow = (function () {
     var root = document.getElementById("wf-activity-list");
     var traceRoot = document.getElementById("wf-trace-list");
     if (!root || !traceRoot) return;
+    view = ensurePresentationView(view);
+    if (view && view._presentation) {
+      lastView = view;
+      activeWorkflowId = view.workflow_id;
+      workflowId = view.workflow_id;
+      viewCache[String(view.workflow_id)] = view;
+    }
     view = buildTimelineView(view);
     var orchestration = view && view.orchestration || {};
     var rows = orchestration.activities || [];
@@ -882,16 +1064,15 @@ window.PlatformWorkflow = (function () {
     root.innerHTML = rows.length ? rows.map(function (item) {
       var state = item.status || "pending";
       var sequenceContainer = item.type === "sequence" || /activatity-\d+-sequence$/i.test(item.activity_id || "");
-      var title = sequenceContainer ? "顺序流程容器" : (item.role || item.work_item || item.activity_id || "执行项");
+      var itemPhaseContext = item._timeline_phase_context || phaseContext;
+      var title = activityDisplayTitle(item, sequenceContainer, itemPhaseContext);
       var executor = sequenceContainer
         ? "Commander 流程控制 · " + (item.activity_id || item.work_item || "内部节点")
         : (item.agent || "Agent 未分配");
       var dependency = (item.depends_on || []).length ? " · 依赖 " + item.depends_on.join(", ") : "";
       var description = activityDescription(item, sequenceContainer, phaseContext);
-      var phaseLabel = phaseContext.label || "阶段未上报";
       var detail = view && view.activity_details && view.activity_details[activityKey(item)];
       var timing = activityTimingLabel(item, detail);
-      var itemPhaseContext = item._timeline_phase_context || phaseContext;
       var itemPhaseLabel = itemPhaseContext.label || "阶段未上报";
       return '<button type="button" class="workflow-activity ' + escapeHtml(state) + (activityKey(item) === selectedActivityId ? " selected" : "") +
         '" data-activity-id="' + escapeHtml(activityKey(item)) + '" aria-pressed="' + (activityKey(item) === selectedActivityId) + '">' +
@@ -930,6 +1111,7 @@ window.PlatformWorkflow = (function () {
       return '<div class="workflow-trace-row"><span>' + escapeHtml(item.timestamp || "—") + '</span><b>' + escapeHtml(item.event) + '</b><small>' +
         escapeHtml(traceMeta) + '</small></div>';
     }).join("") : '<div class="workflow-empty">未返回执行事件</div>';
+    if (view && view._presentation) renderTaskHistory();
     renderActivityDetail(view);
   }
 
@@ -1265,11 +1447,16 @@ window.PlatformWorkflow = (function () {
     if (follow) follow.checked = true;
     renderSubmission(null);
     renderActivities({});
-    renderResults({});
-    renderEvidenceViews({});
-    renderTaskHistory();
-    document.dispatchEvent(new CustomEvent("amos:workflow-view", {detail: null}));
-    selectTab("input", false);
+    if (lastView && lastView._presentation) {
+      renderActivityDetail(lastView);
+      selectTab("orchestration", false);
+    } else {
+      renderResults({});
+      renderEvidenceViews({});
+      renderTaskHistory();
+      document.dispatchEvent(new CustomEvent("amos:workflow-view", {detail: null}));
+      selectTab("input", false);
+    }
   }
 
   async function submit() {
@@ -1508,5 +1695,6 @@ window.PlatformWorkflow = (function () {
     syncRun: syncRun,
     track: track,
     reset: resetWorkflowDisplay,
+    refreshPresentation: refreshPresentation,
   };
 })();
