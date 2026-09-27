@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 from typing import Any
 
 import requests
@@ -145,19 +144,11 @@ class CommanderClient(_JsonHttpClient):
         )
 
     def get_workflow(self, workflow_id: str) -> dict:
-        payload = self._request(
+        return self._request(
             "GET",
             f"/workflows/{workflow_id}",
             service="COMMANDER",
-            params={"checkpoint": "true"},
         )
-        checkpoint = payload.get("checkpoint") if isinstance(payload, dict) else None
-        if payload.get("status") == "checkpoint_only" and isinstance(checkpoint, dict):
-            restored = copy.deepcopy(checkpoint)
-            restored.setdefault("workflow_id", workflow_id)
-            restored.setdefault("state_path", payload.get("state_path"))
-            return restored
-        return payload
 
     def get_workflow_brief(self, workflow_id: str) -> dict:
         """Status-only payload (no checkpoint embed, no artifacts)."""

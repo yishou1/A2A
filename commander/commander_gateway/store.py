@@ -38,8 +38,24 @@ class FileGatewayStore:
         ):
             directory.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self.package_retention_count = self._env_limit("GATEWAY_PACKAGE_RETENTION_COUNT", 128)
+        self.package_retention_bytes = self._env_limit("GATEWAY_PACKAGE_RETENTION_BYTES", 2 * 1024 * 1024 * 1024)
+        self.workflow_retention_count = self._env_limit("GATEWAY_WORKFLOW_RETENTION_COUNT", 128)
+        self.workflow_retention_bytes = self._env_limit("GATEWAY_WORKFLOW_RETENTION_BYTES", 512 * 1024 * 1024)
+        self.idempotency_retention_count = self._env_limit("GATEWAY_IDEMPOTENCY_RETENTION_COUNT", 128)
         self.index_path = self.state_dir / "request_index.sqlite3"
         self._initialize_index()
+        with self._lock:
+            self._prune_directory(self.packages_dir, max_items=self.package_retention_count, max_bytes=self.package_retention_bytes, protected=set(), remove_checksum=True)
+            self._prune_directory(self.workflows_dir, max_items=self.workflow_retention_count, max_bytes=self.workflow_retention_bytes, protected=set())
+            self._prune_directory(self.idempotency_dir, max_items=self.idempotency_retention_count, max_bytes=64 * 1024 * 1024, protected=set())
+
+    @staticmethod
+    def _env_limit(name: str, default: int) -> int:
+        try:
+            return max(1, int(os.environ.get(name, default)))
+        except (TypeError, ValueError):
+            return max(1, int(default))
 
     @contextmanager
     def _index(self):
@@ -55,6 +71,9 @@ class FileGatewayStore:
         # an interrupted write is recovered by reading only its journaled file.
         with self._lock, self._index() as db:
             db.execute("CREATE TABLE IF NOT EXISTS records (kind TEXT, identifier TEXT, request_key TEXT, PRIMARY KEY(kind, identifier))")
+            columns = {row[1] for row in db.execute("PRAGMA table_info(records)")}
+            if "status" not in columns:
+                db.execute("ALTER TABLE records ADD COLUMN status TEXT")
             db.execute("CREATE INDEX IF NOT EXISTS request_keys ON records(kind, request_key)")
             db.execute("CREATE TABLE IF NOT EXISTS pending (kind TEXT, identifier TEXT, PRIMARY KEY(kind, identifier))")
             db.execute("CREATE TABLE IF NOT EXISTS metadata (name TEXT PRIMARY KEY, value TEXT)")
@@ -66,6 +85,8 @@ class FileGatewayStore:
             for kind, identifier in db.execute("SELECT kind, identifier FROM pending").fetchall():
                 self._index_file(db, kind, identifier)
             db.execute("DELETE FROM pending")
+            for (identifier,) in db.execute("SELECT identifier FROM records WHERE kind='workflow' AND status IS NULL").fetchall():
+                self._index_file(db, "workflow", identifier)
 
     def _index_file(self, db, kind: str, identifier: str) -> None:
         directory = self.workflows_dir if kind == "workflow" else self.idempotency_dir
@@ -79,21 +100,23 @@ class FileGatewayStore:
                 raise ValueError("record is not an object")
         except (ValueError, UnicodeDecodeError) as exc:
             raise GatewayError(f"{kind.upper()}_CORRUPT", f"{kind} record is corrupt", 500) from exc
-        db.execute("INSERT OR REPLACE INTO records VALUES (?, ?, ?)", (kind, identifier, record.get("request_key")))
+        status = (record.get("projection") or {}).get("status") if kind == "workflow" else None
+        db.execute("INSERT OR REPLACE INTO records (kind, identifier, request_key, status) VALUES (?, ?, ?, ?)", (kind, identifier, record.get("request_key"), status))
 
     def _save_indexed(self, kind: str, identifier: str, record: dict) -> None:
         directory = self.workflows_dir if kind == "workflow" else self.idempotency_dir
         body = canonical_json_bytes(record)
         with self._lock:
             with self._index() as db:
-                previous = db.execute("SELECT request_key FROM records WHERE kind=? AND identifier=?", (kind, identifier)).fetchone()
-                changed = previous is None or previous[0] != record.get("request_key")
+                status = (record.get("projection") or {}).get("status") if kind == "workflow" else None
+                previous = db.execute("SELECT request_key, status FROM records WHERE kind=? AND identifier=?", (kind, identifier)).fetchone()
+                changed = previous is None or previous[0] != record.get("request_key") or previous[1] != status
                 if changed:
                     db.execute("INSERT OR IGNORE INTO pending VALUES (?, ?)", (kind, identifier))
             self._atomic_write(directory / f"{identifier}.json", body)
             if changed:
                 with self._index() as db:
-                    db.execute("INSERT OR REPLACE INTO records VALUES (?, ?, ?)", (kind, identifier, record.get("request_key")))
+                    db.execute("INSERT OR REPLACE INTO records (kind, identifier, request_key, status) VALUES (?, ?, ?, ?)", (kind, identifier, record.get("request_key"), status))
                     db.execute("DELETE FROM pending WHERE kind=? AND identifier=?", (kind, identifier))
 
     def _find_indexed(self, kind: str, request_key: str) -> tuple[str, dict] | None:
@@ -154,6 +177,7 @@ class FileGatewayStore:
             self._atomic_write(
                 self.packages_dir / f"{package_id}.sha256", checksum.encode("ascii")
             )
+            self._prune_directory(self.packages_dir, max_items=self.package_retention_count, max_bytes=self.package_retention_bytes, protected={package_id}, remove_checksum=True)
         return package_id, checksum, body
 
     def read_package(self, package_id: str) -> tuple[bytes, str]:
@@ -187,6 +211,8 @@ class FileGatewayStore:
     def save_workflow(self, workflow_id: str, record: dict) -> None:
         workflow_id = self._safe_component(workflow_id)
         self._save_indexed("workflow", workflow_id, record)
+        with self._lock:
+            self._prune_directory(self.workflows_dir, max_items=self.workflow_retention_count, max_bytes=self.workflow_retention_bytes, protected={workflow_id})
 
     def read_workflow(self, workflow_id: str) -> dict:
         workflow_id = self._safe_component(workflow_id)
@@ -208,6 +234,8 @@ class FileGatewayStore:
     def save_idempotency(self, digest: str, record: dict) -> None:
         digest = self._safe_component(digest)
         self._save_indexed("idempotency", digest, record)
+        with self._lock:
+            self._prune_directory(self.idempotency_dir, max_items=self.idempotency_retention_count, max_bytes=64 * 1024 * 1024, protected={digest})
 
     def read_idempotency(self, digest: str) -> dict | None:
         digest = self._safe_component(digest)
@@ -227,3 +255,43 @@ class FileGatewayStore:
 
     def list_idempotency(self) -> list[str]:
         return sorted(path.stem for path in self.idempotency_dir.glob("*.json"))
+
+    def _prune_directory(self, directory: Path, *, max_items: int, max_bytes: int, protected: set[str], remove_checksum: bool = False) -> list[str]:
+        files = sorted(directory.glob("*.json"), key=lambda path: (path.stat().st_mtime_ns, path.name), reverse=True)
+        active: set[str] = set()
+        kind = "workflow" if directory == self.workflows_dir else "idempotency" if directory == self.idempotency_dir else None
+        if kind == "workflow":
+            with self._index() as db:
+                active = {row[0] for row in db.execute("SELECT identifier FROM records WHERE kind='workflow' AND lower(status) IN ('queued', 'running', 'submitting', 'resuming')")}
+        keep_ids = set(protected) | active
+        kept_items = kept_bytes = 0
+        removed: list[str] = []
+        for path in files:
+            size = path.stat().st_size
+            keep = path.stem in keep_ids or (kept_items < max_items and kept_bytes + size <= max_bytes)
+            if keep:
+                kept_items += 1
+                kept_bytes += size
+                continue
+            path.unlink(missing_ok=True)
+            if remove_checksum:
+                path.with_suffix(".sha256").unlink(missing_ok=True)
+            removed.append(path.stem)
+        if removed and kind:
+            with self._index() as db:
+                db.executemany("DELETE FROM records WHERE kind=? AND identifier=?", [(kind, identifier) for identifier in removed])
+                db.executemany("DELETE FROM pending WHERE kind=? AND identifier=?", [(kind, identifier) for identifier in removed])
+        return removed
+
+    @staticmethod
+    def _directory_stats(directory: Path) -> dict[str, int]:
+        files = list(directory.glob("*.json"))
+        return {"items": len(files), "bytes": sum(path.stat().st_size for path in files)}
+
+    def stats(self) -> dict[str, dict[str, int]]:
+        with self._lock:
+            return {
+                "packages": {**self._directory_stats(self.packages_dir), "max_items": self.package_retention_count, "max_bytes": self.package_retention_bytes},
+                "workflows": {**self._directory_stats(self.workflows_dir), "max_items": self.workflow_retention_count, "max_bytes": self.workflow_retention_bytes},
+                "idempotency": {**self._directory_stats(self.idempotency_dir), "max_items": self.idempotency_retention_count},
+            }

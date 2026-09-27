@@ -5,6 +5,7 @@ import re
 import argparse
 import threading
 import queue
+import hashlib
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 from copy import deepcopy
 
@@ -73,6 +74,8 @@ def load_env_file(path=os.path.join(PROJECT_ROOT, ".env")):
                 os.environ[key] = value
 
 class CommanderAgent:
+    _EVIDENCE_INLINE_LIMIT_BYTES = 16 * 1024
+
     def __init__(
         self,
         mode: str = None,
@@ -243,7 +246,117 @@ class CommanderAgent:
         print("========================")
 
     @staticmethod
-    def _runtime_records_from_output(value: object) -> dict[str, list[dict]]:
+    def _evidence_bytes(value: object) -> bytes:
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+
+    @classmethod
+    def _evidence_summary(cls, value: object) -> dict:
+        body = cls._evidence_bytes(value)
+        summary = {
+            "type": type(value).__name__,
+            "size_bytes": len(body),
+            "sha256": hashlib.sha256(body).hexdigest(),
+        }
+        if isinstance(value, dict):
+            summary["keys"] = sorted(str(key) for key in value)[:32]
+            summary["field_count"] = len(value)
+        elif isinstance(value, list):
+            summary["item_count"] = len(value)
+        elif isinstance(value, str):
+            summary["character_count"] = len(value)
+        return summary
+
+    @classmethod
+    def _compact_runtime_record(cls, value: dict) -> dict:
+        """Keep runtime provenance while dropping duplicate/large raw I/O."""
+        record = deepcopy(value)
+        for singular, plural in (("input", "inputs"), ("output", "outputs")):
+            if singular in record and plural in record and record[singular] == record[plural]:
+                record.pop(plural, None)
+
+        for field, summary_key in (
+            ("input", "input_summary"),
+            ("inputs", "input_summary"),
+            ("output", "result_summary"),
+            ("outputs", "result_summary"),
+        ):
+            if field not in record:
+                continue
+            body = cls._evidence_bytes(record[field])
+            if len(body) <= cls._EVIDENCE_INLINE_LIMIT_BYTES:
+                continue
+            summary = cls._evidence_summary(record[field])
+            record.setdefault(summary_key, summary)
+            prefix = "input" if field.startswith("input") else "output"
+            record.setdefault(f"{prefix}_sha256", summary["sha256"])
+            record.setdefault(f"{prefix}_size_bytes", summary["size_bytes"])
+            record.pop(field, None)
+        return record
+
+    @classmethod
+    def _compact_terminal_evidence(cls, value: object) -> object:
+        """Recursively compact immutable terminal evidence.
+
+        Running checkpoints remain fully resumable.  At terminal state the
+        same request/response objects otherwise appear under aliases such as
+        ``input``/``inputs``, ``output``/``outputs`` and ``value``/``output``.
+        """
+        if isinstance(value, list):
+            return [cls._compact_terminal_evidence(item) for item in value]
+        if not isinstance(value, dict):
+            return deepcopy(value)
+
+        compacted = deepcopy(value)
+        if compacted.get("algorithm_id") or compacted.get("model_id"):
+            compacted = cls._compact_runtime_record(compacted)
+
+        for canonical, alias in (
+            ("algorithm_invocations", "algorithm_calls"),
+            ("model_invocations", "model_calls"),
+        ):
+            primary = compacted.get(canonical)
+            alternate = compacted.get(alias)
+            if isinstance(primary, list):
+                compacted[canonical] = [
+                    cls._compact_runtime_record(item) if isinstance(item, dict) else item
+                    for item in primary
+                ]
+                compacted.pop(alias, None)
+            elif isinstance(alternate, list):
+                compacted[canonical] = [
+                    cls._compact_runtime_record(item) if isinstance(item, dict) else item
+                    for item in alternate
+                ]
+                compacted.pop(alias, None)
+
+        if "value" in compacted and isinstance(compacted.get("output"), dict):
+            output = compacted["output"]
+            if len(output) == 1 and next(iter(output.values())) == compacted["value"]:
+                compacted["output_keys"] = [str(next(iter(output)))]
+                compacted["output_ref"] = "value"
+                compacted.pop("output", None)
+
+        if "input_data" in compacted:
+            body = cls._evidence_bytes(compacted["input_data"])
+            if len(body) > cls._EVIDENCE_INLINE_LIMIT_BYTES:
+                compacted["input_data_summary"] = cls._evidence_summary(
+                    compacted["input_data"]
+                )
+                compacted.pop("input_data", None)
+
+        for key, child in list(compacted.items()):
+            if isinstance(child, (dict, list)):
+                compacted[key] = cls._compact_terminal_evidence(child)
+        return compacted
+
+    @classmethod
+    def _runtime_records_from_output(cls, value: object) -> dict[str, list[dict]]:
         """Collect runtime call records from an agent's output envelope.
 
         Agents commonly return ``{output_hint: {output_data: {...}}}``, while
@@ -251,13 +364,16 @@ class CommanderAgent:
         Keep both protocol shapes visible at the activity level so consumers
         do not need to know the agent-specific envelope.
         """
-        runtime_keys = (
+        runtime_keys = {
             "algorithm_calls",
             "algorithm_invocations",
             "model_calls",
             "model_invocations",
-        )
-        records: dict[str, list[dict]] = {key: [] for key in runtime_keys}
+        }
+        records: dict[str, list[dict]] = {
+            "algorithm_invocations": [],
+            "model_invocations": [],
+        }
 
         def visit(node: object, depth: int = 0) -> None:
             if depth > 8:
@@ -268,11 +384,22 @@ class CommanderAgent:
                 return
             if not isinstance(node, dict):
                 return
-            for key in runtime_keys:
-                value = node.get(key)
-                if isinstance(value, list):
-                    records[key].extend(deepcopy(item) for item in value)
-            for child in node.values():
+            for canonical, alias in (
+                ("algorithm_invocations", "algorithm_calls"),
+                ("model_invocations", "model_calls"),
+            ):
+                collection = node.get(canonical)
+                if not isinstance(collection, list):
+                    collection = node.get(alias)
+                if isinstance(collection, list):
+                    records[canonical].extend(
+                        cls._compact_runtime_record(item)
+                        for item in collection
+                        if isinstance(item, dict)
+                    )
+            for key, child in node.items():
+                if key in runtime_keys or key in {"input", "inputs"}:
+                    continue
                 if isinstance(child, (dict, list)):
                     visit(child, depth + 1)
 
@@ -337,17 +464,24 @@ class CommanderAgent:
                     response.get("execution_mode")
                     or ("local_agent" if response.get("mode") == "local" else response.get("mode"))
                 ),
-                "input": deepcopy(request.get("input") or {}),
                 "input_source": request.get("input_source") or "agent_request.input",
                 "request": {
                     key: deepcopy(value)
                     for key, value in request.items()
-                    if key != "input"
+                    if key not in {
+                        "input", "input_summary", "input_sha256", "input_size_bytes"
+                    }
                 },
                 "output_ref": output_ref,
                 "output_keys": output_keys_for_activity,
                 "metrics": response.get("metrics", {}),
             }
+            if "input" in request:
+                activity_row["input"] = deepcopy(request["input"])
+            elif request.get("input_summary"):
+                activity_row["input_summary"] = deepcopy(request["input_summary"])
+                activity_row["input_sha256"] = request.get("input_sha256")
+                activity_row["input_size_bytes"] = request.get("input_size_bytes")
             if isinstance(response_output, dict):
                 activity_row.update(self._runtime_records_from_output(response_output))
             activity_results.append(activity_row)
@@ -379,18 +513,26 @@ class CommanderAgent:
             "trace_id": self.workflow_id,
         }
 
-    @staticmethod
-    def _task_request_snapshot(task_payload: dict | None) -> dict:
+    @classmethod
+    def _task_request_snapshot(cls, task_payload: dict | None) -> dict:
         """Persist the actual activity request input without duplicating large context blobs."""
         payload = deepcopy(task_payload or {})
+        input_value = deepcopy(payload.get("input") or {})
         snapshot = {
-            "input": deepcopy(payload.get("input") or {}),
             "input_source": "agent_request.input",
             "command": payload.get("command"),
             "required_skill": payload.get("required_skill"),
             "required_skills": list(payload.get("required_skills") or []),
             "output_hint": payload.get("output_hint"),
         }
+        input_body = cls._evidence_bytes(input_value)
+        if len(input_body) <= cls._EVIDENCE_INLINE_LIMIT_BYTES:
+            snapshot["input"] = input_value
+        else:
+            summary = cls._evidence_summary(input_value)
+            snapshot["input_summary"] = summary
+            snapshot["input_sha256"] = summary["sha256"]
+            snapshot["input_size_bytes"] = summary["size_bytes"]
         if payload.get("workflow_id"):
             snapshot["workflow_id"] = payload.get("workflow_id")
         if payload.get("work_item"):
@@ -1326,18 +1468,27 @@ class CommanderAgent:
             entry.setdefault("status", status or "completed")
             entry.setdefault("error", error)
             entry.setdefault("duration_ms", duration_ms)
+            if isinstance(entry.get("output"), dict):
+                candidate = entry["output"]
+                if len(candidate) == 1 and next(iter(candidate.values())) == entry.get("value"):
+                    entry["output_keys"] = [str(next(iter(candidate)))]
+                    entry["output_ref"] = "value"
+                    entry.pop("output", None)
             return entry
-        return {
+        entry = {
             "activity_id": activity_id,
             "work_item": work_item,
             "role": role,
             "value": value,
-            "output": deepcopy(output or {}),
             "status": status or "completed",
             "error": error,
             "duration_ms": duration_ms,
             "created_at": created_at or utc_now_iso(),
         }
+        if isinstance(output, dict) and output:
+            entry["output_keys"] = sorted(str(key) for key in output)
+            entry["output_ref"] = "value"
+        return entry
 
     @classmethod
     def _context_entries(cls, context: dict, key: str):
@@ -1577,6 +1728,8 @@ class CommanderAgent:
                 closed_loop = persisted_context.get("closed_loop_result")
                 if isinstance(closed_loop, list) and closed_loop and isinstance(closed_loop[0], dict):
                     persisted_context["closed_loop_result"] = [{"$ref": "effect_evaluation_result"}]
+
+                persisted_context = self._compact_terminal_evidence(persisted_context)
 
             state = {
                 "workflow_id": self.workflow_id,

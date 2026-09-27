@@ -5,13 +5,13 @@ import hashlib
 import math
 import threading
 import time
-from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import ValidationError
 
 from commander_gateway.clients import AmosClient, CommanderClient
+from bounded_cache import BoundedLRUCache, env_positive_int, process_rss_bytes
 from commander_gateway.config import GatewayConfig
 from commander_gateway.errors import GatewayError, UpstreamError
 from commander_gateway.schemas import (
@@ -315,7 +315,14 @@ class GatewayService:
         self._submit_lock = threading.RLock()
         self._workflow_locks = [threading.RLock() for _ in range(32)]
         self._cache_lock = threading.Lock()
-        self._projection_cache: OrderedDict[str, tuple] = OrderedDict()
+        self._projection_cache = BoundedLRUCache(
+            max_items=env_positive_int("GATEWAY_VIEW_CACHE_MAX_ITEMS", 4),
+            max_bytes=env_positive_int("GATEWAY_VIEW_CACHE_MAX_BYTES", 16 * 1024 * 1024),
+        )
+        self._terminal_projection_cache = BoundedLRUCache(
+            max_items=env_positive_int("GATEWAY_TERMINAL_CACHE_MAX_ITEMS", 12),
+            max_bytes=env_positive_int("GATEWAY_TERMINAL_CACHE_MAX_BYTES", 128 * 1024 * 1024),
+        )
 
     def _workflow_lock(self, workflow_id: str):
         return self._workflow_locks[hash(workflow_id) % len(self._workflow_locks)]
@@ -328,17 +335,22 @@ class GatewayService:
         if version is None:
             return None
         with self._cache_lock:
+            cached = self._terminal_projection_cache.get(workflow_id)
+            if cached is not None:
+                cached_version, projection = cached
+                if cached_version == version:
+                    return projection.model_copy(deep=True)
             cached = self._projection_cache.get(workflow_id)
             if cached is not None:
                 cached_version, cached_at, projection = cached
-                if cached_version == version and (projection.status == "completed" or time.monotonic() - cached_at < 0.8):
-                    self._projection_cache.move_to_end(workflow_id)
+                if cached_version == version and time.monotonic() - cached_at < 0.8:
                     return projection.model_copy(deep=True)
         return None
 
     def _invalidate_projection(self, workflow_id: str) -> None:
         with self._cache_lock:
             self._projection_cache.pop(workflow_id, None)
+            self._terminal_projection_cache.pop(workflow_id, None)
 
     @staticmethod
     def _validate_provenance(payload: dict, label: str) -> None:
@@ -850,12 +862,12 @@ class GatewayService:
         record["projection"] = updated.model_dump(mode="json")
         self.store.save_workflow(workflow_id, record)
         same_state = isinstance(brief, dict) and (str(brief.get("status") or "").lower() == updated.status.lower() or (brief.get("status") == "checkpoint_only" and brief.get("checkpoint_version") and updated.status == "completed"))
-        if version is not None and same_state and (updated.status != "completed" or bool(result)):
+        if version is not None and same_state and updated.status == "completed" and bool(result):
+            with self._cache_lock:
+                self._terminal_projection_cache[workflow_id] = (version, updated.model_copy(deep=True))
+        elif version is not None and same_state:
             with self._cache_lock:
                 self._projection_cache[workflow_id] = (version, time.monotonic(), updated.model_copy(deep=True))
-                self._projection_cache.move_to_end(workflow_id)
-                while len(self._projection_cache) > 16:
-                    self._projection_cache.popitem(last=False)
         return updated
 
     def _read_checkpoint_list(self, workflow_id: str, field: str) -> list:
@@ -884,8 +896,8 @@ class GatewayService:
             # after restart. File version changes invalidate this answer.
             version = self._workflow_version(upstream)
             with self._cache_lock:
-                cached = self._projection_cache.get(workflow_id)
-                if cached is not None and cached[0] == version and cached[2].status == "completed":
+                cached = self._terminal_projection_cache.get(workflow_id)
+                if cached is not None and cached[0] == version and cached[1].status == "completed":
                     status = "completed"
         return {
             "workflow_id": str(upstream.get("workflow_id") or workflow_id),
@@ -961,6 +973,13 @@ class GatewayService:
         status = "ok" if healthy else "degraded"
         return (200 if healthy else 503), {
             "status": status,
-            "gateway": {"status": "ok", "single_worker_only": True},
+            "gateway": {
+                "status": "ok",
+                "single_worker_only": True,
+                "process_rss_bytes": process_rss_bytes(),
+                "view_cache": self._projection_cache.stats(),
+                "terminal_cache": self._terminal_projection_cache.stats(),
+                "retention": self.store.stats(),
+            },
             "dependencies": dependencies,
         }

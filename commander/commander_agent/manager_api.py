@@ -67,7 +67,11 @@ def build_workflow_manager_app(
 
     @app.get("/health")
     def health():
-        return app.state.workflow_manager.health_snapshot()
+        workflow_manager = app.state.workflow_manager
+        return {
+            **workflow_manager.health_snapshot(),
+            "memory": workflow_manager.memory_metrics(),
+        }
 
     @app.get("/supervisor", response_class=HTMLResponse)
     def supervisor_dashboard():

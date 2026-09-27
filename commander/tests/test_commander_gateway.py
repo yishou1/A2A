@@ -156,6 +156,11 @@ class FakeCommanderClient:
         self.trace_error = None
         self.checkpoint_error = None
         self.checkpoints = {}
+        self.workflow_calls = 0
+        self.brief_calls = 0
+        self.work_list_calls = 0
+        self.trace_calls = 0
+        self.checkpoint_calls = 0
 
     def health(self):
         if self.health_error:
@@ -176,21 +181,31 @@ class FakeCommanderClient:
         return copy.deepcopy(state)
 
     def get_workflow(self, workflow_id):
+        self.workflow_calls += 1
+        if workflow_id not in self.workflows:
+            raise UpstreamError("COMMANDER_NOT_FOUND", "workflow not found", 404, False)
+        return copy.deepcopy(self.workflows[workflow_id])
+
+    def get_workflow_brief(self, workflow_id):
+        self.brief_calls += 1
         if workflow_id not in self.workflows:
             raise UpstreamError("COMMANDER_NOT_FOUND", "workflow not found", 404, False)
         return copy.deepcopy(self.workflows[workflow_id])
 
     def get_work_list(self, workflow_id):
+        self.work_list_calls += 1
         if self.work_list_error:
             raise self.work_list_error
         return {"workflow_id": workflow_id, "work_list": [{"id": "work-1"}]}
 
     def get_trace(self, workflow_id):
+        self.trace_calls += 1
         if self.trace_error:
             raise self.trace_error
         return {"workflow_id": workflow_id, "trace": [{"event": "submitted"}]}
 
     def get_checkpoint(self, workflow_id):
+        self.checkpoint_calls += 1
         if self.checkpoint_error:
             raise self.checkpoint_error
         if workflow_id not in self.checkpoints:
@@ -595,6 +610,21 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(current.result["activity_results"][0]["output"], tracking_value)
         persisted = self.store.read_workflow(workflow_id)
         self.assertEqual(persisted["projection"]["result"], current.result)
+
+        second = self.service.get_projection(workflow_id)
+        self.assertEqual(second.result, current.result)
+        self.assertEqual(self.commander.checkpoint_calls, 1)
+
+    def test_running_projection_uses_brief_without_full_checkpoint_status(self):
+        projection = self.service.submit(WorkflowSubmitV1.model_validate(submit_payload()))
+
+        current = self.service.get_projection(projection.workflow_id)
+
+        self.assertEqual(current.status, "queued")
+        self.assertEqual(self.commander.brief_calls, 1)
+        self.assertEqual(self.commander.work_list_calls, 1)
+        self.assertEqual(self.commander.trace_calls, 1)
+        self.assertEqual(self.commander.workflow_calls, 0)
 
     def test_work_list_and_trace_failures_are_independent(self):
         projection = self.service.submit(WorkflowSubmitV1.model_validate(submit_payload()))

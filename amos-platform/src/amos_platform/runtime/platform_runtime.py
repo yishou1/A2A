@@ -194,8 +194,10 @@ class PlatformRuntime:
         work_list: Any = {}
         trace: Any = {}
         if not status.get("error"):
-            work_list = status["work_list"] if "work_list" in status else bridge.get_work_list(workflow_id)
-            trace = status["trace"] if "trace" in status else bridge.get_workflow_trace(workflow_id)
+            embedded_work_list = status.get("work_list")
+            embedded_trace = status.get("trace")
+            work_list = embedded_work_list if isinstance(embedded_work_list, (dict, list)) else bridge.get_work_list(workflow_id)
+            trace = embedded_trace if isinstance(embedded_trace, (dict, list)) else bridge.get_workflow_trace(workflow_id)
             if completed:
                 with self._workflow_cache_lock:
                     projection = deepcopy(self._workflow_projections.get(cache_key) or {})

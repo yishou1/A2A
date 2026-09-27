@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 import time
 from typing import Any, Dict, List
 
+from bounded_cache import BoundedLRUCache, env_positive_int
+
 # Bounded retention for per-work-item response caches. Each entry embeds the
 # full task artifact (hundreds of KB); export_persistent_state() deep-copies
 # these caches and state_store.save() serializes them on EVERY request, so
@@ -20,6 +22,27 @@ from typing import Any, Dict, List
 # 78 MB state file after ~200 cached work items, adding ~10 s per call).
 # 16 entries comfortably covers retries/replays across concurrent workflows.
 TASK_CACHE_MAX_ENTRIES = 16
+
+
+def _task_cache() -> BoundedLRUCache:
+    return BoundedLRUCache(
+        max_items=env_positive_int("TRACK_AGENT_TASK_CACHE_COUNT", TASK_CACHE_MAX_ENTRIES),
+        max_bytes=env_positive_int("TRACK_AGENT_TASK_CACHE_BYTES", 32 * 1024 * 1024),
+    )
+
+
+def _stream_cache() -> BoundedLRUCache:
+    return BoundedLRUCache(
+        max_items=env_positive_int("TRACK_AGENT_STREAM_CACHE_COUNT", 16),
+        max_bytes=env_positive_int("TRACK_AGENT_STREAM_CACHE_BYTES", 8 * 1024 * 1024),
+    )
+
+
+def _work_list_cache() -> BoundedLRUCache:
+    return BoundedLRUCache(
+        max_items=env_positive_int("TRACK_AGENT_WORK_LIST_COUNT", 16),
+        max_bytes=env_positive_int("TRACK_AGENT_WORK_LIST_BYTES", 8 * 1024 * 1024),
+    )
 
 
 @dataclass
@@ -39,9 +62,9 @@ class A2ARuntimeState:
     rejected_task_count: int = 0
     max_concurrent_tasks: int = 1
     last_error: str | None = None
-    _task_response_cache: Dict[str, Dict[str, Any]] = field(default_factory=dict)
-    _stream_response_cache: Dict[str, List[str]] = field(default_factory=dict)
-    _workflow_work_lists: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
+    _task_response_cache: BoundedLRUCache = field(default_factory=_task_cache)
+    _stream_response_cache: BoundedLRUCache = field(default_factory=_stream_cache)
+    _workflow_work_lists: BoundedLRUCache = field(default_factory=_work_list_cache)
     _recovery_notices: List[Dict[str, Any]] = field(default_factory=list)
 
     @staticmethod
@@ -70,13 +93,6 @@ class A2ARuntimeState:
         cached = deepcopy(response)
         cached["cached"] = False
         self._task_response_cache[work_item] = cached
-        # Bounded retention: each cached response embeds the full artifact
-        # (~hundreds of KB), and export_persistent_state() deep-copies this
-        # cache on every request. Without a cap the per-request cost grows
-        # linearly with the demo session (deepcopy + JSON dump).
-        while len(self._task_response_cache) > TASK_CACHE_MAX_ENTRIES:
-            oldest = next(iter(self._task_response_cache))
-            self._task_response_cache.pop(oldest, None)
         self.processed_task_count += 1
 
     def get_stream_events(self, work_item: str) -> List[str] | None:
@@ -85,9 +101,27 @@ class A2ARuntimeState:
 
     def set_stream_events(self, work_item: str, events: List[str]) -> None:
         self._stream_response_cache[work_item] = list(events)
-        while len(self._stream_response_cache) > TASK_CACHE_MAX_ENTRIES:
-            oldest = next(iter(self._stream_response_cache))
-            self._stream_response_cache.pop(oldest, None)
+
+    def cleanup_workflow(self, workflow_id: str) -> Dict[str, Any]:
+        workflow_id = str(workflow_id or "").strip()
+        if not workflow_id:
+            return {"workflow_id": workflow_id, "removed": 0}
+        removed = 1 if self._workflow_work_lists.pop(workflow_id, None) is not None else 0
+        removed += self._task_response_cache.remove_if(
+            lambda key, value: key.startswith(f"{workflow_id}:")
+            or (isinstance(value, dict) and value.get("workflow_id") == workflow_id)
+        )
+        removed += self._stream_response_cache.remove_if(
+            lambda key, _value: key.startswith(f"{workflow_id}:")
+        )
+        return {"workflow_id": workflow_id, "removed": removed}
+
+    def cache_metrics(self) -> Dict[str, Dict[str, int]]:
+        return {
+            "task_responses": self._task_response_cache.stats(),
+            "stream_responses": self._stream_response_cache.stats(),
+            "workflow_work_lists": self._workflow_work_lists.stats(),
+        }
 
     def mark_busy(self, workflow_id: str | None, work_item: str | None) -> None:
         self.agent_status = "busy"
@@ -156,14 +190,11 @@ class A2ARuntimeState:
         if record["reset_cache"]:
             workflow_id = record["workflow_id"]
             if workflow_id:
-                self._task_response_cache = {
-                    key: value
-                    for key, value in self._task_response_cache.items()
-                    if value.get("workflow_id") != workflow_id
-                }
+                self.cleanup_workflow(str(workflow_id))
             else:
                 self._task_response_cache.clear()
-            self._stream_response_cache.clear()
+                self._stream_response_cache.clear()
+                self._workflow_work_lists.clear()
         self.ready = True
         return {
             "acknowledged": True,
@@ -239,9 +270,9 @@ class A2ARuntimeState:
             "cache_hit_count": self.cache_hit_count,
             "rejected_task_count": self.rejected_task_count,
             "last_error": self.last_error,
-            "task_response_cache": deepcopy(self._task_response_cache),
-            "stream_response_cache": deepcopy(self._stream_response_cache),
-            "workflow_work_lists": deepcopy(self._workflow_work_lists),
+            "task_response_cache": deepcopy(dict(self._task_response_cache.items())),
+            "stream_response_cache": deepcopy(dict(self._stream_response_cache.items())),
+            "workflow_work_lists": deepcopy(dict(self._workflow_work_lists.items())),
             "recovery_notices": deepcopy(self._recovery_notices),
         }
 
@@ -257,7 +288,16 @@ class A2ARuntimeState:
         self.active_task_count = 0
         self.rejected_task_count = int(state.get("rejected_task_count", 0) or 0)
         self.last_error = state.get("last_error")
-        self._task_response_cache = deepcopy(state.get("task_response_cache", {}) or {})
-        self._stream_response_cache = deepcopy(state.get("stream_response_cache", {}) or {})
-        self._workflow_work_lists = deepcopy(state.get("workflow_work_lists", {}) or {})
+        self._task_response_cache.clear()
+        self._task_response_cache.update(
+            deepcopy(state.get("task_response_cache", {}) or {})
+        )
+        self._stream_response_cache.clear()
+        self._stream_response_cache.update(
+            deepcopy(state.get("stream_response_cache", {}) or {})
+        )
+        self._workflow_work_lists.clear()
+        self._workflow_work_lists.update(
+            deepcopy(state.get("workflow_work_lists", {}) or {})
+        )
         self._recovery_notices = deepcopy(state.get("recovery_notices", []) or [])[-100:]

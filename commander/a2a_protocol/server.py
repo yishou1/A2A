@@ -26,6 +26,7 @@ from protocol_contracts import (
 )
 from skill_catalog import enrich_skill_contract, professional_skills_for_role
 from distributed_coordination.agent_state import AgentCoordinationStore
+from bounded_cache import BoundedLRUCache, env_positive_int, process_rss_bytes
 
 def verify_token(authorization: str = Header(None)):
     if not authorization or not authorization.startswith("Bearer "):
@@ -177,9 +178,24 @@ class A2ABaseAgent:
             state_db,
             namespace=idempotency_namespace or f"{self.name}:{self.port}",
         )
-        self._task_response_cache = {}
-        self._stream_response_cache = {}
-        self._workflow_work_lists = {}
+        self._task_response_cache = BoundedLRUCache(
+            max_items=env_positive_int("A2A_AGENT_RESPONSE_CACHE_MAX_ITEMS", 64),
+            max_bytes=env_positive_int(
+                "A2A_AGENT_RESPONSE_CACHE_MAX_BYTES", 32 * 1024 * 1024
+            ),
+        )
+        self._stream_response_cache = BoundedLRUCache(
+            max_items=env_positive_int("A2A_AGENT_STREAM_CACHE_MAX_ITEMS", 32),
+            max_bytes=env_positive_int(
+                "A2A_AGENT_STREAM_CACHE_MAX_BYTES", 8 * 1024 * 1024
+            ),
+        )
+        self._workflow_work_lists = BoundedLRUCache(
+            max_items=env_positive_int("A2A_AGENT_WORK_LIST_MAX_ITEMS", 32),
+            max_bytes=env_positive_int(
+                "A2A_AGENT_WORK_LIST_MAX_BYTES", 8 * 1024 * 1024
+            ),
+        )
         self._recovery_notices = []
         self._metrics = {
             "tasks_received": 0,
@@ -222,6 +238,7 @@ class A2ABaseAgent:
             "sendMessageEndpoint": "/sendMessage",
             "sendMessageStreamEndpoint": "/sendMessageStream",
             "workListEndpoint": "/workflows/{workflow_id}/work-list",
+            "workflowCleanupEndpoint": "/workflows/{workflow_id}/cache",
             "healthEndpoint": "/health",
             "readyEndpoint": "/ready",
             "metricsEndpoint": "/metrics",
@@ -298,6 +315,35 @@ class A2ABaseAgent:
         with self._state_lock:
             return deepcopy(self._workflow_work_lists.get(workflow_id, []))
 
+    def cleanup_workflow(self, workflow_id: str) -> dict:
+        """Release workflow-scoped transient state after Commander finishes."""
+        key = str(workflow_id or "").strip()
+        if not key:
+            return {"workflow_id": key, "removed": 0}
+        with self._state_lock:
+            removed = int(self._workflow_work_lists.pop(key, None) is not None)
+            removed += self._task_response_cache.remove_if(
+                lambda work_item, value: (
+                    str(work_item).startswith(f"{key}:")
+                    or (
+                        isinstance(value, dict)
+                        and str(value.get("workflow_id") or "") == key
+                    )
+                )
+            )
+            removed += self._stream_response_cache.remove_if(
+                lambda work_item, _value: str(work_item).startswith(f"{key}:")
+            )
+        return {"workflow_id": key, "removed": removed}
+
+    def cache_metrics(self) -> dict:
+        return {
+            "task_responses": self._task_response_cache.stats(),
+            "stream_responses": self._stream_response_cache.stats(),
+            "workflow_work_lists": self._workflow_work_lists.stats(),
+            "idempotency": self.idempotency_store.stats(),
+        }
+
     def metrics_snapshot(self):
         with self._state_lock:
             snapshot = deepcopy(self._metrics)
@@ -310,6 +356,8 @@ class A2ABaseAgent:
                 "ready": self.ready,
                 "uptime_seconds": round(time.time() - self.started_at, 3),
                 "resources": resource_snapshot,
+                "cache": self.cache_metrics(),
+                "process_rss_bytes": process_rss_bytes(),
             }
         )
         return snapshot
@@ -461,11 +509,12 @@ class A2ABaseAgent:
             if notice.get("reset_cache"):
                 workflow_id = notice.get("workflow_id")
                 if workflow_id:
-                    self._task_response_cache = {
-                        key: value
-                        for key, value in self._task_response_cache.items()
-                        if value.get("workflow_id") != workflow_id
-                    }
+                    self._task_response_cache.remove_if(
+                        lambda _key, value: (
+                            isinstance(value, dict)
+                            and value.get("workflow_id") == workflow_id
+                        )
+                    )
                     self._stream_response_cache.clear()
                 else:
                     self._task_response_cache.clear()
@@ -552,6 +601,8 @@ class A2ABaseAgent:
                 "role": self.role,
                 "uptime_seconds": round(time.time() - self.started_at, 3),
                 "resource_monitor_available": resources.get("monitor_available"),
+                "process_rss_bytes": process_rss_bytes(),
+                "cache": self.cache_metrics(),
             }
 
         @self.app.get("/ready")
@@ -635,6 +686,10 @@ class A2ABaseAgent:
                 "role": self.role,
                 "work_list": self.get_work_list(workflow_id),
             }
+
+        @self.app.delete("/workflows/{workflow_id}/cache")
+        async def cleanup_workflow_cache(workflow_id: str):
+            return self.cleanup_workflow(workflow_id)
 
         @self.app.post("/sendMessage")
         async def send_message(payload: dict, token: str = Depends(verify_token)):
