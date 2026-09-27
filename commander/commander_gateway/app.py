@@ -112,7 +112,7 @@ def build_gateway_app(
     control = Depends(require_control_token)
 
     @app.get("/gateway/v1/health")
-    async def health():
+    def health():
         status_code, payload = gateway_service.health()
         return JSONResponse(status_code=status_code, content=payload)
 
@@ -122,7 +122,7 @@ def build_gateway_app(
         status_code=202,
         dependencies=[control],
     )
-    async def submit_workflow(request: WorkflowSubmitV1):
+    def submit_workflow(request: WorkflowSubmitV1):
         return gateway_service.submit(request)
 
     @app.get(
@@ -130,14 +130,14 @@ def build_gateway_app(
         response_model=CommanderProjectionV1,
         dependencies=[control],
     )
-    async def get_workflow(workflow_id: str):
+    def get_workflow(workflow_id: str):
         return gateway_service.get_projection(workflow_id)
 
     @app.get(
         "/gateway/v1/workflows/{workflow_id}/brief",
         dependencies=[control],
     )
-    async def get_workflow_brief(workflow_id: str):
+    def get_workflow_brief(workflow_id: str):
         return gateway_service.get_brief(workflow_id)
 
     @app.post(
@@ -146,14 +146,14 @@ def build_gateway_app(
         status_code=202,
         dependencies=[control],
     )
-    async def resume_workflow(workflow_id: str):
+    def resume_workflow(workflow_id: str):
         return gateway_service.resume(workflow_id)
 
     @app.get(
         "/gateway/v1/workflows/{workflow_id}/work-list",
         dependencies=[control],
     )
-    async def get_work_list(workflow_id: str):
+    def get_work_list(workflow_id: str):
         return {
             "workflow_id": workflow_id,
             "work_list": gateway_service.get_work_list(workflow_id),
@@ -163,14 +163,14 @@ def build_gateway_app(
         "/gateway/v1/workflows/{workflow_id}/trace",
         dependencies=[control],
     )
-    async def get_trace(workflow_id: str):
+    def get_trace(workflow_id: str):
         return {
             "workflow_id": workflow_id,
             "trace": gateway_service.get_trace(workflow_id),
         }
 
     @app.get("/gateway/v1/packages/{package_id}")
-    async def get_package(package_id: str):
+    def get_package(package_id: str):
         body, checksum = gateway_service.store.read_package(package_id)
         return Response(
             content=body,

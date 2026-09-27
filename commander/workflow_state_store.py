@@ -58,6 +58,21 @@ class WorkflowStateStore:
     def state_path(self, workflow_id: str) -> Path:
         return self.base_dir / f"{workflow_id}.json"
 
+    def brief_metadata(self, workflow_id: str) -> dict | None:
+        """Version the authoritative checkpoint without decoding its payload."""
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT updated_at FROM workflow_checkpoints WHERE workflow_id=?",
+                (workflow_id,),
+            ).fetchone()
+            if row:
+                return {"checkpoint_version": f"db:{row[0]}"}
+            try:
+                stat = self.state_path(workflow_id).stat()
+            except FileNotFoundError:
+                return None
+            return {"checkpoint_version": f"file:{stat.st_mtime_ns}:{stat.st_size}"}
+
     def exists(self, workflow_id: str) -> bool:
         with self._lock, self._connect() as connection:
             row = connection.execute(

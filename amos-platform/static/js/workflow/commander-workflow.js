@@ -19,6 +19,7 @@ window.PlatformWorkflow = (function () {
   var historyRunId = null;
   var historyLoadingRunId = null;
   var viewCache = {};
+  var viewFetchedAt = {};
   var viewLoadInFlight = false;
   var selectedActivityId = null;
   var selectedFunctionPointId = null;
@@ -1122,9 +1123,19 @@ window.PlatformWorkflow = (function () {
     if (viewLoadInFlight) return null;
     viewLoadInFlight = true;
     try {
+      var previous = viewCache[String(id)];
+      // Automatic polling checks lifecycle first. Refresh activity details at
+      // a bounded interval and immediately fetch the verified terminal result.
+      if (generation != null && previous && API.getWorkflowBrief) {
+        var brief = await API.getWorkflowBrief(id);
+        if (generation !== viewGeneration || String(id) !== String(activeWorkflowId || "")) return null;
+        if (!brief.error && brief.status === previous.status &&
+            (previous.terminal || Date.now() - (viewFetchedAt[String(id)] || 0) < 6000)) return previous;
+      }
       var view = await API.getWorkflowView(id);
       if (generation != null && (generation !== viewGeneration || String(id) !== String(activeWorkflowId || ""))) return null;
       viewCache[String(id)] = view;
+      viewFetchedAt[String(id)] = Date.now();
       renderTaskHistory();
       if (String(id) === String(workflowId || "")) renderView(view);
       else processActiveView(view);
@@ -1163,6 +1174,7 @@ window.PlatformWorkflow = (function () {
     historyRunId = null;
     historyLoadingRunId = null;
     viewCache = {};
+    viewFetchedAt = {};
     selectedActivityId = null;
     activityTab = "input";
     followCurrentActivity = true;

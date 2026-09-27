@@ -4,6 +4,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 from commander_agent.workflow_manager import CommanderWorkflowManager
 from workflow_state_store import WorkflowStateStore
@@ -60,6 +61,46 @@ class FakeCommander:
 
 
 class CommanderWorkflowManagerTest(unittest.TestCase):
+    def test_restored_brief_uses_authoritative_database_even_without_json(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = CommanderWorkflowManager(mode="local", state_dir=temp_dir)
+            try:
+                manager.state_store.save("wf-restored", {"status": "completed", "context": {}})
+                manager.state_store.state_path("wf-restored").unlink()
+                first = manager.get_workflow_brief("wf-restored")
+                self.assertEqual(first["status"], "checkpoint_only")
+                self.assertTrue(first["checkpoint_version"].startswith("db:"))
+                manager.state_store.save("wf-restored", {"status": "running", "context": {}})
+                self.assertNotEqual(first["checkpoint_version"], manager.get_workflow_brief("wf-restored")["checkpoint_version"])
+            finally:
+                manager.shutdown()
+
+    def test_health_remains_local_while_service_discovery_is_blocked(self):
+        started, release, finished = threading.Event(), threading.Event(), threading.Event()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = CommanderWorkflowManager(mode="local", state_dir=temp_dir)
+
+            def slow_discovery():
+                started.set()
+                release.wait(2)
+                finished.set()
+                return []
+
+            try:
+                with patch.object(manager, "list_agents", side_effect=slow_discovery), patch.object(manager, "list_workflows", side_effect=AssertionError("full job copies")):
+                    first = manager.health_snapshot()
+                    self.assertEqual(first["status"], "ok")
+                    self.assertTrue(started.wait(1))
+                    second = manager.health_snapshot()
+                    self.assertEqual(second["workflow_count"], 0)
+                    self.assertFalse(finished.is_set())
+                    self.assertEqual(second["discovery"]["status"], "unknown")
+                    release.set()
+                    self.assertTrue(finished.wait(1))
+            finally:
+                release.set()
+                manager.shutdown()
+
     def test_thread_pool_limits_concurrency_and_checkpoints_are_independent(self):
         FakeCommander.reset()
         with tempfile.TemporaryDirectory() as temp_dir:

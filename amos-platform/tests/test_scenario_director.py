@@ -884,7 +884,7 @@ def test_stage_workflows_wait_for_previous_analysis_before_submitting_next() -> 
     assert calls == ["MAR-CP-PERCEPTION", "MAR-CP-ASSESS"]
 
 
-def test_analysis_keeps_world_moving_at_16x_without_advancing_story() -> None:
+def test_first_analysis_advances_story_at_16x() -> None:
     runtime = PlatformRuntime()
     director = DirectorService(
         runtime,
@@ -916,15 +916,15 @@ def test_analysis_keeps_world_moving_at_16x_without_advancing_story() -> None:
     state = engine.get_operator_state()
 
     assert state["clock"]["elapsed_sec"] == physical_before + 1200.0
-    assert state["clock"]["scenario_elapsed_sec"] == story_before
-    assert state["mission_phases"]["f2t2ea"]["current"] == "FIX"
+    assert state["clock"]["scenario_elapsed_sec"] == story_before + 1200.0
+    assert state["mission_phases"]["f2t2ea"]["current"] == "TRACK"
 
     director._clear_analysis_motion_limit()
     assert engine._director_motion_limit_sec is None
     assert engine.clock["speed"] == 32
     with engine._lock:
         engine._tick(30.0)
-    assert engine.clock["scenario_elapsed_sec"] == story_before + 30.0
+    assert engine.clock["scenario_elapsed_sec"] == story_before + 1230.0
 
 
 def test_long_analysis_wait_preserves_later_sensor_capture_windows() -> None:
@@ -1038,10 +1038,10 @@ def test_nonoperator_checkpoint_resumes_after_snapshot_capture() -> None:
     pause_alerts_before = sum(alert.get("msg") == "仿真已暂停" for alert in engine.alerts)
     try:
         director._auto_monitor()
-        assert observations == [(True, True)]
+        assert observations == [(False, True)]
         assert director.state()["current_checkpoint"]["analysis_status"] == "submitted"
         assert engine.clock["running"] is True
-        assert engine._director_story_hold is True
+        assert engine._director_story_hold is False
         assert engine.clock["speed"] == 16
         assert sum(alert.get("msg") == "仿真已暂停" for alert in engine.alerts) == pause_alerts_before
     finally:
@@ -1093,7 +1093,7 @@ def test_auto_submission_keeps_status_responsive_after_snapshot() -> None:
         assert engine.clock["speed"] == 16
         with engine._lock:
             engine._tick(10.0)
-        assert engine.clock["scenario_elapsed_sec"] == 1470.0
+        assert engine.clock["scenario_elapsed_sec"] == pytest.approx(1480.0, abs=0.01)
         finish_submission.set()
         for _ in range(40):
             if director.state()["current_checkpoint"]["analysis_status"] == "submitted":
@@ -1264,7 +1264,7 @@ def test_engagement_warning_overlaps_analysis_but_fire_waits_for_completion() ->
     assert state["current_checkpoint"]["analysis_status"] == "running"
     assert engine.clock["running"] is True
     assert engine._director_motion_limit_sec is None
-    assert engine._director_story_hold is True
+    assert engine._director_story_hold is False
     assert engine.clock["speed"] == 16
 
     engine.clock["elapsed_sec"] = 4020.0
@@ -1320,7 +1320,7 @@ def test_operator_checkpoint_submits_execution_only_after_fire_authorization(mon
     submitted_at: list[float] = []
 
     def submit(context: dict) -> dict:
-        assert engine.clock["running"] is False
+        assert engine.clock["running"] is True
         assert any(event.get("type") == "authorized_fire_command" for event in engine.events)
         submitted_at.append(float(engine.clock["elapsed_sec"]))
         context["on_snapshot_captured"]()
@@ -1367,7 +1367,7 @@ def test_operator_checkpoint_submits_execution_only_after_fire_authorization(mon
     })
     monitor_once()
 
-    assert submitted_at == [3900.0]
+    assert submitted_at == pytest.approx([3900.0], abs=0.1)
     assert director.state()["current_checkpoint"]["analysis_status"] == "submitted"
     assert director.state()["current_checkpoint"]["submission"]["workflow_id"] == "wf-engage"
     assert engine.clock["running"] is True
@@ -1611,3 +1611,322 @@ def test_director_routes_validate_configuration_and_do_not_expose_future_conditi
     assert summary["scenario_id"] == "maritime-convoy-air-defense"
     assert summary["current_checkpoint"] is None
     assert client.post("/api/v1/director/action", json={"action": "unknown"}).status_code == 400
+
+
+@pytest.mark.parametrize("checkpoint_index", [0, 1, 2, 4])
+def test_maritime_nonoperator_analyses_keep_motion_during_submission(
+    checkpoint_index: int, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = PlatformRuntime()
+    engine = runtime.get_engine()
+    preparing = threading.Event()
+    capture = threading.Event()
+    submitting = threading.Event()
+    finish = threading.Event()
+
+    def submit(context: dict) -> dict:
+        preparing.set()
+        assert capture.wait(3.0)
+        context["on_snapshot_captured"]()
+        submitting.set()
+        assert finish.wait(3.0)
+        return {"workflow_id": "wf-continuous"}
+
+    director = DirectorService(
+        runtime, checkpoint_callback=submit,
+        workflow_state_callback=lambda workflow_id: {"status": "running", "terminal": False},
+    )
+    director.configure(
+        scenario_id="maritime-convoy-air-defense", mode="demonstration",
+        branch="standard", seed=33031,
+    )
+    checkpoint = director._scenario["demo_checkpoints"][checkpoint_index]
+    director._checkpoint_index = checkpoint_index - 1
+    story_time = float(checkpoint["min_elapsed_sec"])
+    engine.clock.update({
+        "elapsed_sec": story_time, "scenario_elapsed_sec": story_time,
+        "running": True, "lifecycle": "running",
+    })
+    pause_calls: list[bool] = []
+    original_pause = engine.pause
+
+    def record_pause(*, announce: bool = True) -> None:
+        pause_calls.append(announce)
+        original_pause(announce=announce)
+
+    monkeypatch.setattr(engine, "pause", record_pause)
+    monkeypatch.setattr(director, "_checkpoint_satisfied", lambda checkpoint: True)
+
+    class StopAfterOnePoll:
+        polls = 0
+
+        def wait(self, timeout: float) -> bool:
+            self.polls += 1
+            return self.polls > 1
+
+    director._auto_stop = StopAfterOnePoll()
+    director._auto_thread = threading.current_thread()
+    ship_ids = ["MERCHANT-01", "MERCHANT-02", "ESCORT-01"]
+    reference = SimEngine(seed=33031)
+    reference.load_scenario(director._scenario)
+    reference.clock.update({"elapsed_sec": story_time, "scenario_elapsed_sec": story_time})
+
+    def assert_motion_continues() -> None:
+        positions = {asset_id: dict(engine.assets[asset_id]["position"]) for asset_id in ship_ids}
+        elapsed = engine.clock["elapsed_sec"]
+        with engine._lock:
+            engine._tick(16.0)
+            reference._tick(16.0)
+        assert engine.clock["running"] is True
+        assert engine.clock["speed"] == 16
+        assert engine.clock["elapsed_sec"] == elapsed + 16.0
+        assert engine.clock["scenario_elapsed_sec"] == engine.clock["elapsed_sec"]
+        assert engine._director_story_hold is False
+        assert all(engine.assets[asset_id]["position"] == reference.assets[asset_id]["position"] for asset_id in ship_ids)
+        assert [engine.assets[asset_id]["speed_kts"] for asset_id in ship_ids] == [14, 14, 15]
+        assert all(engine.assets[asset_id]["position"] != positions[asset_id] for asset_id in ship_ids)
+        assert director.state()["current_checkpoint"]["checkpoint_id"] == checkpoint["checkpoint_id"]
+        assert len(director.state()["reached_checkpoints"]) == 1
+        assert pause_calls == []
+
+    try:
+        director._auto_monitor()
+        assert preparing.wait(1.0)
+        assert_motion_continues()
+        capture.set()
+        assert submitting.wait(1.0)
+        assert_motion_continues()
+        finish.set()
+        for _ in range(60):
+            if director.state()["current_checkpoint"]["analysis_status"] == "submitted":
+                break
+            time.sleep(0.025)
+        assert director.state()["current_checkpoint"]["analysis_status"] == "submitted"
+        assert director._poll_current_analysis(resume_on_success=True) == "pending"
+        assert_motion_continues()
+        if director._next_checkpoint() is not None:
+            with pytest.raises(DirectorError, match="analysis is not completed"):
+                director._reach_checkpoint(director._next_checkpoint())
+    finally:
+        capture.set()
+        finish.set()
+        original_pause(announce=False)
+
+
+def test_first_analysis_releases_next_scene_and_preserves_warning_window() -> None:
+    runtime = PlatformRuntime()
+    director = DirectorService(
+        runtime, checkpoint_callback=lambda context: {"workflow_id": "wf-observe"},
+        workflow_state_callback=lambda workflow_id: {"status": "running", "terminal": False},
+    )
+    director.configure(
+        scenario_id="maritime-convoy-air-defense", mode="demonstration",
+        branch="standard", seed=33031,
+    )
+    director.action("advance_checkpoint")
+    engine = runtime.get_engine()
+    director._arm_analysis_motion_limit()
+    first_time = engine.clock["scenario_elapsed_sec"]
+    before = dict(engine.assets["ESCORT-01"]["position"])
+    engine._tick(2190.0 - first_time)
+    assert engine.clock["scenario_elapsed_sec"] == 2190.0
+    assert "MAR-CUE-04" in engine._story_emitted
+    assert "MAR-MEDIA-03" in engine.media_capture.captured_media_ids
+    assert engine.assets["ESCORT-01"]["position"] != before
+    assert director.state()["current_checkpoint"]["checkpoint_id"] == "MAR-CP-PERCEPTION"
+    assert director._poll_current_analysis(resume_on_success=True) == "pending"
+    engine._tick(1800.0)
+    assert engine.clock["scenario_elapsed_sec"] == 3899.0
+    assert "MAR-MEDIA-04" in engine.media_capture.captured_media_ids
+    assert "MAR-MEDIA-05" in engine.media_capture.captured_media_ids
+    assert "MAR-CUE-07" not in engine._story_emitted
+    assert "MAR-MEDIA-06" not in engine.media_capture.captured_media_ids
+    before = dict(engine.assets["ESCORT-01"]["position"])
+    engine._tick(30.0)
+    assert engine.clock["scenario_elapsed_sec"] == 3899.0
+    assert engine.assets["ESCORT-01"]["position"] != before
+    engine._tick(1500.0)
+    assert engine.clock["elapsed_sec"] > 5400.0
+    assert engine.clock["scenario_elapsed_sec"] == 3899.0
+    assert engine.clock["lifecycle"] != "completed"
+    with pytest.raises(DirectorError, match="analysis is not completed"):
+        director._reach_checkpoint(director._next_checkpoint())
+    director._clear_analysis_motion_limit()
+    assert engine._director_story_limit_sec is None
+    engine._tick(1.0)
+    assert engine.clock["scenario_elapsed_sec"] == 3900.0
+
+
+@pytest.mark.parametrize("dialog_wait", [True, False])
+def test_post_fire_analysis_keeps_execution_and_return_running(dialog_wait, monkeypatch) -> None:
+    runtime = PlatformRuntime()
+    started = threading.Event()
+    release = threading.Event()
+
+    def submit(context: dict) -> dict:
+        assert context["checkpoint_id"] == "MAR-CP-ENGAGE"
+        assert engine.clock["running"] is True
+        started.set()
+        assert release.wait(20.0)
+        context["on_snapshot_captured"]()
+        return {"workflow_id": "wf-post-fire-moving"}
+
+    director = DirectorService(
+        runtime, checkpoint_callback=submit,
+        workflow_state_callback=lambda workflow_id: {"status": "running", "terminal": False},
+    )
+    director.configure(
+        scenario_id="maritime-convoy-air-defense", mode="demonstration",
+        branch="standard", seed=33031,
+    )
+    engine = runtime.get_engine()
+    # Drive real physics deterministically while keeping resume/pause behavior.
+    monkeypatch.setattr(engine, "_tick_loop", lambda: None)
+    engine._tick(3900.0)
+    hostile = max(
+        (track for track in engine.sensor_fusion.tracks.values()
+         if engine._truth_target_for_track(track) == "CONTACT-HOSTILE-01"),
+        key=lambda track: track.last_sim_time,
+    )
+    hostile.classification = "FAST_ATTACK_CRAFT"
+    hostile.threat_level = "HIGH"
+    hostile.kill_chain_phase = "ENGAGE"
+    hostile.agent_assessment = {"status": "confirmed", "label": "high", "source": "test"}
+    engine._tick(1.0)
+    follow = engine.authorize_follow_asset("UAV-CONFIRM-01", hostile.id, authorized=True)
+    assert follow.get("status") == "authorized", follow
+    warning = engine.issue_warning_at_track(hostile.id, authorized=True)
+    assert warning["status"] == "issued"
+    engine._tick(float(warning["delay_sec"]))
+    director._checkpoint_index = 2
+    director._reach_checkpoint(director._next_checkpoint())
+    engine.pause(announce=False)
+    director._state["awaiting_authorization"] = dialog_wait
+    director._state["authorization_stage"] = "fire" if dialog_wait else None
+    fire = engine.fire_weapon_at_track(
+        hostile.id, asset_id="ESCORT-01", weapon_name="舰载反舰导弹", authorized=True,
+    )
+    assert fire["status"] == "launched"
+    pauses: list[bool] = []
+    original_pause = engine.pause
+
+    def record_pause(*, announce=True):
+        pauses.append(announce)
+        original_pause(announce=announce)
+
+    monkeypatch.setattr(engine, "pause", record_pause)
+
+    class StopAfterOnePoll:
+        polls = 0
+
+        def wait(self, timeout):
+            self.polls += 1
+            return self.polls > 1
+
+    director._auto_stop = StopAfterOnePoll()
+    director._auto_thread = threading.current_thread()
+    try:
+        director._auto_monitor()
+        assert started.wait(1.0)
+        assert engine.clock["running"] is True
+        assert engine._director_story_hold is False
+        assert engine.clock["speed"] == 16
+        assert engine._director_story_limit_sec == 5399.0
+        before = engine.clock["scenario_elapsed_sec"]
+        escort_before = dict(engine.assets["ESCORT-01"]["position"])
+        for _ in range(14):
+            engine._tick(30.0)
+            if engine.weapons[fire["weapon_id"]].get("damage_state") == "destroyed":
+                break
+        assert engine.clock["scenario_elapsed_sec"] > before
+        assert engine.assets["ESCORT-01"]["position"] != escort_before
+        assert engine.weapons[fire["weapon_id"]]["damage_state"] == "destroyed"
+        assert "MAR-MEDIA-07" in engine.media_capture.captured_media_ids
+        assert engine.assets["UAV-CONFIRM-01"].get("_follow_returning_home") is True
+        assert director.state()["current_checkpoint"]["analysis_status"] == "submitting"
+        assert pauses == []
+    finally:
+        release.set()
+        original_pause(announce=False)
+
+
+def test_final_analysis_keeps_scene_running_until_review_finishes(monkeypatch) -> None:
+    runtime = PlatformRuntime()
+    terminal = {"value": False}
+
+    def view(workflow_id, light=True):
+        if not terminal["value"]:
+            return {"status": "running", "terminal": False}
+        return {
+            "status": "completed", "terminal": True, "run": {"current": True},
+            "orchestration": {"counts": {"total": 2, "completed": 2, "failed": 0}},
+            "result": {"projection_status": "completed"},
+        }
+
+    director = DirectorService(
+        runtime, checkpoint_callback=lambda context: {"workflow_id": "wf-final-review"},
+        workflow_state_callback=view,
+    )
+    director.configure(
+        scenario_id="maritime-convoy-air-defense", mode="demonstration",
+        branch="standard", seed=33031,
+    )
+    engine = runtime.get_engine()
+    monkeypatch.setattr(engine, "_tick_loop", lambda: None)
+    engine.clock.update({"elapsed_sec": 4590.0, "scenario_elapsed_sec": 4590.0, "running": True, "lifecycle": "running"})
+    director._checkpoint_index = 3
+    checkpoint = director._next_checkpoint()
+    director._arm_analysis_motion_limit(checkpoint)
+    director._reach_checkpoint(checkpoint)
+    before = dict(engine.assets["ESCORT-01"]["position"])
+    engine._tick(30.0)
+    assert engine.assets["ESCORT-01"]["position"] != before
+    assert engine.clock["scenario_elapsed_sec"] == 4620.0
+    engine._tick(800.0)
+    assert engine.clock["scenario_elapsed_sec"] == 5399.0
+    assert engine.clock["running"] is True
+    assert director._poll_current_analysis(resume_on_success=True) == "pending"
+    engine._tick(30.0)
+    assert engine.clock["running"] is True
+    assert engine.clock["scenario_elapsed_sec"] == 5399.0
+    terminal["value"] = True
+    assert director._poll_current_analysis(resume_on_success=True) == "completed"
+    assert engine._director_story_limit_sec is None
+    assert engine.clock["speed"] == 32
+    engine._tick(1.0)
+    assert engine.clock["scenario_elapsed_sec"] == 5400.0
+    assert engine.clock["lifecycle"] == "completed"
+    engine.pause(announce=False)
+
+
+def test_analysis_handoff_keeps_warning_guard_while_routes_continue(monkeypatch) -> None:
+    runtime = PlatformRuntime()
+    director = DirectorService(
+        runtime, checkpoint_callback=lambda context: {"workflow_id": "wf-complete"},
+        workflow_state_callback=lambda workflow_id, light=True: {
+            "status": "completed", "terminal": True, "run": {"current": True},
+            "orchestration": {"counts": {"total": 2, "completed": 2, "failed": 0}},
+            "result": {"projection_status": "completed"},
+        },
+    )
+    director.configure(
+        scenario_id="maritime-convoy-air-defense", mode="demonstration",
+        branch="standard", seed=33031,
+    )
+    engine = runtime.get_engine()
+    monkeypatch.setattr(engine, "_tick_loop", lambda: None)
+    engine.clock.update({"elapsed_sec": 3899.0, "scenario_elapsed_sec": 3899.0, "running": True, "lifecycle": "running"})
+    director._reach_checkpoint(director._next_checkpoint())
+    director._arm_analysis_motion_limit()
+    assert director._poll_current_analysis(resume_on_success=True) == "completed"
+    before = dict(engine.assets["ESCORT-01"]["position"])
+    engine._tick(30.0)
+    assert engine.clock["scenario_elapsed_sec"] == 3899.0
+    assert engine.assets["ESCORT-01"]["position"] != before
+    assert engine._director_story_hold is False
+    assert engine._director_story_limit_sec == 3899.0
+    assert "MAR-CUE-07" not in engine._story_emitted
+    director._reach_checkpoint(director._next_checkpoint())
+    director._arm_analysis_motion_limit()
+    assert engine.clock["speed"] == 16
+    engine.pause(announce=False)

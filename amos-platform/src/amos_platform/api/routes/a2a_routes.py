@@ -64,12 +64,15 @@ def register_a2a_routes(bp: Any) -> None:
         """Return the stable AMOS workflow-display contract."""
         return ok(get_runtime().get_workflow_view(workflow_id))
 
+    @bp.route("/api/v1/a2a/workflows/<workflow_id>/brief", methods=["GET"])
+    def a2a_workflow_brief(workflow_id: str):
+        return ok(get_runtime().get_workflow_brief_view(workflow_id))
+
     @bp.route("/api/v1/a2a/workflows/<workflow_id>/resume", methods=["POST"])
     def a2a_workflow_resume(workflow_id: str):
         """Resume a paused/failed workflow."""
         data = request.get_json(silent=True) or {}
-        bridge = get_bridge()
-        result = bridge.resume_workflow(workflow_id, **data)
+        result = get_runtime().resume_workflow(workflow_id, **data)
         if result.get("error"):
             status, message = normalize_upstream_error(result, "分析任务恢复失败")
             return err(status, message, {"backend": result}), status

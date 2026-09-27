@@ -339,6 +339,9 @@ class DirectorService:
                 "reached_at_sec": round(float(engine.clock.get("elapsed_sec", 0) or 0), 3),
                 "analysis_status": analysis_status,
                 "analysis_after_authorization": after_authorization,
+                "advance_story_during_analysis": bool(checkpoint.get("advance_story_during_analysis")),
+                "continue_during_submission": bool(checkpoint.get("continue_during_submission")),
+                "analysis_story_limit_sec": checkpoint.get("analysis_story_limit_sec"),
                 # Authorization belongs to a concrete reached checkpoint.  Do not
                 # start an operator gate merely because the timeline entered the
                 # ENGAGE phase before the evidence/analysis checkpoint was ready.
@@ -611,13 +614,26 @@ class DirectorService:
         )
         return duration if duration > elapsed else None
 
-    def _arm_analysis_motion_limit(self) -> None:
+    def _arm_analysis_motion_limit(self, checkpoint: dict[str, Any] | None = None) -> None:
         engine = self.runtime.get_engine()
         controls = (self._scenario or {}).get("demo_controls") or {}
         if controls.get("elastic_timeline"):
             if self._analysis_speed_before is None:
                 self._analysis_speed_before = float(engine.clock.get("speed", 1) or 1)
-            engine.set_director_story_hold(True)
+            current = checkpoint or self._state.get("current_checkpoint") or {}
+            configured = next((
+                item for item in (self._scenario or {}).get("demo_checkpoints") or []
+                if item.get("checkpoint_id") == current.get("checkpoint_id")
+            ), {})
+            current = {**configured, **current}
+            progress_story = bool(current.get("advance_story_during_analysis"))
+            engine.set_director_story_hold(not progress_story)
+            story_limit = current.get("analysis_story_limit_sec")
+            if story_limit is None:
+                story_limit = controls.get("analysis_story_limit_sec")
+            engine.set_director_story_limit(
+                float(story_limit) if progress_story and story_limit is not None else None
+            )
             engine.set_speed(float(controls.get("analysis_speed", 16) or 16))
             self._record("analysis_motion_continues", speed=engine.clock["speed"], elastic_timeline=True)
             return
@@ -627,9 +643,11 @@ class DirectorService:
             limit_sec=engine._director_motion_limit_sec,
         )
 
-    def _clear_analysis_motion_limit(self) -> None:
+    def _clear_analysis_motion_limit(self, *, keep_story_limit: bool = False) -> None:
         engine = self.runtime.get_engine()
         engine._director_motion_limit_sec = None
+        if not keep_story_limit:
+            engine.set_director_story_limit(None)
         if self._analysis_speed_before is not None:
             engine.set_director_story_hold(False)
             engine.set_speed(self._analysis_speed_before)
@@ -857,7 +875,18 @@ class DirectorService:
             return "completed"
         self._state["awaiting_analysis"] = False
         self._state["last_error"] = None
-        self._clear_analysis_motion_limit()
+        next_checkpoint = self._next_checkpoint() or {}
+        # Keep the narrative guard while bookkeeping hands off to another
+        # analysis. Physical route navigation keeps running during this handoff.
+        keep_story_limit = bool(
+            checkpoint.get("advance_story_during_analysis")
+            and next_checkpoint.get("submit_analysis")
+            and not (
+                next_checkpoint.get("requires_operator_action")
+                and str(next_checkpoint.get("operator_action_type") or "fire") == "fire"
+            )
+        )
+        self._clear_analysis_motion_limit(keep_story_limit=keep_story_limit)
         # Release the analysis crawl lock (if held) so the demo speed is
         # restored; the follow-launch confirmation lock, when separately
         # pending, keeps holding 1x on its own until the operator answers.
@@ -1165,7 +1194,9 @@ class DirectorService:
                         self._set_status("awaiting_analysis" if analysis_pending else "auto_running")
                         self._leave_authorization_wait()
                         if completed_by_event and checkpoint.get("analysis_after_authorization"):
-                            self._arm_analysis_motion_limit()
+                            self._arm_analysis_motion_limit(checkpoint)
+                            if checkpoint.get("continue_during_submission"):
+                                engine.resume(announce=False)
                             self._record(
                                 "authorization_completed",
                                 phase="ENGAGE",
@@ -1199,8 +1230,11 @@ class DirectorService:
                     if self._has_authorized_engagement(
                         since_sec=float(current.get("reached_at_sec", 0) or 0)
                     ):
-                        engine.pause()
-                        self._arm_analysis_motion_limit()
+                        if not current.get("continue_during_submission"):
+                            engine.pause()
+                        self._arm_analysis_motion_limit(current)
+                        if current.get("continue_during_submission") and not engine.clock.get("running"):
+                            engine.resume(announce=False)
                         if not self._submit_deferred_analysis(
                             current, on_snapshot_captured=engine.resume,
                         ):
@@ -1234,18 +1268,24 @@ class DirectorService:
                         and str(checkpoint.get("operator_action_type") or "fire") == "fire"
                     )
                     elastic = bool(((self._scenario or {}).get("demo_controls") or {}).get("elastic_timeline"))
-                    # The submission callback can take wall-clock seconds.
-                    # Freeze simulated time before it captures and submits the
-                    # snapshot, then allow motion only under the phase limit.
-                    if elastic or (pause_on_reach and not continue_during_analysis):
+                    continuous_submission = bool(
+                        elastic and continue_during_analysis and not operator_gate
+                        and checkpoint.get("continue_during_submission")
+                    )
+                    # Snapshot capture is atomic under the engine lock. These
+                    # checkpoints keep motion running through preparation and
+                    # submission; each checkpoint controls whether story time advances.
+                    if (elastic and not continuous_submission) or (
+                        pause_on_reach and not continue_during_analysis
+                    ):
                         engine.pause(announce=operator_gate)
                     if elastic and continue_during_analysis and not operator_gate:
-                        self._arm_analysis_motion_limit()
+                        self._arm_analysis_motion_limit(checkpoint)
                     self._reach_checkpoint(
                         checkpoint,
                         defer_submission=bool(checkpoint.get("requires_operator_action")) and not checkpoint.get("submit_after_authorization"),
                         on_snapshot_captured=(
-                            (lambda: engine.resume(announce=False))
+                            (lambda: engine.resume(announce=False) if not engine.clock.get("running") else None)
                             if elastic and continue_during_analysis and not operator_gate
                             else None
                         ),

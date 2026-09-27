@@ -3,8 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sqlite3
 import threading
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +38,88 @@ class FileGatewayStore:
         ):
             directory.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self.index_path = self.state_dir / "request_index.sqlite3"
+        self._initialize_index()
+
+    @contextmanager
+    def _index(self):
+        connection = sqlite3.connect(self.index_path, timeout=10)
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
+
+    def _initialize_index(self) -> None:
+        # JSON remains the durable source of truth. Migrate old archives once;
+        # an interrupted write is recovered by reading only its journaled file.
+        with self._lock, self._index() as db:
+            db.execute("CREATE TABLE IF NOT EXISTS records (kind TEXT, identifier TEXT, request_key TEXT, PRIMARY KEY(kind, identifier))")
+            db.execute("CREATE INDEX IF NOT EXISTS request_keys ON records(kind, request_key)")
+            db.execute("CREATE TABLE IF NOT EXISTS pending (kind TEXT, identifier TEXT, PRIMARY KEY(kind, identifier))")
+            db.execute("CREATE TABLE IF NOT EXISTS metadata (name TEXT PRIMARY KEY, value TEXT)")
+            if db.execute("SELECT value FROM metadata WHERE name='initialized'").fetchone() is None:
+                for kind, directory in (("workflow", self.workflows_dir), ("idempotency", self.idempotency_dir)):
+                    for path in sorted(directory.glob("*.json")):
+                        self._index_file(db, kind, path.stem)
+                db.execute("INSERT INTO metadata VALUES ('initialized', '1')")
+            for kind, identifier in db.execute("SELECT kind, identifier FROM pending").fetchall():
+                self._index_file(db, kind, identifier)
+            db.execute("DELETE FROM pending")
+
+    def _index_file(self, db, kind: str, identifier: str) -> None:
+        directory = self.workflows_dir if kind == "workflow" else self.idempotency_dir
+        path = directory / f"{self._safe_component(identifier)}.json"
+        if not path.exists():
+            db.execute("DELETE FROM records WHERE kind=? AND identifier=?", (kind, identifier))
+            return
+        try:
+            record = json.loads(path.read_bytes())
+            if not isinstance(record, dict):
+                raise ValueError("record is not an object")
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise GatewayError(f"{kind.upper()}_CORRUPT", f"{kind} record is corrupt", 500) from exc
+        db.execute("INSERT OR REPLACE INTO records VALUES (?, ?, ?)", (kind, identifier, record.get("request_key")))
+
+    def _save_indexed(self, kind: str, identifier: str, record: dict) -> None:
+        directory = self.workflows_dir if kind == "workflow" else self.idempotency_dir
+        body = canonical_json_bytes(record)
+        with self._lock:
+            with self._index() as db:
+                previous = db.execute("SELECT request_key FROM records WHERE kind=? AND identifier=?", (kind, identifier)).fetchone()
+                changed = previous is None or previous[0] != record.get("request_key")
+                if changed:
+                    db.execute("INSERT OR IGNORE INTO pending VALUES (?, ?)", (kind, identifier))
+            self._atomic_write(directory / f"{identifier}.json", body)
+            if changed:
+                with self._index() as db:
+                    db.execute("INSERT OR REPLACE INTO records VALUES (?, ?, ?)", (kind, identifier, record.get("request_key")))
+                    db.execute("DELETE FROM pending WHERE kind=? AND identifier=?", (kind, identifier))
+
+    def _find_indexed(self, kind: str, request_key: str) -> tuple[str, dict] | None:
+        with self._lock, self._index() as db:
+            # Also recover interrupted writes in this process before a retry.
+            for pending_kind, identifier in db.execute("SELECT kind, identifier FROM pending").fetchall():
+                self._index_file(db, pending_kind, identifier)
+            db.execute("DELETE FROM pending")
+            rows = db.execute("SELECT identifier FROM records WHERE kind=? AND request_key=? ORDER BY identifier", (kind, request_key)).fetchall()
+            for (identifier,) in rows:
+                if kind == "workflow":
+                    try:
+                        record = self.read_workflow(identifier)
+                    except GatewayError as exc:
+                        if exc.code != "WORKFLOW_NOT_FOUND":
+                            raise
+                        record = None
+                else:
+                    record = self.read_idempotency(identifier)
+                if record is None:
+                    db.execute("DELETE FROM records WHERE kind=? AND identifier=?", (kind, identifier))
+                    continue
+                if record.get("request_key") != request_key:
+                    raise GatewayError(f"{kind.upper()}_CORRUPT", f"{kind} request key mismatch", 500)
+                return identifier, record
+        return None
 
     @staticmethod
     def _safe_component(value: str) -> str:
@@ -102,11 +186,7 @@ class FileGatewayStore:
 
     def save_workflow(self, workflow_id: str, record: dict) -> None:
         workflow_id = self._safe_component(workflow_id)
-        with self._lock:
-            self._atomic_write(
-                self.workflows_dir / f"{workflow_id}.json",
-                canonical_json_bytes(record),
-            )
+        self._save_indexed("workflow", workflow_id, record)
 
     def read_workflow(self, workflow_id: str) -> dict:
         workflow_id = self._safe_component(workflow_id)
@@ -123,29 +203,11 @@ class FileGatewayStore:
         return value
 
     def find_workflow_by_request_key(self, request_key: str) -> tuple[str, dict] | None:
-        with self._lock:
-            for path in sorted(self.workflows_dir.glob("*.json")):
-                try:
-                    record = json.loads(path.read_bytes())
-                except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-                    raise GatewayError(
-                        "WORKFLOW_CORRUPT", "Gateway workflow record is corrupt", 500
-                    ) from exc
-                if not isinstance(record, dict):
-                    raise GatewayError(
-                        "WORKFLOW_CORRUPT", "Gateway workflow record is corrupt", 500
-                    )
-                if record.get("request_key") == request_key:
-                    return path.stem, record
-        return None
+        return self._find_indexed("workflow", request_key)
 
     def save_idempotency(self, digest: str, record: dict) -> None:
         digest = self._safe_component(digest)
-        with self._lock:
-            self._atomic_write(
-                self.idempotency_dir / f"{digest}.json",
-                canonical_json_bytes(record),
-            )
+        self._save_indexed("idempotency", digest, record)
 
     def read_idempotency(self, digest: str) -> dict | None:
         digest = self._safe_component(digest)
@@ -161,21 +223,7 @@ class FileGatewayStore:
         return value
 
     def find_idempotency_by_request_key(self, request_key: str) -> tuple[str, dict] | None:
-        with self._lock:
-            for path in sorted(self.idempotency_dir.glob("*.json")):
-                try:
-                    record = json.loads(path.read_bytes())
-                except json.JSONDecodeError as exc:
-                    raise GatewayError(
-                        "IDEMPOTENCY_CORRUPT", "idempotency record is corrupt", 500
-                    ) from exc
-                if not isinstance(record, dict):
-                    raise GatewayError(
-                        "IDEMPOTENCY_CORRUPT", "idempotency record is corrupt", 500
-                    )
-                if record.get("request_key") == request_key:
-                    return path.stem, record
-        return None
+        return self._find_indexed("idempotency", request_key)
 
     def list_idempotency(self) -> list[str]:
         return sorted(path.stem for path in self.idempotency_dir.glob("*.json"))

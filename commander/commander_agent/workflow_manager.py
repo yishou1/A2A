@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
@@ -56,6 +57,44 @@ class WorkflowManager:
         self._lock = threading.RLock()
         self._jobs: dict[str, dict] = {}
         self._closed = False
+        self._health_lock = threading.Lock()
+        self._health_refreshing = False
+        self._health_refreshed_at = 0.0
+        self._health_discovery = {"status": "unknown", "agent_count": None, "active_leases": None, "checked_at": None}
+
+    def health_snapshot(self) -> dict:
+        """Local liveness plus separately refreshed discovery diagnostics."""
+        with self._lock:
+            workflow_count = len(self._jobs)
+        with self._health_lock:
+            if not self._closed and not self._health_refreshing and time.monotonic() - self._health_refreshed_at >= 10:
+                self._health_refreshing = True
+                threading.Thread(target=self._refresh_health_discovery, name="commander-health-discovery", daemon=True).start()
+            discovery = dict(self._health_discovery)
+            age = time.monotonic() - self._health_refreshed_at if self._health_refreshed_at else None
+        return {
+            "status": "ok", "mode": self.mode, "max_workflows": self.max_workflows,
+            "workflow_count": workflow_count,
+            "active_leases": discovery.get("active_leases"),
+            "agent_count": discovery.get("agent_count"),
+            "discovery": {**discovery, "age_sec": age},
+        }
+
+    def _refresh_health_discovery(self) -> None:
+        try:
+            agents = self.list_agents()
+            discovery = {
+                "status": "ok" if self.registry is None or agents else "unavailable",
+                "agent_count": len(agents), "active_leases": len(self.list_agent_leases()),
+                "checked_at": utc_now_iso(),
+            }
+        except Exception as exc:
+            discovery = {"status": "unavailable", "error": str(exc), "checked_at": utc_now_iso()}
+        finally:
+            with self._health_lock:
+                self._health_discovery = discovery
+                self._health_refreshed_at = time.monotonic()
+                self._health_refreshing = False
 
     def submit_workflow(self, **kwargs) -> dict:
         workflow_id = kwargs.get("workflow_id")
@@ -157,21 +196,23 @@ class WorkflowManager:
 
     def list_workflows(self) -> list[dict]:
         with self._lock:
-            return [self._job_snapshot(job) for job in self._jobs.values()]
+            jobs = [dict(job) for job in self._jobs.values()]
+        return [self._job_snapshot(job) for job in jobs]
 
     def get_workflow(self, workflow_id: str, include_checkpoint: bool = False) -> dict:
         with self._lock:
             job = self._jobs.get(workflow_id)
             if job is not None:
-                result = self._job_snapshot(job)
-            elif self.state_store.exists(workflow_id):
-                result = {
-                    "workflow_id": workflow_id,
-                    "status": "checkpoint_only",
-                    "state_path": str(self.state_store.state_path(workflow_id)),
-                }
+                result = dict(job)
             else:
+                result = None
+        if result is None:
+            if not self.state_store.exists(workflow_id):
                 raise KeyError(workflow_id)
+            result = {"workflow_id": workflow_id, "status": "checkpoint_only", "state_path": str(self.state_store.state_path(workflow_id))}
+        # Job updates replace values; expensive artifact copies do not need to
+        # hold the lifecycle lock used by health and brief status readers.
+        result = self._job_snapshot(result)
         if include_checkpoint and self.state_store.exists(workflow_id):
             result["checkpoint"] = self.state_store.load(workflow_id)
         return result
@@ -202,8 +243,9 @@ class WorkflowManager:
             job = self._jobs.get(workflow_id)
             if job is not None:
                 return {key: job[key] for key in brief_keys if key in job}
-            if self.state_store.exists(workflow_id):
-                return {"workflow_id": workflow_id, "status": "checkpoint_only"}
+        metadata = self.state_store.brief_metadata(workflow_id)
+        if metadata is not None:
+            return {"workflow_id": workflow_id, "status": "checkpoint_only", **metadata}
         raise KeyError(workflow_id)
 
     def list_agent_leases(self) -> list[dict]:

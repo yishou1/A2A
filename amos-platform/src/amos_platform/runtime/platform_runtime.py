@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections import OrderedDict
+from copy import deepcopy
+import threading
 from typing import Any
 
 from amos_platform.config import run_database_path
@@ -21,6 +24,31 @@ class PlatformRuntime:
     _bridge: Any = None
     _director: Any = None
     _run_manifest_store: Any = None
+    _workflow_locks: Any = field(default_factory=lambda: [threading.RLock() for _ in range(32)], repr=False)
+    _workflow_cache_lock: Any = field(default_factory=threading.RLock, repr=False)
+    _workflow_views: Any = field(default_factory=OrderedDict, repr=False)
+    _workflow_projections: Any = field(default_factory=dict, repr=False)
+
+    def invalidate_workflow_view(self, workflow_id: str) -> None:
+        with self._workflow_locks[hash(workflow_id) % len(self._workflow_locks)]:
+            with self._workflow_cache_lock:
+                for cache in (self._workflow_views, self._workflow_projections):
+                    for key in list(cache):
+                        if key[1] == workflow_id:
+                            del cache[key]
+
+    def get_workflow_brief_view(self, workflow_id: str) -> dict[str, Any]:
+        """Browser lifecycle poll; terminal result verification stays in full view."""
+        payload = self.get_bridge().get_workflow_brief(workflow_id)
+        return {**payload, "workflow_id": workflow_id}
+
+    def resume_workflow(self, workflow_id: str, **options: Any) -> dict[str, Any]:
+        with self._workflow_locks[hash(workflow_id) % len(self._workflow_locks)]:
+            self.invalidate_workflow_view(workflow_id)
+            try:
+                return self.get_bridge().resume_workflow(workflow_id, **options)
+            finally:
+                self.invalidate_workflow_view(workflow_id)
 
     def get_engine(self) -> Any:
         """Lazy-init and return the simulation engine."""
@@ -123,6 +151,10 @@ class PlatformRuntime:
         }
 
     def get_workflow_view(self, workflow_id: str) -> dict[str, Any]:
+        with self._workflow_locks[hash(workflow_id) % len(self._workflow_locks)]:
+            return self._get_workflow_view_locked(workflow_id)
+
+    def _get_workflow_view_locked(self, workflow_id: str) -> dict[str, Any]:
         """Read one backend workflow and project verified terminal output."""
         from amos_platform.agents.a2a.commander_projection import apply_commander_assessments
         from amos_platform.agents.a2a.workflow_run_store import get_workflow_run_store
@@ -131,6 +163,19 @@ class PlatformRuntime:
         bridge = self.get_bridge()
         status = bridge.get_workflow(workflow_id)
         status.setdefault("workflow_id", workflow_id)
+        current_run_id = str(self.get_engine().clock.get("run_id") or "")
+        cache_key = (current_run_id, workflow_id, status.get("run_id"), status.get("package_checksum"), status.get("updated_at"), status.get("finished_at"))
+        completed = str(status.get("status") or "").lower() == "completed" and not status.get("error")
+        with self._workflow_cache_lock:
+            # Keep only the current engine run; never reuse a previous run's view.
+            for cache in (self._workflow_views, self._workflow_projections):
+                for key in list(cache):
+                    if key[0] != current_run_id:
+                        del cache[key]
+            cached = self._workflow_views.get(cache_key) if completed else None
+            if cached is not None:
+                self._workflow_views.move_to_end(cache_key)
+                return deepcopy(cached)
         submission = get_workflow_run_store().get(workflow_id)
         if not submission:
             run_id = str(status.get("run_id") or "")
@@ -149,14 +194,16 @@ class PlatformRuntime:
         work_list: Any = {}
         trace: Any = {}
         if not status.get("error"):
-            work_list = bridge.get_work_list(workflow_id)
-            trace = bridge.get_workflow_trace(workflow_id)
-            if str(status.get("status") or "").lower() == "completed":
-                projection = apply_commander_assessments(
-                    self.get_engine(),
-                    status,
-                    submission=submission,
-                )
+            work_list = status["work_list"] if "work_list" in status else bridge.get_work_list(workflow_id)
+            trace = status["trace"] if "trace" in status else bridge.get_workflow_trace(workflow_id)
+            if completed:
+                with self._workflow_cache_lock:
+                    projection = deepcopy(self._workflow_projections.get(cache_key) or {})
+                if not projection:
+                    projection = apply_commander_assessments(self.get_engine(), status, submission=submission)
+                    if projection.get("status") == "completed" and status.get("result"):
+                        with self._workflow_cache_lock:
+                            self._workflow_projections[cache_key] = deepcopy(projection)
         view = build_workflow_view(
             status,
             work_list={} if isinstance(work_list, dict) and work_list.get("error") else work_list,
@@ -164,10 +211,16 @@ class PlatformRuntime:
             submission=submission,
             projection=projection,
             backend_transport=bridge.mode,
-            current_run_id=str(self.get_engine().clock.get("run_id") or ""),
+            current_run_id=current_run_id,
             algorithm_catalog=bridge.algorithm_catalog() if hasattr(bridge, "algorithm_catalog") else None,
         )
         self.record_workflow_view(view)
+        if completed and status.get("result") and projection.get("status") == "completed":
+            with self._workflow_cache_lock:
+                self._workflow_views[cache_key] = deepcopy(view)
+                self._workflow_views.move_to_end(cache_key)
+                while len(self._workflow_views) > 16:
+                    self._workflow_views.popitem(last=False)
         return view
 
     def get_scenario_support(self) -> dict[str, Any]:

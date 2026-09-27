@@ -269,6 +269,7 @@ def build_maritime_convoy_air_defense_scenario() -> dict[str, Any]:
         "demo_controls": {
             "recommended_speed": 32,
             "analysis_speed": 16,
+            "analysis_story_limit_sec": 3899,
             "elastic_timeline": True,
             "analysis_hold_motion": {
                 "until_story_sec": 3900,
@@ -302,11 +303,11 @@ def build_maritime_convoy_air_defense_scenario() -> dict[str, Any]:
             "KC-28": {"event": "damage_assessment_confirmed", "offset_sec": 0},
         },
         "demo_checkpoints": [
-            {"checkpoint_id": "MAR-CP-PERCEPTION", "title": "海空观测融合输入就绪", "min_elapsed_sec": 1470, "conditions": {"stable_track_count_at_least": 2, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["MAR-MEDIA-01", "MAR-MEDIA-02"]}, "pause": False, "submit_analysis": True, "block_until_analysis_complete": True},
-            {"checkpoint_id": "MAR-CP-ASSESS", "title": "敌方与渔船识别输入就绪", "min_elapsed_sec": 2910, "conditions": {"stable_track_count_at_least": 2, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["MAR-MEDIA-03", "MAR-MEDIA-04"]}, "pause": False, "submit_analysis": True, "block_until_analysis_complete": True},
-            {"checkpoint_id": "MAR-CP-PLAN", "title": "攻击方案与禁射约束输入就绪", "min_elapsed_sec": 3630, "conditions": {"media_ids_released": ["MAR-MEDIA-05"]}, "pause": False, "submit_analysis": True, "block_until_analysis_complete": True},
-            {"checkpoint_id": "MAR-CP-ENGAGE", "title": "无线电警告与模拟开火等待授权", "min_elapsed_sec": 3630, "conditions": {"media_ids_released": ["MAR-MEDIA-06"]}, "pause": True, "submit_analysis": True, "submit_after_authorization": True, "block_until_analysis_complete": True, "requires_operator_action": True, "operator_action_type": "fire"},
-            {"checkpoint_id": "MAR-CP-CLOSE", "title": "毁伤评估与渔船安全复核就绪", "min_elapsed_sec": 4590, "conditions": {"media_ids_released": ["MAR-MEDIA-07"], "event_types_emitted": ["weapon_hit", "damage_assessment_confirmed"]}, "pause": True, "submit_analysis": True, "requires_operator_action": True, "operator_action_type": "review"},
+            {"checkpoint_id": "MAR-CP-PERCEPTION", "title": "海空观测融合输入就绪", "min_elapsed_sec": 1470, "conditions": {"stable_track_count_at_least": 2, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["MAR-MEDIA-01", "MAR-MEDIA-02"]}, "pause": False, "continue_during_submission": True, "advance_story_during_analysis": True, "submit_analysis": True, "block_until_analysis_complete": True},
+            {"checkpoint_id": "MAR-CP-ASSESS", "title": "敌方与渔船识别输入就绪", "min_elapsed_sec": 2910, "conditions": {"stable_track_count_at_least": 2, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["MAR-MEDIA-03", "MAR-MEDIA-04"]}, "pause": False, "continue_during_submission": True, "advance_story_during_analysis": True, "submit_analysis": True, "block_until_analysis_complete": True},
+            {"checkpoint_id": "MAR-CP-PLAN", "title": "攻击方案与禁射约束输入就绪", "min_elapsed_sec": 3630, "conditions": {"media_ids_released": ["MAR-MEDIA-05"]}, "pause": False, "continue_during_submission": True, "advance_story_during_analysis": True, "submit_analysis": True, "block_until_analysis_complete": True},
+            {"checkpoint_id": "MAR-CP-ENGAGE", "title": "无线电警告与模拟开火等待授权", "min_elapsed_sec": 3630, "conditions": {"media_ids_released": ["MAR-MEDIA-06"]}, "pause": True, "continue_during_submission": True, "advance_story_during_analysis": True, "analysis_story_limit_sec": 5399, "submit_analysis": True, "submit_after_authorization": True, "block_until_analysis_complete": True, "requires_operator_action": True, "operator_action_type": "fire"},
+            {"checkpoint_id": "MAR-CP-CLOSE", "title": "毁伤评估与渔船安全复核就绪", "min_elapsed_sec": 4590, "conditions": {"media_ids_released": ["MAR-MEDIA-07"], "event_types_emitted": ["weapon_hit", "damage_assessment_confirmed"]}, "pause": True, "continue_during_submission": True, "advance_story_during_analysis": True, "analysis_story_limit_sec": 5399, "submit_analysis": True, "requires_operator_action": True, "operator_action_type": "review"},
         ],
         "fault_injections": [
             {"fault_id": "MAR-FAULT-JAM", "type": "communication_degradation", "target": "ESCORT-01", "at_checkpoint": "MAR-CP-ASSESS", "status": "available"},

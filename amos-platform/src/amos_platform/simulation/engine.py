@@ -133,6 +133,7 @@ class SimEngine:
         self._lock = threading.RLock()
         self._tick_interval = 0.5  # seconds wall clock
         self._director_motion_limit_sec: float | None = None
+        self._director_story_limit_sec: float | None = None
         self._director_story_hold = False
         self._director_hold_elapsed_sec = 0.0
         self._director_hold_assets: dict[str, tuple[float, float]] = {}
@@ -174,8 +175,14 @@ class SimEngine:
         """Load assets and threats from a scenario dict into the engine."""
         with self._lock:
             self._director_motion_limit_sec = None
+            self._director_story_limit_sec = None
             self.configure_seed(scenario.get("default_seed", self._seed) if seed is None else seed)
             load_scenario_into_engine(self, scenario, _now_iso)
+
+    def set_director_story_limit(self, limit_sec: float | None) -> None:
+        """Limit narrative time without changing route navigation or physical time."""
+        with self._lock:
+            self._director_story_limit_sec = limit_sec
 
     def set_director_story_hold(self, enabled: bool) -> None:
         """Keep scripted milestones still while the physical world continues."""
@@ -425,7 +432,10 @@ class SimEngine:
                         candidates.append(current + remaining)
         if not self._director_story_hold:
             story_now = float(self.clock.get("scenario_elapsed_sec", current) or 0)
-            candidates.extend(current + (value - story_now) for value in story_boundaries)
+            candidates.extend(
+                current + (value - story_now) for value in story_boundaries
+                if self._director_story_limit_sec is None or value <= self._director_story_limit_sec
+            )
         eligible = [value for value in candidates if current + 1e-9 < value < target - 1e-9]
         return min(eligible) if eligible else None
 
@@ -469,7 +479,15 @@ class SimEngine:
         if self._director_story_hold:
             self._director_hold_elapsed_sec += dt
         if "scenario_elapsed_sec" in self.clock and not self._director_story_hold:
-            self.clock["scenario_elapsed_sec"] = float(self.clock.get("scenario_elapsed_sec", 0) or 0) + dt
+            story_target = float(self.clock.get("scenario_elapsed_sec", 0) or 0) + dt
+            if self._director_story_limit_sec is not None:
+                # A late analysis must not consume the warning/authorization
+                # window. Ships still use their normal waypoint routes here.
+                story_target = max(
+                    float(self.clock.get("scenario_elapsed_sec", 0) or 0),
+                    min(story_target, self._director_story_limit_sec),
+                )
+            self.clock["scenario_elapsed_sec"] = story_target
         scenario_elapsed = float(self.clock.get("scenario_elapsed_sec", self.clock["elapsed_sec"]) or 0)
         self._update_scenario_tasks()
 

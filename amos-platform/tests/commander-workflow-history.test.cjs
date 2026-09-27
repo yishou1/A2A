@@ -4,6 +4,41 @@ const {readFileSync} = require('node:fs');
 const {resolve} = require('node:path');
 const vm = require('node:vm');
 
+test('automatic polls use brief status and fetch terminal details immediately', async () => {
+  const timers = new Map();
+  const context = {
+    window: {},
+    document: {getElementById() { return null; }, querySelectorAll() { return []; }, dispatchEvent() {}},
+    sessionStorage: {getItem() { return 'wf-one'; }, setItem() {}, removeItem() {}},
+    CustomEvent: function () {},
+    setInterval(callback, delay) { timers.set(delay, callback); return delay; }, clearInterval() {},
+  };
+  vm.runInNewContext(readFileSync(resolve(__dirname, '../static/js/workflow/commander-workflow.js'), 'utf8'), context);
+  let state = 'running', fullCount = 0, briefCount = 0;
+  const api = {
+    getBackendHealth: async () => ({status: 'ok'}),
+    getWorkflowBrief: async () => { briefCount++; return {status: state}; },
+    getWorkflowView: async () => {
+      fullCount++;
+      return {workflow_id: 'wf-one', status: state, terminal: state === 'completed', orchestration: {counts: {total: 1}}};
+    },
+  };
+  context.window.PlatformWorkflow.init(api);
+  await new Promise(setImmediate);
+  assert.equal(fullCount, 1);
+  timers.get(2000)();
+  await new Promise(setImmediate);
+  assert.equal(briefCount, 1);
+  assert.equal(fullCount, 1);
+  state = 'completed';
+  timers.get(2000)();
+  await new Promise(setImmediate);
+  assert.equal(fullCount, 2);
+  timers.get(2000)();
+  await new Promise(setImmediate);
+  assert.equal(fullCount, 2);
+});
+
 test('history refresh replaces a stale running stage with its completed view', async () => {
   const history = {innerHTML: '', addEventListener() {}};
   const timers = new Map();
