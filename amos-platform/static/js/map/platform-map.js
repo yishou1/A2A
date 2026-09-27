@@ -1198,9 +1198,16 @@ window.PlatformMap = (function () {
     if (configuredFocus) {
       operationalBounds = [[configuredFocus.south, configuredFocus.west], [configuredFocus.north, configuredFocus.east]];
     }
+    var configuredStartFocus = mapDisplay.start_focus_bounds;
+    var startBounds = configuredStartFocus ? [
+      [configuredStartFocus.south, configuredStartFocus.west],
+      [configuredStartFocus.north, configuredStartFocus.east]
+    ] : null;
     scenarioView = {
       center: [center.lat, center.lng],
       zoom: Number(theater.zoom || 12),
+      startZoom: Number(mapDisplay.start_zoom || theater.zoom || 12),
+      startBounds: startBounds,
       excludeDomains: excludedDomains.slice(),
       fixedBounds: Boolean(configuredFocus),
       labelAssetIds: Array.isArray(mapDisplay.label_asset_ids) ? mapDisplay.label_asset_ids.slice() : null,
@@ -1426,6 +1433,17 @@ window.PlatformMap = (function () {
     var seenAssets = {};
     (assets || []).forEach(function (asset, assetIndex) {
       var id = asset.id || asset.asset_id;
+      if (String(asset.status || "").toLowerCase() === "recovered") {
+        removeLayer(ownMarkers[id]);
+        removeLayer(ownTrails[id]);
+        (sensorLayers[id] || []).forEach(removeLayer);
+        delete ownMarkers[id];
+        delete ownTrails[id];
+        delete sensorLayers[id];
+        delete sensorLayerSignatures[id];
+        delete sensorPoseSignatures[id];
+        return;
+      }
       if (scenarioView && scenarioView.spaceNodeAssetIds.indexOf(String(id)) !== -1) {
         if (ownMarkers[id]) {
           removeLayer(ownMarkers[id]);
@@ -1624,6 +1642,19 @@ window.PlatformMap = (function () {
     }
   }
 
+  function focusMissionView() {
+    if (!map || !scenarioView) return;
+    if (!scenarioView.startBounds) {
+      focusScenarioView();
+      return;
+    }
+    map.invalidateSize();
+    map.fitBounds(scenarioView.startBounds, {
+      paddingTopLeft: [28, 28], paddingBottomRight: [28, 28],
+      maxZoom: scenarioView.startZoom, animate: false,
+    });
+  }
+
   function invalidateSize() {
     if (map) map.invalidateSize({pan: false});
   }
@@ -1700,6 +1731,7 @@ window.PlatformMap = (function () {
     renderAllSensorFootprints: renderAllSensorFootprints,
     clearSensorFootprints: clearSensors,
     focusScenarioView: focusScenarioView,
+    focusMissionView: focusMissionView,
     invalidateSize: invalidateSize,
     toggleLayer: toggleLayer,
     toggleMapLabels: toggleMapLabels,

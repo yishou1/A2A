@@ -125,7 +125,7 @@ def test_map_defaults_to_a_larger_view_and_supports_expanded_mode() -> None:
     controller = (ROOT / "static/js/app/platform.js").read_text(encoding="utf-8")
     dashboard = (ROOT / "templates/dashboard.html").read_text(encoding="utf-8")
 
-    assert "--workspace-width:46vw" in css
+    assert "--workspace-width:35vw" in css
     assert ".main.map-expanded #map-panel" in css
     assert 'id="btn-toggle-map-expanded"' in dashboard
     assert "function setMapExpanded(expanded)" in controller

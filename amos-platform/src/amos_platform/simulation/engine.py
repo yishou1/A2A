@@ -727,6 +727,10 @@ class SimEngine:
                 float(second["lat"]), float(second["lng"]),
             ), 1)
 
+        # Keep recovery waypoints attached to their moving host platform and
+        # recovered aircraft visually on its deck.
+        self._refresh_recovery_targets()
+
         # 1. Move assets along waypoint routes
         moving_assets = (
             {
@@ -746,14 +750,56 @@ class SimEngine:
                 continue
             if self.waypoint_nav.routes.get(asset_id):
                 continue
+            recovery_asset_id = str(asset.get("_recover_to_asset_id") or "")
+            recovery_asset = self.assets.get(recovery_asset_id)
+            asset_position = asset.get("position") or asset
+            recovery_position = (
+                (recovery_asset.get("position") or recovery_asset)
+                if recovery_asset else None
+            )
+            if recovery_position:
+                distance_nm = self.waypoint_nav._haversine(
+                    float(asset_position.get("lat", 0)),
+                    float(asset_position.get("lng", 0)),
+                    float(recovery_position.get("lat", 0)),
+                    float(recovery_position.get("lng", 0)),
+                )
+                recovery_radius_nm = max(
+                    0.01,
+                    float(asset.get("_recovery_radius_nm", 0.15) or 0.15),
+                )
+                if distance_nm > recovery_radius_nm:
+                    self.waypoint_nav.set_route(
+                        asset_id,
+                        [{
+                            "lat": float(recovery_position.get("lat", 0)),
+                            "lng": float(recovery_position.get("lng", 0)),
+                            "label": "RECOVERY-ASSET-DECK",
+                        }],
+                        mode="hold",
+                    )
+                    asset["status"] = "active"
+                    asset["speed_kts"] = max(
+                        1.0,
+                        float(asset.get("_cruise_speed_kts", 1) or 1),
+                    )
+                    continue
+                asset_position["lat"] = float(recovery_position.get("lat", 0))
+                asset_position["lng"] = float(recovery_position.get("lng", 0))
+                asset_position["alt_ft"] = float(recovery_position.get("alt_ft", 0) or 0)
+                if recovery_asset.get("heading_deg") is not None:
+                    asset["heading_deg"] = float(recovery_asset["heading_deg"])
+                asset["_recovered_on_asset_id"] = recovery_asset_id
             asset.pop("_recover_on_arrival", None)
             asset["status"] = "recovered"
             asset["_cruise_speed_kts"] = 0.0
             asset["speed_kts"] = 0.0
+            self.waypoint_nav.clear(asset_id)
             self.events.append({
                 "type": "aircraft_recovered",
                 "asset_id": asset_id,
                 "recovery_kind": "deck",
+                "recovery_asset_id": recovery_asset_id or None,
                 "sim_time": round(float(self.clock.get("elapsed_sec", 0) or 0), 2),
                 "timestamp": time.time(),
             })
@@ -1299,6 +1345,7 @@ class SimEngine:
 
         # Maintain a continuous, causal exchange log independently of browser
         # polling so Gateway receives the full run slice at submission time.
+        self._refresh_recovery_targets()
         self.exchange.build_snapshot(self.get_agent_visible_state())
 
     def evaluate_media_captures(self) -> list[dict]:
@@ -2264,6 +2311,17 @@ class SimEngine:
                     # 到达最终回收航路点后转为已回收（发 aircraft_recovered 事件），
                     # 供导演的 recovered_asset_ids 条件和"甲板回收完成"叙事使用。
                     asset["_recover_on_arrival"] = bool(behavior.get("recover_on_arrival"))
+                    recovery_asset_id = str(behavior.get("recover_to_asset_id") or "")
+                    if asset["_recover_on_arrival"] and recovery_asset_id:
+                        asset["_recover_to_asset_id"] = recovery_asset_id
+                        asset["_recovery_radius_nm"] = float(
+                            behavior.get("recovery_radius_nm", 0.15) or 0.15
+                        )
+                        recovery_asset = self.assets.get(recovery_asset_id)
+                        if recovery_asset:
+                            recovery_position = recovery_asset.get("position") or recovery_asset
+                            waypoints[-1]["lat"] = float(recovery_position.get("lat", 0))
+                            waypoints[-1]["lng"] = float(recovery_position.get("lng", 0))
                     rerouted_assets.append(route_asset_id)
             self.events.append({
                 "type": "damage_assessment_confirmed",
@@ -2287,6 +2345,31 @@ class SimEngine:
                     "sim_time": round(now, 2),
                     "timestamp": time.time(),
                 })
+
+    def _refresh_recovery_targets(self) -> None:
+        """Attach returning and recovered aircraft to a moving host asset."""
+        for asset_id, asset in self.assets.items():
+            recovery_asset_id = str(
+                asset.get("_recover_to_asset_id")
+                or asset.get("_recovered_on_asset_id")
+                or ""
+            )
+            recovery_asset = self.assets.get(recovery_asset_id)
+            if not recovery_asset:
+                continue
+            recovery_position = recovery_asset.get("position") or recovery_asset
+            if asset.get("_recovered_on_asset_id"):
+                asset_position = asset.get("position") or asset
+                asset_position["lat"] = float(recovery_position.get("lat", 0))
+                asset_position["lng"] = float(recovery_position.get("lng", 0))
+                asset_position["alt_ft"] = float(recovery_position.get("alt_ft", 0) or 0)
+                if recovery_asset.get("heading_deg") is not None:
+                    asset["heading_deg"] = float(recovery_asset["heading_deg"])
+                continue
+            route = self.waypoint_nav.routes.get(asset_id)
+            if route:
+                route[-1]["lat"] = float(recovery_position.get("lat", 0))
+                route[-1]["lng"] = float(recovery_position.get("lng", 0))
 
     def _post_impact_visual_observer(self, truth_id: str) -> str | None:
         """Return an active visual platform currently able to assess an impact.

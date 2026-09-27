@@ -459,7 +459,7 @@ def build_coastal_joint_recon_strike_scenario() -> dict[str, Any]:
         "description": "验证两颗低轨侦察卫星接力过境、通信卫星持续中继、情报产品时效管理、单机侦察、海上任务指挥、空中战术指挥、四节点协同武器链、人工授权、分路撤离和毁伤评估闭环。",
         "scenario_type": "scripted_agent_demo",
         "theater": {"theater_id": "bashi_channel_adjacent_joint_training", "name": "台湾南部—菲律宾北部毗邻海域虚构联合训练区", "location_profile": "fictional_training_area", "center": {"lat": 20.49, "lng": 122.13}, "zoom": 8, "ao": {"north": 21.06, "south": 20.01, "east": 122.93, "west": 121.07}},
-        "map_display": {"relief_manifest": "/static/assets/maps/taiwan-se-relief/manifest.json", "default_layers": {"sensors": False, "ao": True, "coordination": True}, "coordination_link_types": ["weapon"], "track_style": "tactical_joint", "base_surface": "coastal", "focus_bounds": {"north": 22.10, "south": 19.70, "east": 122.80, "west": 120.80}, "exclude_domains_from_focus": ["space"], "space_node_asset_ids": ["SAT-COM-01"], "space_visual_speed_factor": 0.035, "space_ground_tracks": [{"asset_id": "SAT-RECON-01", "label": "侦察卫星01完整星下轨迹", "access_start_sec": 240, "access_end_sec": 600, "color": "#9eb2c8", "points": [dict(point) for point in orbital_tracks["SAT-RECON-01"]]}, {"asset_id": "SAT-RECON-02", "label": "侦察卫星02完整接力星下轨迹", "access_start_sec": 1680, "access_end_sec": 2040, "color": "#9da7bf", "points": [dict(point) for point in orbital_tracks["SAT-RECON-02"]]}], "trail_window_sec": 240, "track_trail_window_sec": 360, "label_asset_ids": ["SAT-RECON-01", "SAT-RECON-02", "SEA-C2-01", "WZ10-01", "J16-01", "ATTACK-UAV-01", "ATTACK-UAV-02"], "trail_asset_ids": ["WZ10-01", "J16-01", "ATTACK-UAV-01", "ATTACK-UAV-02"]},
+        "map_display": {"relief_manifest": "/static/assets/maps/taiwan-se-relief/manifest.json", "default_layers": {"sensors": False, "ao": True, "coordination": True}, "coordination_link_types": ["weapon"], "track_style": "tactical_joint", "base_surface": "coastal", "focus_bounds": {"north": 22.10, "south": 19.70, "east": 122.80, "west": 120.80}, "start_focus_bounds": {"north": 21.06, "south": 20.01, "east": 122.93, "west": 121.07}, "start_zoom": 9, "expand_on_start": False, "exclude_domains_from_focus": ["space"], "space_node_asset_ids": ["SAT-COM-01"], "space_visual_speed_factor": 0.035, "space_ground_tracks": [{"asset_id": "SAT-RECON-01", "label": "侦察卫星01完整星下轨迹", "access_start_sec": 240, "access_end_sec": 600, "color": "#9eb2c8", "points": [dict(point) for point in orbital_tracks["SAT-RECON-01"]]}, {"asset_id": "SAT-RECON-02", "label": "侦察卫星02完整接力星下轨迹", "access_start_sec": 1680, "access_end_sec": 2040, "color": "#9da7bf", "points": [dict(point) for point in orbital_tracks["SAT-RECON-02"]]}], "trail_window_sec": 240, "track_trail_window_sec": 360, "label_asset_ids": ["SAT-RECON-01", "SAT-RECON-02", "SEA-C2-01", "WZ10-01", "J16-01", "ATTACK-UAV-01", "ATTACK-UAV-02"], "trail_asset_ids": ["WZ10-01", "J16-01", "ATTACK-UAV-01", "ATTACK-UAV-02"]},
         "space_operations": {
             "title": "空天支援 · 双星接力",
             "relay": {"asset_id": "SAT-COM-01", "label": "通信中继在线"},
@@ -559,11 +559,16 @@ def build_coastal_joint_recon_strike_scenario() -> dict[str, Any]:
             {"checkpoint_id": "CJR-CP-IDENTIFY", "title": "地面目标多模态识别输入就绪", "min_elapsed_sec": 1530, "conditions": {"stable_track_count_at_least": 1, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["CJR-MEDIA-03"]}, "pause": False, "submit_analysis": True, "block_until_analysis_complete": True},
             {"checkpoint_id": "CJR-CP-FUSION", "title": "情报融合与共享输入就绪", "min_elapsed_sec": 2130, "conditions": {"stable_track_count_at_least": 1, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["CJR-MEDIA-03", "CJR-MEDIA-10"]}, "pause": False, "submit_analysis": True, "block_until_analysis_complete": True},
             {"checkpoint_id": "CJR-CP-PLAN", "title": "战术指挥与协同方案输入就绪", "min_elapsed_sec": 2730, "conditions": {"stable_track_count_at_least": 1, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["CJR-MEDIA-03", "CJR-MEDIA-10"]}, "pause": False, "submit_analysis": True, "block_until_analysis_complete": True},
-            {"checkpoint_id": "CJR-CP-ENGAGE", "title": "协同武器链等待明确授权", "min_elapsed_sec": 3330, "conditions": {"media_ids_released": ["CJR-MEDIA-06", "CJR-MEDIA-08", "CJR-MEDIA-09"]}, "pause": True, "submit_analysis": True, "block_until_analysis_complete": True, "requires_operator_action": True},
+            # CJR-CP-PLAN 已经完成目标识别、保护区审查和武器链规划；授权边界
+            # 只负责向操作员展示最终方案。这里不得再次提交整套 A1-A6 工作流，
+            # 否则地图会先暂停十几秒，待重复分析完成后才出现授权弹窗。
+            {"checkpoint_id": "CJR-CP-ENGAGE", "title": "协同武器链等待明确授权", "min_elapsed_sec": 3300, "conditions": {"media_ids_released": ["CJR-MEDIA-06", "CJR-MEDIA-08", "CJR-MEDIA-09"]}, "pause": True, "submit_analysis": False, "block_until_analysis_complete": False, "requires_operator_action": True},
             # 收尾检查点只承载复核结果，不得再次进入 FIRE 授权状态。否则首轮
             # 齐射已经核销后不存在 eligible track，前端没有可展示目标，导演却会
             # 永久等待一个不可能出现的第二个攻击弹窗。
-            {"checkpoint_id": "CJR-CP-CLOSE", "title": "毁伤评估与闭环建议就绪", "min_elapsed_sec": 4530, "conditions": {"media_ids_released": ["CJR-MEDIA-07"], "event_types_emitted": ["damage_assessment_confirmed"]}, "pause": True, "submit_analysis": True, "block_until_analysis_complete": True, "requires_operator_action": True, "operator_action_type": "review"},
+            # 毁伤评估事件本身已经是闭环结论。收尾检查点只做记账，不再暂停
+            # 仿真或重复提交分析，确保无人机在评估确认后立即连续返航。
+            {"checkpoint_id": "CJR-CP-CLOSE", "title": "毁伤评估与闭环建议就绪", "min_elapsed_sec": 4530, "conditions": {"media_ids_released": ["CJR-MEDIA-07"], "event_types_emitted": ["damage_assessment_confirmed"]}, "pause": False, "submit_analysis": False, "block_until_analysis_complete": False, "requires_operator_action": False, "operator_action_type": "review"},
         ],
         "fault_injections": [
             {"fault_id": "CJR-FAULT-LINK", "type": "communication_degradation", "target": "J16-01", "at_checkpoint": "CJR-CP-PLAN", "status": "available"},
@@ -640,8 +645,8 @@ def build_coastal_joint_recon_strike_scenario() -> dict[str, Any]:
             "post_bda_behaviors": {
                 "WZ10-01": {"behavior": "reconnaissance_return", "label": "完成毁伤复查后返航", "speed_kts": 190},
                 "SEA-C2-01": {"behavior": "command_ship_recovery", "label": "离开发射阵位并撤收", "speed_kts": 14},
-                "ATTACK-UAV-01": {"behavior": "north_axis_recovered_to_support_ship", "label": "北路无人机返保障舰并完成甲板回收", "speed_kts": 130, "recover_on_arrival": True},
-                "ATTACK-UAV-02": {"behavior": "south_axis_recovered_to_support_ship", "label": "南路无人机返保障舰并完成甲板回收", "speed_kts": 130, "recover_on_arrival": True},
+                "ATTACK-UAV-01": {"behavior": "north_axis_recovered_to_support_ship", "label": "北路无人机返保障舰并完成甲板回收", "speed_kts": 130, "recover_on_arrival": True, "recover_to_asset_id": "SEA-C2-01", "recovery_radius_nm": 0.15},
+                "ATTACK-UAV-02": {"behavior": "south_axis_recovered_to_support_ship", "label": "南路无人机返保障舰并完成甲板回收", "speed_kts": 130, "recover_on_arrival": True, "recover_to_asset_id": "SEA-C2-01", "recovery_radius_nm": 0.15},
             },
             "coordinated_engagement": {
                 "chain_id": "CJR-WEAPON-CHAIN-01",

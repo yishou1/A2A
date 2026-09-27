@@ -343,6 +343,8 @@ def test_frontend_keeps_director_stream_and_interpolates_live_markers() -> None:
     assert "var runChanged = Boolean(" in controller
     assert "runChanged &&" in controller
     assert "Map.focusScenarioView();" in controller
+    assert "DIRECTOR_REFRESH_INTERVAL_MS = 1000" in controller
+    assert 'String(asset.status || "").toLowerCase() === "recovered"' in map_script
 
 
 def test_frontend_fails_closed_after_analysis_error_and_uses_panel_width() -> None:

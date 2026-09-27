@@ -112,6 +112,10 @@ def test_coastal_joint_force_package_and_backend_contract_are_complete() -> None
     assert scenario["map_display"]["default_layers"]["coordination"] is True
     assert scenario["map_display"]["coordination_link_types"] == ["weapon"]
     assert scenario["map_display"]["trail_window_sec"] == 240
+    start_bounds = scenario["map_display"]["start_focus_bounds"]
+    assert start_bounds == scenario["theater"]["ao"]
+    assert scenario["map_display"]["start_zoom"] == 9
+    assert scenario["map_display"]["expand_on_start"] is False
     assert len(scenario["media_cues"]) == 12
     assert scenario["map_display"]["space_visual_speed_factor"] == 0.035
     assert "SAT-RECON-01" not in scenario["map_display"]["trail_asset_ids"]
@@ -126,6 +130,19 @@ def test_coastal_joint_force_package_and_backend_contract_are_complete() -> None
         item for item in scenario["demo_checkpoints"]
         if item["checkpoint_id"] == "CJR-CP-CLOSE"
     )
+    engage_checkpoint = next(
+        item for item in scenario["demo_checkpoints"]
+        if item["checkpoint_id"] == "CJR-CP-ENGAGE"
+    )
+    assert engage_checkpoint["pause"] is True
+    assert engage_checkpoint["min_elapsed_sec"] == 3300
+    assert engage_checkpoint["submit_analysis"] is False
+    assert engage_checkpoint["block_until_analysis_complete"] is False
+    assert engage_checkpoint["requires_operator_action"] is True
+    assert close_checkpoint["pause"] is False
+    assert close_checkpoint["submit_analysis"] is False
+    assert close_checkpoint["block_until_analysis_complete"] is False
+    assert close_checkpoint["requires_operator_action"] is False
     assert close_checkpoint["operator_action_type"] == "review"
     assert close_checkpoint["conditions"]["event_types_emitted"] == [
         "damage_assessment_confirmed"
@@ -351,20 +368,39 @@ def test_backend_assessment_unlocks_four_individual_weapon_nodes_without_truth_l
     assert engine.waypoint_nav.get_route("ATTACK-UAV-02")[-1]["label"] == "SEA-C2-RECOVERY-DECK"
     assert engine.assets["ATTACK-UAV-01"]["_current_behavior"] == "north_axis_recovered_to_support_ship"
     assert engine.assets["ATTACK-UAV-02"]["_current_behavior"] == "south_axis_recovered_to_support_ship"
+    recovery_position = engine.assets["SEA-C2-01"]["position"]
+    for asset_id in ("ATTACK-UAV-01", "ATTACK-UAV-02"):
+        asset = engine.assets[asset_id]
+        recovery_waypoint = engine.waypoint_nav.get_route(asset_id)[-1]
+        assert asset["_recover_to_asset_id"] == "SEA-C2-01"
+        assert distance_nm(
+            recovery_waypoint["lat"], recovery_waypoint["lng"],
+            recovery_position["lat"], recovery_position["lng"],
+        ) <= asset["_recovery_radius_nm"]
     assert "CJR-MEDIA-07" in {
         item["media_id"] for item in engine.media_capture.public_captures()
     }
     # 两架攻击无人机在 BDA 后返回保障舰，到达最终回收点完成甲板回收。
     # 5720 覆盖从盘旋环最远端出发的最坏飞行时间（BDA≈4510 + ~1075s + 余量）。
     _advance(engine, 5720)
+    recovery_position = engine.assets["SEA-C2-01"]["position"]
     for asset_id in ("ATTACK-UAV-01", "ATTACK-UAV-02"):
-        assert engine.assets[asset_id]["status"] == "recovered", asset_id
-        assert engine.assets[asset_id]["speed_kts"] == 0.0, asset_id
+        asset = engine.assets[asset_id]
+        assert asset["status"] == "recovered", asset_id
+        assert asset["speed_kts"] == 0.0, asset_id
+        assert asset["_recovered_on_asset_id"] == "SEA-C2-01", asset_id
+        assert asset["position"]["lat"] == recovery_position["lat"], asset_id
+        assert asset["position"]["lng"] == recovery_position["lng"], asset_id
     assert {
         item.get("asset_id")
         for item in engine.events
         if item.get("type") == "aircraft_recovered"
     } == {"ATTACK-UAV-01", "ATTACK-UAV-02"}
+    assert {
+        item.get("recovery_asset_id")
+        for item in engine.events
+        if item.get("type") == "aircraft_recovered"
+    } == {"SEA-C2-01"}
 
 
 def test_maritime_observe_attachments_unchanged_by_coastal_filters() -> None:

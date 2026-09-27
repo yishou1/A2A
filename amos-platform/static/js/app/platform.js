@@ -21,7 +21,9 @@ window.Platform = (function () {
   var directorWorkflowId = null;
   var handledDirectorCheckpoint = null;
   var SIM_POLL_INTERVAL_MS = 3000;
-  var DIRECTOR_REFRESH_INTERVAL_MS = 5000;
+  // Authorization is a local, lightweight state read. Poll it frequently so
+  // the dialog follows the paused engagement boundary without a visible gap.
+  var DIRECTOR_REFRESH_INTERVAL_MS = 1000;
   var ALGORITHM_REFRESH_INTERVAL_MS = 60000;
   var running = false;
   var paused = false;
@@ -668,6 +670,13 @@ window.Platform = (function () {
     await setSpeed(speed);
     onState(await API.loadSimState());
     connectSSE();
+    var mapDisplay = currentScenario && currentScenario.map_display || {};
+    if (mapDisplay.expand_on_start) setMapExpanded(true);
+    window.requestAnimationFrame(function () {
+      Map.invalidateSize();
+      if (Map.focusMissionView) Map.focusMissionView();
+      else Map.focusScenarioView();
+    });
   }
 
   async function pauseSim() {
