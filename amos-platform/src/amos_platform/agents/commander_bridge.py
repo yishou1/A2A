@@ -49,7 +49,9 @@ CHECKPOINT_WORKFLOW_FILES = {
     "MAR-CP-PLAN": DECIDE_WORKFLOW_FILE,
     "MAR-CP-CLOSE": ACT_WORKFLOW_FILE,
     "CJR-CP-CUE": OBSERVE_WORKFLOW_FILE,
-    "CJR-CP-IDENTIFY": ORIENT_WORKFLOW_FILE,
+    # Ground EO identification is still Observe/FIND-FIX work: TIA must see the
+    # coastal-missile-site frame before TrackThreat ranks the fixed track.
+    "CJR-CP-IDENTIFY": OBSERVE_WORKFLOW_FILE,
     "CJR-CP-FUSION": ORIENT_WORKFLOW_FILE,
     "CJR-CP-PLAN": DECIDE_WORKFLOW_FILE,
     "CJR-CP-ENGAGE": ENGAGE_WORKFLOW_FILE,

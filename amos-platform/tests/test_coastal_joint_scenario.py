@@ -367,29 +367,156 @@ def test_backend_assessment_unlocks_four_individual_weapon_nodes_without_truth_l
     } == {"ATTACK-UAV-01", "ATTACK-UAV-02"}
 
 
+def test_maritime_observe_attachments_unchanged_by_coastal_filters() -> None:
+    """剧本二附件过滤不得收缩剧本一观察阶段的历史附件集合。"""
+    scenario = get_scenario("maritime-convoy-air-defense")
+    assert scenario is not None
+    engine = SimEngine(seed=int(scenario["default_seed"]))
+    engine.load_scenario(scenario)
+    engine.clock.update({
+        "run_id": "run-mar-observe-regression",
+        "scenario_id": "maritime-convoy-air-defense",
+        "scenario_branch": "standard",
+        "director_checkpoint_id": "MAR-CP-PERCEPTION",
+    })
+    _advance(engine, 1470)
+    payload = CommanderBridge(mode="gateway").build_workflow_payload(scenario, {}, engine)
+    assert payload["workflow_file"].endswith("observe_workflow.bpel")
+    assert [item["id"] for item in payload.get("attachments") or []] == [
+        "MAR-MEDIA-00", "MAR-MEDIA-01", "MAR-MEDIA-02",
+    ]
+    uris = [str(item.get("uri") or "") for item in payload.get("attachments") or []]
+    assert any(uri.endswith("00-convoy-overview.png") for uri in uris)
+    assert all("/coastal-joint-recon-strike/" not in uri for uri in uris)
+
+
+def test_observe_identify_feeds_coastal_missile_site_not_ship_imagery() -> None:
+    """剧本二观察与识别：TIA 应收到沿海阵地传感器图，而不是海面船图或舰艇示意图。"""
+    scenario = get_scenario(SCENARIO_ID)
+    assert scenario is not None
+    expected = {
+        "CJR-CP-CUE": {
+            "elapsed": 930,
+            "workflow": "observe_workflow.bpel",
+            "must_include": {"01-satellite-sar-v2.png", "02-wz10-sar-v2.png"},
+            "must_exclude_names": {"00-theater-overview.svg", "03-fast-surface-contact.png"},
+        },
+        "CJR-CP-IDENTIFY": {
+            "elapsed": 1530,
+            "workflow": "observe_workflow.bpel",
+            "must_include": {"03-wz10-eo-v2.png"},
+            "must_exclude_names": {
+                "00-theater-overview.svg",
+                "03-fast-surface-contact.png",
+                "00-convoy-overview.png",
+            },
+        },
+    }
+    for checkpoint_id, spec in expected.items():
+        engine = SimEngine(seed=int(scenario["default_seed"]))
+        engine.load_scenario(scenario)
+        engine.clock.update({
+            "run_id": f"run-tia-media-{checkpoint_id}",
+            "scenario_id": SCENARIO_ID,
+            "scenario_branch": "standard",
+            "director_checkpoint_id": checkpoint_id,
+        })
+        _advance(engine, float(spec["elapsed"]))
+        payload = CommanderBridge(mode="gateway").build_workflow_payload(scenario, {}, engine)
+        assert payload["workflow_file"].endswith(spec["workflow"])
+        stage = payload["mission_input"]["stage_transfer"]
+        assert stage["checkpoint_id"] == checkpoint_id
+        uris = [str(item.get("uri") or "") for item in payload.get("attachments") or []]
+        names = {uri.rsplit("/", 1)[-1] for uri in uris}
+        assert all("/coastal-joint-recon-strike/" in uri for uri in uris if uri.endswith((".png", ".svg")))
+        assert not any("/maritime-convoy-air-defense/" in uri for uri in uris)
+        assert spec["must_include"] <= names
+        assert names.isdisjoint(spec["must_exclude_names"])
+
+
+def _apply_observe_identify_assessment(engine: SimEngine, workflow_id: str = "wf-cjr-identify") -> str:
+    """Simulate observe_workflow tracking output (no Orient threat ranking)."""
+    track = next(iter(engine.sensor_fusion.tracks.values()))
+    projection = apply_commander_assessments(
+        engine,
+        {
+            "workflow_id": workflow_id,
+            "status": "completed",
+            "result": {
+                "outputs": {
+                    "tracking_result": [{"value": {"tracks": [{
+                        "track_id": track.id,
+                        "object_type": "unknown",
+                        "metadata": {
+                            "source_class": "coastal_missile_site",
+                            "label": "hostile",
+                            "affiliation": "red",
+                            "threat_level": "high",
+                        },
+                        "lat": track.lat,
+                        "lon": track.lng,
+                    }]}}],
+                },
+                "summary": {"verification": "observe-identify fixture"},
+            },
+        },
+        submission={
+            "run_id": str(engine.clock.get("run_id") or "run-cjr-identify"),
+            "transport": "gateway",
+            "package": {"package_id": "pkg-cjr-identify", "verified": True},
+            "snapshot_sequence": int(engine.sensor_fusion.last_observation_batch.get("tick_id", 0) or 0),
+            "simulation_time_sec": float(engine.clock["elapsed_sec"]),
+        },
+    )
+    assert projection["status"] == "completed"
+    assert projection["applied_count"] == 1
+    return track.id
+
+
 def test_multimodal_evidence_releases_a_backend_classification_candidate() -> None:
     scenario = get_scenario(SCENARIO_ID)
     assert scenario is not None
     engine = SimEngine(seed=int(scenario["default_seed"]))
     engine.load_scenario(scenario)
 
+    # EO evidence alone should classify before Orient/FUSION (T+2130).
     _advance(engine, 1530)
-    assert all(
-        track.classification == "UNKNOWN"
-        for track in engine.sensor_fusion.tracks.values()
-    )
-
-    _advance(engine, 1710)
     candidates = list(engine.sensor_fusion.tracks.values())
     assert candidates
     assert all(track.classification == "COASTAL_MISSILE_SITE" for track in candidates)
     assert all(track.agent_assessment["status"] == "pending" for track in candidates)
+    assert float(engine.clock["elapsed_sec"]) < 2130
 
-    payload = CommanderBridge().build_workflow_payload(scenario, {}, engine)
-    mission = payload["attachments"][0]["meta"]["amos_mission"]
-    assert {contact["classification"] for contact in mission["contacts"]} == {
+    payload = CommanderBridge(mode="gateway").build_workflow_payload(scenario, {}, engine)
+    contacts = payload["mission_input"]["contacts"]
+    assert {contact["classification"] for contact in contacts} == {
         "coastal_missile_site",
     }
+
+
+def test_high_risk_confirmed_during_observe_before_orient_fusion() -> None:
+    """高风险应在观察与识别（IDENTIFY）结束时写出，早于航迹评估 FUSION。"""
+    scenario = get_scenario(SCENARIO_ID)
+    assert scenario is not None
+    engine = SimEngine(seed=int(scenario["default_seed"]))
+    engine.load_scenario(scenario)
+    engine.clock.update({
+        "run_id": "run-cjr-high-risk-early",
+        "scenario_id": SCENARIO_ID,
+        "scenario_branch": "standard",
+        "director_checkpoint_id": "CJR-CP-IDENTIFY",
+    })
+
+    _advance(engine, 1530)
+    track_id = _apply_observe_identify_assessment(engine)
+    track = engine.sensor_fusion.tracks[track_id]
+
+    assert float(engine.clock["elapsed_sec"]) < 2130
+    assert track.classification == "COASTAL_MISSILE_SITE"
+    assert track.threat_level == "HIGH"
+    assert track.agent_assessment["status"] == "confirmed"
+    assert track.agent_assessment["label"] == "高风险"
+    assert track.agent_assessment["source"] == "A2A 后端工作流"
 
 
 def test_individual_assets_loiter_or_patrol_instead_of_freezing_on_station() -> None:

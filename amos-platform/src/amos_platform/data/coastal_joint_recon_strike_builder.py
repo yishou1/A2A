@@ -508,9 +508,11 @@ def build_coastal_joint_recon_strike_scenario() -> dict[str, Any]:
         "capture_plans": capture_plans,
         "evidence_classification_rules": [
             {
+                # Identify on EO at CJR-CP-IDENTIFY (T+1530), before Orient/FUSION.
+                # ELINT (CJR-MEDIA-10) remains fusion evidence, not the entry gate.
                 "rule_id": "CJR-ID-COASTAL-SITE",
                 "target_ref": "COASTAL-SITE-01",
-                "required_media_ids": ["CJR-MEDIA-03", "CJR-MEDIA-10"],
+                "required_media_ids": ["CJR-MEDIA-03"],
                 "classification": "COASTAL_MISSILE_SITE",
                 "retain_until_sec": 5100,
             },

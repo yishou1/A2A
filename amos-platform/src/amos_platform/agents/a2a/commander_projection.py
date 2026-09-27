@@ -93,27 +93,36 @@ def _workflow_artifacts(workflow_status: dict[str, Any]) -> tuple[dict[str, Any]
 def _assessment_rows(artifact: dict[str, Any]) -> list[dict[str, Any]]:
     rows = artifact.get("threats") or artifact.get("ranked_threats") or artifact.get("unified_threat_ranking") or []
     if not rows:
-        # FIX may produce an identified track before Orient computes a threat
-        # ranking. Preserve that backend-owned classification so the next
-        # stage receives it instead of reverting the contact to generic SHIP.
-        rows = [
-            {
+        # Observe may identify a hostile coastal site before Orient ranks threats.
+        # Promote track metadata (source_class / threat_level) so AMOS can show
+        # 「高风险」 at CJR-CP-IDENTIFY instead of waiting for FUSION.
+        high_risk_classes = {
+            "coastal_missile_site",
+            "missile_site",
+            "missile_battery",
+            "fast_attack_craft",
+            "airfield_runway",
+            "airfield",
+            "mobile_coastal_air_defense",
+            "coastal_air_defense",
+        }
+        rows = []
+        for item in artifact.get("tracks") or []:
+            if not isinstance(item, dict) or not (item.get("track_id") or item.get("id")):
+                continue
+            metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+            source_class = str(metadata.get("source_class") or "").lower()
+            if source_class in {"", "unknown", "ship"}:
+                continue
+            level = str(metadata.get("threat_level") or "").lower()
+            if not level and source_class in high_risk_classes:
+                level = "high"
+            rows.append({
                 **item,
                 "track_id": item.get("track_id") or item.get("id"),
                 "score": item.get("track_quality", item.get("confidence")),
-                "level": (
-                    (item.get("metadata") or {}).get("threat_level")
-                    if isinstance(item.get("metadata"), dict)
-                    else None
-                ),
-            }
-            for item in artifact.get("tracks") or []
-            if isinstance(item, dict)
-            and (item.get("track_id") or item.get("id"))
-            and isinstance(item.get("metadata"), dict)
-            and str((item.get("metadata") or {}).get("source_class") or "").lower()
-            not in {"", "unknown", "ship"}
-        ]
+                "level": level or None,
+            })
     normalized = []
     for row in rows:
         if not isinstance(row, dict):

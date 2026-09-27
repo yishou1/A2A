@@ -218,6 +218,82 @@ class PayloadAdapterTest(unittest.TestCase):
             "stationary_multisensor_ground_site_evidence",
         )
 
+    def test_theater_schematic_is_not_converted_to_tia_image_frame(self):
+        batch = commander_payload_to_batch({
+            "workflow_id": "wf-coastal-cue",
+            "attachments": [
+                {
+                    "id": "CJR-MEDIA-00",
+                    "kind": "telemetry",
+                    "uri": "http://127.0.0.1:5000/static/assets/scenarios/coastal-joint-recon-strike/00-theater-overview.svg",
+                    "mime_type": "image/svg+xml",
+                    "checksum": {"algorithm": "sha256", "value": "abc"},
+                    "meta": {
+                        "product_type": "external_precollected",
+                        "modality": "telemetry",
+                    },
+                },
+                {
+                    "id": "CJR-MEDIA-03",
+                    "kind": "image",
+                    "uri": "http://127.0.0.1:5000/static/assets/scenarios/coastal-joint-recon-strike/03-wz10-eo-v2.png",
+                    "mime_type": "image/png",
+                    "checksum": {"algorithm": "sha256", "value": "def"},
+                    "meta": {
+                        "product_type": "raw_sensor_frame",
+                        "modality": "eo_ir",
+                    },
+                },
+            ],
+        })
+        image_uris = [
+            str((frame.payload or {}).get("image_uri") or "")
+            for frame in batch.frames
+            if (frame.payload or {}).get("image_uri")
+        ]
+        self.assertEqual(image_uris, [
+            "http://127.0.0.1:5000/static/assets/scenarios/coastal-joint-recon-strike/03-wz10-eo-v2.png",
+        ])
+        self.assertTrue(all("maritime-convoy-air-defense" not in uri for uri in image_uris))
+        self.assertTrue(all("fast-surface-contact" not in uri for uri in image_uris))
+
+    def test_ground_ship_detector_label_is_remapped_to_coastal_missile_site(self):
+        batch = commander_payload_to_batch({
+            "workflow_id": "wf-coastal-cue",
+            "input": {
+                "mission_input": {
+                    "stage_transfer": {
+                        "checkpoint_id": "CJR-CP-CUE",
+                        "phase": "FIX",
+                    },
+                    "contacts": [{
+                        "track_id": "TRK-GROUND-01",
+                        "geo": {"lat": 20.45, "lon": 121.98},
+                        "metadata": {
+                            "domain_hint": "ground",
+                            "speed_kts": 0.0,
+                            "sensor_sources": ["SAR"],
+                        },
+                    }],
+                },
+            },
+        })
+        classifications = CognitionSkill._apply_observable_classification_evidence(
+            batch,
+            [{
+                "target_id": "TRK-GROUND-01",
+                "label": "unknown",
+                "object_class": "ship",
+                "confidence": 0.7,
+            }],
+        )
+        self.assertEqual(classifications[0]["object_class"], "coastal_missile_site")
+        self.assertEqual(classifications[0]["label"], "hostile")
+        self.assertEqual(
+            classifications[0]["classification_basis"],
+            "ground_domain_rejects_maritime_detector_label",
+        )
+
     def test_find_phase_does_not_identify_contacts_early(self):
         batch = commander_payload_to_batch({
             "workflow_id": "wf-find",

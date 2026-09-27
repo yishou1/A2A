@@ -18,6 +18,37 @@ from amos_platform.agents.a2a.mission_contract import (
 from amos_platform.agents.a2a.stage_transfer import build_stage_transfer_manifest
 
 
+def _is_coastal_scenario_attachment(item: dict[str, Any], scenario_id: str = "") -> bool:
+    media_id = str(item.get("id") or "")
+    uri = str(item.get("uri") or "")
+    return (
+        str(scenario_id).startswith("coastal-joint")
+        or media_id.startswith("CJR-MEDIA-")
+        or "/coastal-joint-recon-strike/" in uri
+    )
+
+
+def _is_agent_sensor_attachment(item: dict[str, Any], *, scenario_id: str = "") -> bool:
+    """Coastal-only: drop theater schematics from agent image attachments.
+
+    Maritime and other scenarios keep their historical attachment set unchanged.
+    Stage transfer still records coastal schematics as evidence.
+    """
+    if not _is_coastal_scenario_attachment(item, scenario_id):
+        return True
+    meta = item.get("meta") if isinstance(item.get("meta"), dict) else {}
+    product_type = str(meta.get("product_type") or item.get("product_type") or "").casefold()
+    mime = str(item.get("mime_type") or "").casefold()
+    kind = str(item.get("kind") or "").casefold()
+    if product_type == "command_product":
+        return False
+    if product_type == "external_precollected" and (
+        mime == "image/svg+xml" or kind == "telemetry"
+    ):
+        return False
+    return True
+
+
 def build_a2a_perception_task(agent_input: dict[str, Any]) -> dict[str, Any]:
     """Wrap an agent-visible perception packet as an A2A task body."""
     return {
@@ -238,6 +269,7 @@ def build_commander_workflow_payload(
     attachments = [
         item for item in attachments
         if str(item.get("id") or "") in transfer_media_ids
+        and _is_agent_sensor_attachment(item, scenario_id=str(scenario_id or ""))
     ]
     evidence = link_evidence(attachments, tracks)
     elapsed = float((snapshot.get("clock") or {}).get("elapsed_sec", 0) or 0)

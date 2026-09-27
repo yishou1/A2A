@@ -43,7 +43,42 @@ _SENSOR_META_KEYS = (
 )
 
 
-def _frame_from_attachment(attachment: dict[str, Any], index: int) -> SensorFrame:
+def _is_coastal_scenario_attachment(attachment: dict[str, Any]) -> bool:
+    media_id = str(attachment.get("id") or "")
+    uri = str(attachment.get("uri") or "")
+    meta = attachment.get("meta") if isinstance(attachment.get("meta"), dict) else {}
+    scenario_hint = str(meta.get("scenario_id") or "")
+    return (
+        media_id.startswith("CJR-MEDIA-")
+        or "/coastal-joint-recon-strike/" in uri
+        or scenario_hint.startswith("coastal-joint")
+    )
+
+
+def _is_visual_sensor_attachment(attachment: dict[str, Any]) -> bool:
+    """Coastal-only: drop theater schematics / command boards from TIA frames.
+
+    Maritime Observe continues to forward its historical attachment set,
+    including precollected convoy EO and derived radar SVG products.
+    """
+    if not _is_coastal_scenario_attachment(attachment):
+        return True
+    meta = attachment.get("meta") if isinstance(attachment.get("meta"), dict) else {}
+    product_type = str(meta.get("product_type") or "").casefold()
+    mime = str(attachment.get("mime_type") or "").casefold()
+    kind = str(attachment.get("kind") or "").casefold()
+    if product_type == "command_product":
+        return False
+    if product_type == "external_precollected" and (
+        mime == "image/svg+xml" or kind == "telemetry"
+    ):
+        return False
+    return True
+
+
+def _frame_from_attachment(attachment: dict[str, Any], index: int) -> SensorFrame | None:
+    if not _is_visual_sensor_attachment(attachment):
+        return None
     attachment_id = attachment.get("id") or f"att-{index:03d}"
     modality = _modality_for_attachment(attachment)
     meta = dict(attachment.get("meta") or {})
@@ -270,7 +305,11 @@ def commander_payload_to_batch(payload: dict[str, Any]) -> SensorBatch:
     command = payload.get("command") or "process_intelligence"
 
     attachments = normalize_attachments(payload.get("attachments"))
-    frames = [_frame_from_attachment(item, index) for index, item in enumerate(attachments)]
+    frames = [
+        frame
+        for index, item in enumerate(attachments)
+        if (frame := _frame_from_attachment(item, index)) is not None
+    ]
 
     input_payload = _normalize_input_payload(payload)
     upstream_context = dict(payload.get("context") or {})
