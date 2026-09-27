@@ -611,6 +611,10 @@ window.Platform = (function () {
       ["terrain", "hillshade", "contours", "sensors", "coordination", "ao"].forEach(function (name) {
         document.getElementById("btn-toggle-" + name).classList.toggle("layer-active", Boolean(layerState[name]));
       });
+      var workflowApi = window.Workflow || window.PlatformWorkflow;
+      if (workflowApi && typeof workflowApi.refreshPresentation === "function") {
+        workflowApi.refreshPresentation();
+      }
       refreshDirectorState();
     } catch (error) {
       document.getElementById("status-text").textContent = "场景加载失败：" + errorMessage(error);
