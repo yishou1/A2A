@@ -573,20 +573,154 @@ window.PlatformWorkflow = (function () {
     return "/" + value.replace(/^\/+/, "");
   }
 
-  function liveTacticalAttachmentFrames(scope) {
-    var submission = lastView && lastView.submission || {};
-    var rows = submission.attachments || [];
-    var imageRows = rows.filter(function (item) {
-      var mime = String(item && item.mime_type || "").toLowerCase();
-      var uri = String(item && item.uri || "");
-      return !!uri && mime.indexOf("image/") === 0 && mime.indexOf("svg") < 0;
+  function isImageAttachment(item) {
+    var mime = String(item && item.mime_type || "").toLowerCase();
+    var uri = String(item && (item.uri || item.url || item.media_uri) || "");
+    return !!uri && (mime.indexOf("image/") === 0 || /\.(png|jpe?g|webp)$/i.test(uri)) &&
+      mime.indexOf("svg") < 0;
+  }
+
+  function collectOutputAnnotatedAttachments(detail) {
+    var bags = [];
+    var outputDetail = detail && detail.output_detail || {};
+    var value = outputDetail.value && typeof outputDetail.value === "object" ? outputDetail.value : outputDetail;
+    bags.push(value.output_attachments, value.attachments, detail && detail.output_attachments);
+    (detail && detail.algorithms || []).forEach(function (algo) {
+      bags.push(algo && algo.output_attachments);
+      (algo && algo.invocations || []).forEach(function (inv) {
+        var out = inv && inv.output || {};
+        bags.push(out.output_attachments, out.attachments);
+      });
     });
-    if (!imageRows.length) return null;
-    return imageRows.slice(0, 2).map(function (item) {
+    var rows = [];
+    bags.forEach(function (bag) {
+      if (!Array.isArray(bag)) return;
+      bag.forEach(function (item) {
+        if (!isImageAttachment(item)) return;
+        var meta = item.meta || item.metadata || {};
+        var artifact = String(meta.artifact_type || item.artifact_type || "").toLowerCase();
+        var name = String(item.name || item.id || "");
+        var annotated = artifact.indexOf("annotated") >= 0 ||
+          name.indexOf("det") >= 0 ||
+          name.indexOf("annotated") >= 0 ||
+          name.indexOf("检测") >= 0;
+        rows.push({
+          item: item,
+          annotated: annotated,
+          uri: absoluteMediaUri(item.uri || item.url || item.media_uri),
+          caption: name || "检测结果帧",
+        });
+      });
+    });
+    rows.sort(function (a, b) { return Number(b.annotated) - Number(a.annotated); });
+    return rows.length ? rows.slice(0, 2) : null;
+  }
+
+  function collectOutputDetections(detail) {
+    var bags = [];
+    var outputDetail = detail && detail.output_detail || {};
+    var value = outputDetail.value && typeof outputDetail.value === "object" ? outputDetail.value : outputDetail;
+    bags.push(value.detections, value.perception && value.perception.detections);
+    (detail && detail.algorithms || []).forEach(function (algo) {
+      var id = String(algo && (algo.algorithm_id || algo.name) || "").toLowerCase();
+      if (id && id.indexOf("rtdetr") < 0 && id.indexOf("detector") < 0 && id.indexOf("battlefield") < 0) {
+        // still accept detections if present
+      }
+      bags.push(algo && algo.output && algo.output.detections);
+      (algo && algo.invocations || []).forEach(function (inv) {
+        bags.push(inv && inv.output && inv.output.detections);
+      });
+    });
+    var dets = [];
+    bags.forEach(function (bag) {
+      if (!Array.isArray(bag)) return;
+      bag.forEach(function (det) {
+        if (!det || !det.bbox || det.bbox.length < 4) return;
+        dets.push(det);
+      });
+    });
+    return dets;
+  }
+
+  function drawDetectionsOnCanvas(imageUri, detections, caption) {
+    if (!detections || !detections.length || !imageUri || typeof document === "undefined") return null;
+    try {
+      var canvas = document.createElement("canvas");
+      var ctx = canvas.getContext("2d");
+      if (!ctx) return null;
+      var img = new Image();
+      img.decoding = "async";
+      // Same-origin static/preview URIs; keep sync decode via cache when available.
+      img.src = imageUri;
+      if (!img.complete || !img.naturalWidth) return null;
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      ctx.drawImage(img, 0, 0);
+      detections.slice(0, 12).forEach(function (det) {
+        var bbox = det.bbox || [];
+        var x1 = Number(bbox[0]) || 0;
+        var y1 = Number(bbox[1]) || 0;
+        var x2 = Number(bbox[2]) || 0;
+        var y2 = Number(bbox[3]) || 0;
+        var label = String(det.class_name || det.label || "object");
+        var conf = Number(det.confidence);
+        var text = label + (Number.isFinite(conf) ? (" " + conf.toFixed(2)) : "");
+        ctx.lineWidth = Math.max(2, Math.round(canvas.width / 600));
+        ctx.strokeStyle = label.indexOf("missile") >= 0 || label.indexOf("coastal") >= 0 ? "#ff4040" : "#00ffff";
+        ctx.strokeRect(x1, y1, Math.max(1, x2 - x1), Math.max(1, y2 - y1));
+        ctx.font = "14px sans-serif";
+        var tw = ctx.measureText(text).width + 8;
+        ctx.fillStyle = ctx.strokeStyle;
+        ctx.fillRect(x1, Math.max(0, y1 - 18), tw, 18);
+        ctx.fillStyle = "#000";
+        ctx.fillText(text, x1 + 4, Math.max(12, y1 - 4));
+      });
       return {
-        image: absoluteMediaUri(item.uri),
-        caption: (item.name || item.id || "传感器帧") +
-          (scope === "output" ? " · 检测结果" : " · 输入帧"),
+        image: canvas.toDataURL("image/jpeg", 0.9),
+        caption: caption || "RT-DETR 检测锚框",
+      };
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function liveTacticalAttachmentFrames(scope, detail) {
+    if (scope === "output") {
+      var annotated = collectOutputAnnotatedAttachments(detail);
+      if (annotated && annotated.length) {
+        return annotated.map(function (row) {
+          return {
+            image: row.uri,
+            caption: row.caption + " · 检测锚框",
+          };
+        });
+      }
+      var dets = collectOutputDetections(detail);
+      if (dets.length) {
+        var submission = lastView && lastView.submission || {};
+        var sources = (submission.attachments || []).filter(isImageAttachment).slice(0, 2);
+        var drawn = sources.map(function (item, index) {
+          var sensorDets = dets.filter(function (det) {
+            return !det.sensor_id || String(det.sensor_id) === String(item.id || item.sensor_id || "");
+          });
+          if (!sensorDets.length) sensorDets = index === 0 ? dets : [];
+          return drawDetectionsOnCanvas(
+            absoluteMediaUri(item.uri || item.url),
+            sensorDets,
+            (item.name || item.id || "传感器帧") + " · RT-DETR 锚框"
+          );
+        }).filter(Boolean);
+        if (drawn.length) return drawn;
+      }
+      return null;
+    }
+    var submission = lastView && lastView.submission || {};
+    var rows = (submission.attachments || []).filter(isImageAttachment);
+    if (!rows.length) return null;
+    return rows.slice(0, 2).map(function (item) {
+      return {
+        image: absoluteMediaUri(item.uri || item.url || item.media_uri),
+        caption: (item.name || item.id || "传感器帧") + " · 输入帧",
       };
     });
   }
@@ -642,7 +776,63 @@ window.PlatformWorkflow = (function () {
           },
           output_detail: {
             summary: "目标检测输出（阵地候选）",
+            output_attachments: [
+              {
+                id: "CJR-MEDIA-01-DET",
+                name: "卫星 SAR · RT-DETR 锚框",
+                mime_type: "image/png",
+                uri: "/static/ui-previews/coastal-sar-annotated.png",
+                meta: { artifact_type: "annotated_detection", sensor_id: "CJR-MEDIA-01" },
+              },
+              {
+                id: "CJR-MEDIA-03-DET",
+                name: "无侦-10 光电 · RT-DETR 锚框",
+                mime_type: "image/png",
+                uri: "/static/ui-previews/coastal-eo-missile-site-annotated.png",
+                meta: { artifact_type: "annotated_detection", sensor_id: "CJR-MEDIA-03" },
+              },
+            ],
+            detections: [
+              { sensor_id: "CJR-MEDIA-03", class_name: "missile", confidence: 0.55, bbox: [829.3, 473.4, 886.2, 555.6] },
+              { sensor_id: "CJR-MEDIA-03", class_name: "missile", confidence: 0.34, bbox: [759.7, 460.3, 820.7, 540.9] },
+              { sensor_id: "CJR-MEDIA-03", class_name: "vehicle", confidence: 0.33, bbox: [715.7, 509.4, 765.3, 544.8] },
+              { sensor_id: "CJR-MEDIA-03", class_name: "vehicle", confidence: 0.13, bbox: [767.2, 505.6, 816.5, 540.0] },
+              { sensor_id: "CJR-MEDIA-01", class_name: "elephant", confidence: 0.37, bbox: [795.4, 491.6, 941.5, 579.5] },
+              { sensor_id: "CJR-MEDIA-01", class_name: "person", confidence: 0.22, bbox: [828.1, 492.2, 860.5, 557.8] },
+            ],
           },
+          algorithms: [{
+            algorithm_id: "battlefield_rtdetr_detector",
+            name: "RT-DETR 战场目标检测",
+            status: "completed",
+            output: {
+              count: 6,
+              detections: [
+                { sensor_id: "CJR-MEDIA-03", class_name: "missile", confidence: 0.55, bbox: [829.3, 473.4, 886.2, 555.6] },
+                { sensor_id: "CJR-MEDIA-03", class_name: "missile", confidence: 0.34, bbox: [759.7, 460.3, 820.7, 540.9] },
+                { sensor_id: "CJR-MEDIA-03", class_name: "vehicle", confidence: 0.33, bbox: [715.7, 509.4, 765.3, 544.8] },
+                { sensor_id: "CJR-MEDIA-03", class_name: "vehicle", confidence: 0.13, bbox: [767.2, 505.6, 816.5, 540.0] },
+                { sensor_id: "CJR-MEDIA-01", class_name: "elephant", confidence: 0.37, bbox: [795.4, 491.6, 941.5, 579.5] },
+                { sensor_id: "CJR-MEDIA-01", class_name: "person", confidence: 0.22, bbox: [828.1, 492.2, 860.5, 557.8] },
+              ],
+            },
+            output_attachments: [
+              {
+                id: "CJR-MEDIA-03-DET",
+                name: "无侦-10 光电 · RT-DETR 锚框",
+                mime_type: "image/png",
+                uri: "/static/ui-previews/coastal-eo-missile-site-annotated.png",
+                meta: { artifact_type: "annotated_detection" },
+              },
+              {
+                id: "CJR-MEDIA-01-DET",
+                name: "卫星 SAR · RT-DETR 锚框",
+                mime_type: "image/png",
+                uri: "/static/ui-previews/coastal-sar-annotated.png",
+                meta: { artifact_type: "annotated_detection" },
+              },
+            ],
+          }],
         },
       },
       backend: { available: true },
@@ -710,16 +900,16 @@ window.PlatformWorkflow = (function () {
     // scenarios keep the original maritime boat preview paths unchanged.
     var frames = null;
     if (isCoastal) {
-      frames = liveTacticalAttachmentFrames(scope);
+      frames = liveTacticalAttachmentFrames(scope, detail);
       if (!frames || !frames.length) {
         frames = isOutput ? [
           {
-            image: "/static/ui-previews/coastal-eo-missile-site.png",
-            caption: "无侦-10 光电 · 沿海导弹阵地识别",
+            image: "/static/ui-previews/coastal-eo-missile-site-annotated.png",
+            caption: "无侦-10 光电 · RT-DETR 导弹阵地锚框",
           },
           {
-            image: "/static/ui-previews/coastal-sar-input.png",
-            caption: "天基 SAR · 岸基阵地候选",
+            image: "/static/ui-previews/coastal-sar-annotated.png",
+            caption: "天基 SAR · RT-DETR 岸基阵地锚框",
           },
         ] : [
           {

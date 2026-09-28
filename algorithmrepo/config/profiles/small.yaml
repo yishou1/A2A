@@ -3,7 +3,7 @@ description: 低延迟、低显存；检测用 RT-DETR-N + 416，嵌入维度 25
 target_device: "8GB GPU / 边缘机"
 
 inference:
-  detection_model: rtdetr-n.pt
+  detection_model: models/checkpoints/battlefield_rtdetr.pt
   # 训练完成后可改为: models/checkpoints/battlefield_rtdetr_n.pt
   detection_imgsz: 416
   embed_dim: 256

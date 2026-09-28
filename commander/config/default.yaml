@@ -11,8 +11,8 @@ inference:
     small_max_gb: 10    # 总显存 ≤10GB → small
     medium_max_gb: 22   # 总显存 ≤22GB → medium，否则 large
     mps_profile: medium # Apple MPS 无法读显存时的默认档
-  # 预训练骨干（合并 profile 后会被 profiles/*.yaml 覆盖）
-  detection_model: rtdetr-l.pt
+  # 固定使用本仓库 97 类战场 RT-DETR 权重（勿回退 rtdetr-l / war_ship / dota）
+  detection_model: models/checkpoints/battlefield_rtdetr.pt
   mask2former_model: facebook/mask2former-swin-tiny-ade-semantic
   semantic_comm_model: google/flan-t5-small
   page_index_model: paraphrase-MiniLM-L6-v2

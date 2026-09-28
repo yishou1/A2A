@@ -84,7 +84,9 @@ def get_device(config: dict[str, Any]) -> str:
 
 
 def get_detector(config: dict[str, Any]):
-    weights = _resolve_weights_path(config, "detection_model", "rtdetr-l.pt")
+    weights = _resolve_weights_path(
+        config, "detection_model", "models/checkpoints/battlefield_rtdetr.pt"
+    )
     key = f"detector:{weights}:{_profile_tag(config)}"
     if key in _CACHE:
         return _CACHE[key]

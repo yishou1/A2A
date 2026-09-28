@@ -300,7 +300,7 @@ def collect_reports(
         params_only=params_only,
     )
 
-    det_path = _resolve_path(inf, "detection_model", "rtdetr-l.pt")
+    det_path = _resolve_path(inf, "detection_model", "models/checkpoints/battlefield_rtdetr.pt")
 
     def _rtdetr_count() -> int:
         from ultralytics import RTDETR
