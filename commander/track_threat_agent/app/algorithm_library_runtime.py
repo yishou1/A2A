@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable
 from urllib import error, request
+from llm.audit import new_call_id, record_llm_call
 
 from .tool_llm import AzureToolLLM, ToolLLMError
 
@@ -208,6 +209,14 @@ class TrackThreatAlgorithmRuntime:
         allowed = self._allowed_for_skills(requested_skills)
         raw_calls: list[dict[str, Any]]
         if self.settings.llm_enabled:
+            audit_fields = {
+                "workflow_id": str(request_summary.get("workflow_id") or request_id),
+                "llm_call_id": new_call_id(),
+                "agent": "track_threat",
+                "phase": "orient",
+                "provider": self.settings.llm_provider,
+                "model": self.settings.llm_deployment,
+            }
             try:
                 if self.llm is None:
                     raise ToolLLMError("tool LLM is not configured")
@@ -227,7 +236,18 @@ class TrackThreatAlgorithmRuntime:
                     "intent": str(llm_plan.get("intent") or ""),
                     "explanation": str(llm_plan.get("explanation") or ""),
                 }
+                self._trace["llm_calls"].append(record_llm_call(
+                    **audit_fields,
+                    response_model=str(getattr(self.llm, "last_response_model", "") or ""),
+                    success=True,
+                ))
             except Exception as exc:
+                self._trace["llm_calls"].append(record_llm_call(
+                    **audit_fields,
+                    response_model=str(getattr(self.llm, "last_response_model", "") or ""),
+                    success=False,
+                    fallback_reason=f"{type(exc).__name__}: {exc}",
+                ))
                 if self.settings.llm_required:
                     raise ToolLLMError(str(exc)) from exc
                 raw_calls = self._deterministic_calls(requested_skills)
@@ -506,6 +526,7 @@ class TrackThreatAlgorithmRuntime:
             "planned_algorithms": [],
             "executions": [],
             "local_fallbacks": [],
+            "llm_calls": [],
         }
 
 

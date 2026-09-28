@@ -649,7 +649,8 @@ window.Platform = (function () {
     startButton.disabled = running || directorBusy || analysisFailed || !currentScenarioId;
     startButton.textContent = analysisFailed ? "分析失败" :
       (directorStatus === "awaiting_analysis" ? "等待分析" :
-        (directorStatus === "awaiting_authorization" ? "等待授权" : (paused ? "继续" : "启动")));
+        (directorStatus === "awaiting_authorization" ? "等待授权" :
+          (directorStatus === "awaiting_review" ? "确认复核" : (paused ? "继续" : "启动"))));
     document.getElementById("btn-pause").disabled = !running;
     document.getElementById("btn-stop").disabled = !running && !directorBusy && !analysisFailed;
     document.querySelectorAll(".speed-btn").forEach(function (button) {
@@ -668,6 +669,12 @@ window.Platform = (function () {
 
   async function startSim() {
     if (running || !currentScenarioId) return;
+    if (currentDirectorState && currentDirectorState.director_status === "awaiting_review") {
+      var reviewed = await runDirectorAction("review_checkpoint", document.getElementById("btn-start"));
+      if (!reviewed) throw new Error("人工复核未记录");
+      onState(await API.loadSimState());
+      return;
+    }
     var directorState = await runDirectorAction("start_auto", document.getElementById("btn-start"));
     if (!directorState) throw new Error("导演未能启动自动流程");
     var speed = Number(currentScenario && currentScenario.demo_controls && currentScenario.demo_controls.recommended_speed || 1);
@@ -1184,6 +1191,9 @@ window.Platform = (function () {
     if (directorStatus === "awaiting_authorization") {
       statusText = "等待操作员授权，仿真已暂停在阶段边界；稍后决定将再次提示";
       modeText = "待授权";
+    } else if (directorStatus === "awaiting_review") {
+      statusText = "后端分析已完成，等待操作员复核收尾结果";
+      modeText = "待复核";
     } else if (followLaunchPrompt()) {
       statusText = "等待无人机派遣确认，仿真按当前倍率继续";
       modeText = "待确认";

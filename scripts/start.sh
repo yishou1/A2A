@@ -16,6 +16,7 @@ Usage: scripts/start.sh [--offline] [--require-llm] [--llm-profile PROFILE]
 
 LLM profiles:
   azure            Use Azure OpenAI / API-hosted model from .env AZURE_OPENAI_*.
+  local-qwen       Use the configured OpenAI-compatible Qwen endpoint (Docker uses Ollama).
   local-qwen-gpu   Use/start local OpenAI-compatible Qwen service.
   offline          Disable LLM planning and use deterministic/fixed routing.
 
@@ -54,6 +55,10 @@ done
 
 load_root_env
 resolve_a2a_python
+if [[ "${A2A_CONTAINER_MODE:-0}" == 1 ]]; then
+  # PID values from the persisted runtime volume belong to the previous container.
+  rm -f "$PID_DIR"/*.pid
+fi
 
 if [[ -n "$LLM_PROFILE_OVERRIDE" ]]; then
   export LLM_PROFILE="$LLM_PROFILE_OVERRIDE"
@@ -75,15 +80,24 @@ case "${LLM_PROFILE:-}" in
     export TOOL_LLM_URL="${LOCAL_QWEN_BASE_URL:-http://127.0.0.1:${LOCAL_QWEN_PORT:-11435}/v1}"
     export TOOL_LLM_NAME="${LOCAL_QWEN_MODEL_NAME:-qwen3:1.7b}"
     export API_KEY="${API_KEY:-ollama}"
-    export LOCAL_QWEN_DEVICE="${LOCAL_QWEN_DEVICE:-cuda}"
-    export LOCAL_QWEN_DTYPE="${LOCAL_QWEN_DTYPE:-float16}"
+    if [[ "${A2A_CONTAINER_MODE:-0}" == 1 ]]; then
+      export LOCAL_QWEN_DEVICE="${LOCAL_QWEN_DEVICE:-cpu}"
+      export LOCAL_QWEN_DTYPE="${LOCAL_QWEN_DTYPE:-float32}"
+    else
+      export LOCAL_QWEN_DEVICE="${LOCAL_QWEN_DEVICE:-cuda}"
+      export LOCAL_QWEN_DTYPE="${LOCAL_QWEN_DTYPE:-float16}"
+    fi
     export LLM_TIMEOUT_SECONDS="${LLM_TIMEOUT_SECONDS:-120}"
     export LLM_MAX_TOKENS="${LLM_MAX_TOKENS:-512}"
     export LLM_TEMPERATURE="${LLM_TEMPERATURE:-0.1}"
     export LLM_JSON_MODE="${LLM_JSON_MODE:-true}"
     export LLM_STRIP_THINKING="${LLM_STRIP_THINKING:-true}"
     export LLM_JSON_RETRY_COUNT="${LLM_JSON_RETRY_COUNT:-1}"
-    export LLM_REASONING_EFFORT="${LLM_REASONING_EFFORT:-none}"
+    if [[ "${A2A_CONTAINER_MODE:-0}" == 1 ]]; then
+      export LLM_REASONING_EFFORT="${LLM_REASONING_EFFORT-}"
+    else
+      export LLM_REASONING_EFFORT="${LLM_REASONING_EFFORT:-none}"
+    fi
     ;;
   offline|fixed|deterministic)
     export ENABLE_LLM=false
@@ -91,7 +105,7 @@ case "${LLM_PROFILE:-}" in
     export A2A_ACT_AGENT_LLM=false
     ;;
   *)
-    echo "Unsupported LLM_PROFILE='$LLM_PROFILE'. Use azure, local-qwen-gpu, or offline." >&2
+    echo "Unsupported LLM_PROFILE='$LLM_PROFILE'. Use azure, local-qwen, local-qwen-gpu, or offline." >&2
     exit 2
     ;;
 esac
@@ -107,6 +121,7 @@ if [[ "$OFFLINE" == 1 ]]; then
   active_llm_profile="offline"
   export ENABLE_LLM=false
   export ALGOLIB_ENABLE_LLM=false
+  export A2A_ACT_AGENT_LLM=false
 elif [[ "${ENABLE_LLM:-false}" == "true" && -z "$llm_api_key" ]]; then
   active_llm_profile="${LLM_PROFILE:-env-default}:disabled-no-key"
   if [[ "$REQUIRE_LLM" == 1 ]]; then
@@ -241,9 +256,13 @@ is_track_threat_mounted_algorithm() {
   esac
 }
 
-echo "[infra] checking Docker connection"
+echo "[infra] checking dependencies"
 infra_mode="native"
-if docker info >/dev/null 2>&1 \
+if [[ "${A2A_CONTAINER_MODE:-0}" == 1 ]]; then
+  infra_mode="compose"
+  wait_http "Nacos" "http://${NACOS_ADDR}/nacos/v1/console/health/readiness" 180
+  wait_http "A2A auth mock" "${A2A_AUTH_SERVER_BASE:-http://auth-mock:8080}/get" 60
+elif docker info >/dev/null 2>&1 \
   && docker compose -f "$COMMANDER_DIR/docker-compose.yml" up -d nacos auth-server \
   && wait_http "Nacos" "http://${NACOS_ADDR}/nacos/v1/console/health/readiness" 120 \
   && wait_http "A2A auth mock" "http://127.0.0.1:8080/get" 60; then
@@ -264,6 +283,33 @@ else
 fi
 
 llm_url="${TOOL_LLM_URL:-}"
+if [[ "${A2A_CONTAINER_MODE:-0}" == 1 ]]; then
+  "$A2A_PYTHON" "$ROOT_DIR/scripts/docker/check_assets.py"
+  if [[ "${ENABLE_LLM:-false}" != true ]]; then
+    echo "Container startup requires Qwen; ENABLE_LLM is not true." >&2
+    exit 1
+  fi
+  OLLAMA_PULL_MISSING=false OLLAMA_MODEL="${TOOL_LLM_NAME:-qwen3:1.7b}" \
+    "$A2A_PYTHON" "$ROOT_DIR/scripts/docker/qwen_init.py"
+  "$A2A_PYTHON" - <<'PY'
+from tactical_intelligence_agent.llm.client import OpenAICompatibleClient, ToolLLMSettings
+
+settings = ToolLLMSettings.from_config()
+client = OpenAICompatibleClient(settings)
+reply = client.chat_json(
+    system_prompt='Return one JSON object with a single boolean field named ok.',
+    user_prompt='Return {"ok": true}.',
+)
+if reply.get('ok') is not True or client.last_response_model != settings.name:
+    raise RuntimeError('Business LLM client JSON smoke failed for the required Qwen model')
+print('[models] business JSON client can call the required Qwen model', flush=True)
+PY
+  "$A2A_PYTHON" - <<'PY'
+from sentence_transformers import SentenceTransformer
+SentenceTransformer("paraphrase-MiniLM-L6-v2")
+print("[models] paraphrase-MiniLM-L6-v2 is cached", flush=True)
+PY
+fi
 if [[ "${ENABLE_LLM:-false}" == "true" && "$llm_provider" != "azure" && "$llm_provider" != "azure_openai" ]]; then
   llm_port=""
   if [[ "$llm_url" == http://127.0.0.1:* || "$llm_url" == http://localhost:* ]]; then
@@ -367,13 +413,29 @@ for row in "${ALGORITHM_CARD_ROWS[@]}"; do
       continue
     fi
   fi
-  if ! "$COMMANDER_DIR/build/algolib" register \
+  existing_status=""
+  if existing_card="$("$COMMANDER_DIR/build/algolib" show-card \
+    "$algorithm_id" "$version" "$backend_type" 2>/dev/null)"; then
+    existing_status="$(printf '%s' "$existing_card" | "$A2A_PYTHON" -c \
+      'import json,sys; print(json.load(sys.stdin).get("entry", {}).get("status", ""))')"
+    if [[ "$existing_status" == "deleted" ]]; then
+      echo "[warn] $algorithm_id was explicitly deleted; leaving it unavailable." >&2
+      continue
+    fi
+  elif ! "$COMMANDER_DIR/build/algolib" register \
     "$COMMANDER_DIR/examples/$package_dir/$version/algorithm_card.yaml" >/dev/null; then
     echo "[warn] failed to register $algorithm_id; continuing startup." >&2
     continue
   fi
   if ! "$COMMANDER_DIR/build/algolib" validate "$algorithm_id" "$version" "$backend_type" >/dev/null; then
+    if [[ "$existing_status" == "active" ]]; then
+      "$COMMANDER_DIR/build/algolib" disable "$algorithm_id" "$version" "$backend_type" >/dev/null || true
+    fi
     echo "[warn] failed to validate $algorithm_id; continuing startup without activating it." >&2
+    continue
+  fi
+  if [[ "$existing_status" == "disabled" ]]; then
+    echo "[skip] $algorithm_id remains disabled in the persistent registry."
     continue
   fi
   if ! "$COMMANDER_DIR/build/algolib" activate "$algorithm_id" "$version" "$backend_type" >/dev/null; then
@@ -383,7 +445,7 @@ for row in "${ALGORITHM_CARD_ROWS[@]}"; do
 done
 
 start_service algolib "$COMMANDER_DIR" "http://127.0.0.1:8088/health" \
-  "$COMMANDER_DIR/build/algolib_server" --host 127.0.0.1 --port 8088 \
+  "$COMMANDER_DIR/build/algolib_server" --host "${ALGOLIB_BIND_HOST:-127.0.0.1}" --port 8088 \
   --registry "$ALGOLIB_REGISTRY_PATH" --execution-log "$ALGOLIB_EXECUTION_LOG_PATH"
 
 echo "[agents] starting independent A2A processes"
@@ -413,11 +475,13 @@ start_service agent-closed-loop "$COMMANDER_DIR" "http://127.0.0.1:10205/health"
 
 start_service commander-manager "$COMMANDER_DIR" "http://127.0.0.1:8021/health" \
   "$A2A_PYTHON" commander_agent/main.py --mode remote --workflow bpel \
-  --serve-workflow-manager --manager-host 127.0.0.1 --manager-port 8021 \
+  --serve-workflow-manager --manager-host "${COMMANDER_MANAGER_BIND_HOST:-127.0.0.1}" --manager-port 8021 \
   --state-dir "$RUNTIME_DIR/workflows"
-start_service amos-platform "$AMOS_DIR" "http://127.0.0.1:5000/api/v1/scenarios" \
-  "$A2A_PYTHON" -m amos_platform.api.app_factory --host "$PUBLIC_BIND_HOST" --port 5000
-start_service commander-gateway "$COMMANDER_DIR" "http://127.0.0.1:8030/gateway/v1/health" \
+if [[ "${A2A_CONTAINER_MODE:-0}" != 1 ]]; then
+  start_service amos-platform "$AMOS_DIR" "http://127.0.0.1:5000/api/v1/scenarios" \
+    "$A2A_PYTHON" -m amos_platform.api.app_factory --host "$PUBLIC_BIND_HOST" --port 5000
+fi
+start_service commander-gateway "$COMMANDER_DIR" "http://127.0.0.1:8030/gateway/v1/ready" \
   "$A2A_PYTHON" -m commander_gateway --host "$PUBLIC_BIND_HOST" --port 8030
 
 echo
@@ -433,3 +497,19 @@ echo "  Logs:          $LOG_DIR"
 echo
 echo "Note: if you change --llm-profile, run ./scripts/stop.sh before ./scripts/start.sh so"
 echo "      already-running Agent processes reload the new environment."
+
+if [[ "${A2A_CONTAINER_MODE:-0}" == 1 ]]; then
+  trap 'bash "$SCRIPT_DIR/stop.sh" --keep-nacos; exit 0' TERM INT
+  while true; do
+    for pid_path in "$PID_DIR"/*.pid; do
+      [[ -e "$pid_path" ]] || continue
+      pid="$(tr -d '[:space:]' < "$pid_path")"
+      if [[ ! "$pid" =~ ^[0-9]+$ ]] || ! kill -0 "$pid" 2>/dev/null; then
+        echo "[fatal] managed process stopped: $pid_path" >&2
+        bash "$SCRIPT_DIR/stop.sh" --keep-nacos
+        exit 1
+      fi
+    done
+    sleep 3
+  done
+fi

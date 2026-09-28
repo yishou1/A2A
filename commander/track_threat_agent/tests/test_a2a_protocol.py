@@ -17,6 +17,14 @@ from app.main import (
 DATA_DIR = Path(__file__).resolve().parents[1] / "sample_data"
 
 
+def test_agent_card_uses_configured_auth_service(monkeypatch):
+    monkeypatch.setenv("A2A_AUTH_SERVER_BASE", "http://auth-mock:8080/")
+    card = well_known_a2a_agent_card()
+    scheme = card["securitySchemes"]["openIdConnect"]
+    assert scheme["authorizationUrl"] == "http://auth-mock:8080/auth"
+    assert scheme["tokenUrl"] == "http://auth-mock:8080/post"
+
+
 def _commander_task(
     *,
     work_item: str,

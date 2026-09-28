@@ -1,13 +1,39 @@
 # A2A + AMOS 一体化演示
 
-本目录以尽量少的架构改动联通了 AMOS 仿真平台与 A2A Commander。当前可实际运行
-“海上编队护航与要地防空”剧本：AMOS 产生因果仿真快照，Gateway 传给 Commander，
-Commander 通过 Nacos 发现并协调 7 个独立 HTTP Agent，Agent 经 AlgoLib 加载并调用算法，
-结果再投影回 AMOS 前端。模拟攻击必须由操作员明确授权。
+本项目联通了 AMOS 仿真平台与 A2A Commander。Docker Desktop 一键入口以
+`coastal-joint-recon-strike`（剧本二）为主要验收场景：首次启动自动下载
+`qwen3:1.7b`，CUE 和 PLAN 等阶段通过 Ollama 进行真实业务规划。
+模拟攻击必须由操作员明确授权。
 
 源仓库、分支和提交版本见 [config/SOURCES.md](config/SOURCES.md)。
 
-## 运行结构
+## Windows 一键启动
+
+准备 Windows x64、Docker Desktop（Linux 容器）和首次下载所需网络。克隆当前
+`integration/maritime-algolib` 分支后，双击 `docker-tools` 目录中的 `启动Docker环境.bat`。启动器构建
+应用、下载 Qwen 模型、等待健康检查，然后打开 AMOS 页面（默认 <http://127.0.0.1:5000/>）。
+停止时双击 `docker-tools\停止Docker环境.bat`；模型与运行记录保留在 Docker 命名卷中。
+
+```powershell
+git clone --branch integration/maritime-algolib --single-branch https://github.com/yishou1/A2A.git 613
+cd 613
+.\docker-tools\启动Docker环境.bat
+```
+
+如需验收剧本二，可在服务运行时执行以下命令；它会创建新的剧本运行，并显式授权一次模拟攻击。
+命令在容器内使用 Python，宿主机无需安装 Python：
+
+```powershell
+powershell -File .\scripts\docker-compose.ps1 exec -e AMOS_BASE_URL=http://amos:5000 a2a-core python scripts/verify_coastal.py
+```
+
+命令行可执行 `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\docker-start.ps1`
+及 `powershell -File .\scripts\docker-compose.ps1 logs -f`。普通使用不需要 Conda、Python、Node、本机 Ollama 或 `.env`。
+完整说明见 [docs/docker.md](docs/docker.md)。
+
+## 原生开发运行结构（可选）
+
+根目录的 `启动项目.bat` 和 `停止项目.bat` 保留原有本机启动逻辑，不作为 Docker 入口。它们调用原机器上的 `D:\A2A-jzz-integrated-clean\.runtime` 脚本；该个人运行目录未随仓库提供。新克隆后使用 Docker 时，请运行 `docker-tools` 目录下的专用入口。
 
 | 组件 | 运行方式 | 地址 |
 | --- | --- | --- |
@@ -19,12 +45,11 @@ Commander 通过 Nacos 发现并协调 7 个独立 HTTP Agent，Agent 经 AlgoLi
 | Nacos | Windows 原生 Java 进程（v2.4.3，JRE 17） | <http://127.0.0.1:8848/nacos/> |
 | 认证 mock | Windows 原生 Python 进程 | <http://127.0.0.1:8080/get> |
 
-全栈已无 Docker 依赖。Nacos 使用原生发行版（`.runtime\nacos`，随启动脚本自动拉起，
-依赖便携版 JRE 17：`D:\A2A\jre-17`）；认证 mock 为纯 Python 进程
-（`commander\scripts\auth_mock_server.py`）。启动/停止脚本：
-`.runtime\start-windows-current.ps1` / `.runtime\stop-windows-current.ps1`。
+下列原生运行方式供已有开发环境使用；新克隆的完整剧本二链路请使用上面的 Docker 入口。
+历史机器上的 `.runtime\start-windows-current.ps1`、`.runtime\stop-windows-current.ps1` 和
+`D:\A2A\jre-17` 不随仓库提供，也不是一键启动的前提。
 
-## 首次安装
+## 原生环境首次安装（可选）
 
 推荐在 Windows 11 + WSL2 环境中运行。新电脑需要预先安装：
 
@@ -35,7 +60,7 @@ Commander 通过 Nacos 发现并协调 7 个独立 HTTP Agent，Agent 经 AlgoLi
 Nacos 自带 Java 运行时的 Docker 镜像，因此宿主机不需要单独安装 Java。克隆整合分支：
 
 ```bash
-git clone --branch jzz/integrated --single-branch \
+git clone --branch integration/maritime-algolib --single-branch \
   https://github.com/yishou1/A2A.git a2a-integrated
 cd a2a-integrated
 ```
@@ -162,7 +187,7 @@ Act 阶段是否也使用 LLM 选算法由 `A2A_ACT_AGENT_LLM` 控制。默认�
 LLM 模式默认允许单个 Agent 请求执行 180 秒，以覆盖 Azure 调用和首次模型冷启动；可用
 `A2A_REQUEST_TIMEOUT` 自行覆盖。
 
-## OODA / F2T2EA 与四检查点
+## 原生剧本一：OODA / F2T2EA 与四检查点
 
 界面中的两套阶段不是两条独立流程，而是同一个任务闭环的两种视图：
 
@@ -196,7 +221,7 @@ OODA 阶段的 BPEL；在后端分析期间，仿真可以继续播放当前阶�
 执行三层校验：目标必须被后端确认为敌方、不得属于民用禁射类别、请求必须携带操作员的
 明确批准。即使请求标记为批准，渔船仍会被拒绝。
 
-## 一键验收
+## 原生剧本一验收
 
 只检查服务、7 个不同 PID 和 Nacos 注册：
 
@@ -248,7 +273,7 @@ conda run -n a2a ctest --test-dir commander/build --output-on-failure
 日常开发从整合分支创建个人分支，避免直接向共享分支强推：
 
 ```bash
-git switch jzz/integrated
+git switch integration/maritime-algolib
 git pull --ff-only
 git switch -c <姓名>/<功能名>
 ```
@@ -276,7 +301,7 @@ python scripts/package_release_bundle.py
 
 ## 常见问题
 
-- `docker info` 失败：在 Docker Desktop 的 Resources > WSL Integration 中启用当前发行版。
-- Nacos 已启动但发现不到 Agent：查看 `.runtime/logs/agent-*.log`，然后运行验收脚本检查角色集合。
-- `--require-llm` 报密钥为空：确认 `.env` 中 `AZURE_OPENAI_API_KEY` 非空，且没有给值加错误的空格。
-- 端口被占用：先运行 `./scripts/stop.sh --keep-nacos`，再检查占用进程后重启。
+- Windows 一键启动时 `docker info` 失败：启动 Docker Desktop 并切换到 Linux 容器；仅在 WSL 终端运行 Docker CLI 时，还需为该发行版启用 WSL Integration。
+- Docker 模式宿主端口被占用：启动前设置 `AMOS_HOST_PORT` 或 `A2A_GATEWAY_HOST_PORT`；默认分别为 `5000`、`8030`，详见 [Docker 使用说明](docs/docker.md)。
+- 原生模式下 Nacos 已启动但发现不到 Agent：查看 `.runtime/logs/agent-*.log`，然后运行原生验收脚本检查角色集合。
+- 原生 Azure 模式的 `--require-llm` 报密钥为空：确认 `.env` 中 `AZURE_OPENAI_API_KEY` 非空，且没有给值加错误的空格。

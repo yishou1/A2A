@@ -123,7 +123,7 @@ GET  /api/v1/runs/{run_id}
 GET  /api/v1/runs/{run_id}/report?format=json|markdown|html
 ```
 
-导演动作包括 `start`、`pause`、`step_tick`、`advance_checkpoint`、`start_auto` 和 `stop_auto`。`advance_checkpoint` 通过正常仿真 tick 到达条件检查点，不直接改写时钟；需要分析的检查点通过与手动提交相同的 Gateway 服务提交。Gateway 不可达时记录失败，不生成替代结果。
+导演动作包括 `start`、`pause`、`step_tick`、`advance_checkpoint`、`refresh_analysis`、`review_checkpoint`、`start_auto` 和 `stop_auto`。`advance_checkpoint` 通过正常仿真 tick 到达条件检查点，不直接改写时钟；需要分析的检查点通过与手动提交相同的 Gateway 服务提交。`review_checkpoint` 仅在需要人工复核且分析已完成的检查点记录操作员复核；未复核前不可继续推进。Gateway 不可达时记录失败，不生成替代结果。
 
 页面采用地图与任务工作区双栏结构，工作区包含场景态势、Agent 拓扑、算法覆盖、流程执行、证据与结果五个页签。场景声明只表示计划覆盖；只有后端成功 trace 才计入本次运行的算法和功能点验证结果。证据页可按当前 `run_id` 导出 JSON、Markdown 或独立 HTML 验收报告。
 

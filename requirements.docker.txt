@@ -1,0 +1,4 @@
+-r commander/requirements.txt
+-r commander/services/requirements.txt
+flask>=3.0,<4.0
+waitress>=3.0,<4.0

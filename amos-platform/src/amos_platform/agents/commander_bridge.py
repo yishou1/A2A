@@ -258,6 +258,19 @@ class CommanderBridge:
                     detail = self._fetch_json(detail_url)
                     health_endpoint = self._runtime_health_endpoint(item, detail)
                     if health_endpoint:
+                        parsed_health = urllib.parse.urlsplit(health_endpoint)
+                        if (
+                            os.environ.get("A2A_CONTAINER_MODE") == "1"
+                            and parsed_health.hostname in {"127.0.0.1", "localhost"}
+                        ):
+                            identity = "/".join(
+                                urllib.parse.quote(part, safe="")
+                                for part in (algorithm_id, version, backend_type)
+                            )
+                            health_endpoint = (
+                                f"{self.gateway_url.rstrip('/')}/gateway/v1/algorithms/"
+                                f"{identity}/health"
+                            )
                         health_payload = self._fetch_json(health_endpoint, timeout=1.5)
                         runtime_status = "ready" if self._runtime_is_ready(health_payload) else "unavailable"
                         model_loaded = health_payload.get("model_loaded")

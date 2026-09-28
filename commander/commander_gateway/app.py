@@ -8,6 +8,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from commander_gateway.algorithm_health import probe_algorithm_health
 from commander_gateway.config import GatewayConfig
 from commander_gateway.errors import GatewayError
 from commander_gateway.schemas import CommanderProjectionV1, WorkflowSubmitV1
@@ -111,10 +112,18 @@ def build_gateway_app(
 
     control = Depends(require_control_token)
 
+    @app.get("/gateway/v1/ready")
+    async def ready():
+        return {"status": "ok"}
+
     @app.get("/gateway/v1/health")
     def health():
         status_code, payload = gateway_service.health()
         return JSONResponse(status_code=status_code, content=payload)
+
+    @app.get("/gateway/v1/algorithms/{algorithm_id}/{version}/{backend_type}/health")
+    def algorithm_health(algorithm_id: str, version: str, backend_type: str):
+        return probe_algorithm_health(algorithm_id, version, backend_type)
 
     @app.post(
         "/gateway/v1/workflows",

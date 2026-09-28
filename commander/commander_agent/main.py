@@ -73,6 +73,36 @@ def load_env_file(path=os.path.join(PROJECT_ROOT, ".env")):
             if key and key not in os.environ:
                 os.environ[key] = value
 
+
+def verified_stage_contexts(state_store, mission_input: dict) -> list[dict]:
+    """Resolve completed AMOS checkpoint references within the same run."""
+    run_id = str((mission_input.get("metadata") or {}).get("run_id") or "")
+    mission = mission_input
+    contexts: list[dict] = []
+    seen: set[str] = set()
+    for _ in range(8):
+        stage = mission.get("stage_transfer") if isinstance(mission.get("stage_transfer"), dict) else {}
+        supplemental = stage.get("supplemental_inputs") if isinstance(stage.get("supplemental_inputs"), dict) else {}
+        reference = supplemental.get("workflow_result_ref")
+        if not isinstance(reference, dict):
+            return contexts
+        workflow_id = str(reference.get("workflow_id") or "")
+        if not re.fullmatch(r"amos-[0-9a-f]{24}", workflow_id) or workflow_id in seen:
+            raise ContractValidationError("Invalid or cyclic prior AMOS workflow reference", code="INVALID_STAGE_REFERENCE")
+        if not run_id or reference.get("source_run_id") != run_id or reference.get("status") != "completed":
+            raise ContractValidationError("Prior AMOS workflow is not completed in this run", code="INVALID_STAGE_REFERENCE")
+        if reference.get("package_verified") is False or not state_store.exists(workflow_id):
+            raise ContractValidationError("Prior AMOS workflow evidence is unavailable", code="INVALID_STAGE_REFERENCE")
+        prior = state_store.load(workflow_id)
+        prior_context = prior.get("context") if isinstance(prior.get("context"), dict) else {}
+        prior_mission = prior_context.get("mission_input") if isinstance(prior_context.get("mission_input"), dict) else {}
+        if prior.get("status") != "completed" or (prior_mission.get("metadata") or {}).get("run_id") != run_id:
+            raise ContractValidationError("Prior AMOS workflow state failed verification", code="INVALID_STAGE_REFERENCE")
+        seen.add(workflow_id)
+        contexts.append(prior_context)
+        mission = prior_mission
+    raise ContractValidationError("Prior AMOS workflow chain is too long", code="INVALID_STAGE_REFERENCE")
+
 class CommanderAgent:
     _EVIDENCE_INLINE_LIMIT_BYTES = 16 * 1024
 
@@ -369,10 +399,12 @@ class CommanderAgent:
             "algorithm_invocations",
             "model_calls",
             "model_invocations",
+            "llm_calls",
         }
         records: dict[str, list[dict]] = {
             "algorithm_invocations": [],
             "model_invocations": [],
+            "llm_calls": [],
         }
 
         def visit(node: object, depth: int = 0) -> None:
@@ -384,6 +416,11 @@ class CommanderAgent:
                 return
             if not isinstance(node, dict):
                 return
+            llm_calls = node.get("llm_calls")
+            if isinstance(llm_calls, list):
+                records["llm_calls"].extend(
+                    deepcopy(item) for item in llm_calls if isinstance(item, dict)
+                )
             for canonical, alias in (
                 ("algorithm_invocations", "algorithm_calls"),
                 ("model_invocations", "model_calls"),
@@ -404,6 +441,20 @@ class CommanderAgent:
                     visit(child, depth + 1)
 
         visit(value)
+        # Some agents expose the same call both beside the output hint and
+        # inside its detailed trace. Persist one business event per call ID.
+        seen_llm_call_ids: set[str] = set()
+        unique_llm_calls: list[dict] = []
+        for call in records["llm_calls"]:
+            if not isinstance(call, dict):
+                continue
+            call_id = str(call.get("llm_call_id") or "")
+            if call_id and call_id in seen_llm_call_ids:
+                continue
+            if call_id:
+                seen_llm_call_ids.add(call_id)
+            unique_llm_calls.append(call)
+        records["llm_calls"] = unique_llm_calls
         return {key: value for key, value in records.items() if value}
 
     def _build_workflow_result(self, context: dict) -> dict:
@@ -1974,10 +2025,19 @@ class CommanderAgent:
             # Preserve the decision chain explicitly.  The BPEL input variable
             # is the compliance result, but execution control also needs the
             # selected plan, scheduled resources, and current targets.
-            plan_result = self._latest_context_value(context, "decision_planning_result") or {}
-            compliance_result = self._latest_context_value(context, "compliance_authorization_result") or {}
-            planning = deepcopy(context.get("planning_input", {}))
             mission = context.get("mission_input") if isinstance(context.get("mission_input"), dict) else {}
+            planning_context = deepcopy(context)
+            for prior_context in verified_stage_contexts(self.state_store, mission):
+                for key in (
+                    "task_scheduling_result", "decision_planning_result",
+                    "compliance_authorization_result", "threat_assessment_result",
+                    "intelligence_packet", "planning_input", "commander_decision",
+                ):
+                    if planning_context.get(key) in (None, [], {}) and prior_context.get(key) not in (None, [], {}):
+                        planning_context[key] = deepcopy(prior_context[key])
+            plan_result = self._latest_context_value(planning_context, "decision_planning_result") or {}
+            compliance_result = self._latest_context_value(planning_context, "compliance_authorization_result") or {}
+            planning = deepcopy(planning_context.get("planning_input", {}))
             stage_transfer = (
                 mission.get("stage_transfer")
                 if isinstance(mission.get("stage_transfer"), dict)
@@ -1995,45 +2055,36 @@ class CommanderAgent:
             )
             plan_output = plan_result.get("output_data", plan_result) if isinstance(plan_result, dict) else {}
             compliance_output = compliance_result.get("output_data", compliance_result) if isinstance(compliance_result, dict) else {}
-            if not compliance_output and operator_authorization.get("status") == "approved":
+            if operator_authorization.get("status") == "approved":
                 compliance_output = {
+                    **compliance_output,
                     "decision": "approved",
                     "status": "approved",
                     "approved_for_demo_handoff": True,
                     "authorization_evidence": deepcopy(operator_authorization),
                 }
-            results = self.build_closed_loop_results_from_context(context)
+            results = self.build_closed_loop_results_from_context(planning_context)
+            if "threat_evaluation" not in results:
+                risk_rows = [row for row in planning.get("risk_assessments") or [] if isinstance(row, dict)]
+                risk_scores = []
+                for row in risk_rows:
+                    value = row.get("probability", row.get("threat_score"))
+                    try:
+                        score = float(value)
+                    except (TypeError, ValueError):
+                        continue
+                    risk_scores.append(max(0.0, min(1.0, score / 100.0 if score > 1.0 else score)))
+                if risk_scores:
+                    results["threat_evaluation"] = {"output_data": {
+                        "priority_score": max(risk_scores),
+                        "risk_assessments": deepcopy(risk_rows),
+                    }}
             results["plan_decision"] = {"output_data": deepcopy(plan_output)}
-            results["resource_allocation"] = {
-                "output_data": {
-                    "scheduled_tasks": deepcopy(planning.get("scheduled_tasks", [])),
-                    "resources": deepcopy(planning.get("resources", [])),
-                    "target_histories": deepcopy(planning.get("target_histories", [])),
-                }
-            }
+            resource_output = results.setdefault("resource_allocation", {}).setdefault("output_data", {})
+            for key in ("scheduled_tasks", "resources", "target_histories"):
+                if planning.get(key):
+                    resource_output[key] = deepcopy(planning[key])
             results["compliance_authorization"] = {"output_data": deepcopy(compliance_output)}
-            results["data_fusion"] = {
-                "output_data": {
-                    "tracks": [
-                        {
-                            "track_id": item.get("track_id") or item.get("contact_id"),
-                            "history": [
-                                {
-                                    "t": point.get("sim_time", index),
-                                    "x": point.get("lng", point.get("lon", 0.0)),
-                                    "y": point.get("lat", 0.0),
-                                }
-                                for index, point in enumerate(
-                                    (item.get("metadata") or {}).get("history_path") or []
-                                )
-                                if isinstance(point, dict)
-                            ],
-                        }
-                        for item in mission.get("contacts") or []
-                        if isinstance(item, dict)
-                    ]
-                }
-            }
             return {
                 "schema_version": PROTOCOL_VERSION,
                 "workflow_id": self.workflow_id,
@@ -2052,6 +2103,7 @@ class CommanderAgent:
                     "context": {
                         "workflow_id": self.workflow_id,
                         "mission_input": deepcopy(mission),
+                        "authorization": deepcopy(context.get("authorization") or {}),
                     },
                 },
                 "context": context_snapshot,

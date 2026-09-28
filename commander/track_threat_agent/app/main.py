@@ -340,8 +340,8 @@ def _agent_card_payload() -> Dict[str, Any]:
         "securitySchemes": {
             "openIdConnect": {
                 "type": "openIdConnect",
-                "authorizationUrl": "http://127.0.0.1:8080/auth",
-                "tokenUrl": "http://127.0.0.1:8080/post",
+                "authorizationUrl": f"{os.getenv('A2A_AUTH_SERVER_BASE', 'http://127.0.0.1:8080').rstrip('/')}/auth",
+                "tokenUrl": f"{os.getenv('A2A_AUTH_SERVER_BASE', 'http://127.0.0.1:8080').rstrip('/')}/post",
             }
         },
         "discovery": {
@@ -1342,6 +1342,9 @@ def _build_a2a_output(
         "artifact": artifact,
         "algorithm_calls": artifact.get("algorithm_calls", []),
         "algorithm_invocations": artifact.get("algorithm_invocations", []),
+        "llm_calls": (
+            ((artifact.get("trace") or {}).get("algorithm_library") or {}).get("llm_calls") or []
+        ),
         "safety_boundary": "simulation-only situation-awareness priority; no weapon control",
     }
     output_hint = task_payload.get("output_hint")
@@ -1612,6 +1615,7 @@ def _algorithm_request_summary_from_task(task_payload: Dict[str, Any]) -> Dict[s
         context = task_payload.get("context")
         scene = context.get("scene", {}) if isinstance(context, dict) else {}
     return {
+        "workflow_id": str(task_payload.get("workflow_id") or ""),
         "command": str(task_payload.get("command") or ""),
         "detection_count": len(detections) if isinstance(detections, list) else 0,
         "track_count": len(tracks) if isinstance(tracks, list) else 0,

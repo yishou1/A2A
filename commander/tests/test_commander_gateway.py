@@ -161,6 +161,10 @@ class FakeCommanderClient:
         self.work_list_calls = 0
         self.trace_calls = 0
         self.checkpoint_calls = 0
+        self.workflow_queries = 0
+        self.work_list_queries = 0
+        self.trace_queries = 0
+        self.checkpoint_queries = 0
 
     def health(self):
         if self.health_error:
@@ -182,6 +186,7 @@ class FakeCommanderClient:
 
     def get_workflow(self, workflow_id):
         self.workflow_calls += 1
+        self.workflow_queries += 1
         if workflow_id not in self.workflows:
             raise UpstreamError("COMMANDER_NOT_FOUND", "workflow not found", 404, False)
         return copy.deepcopy(self.workflows[workflow_id])
@@ -194,18 +199,21 @@ class FakeCommanderClient:
 
     def get_work_list(self, workflow_id):
         self.work_list_calls += 1
+        self.work_list_queries += 1
         if self.work_list_error:
             raise self.work_list_error
         return {"workflow_id": workflow_id, "work_list": [{"id": "work-1"}]}
 
     def get_trace(self, workflow_id):
         self.trace_calls += 1
+        self.trace_queries += 1
         if self.trace_error:
             raise self.trace_error
         return {"workflow_id": workflow_id, "trace": [{"event": "submitted"}]}
 
     def get_checkpoint(self, workflow_id):
         self.checkpoint_calls += 1
+        self.checkpoint_queries += 1
         if self.checkpoint_error:
             raise self.checkpoint_error
         if workflow_id not in self.checkpoints:
@@ -571,6 +579,13 @@ class GatewayTestCase(unittest.TestCase):
         projection = self.service.submit(WorkflowSubmitV1.model_validate(submit_payload()))
         workflow_id = projection.workflow_id
         self.commander.workflows[workflow_id]["status"] = "completed"
+        llm_call = {
+            "workflow_id": workflow_id,
+            "llm_call_id": "llm-track-projected",
+            "agent": "track_threat",
+            "status": "success",
+            "model": "qwen3:1.7b",
+        }
         tracking_value = {
             "tracks": [{"track_id": "TRK-AMOS-01", "lat": 22.1, "lon": 121.6}],
             "summary": {"track_count": 1},
@@ -594,6 +609,7 @@ class GatewayTestCase(unittest.TestCase):
                         "activity_id": "activity-track",
                         "output_ref": "outputs.tracking_result",
                         "status": "completed",
+                        "llm_calls": [llm_call],
                     }],
                     "summary": {"completed": 1},
                 },
@@ -608,12 +624,35 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertEqual(current.result["inputs"]["mission_input"], mission_input)
         self.assertEqual(current.result["activity_results"][0]["output"], tracking_value)
+        self.assertEqual(current.result["activity_results"][0]["llm_calls"], [llm_call])
         persisted = self.store.read_workflow(workflow_id)
         self.assertEqual(persisted["projection"]["result"], current.result)
 
         second = self.service.get_projection(workflow_id)
         self.assertEqual(second.result, current.result)
         self.assertEqual(self.commander.checkpoint_calls, 1)
+
+        upstream_queries = (
+            self.commander.workflow_queries,
+            self.commander.brief_calls,
+            self.commander.work_list_queries,
+            self.commander.trace_queries,
+            self.commander.checkpoint_queries,
+        )
+        self.assertEqual(self.service.get_projection(workflow_id), current)
+        self.assertEqual(self.service.get_work_list(workflow_id), current.work_list)
+        self.assertEqual(self.service.get_trace(workflow_id), current.trace)
+        self.assertEqual(
+            (
+                self.commander.workflow_queries,
+                self.commander.brief_calls,
+                self.commander.work_list_queries,
+                self.commander.trace_queries,
+                self.commander.checkpoint_queries,
+            ),
+            upstream_queries,
+            "completed checkpoint reads should reuse the persisted terminal projection",
+        )
 
     def test_running_projection_uses_brief_without_full_checkpoint_status(self):
         projection = self.service.submit(WorkflowSubmitV1.model_validate(submit_payload()))
@@ -759,6 +798,10 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json()["status"], "degraded")
         self.assertEqual(response.json()["dependencies"]["amos"]["status"], "unavailable")
+
+        ready = client.get("/gateway/v1/ready")
+        self.assertEqual(ready.status_code, 200)
+        self.assertEqual(ready.json()["status"], "ok")
 
         response = client.post("/gateway/v1/workflows", json=submit_payload())
         self.assertEqual(response.status_code, 503)

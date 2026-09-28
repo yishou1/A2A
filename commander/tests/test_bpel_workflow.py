@@ -11,6 +11,7 @@ import requests
 from bpel_workflow import BPELWorkflowCatalog
 from commander_agent.agent_leases import AgentLeaseManager
 from commander_agent.main import CommanderAgent
+from commander_gateway.service import GatewayService
 from decision_agents.common.a2a_payloads import build_agent_request_payload
 from decision_support.schemas import AgentRequest
 from protocol_contracts import ContractValidationError
@@ -247,6 +248,75 @@ class BPELWorkflowTest(unittest.TestCase):
 
             self.assertEqual(activity["algorithm_invocations"], [invocation])
             self.assertNotIn("tracking_result", activity["algorithm_invocations"][0])
+
+    def test_completed_workflow_projects_track_and_act_llm_calls(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workflow_id = "wf-business-llm-audit"
+            commander = CommanderAgent(
+                mode="local", workflow_id=workflow_id, state_dir=temp_dir,
+            )
+            context = commander.initial_workflow_context()
+            track_call = {
+                "workflow_id": workflow_id,
+                "llm_call_id": "llm-track-1",
+                "agent": "track_threat",
+                "status": "success",
+                "model": "qwen3:1.7b",
+            }
+            act_call = {
+                "workflow_id": workflow_id,
+                "llm_call_id": "llm-act-1",
+                "agent": "algolib_bridge",
+                "status": "success",
+                "model": "qwen3:1.7b",
+            }
+            context["work_list"] = [
+                {
+                    "activity_id": "A-TRACK",
+                    "work_item": f"{workflow_id}:A-TRACK",
+                    "role": "track_threat",
+                    "status": "completed",
+                },
+                {
+                    "activity_id": "A-ACT",
+                    "work_item": f"{workflow_id}:A-ACT",
+                    "role": "simulation_execution",
+                    "status": "completed",
+                },
+            ]
+            track_result = {"tracks": [{"track_id": "TRK-1"}]}
+            act_result = {"output_data": {"commands": [{"action": "simulate"}]}}
+            context["tracking_result"] = [commander._make_context_entry(track_result)]
+            context["execution_simulation_result"] = [commander._make_context_entry(act_result)]
+            context["agent_results"] = {
+                f"{workflow_id}:A-TRACK": {
+                    "agent": "TrackThreatAgent",
+                    "output": {
+                        "tracking_result": track_result,
+                        "llm_calls": [track_call],
+                        "artifact": {"trace": {"algorithm_library": {"llm_calls": [track_call]}}},
+                    },
+                },
+                f"{workflow_id}:A-ACT": {
+                    "agent": "ExecutionControlAgent",
+                    "output": {
+                        "execution_simulation_result": act_result,
+                        "llm_calls": [act_call],
+                    },
+                },
+            }
+            context["workflow_result"] = commander._build_workflow_result(context)
+            commander._save_workflow_checkpoint(context, status="completed")
+
+            checkpoint = commander.state_store.load(workflow_id)
+            self.assertEqual(checkpoint["context"]["agent_results"], {})
+            projection_result = GatewayService._resolved_workflow_result(checkpoint)
+            activities = {
+                row["activity_id"]: row
+                for row in projection_result["activity_results"]
+            }
+            self.assertEqual(activities["A-TRACK"]["llm_calls"], [track_call])
+            self.assertEqual(activities["A-ACT"]["llm_calls"], [act_call])
 
     def test_workflow_result_promotes_nested_act_algorithm_invocations(self):
         with tempfile.TemporaryDirectory() as temp_dir:

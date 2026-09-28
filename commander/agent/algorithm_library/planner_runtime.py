@@ -6,6 +6,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from llm.audit import new_call_id, record_llm_call, strict_llm_required
+
 from agent.algorithm_library.catalog import (
     TIA_ALLOWED_ALGORITHMS,
     TIA_DEFAULT_PIPELINE,
@@ -58,6 +60,7 @@ class AlgorithmPlan:
     raw_llm_plan: dict[str, Any] | None = None
     fallback_reason: str = ""
     catalog_source: str = "local"
+    llm_call: dict[str, Any] | None = None
 
     @property
     def enabled_ids(self) -> set[str]:
@@ -82,6 +85,7 @@ class AlgorithmPlan:
             "fallback_reason": self.fallback_reason,
             "raw_llm_plan": self.raw_llm_plan,
             "catalog_source": self.catalog_source,
+            "llm_call": self.llm_call,
         }
 
 
@@ -91,6 +95,10 @@ class AlgorithmPlannerError(ValueError):
 
 def resolve_planner_mode(config: dict[str, Any] | None = None) -> str:
     env = os.environ.get("TIA_ALGORITHM_PLANNER", "").strip().lower()
+    if strict_llm_required():
+        if env == "fixed":
+            raise AlgorithmPlannerError("TIA strict LLM mode cannot use the fixed planner.")
+        return "llm"
     if env in {"fixed", "llm"}:
         return env
     planner_cfg = dict((config or {}).get("algorithm_planner") or {})
@@ -111,7 +119,7 @@ def plan_algorithms(
         return _fixed_plan()
 
     planner_cfg = dict(cfg.get("algorithm_planner") or {})
-    fallback = bool(planner_cfg.get("fallback_to_fixed", True))
+    fallback = bool(planner_cfg.get("fallback_to_fixed", True)) and not strict_llm_required()
     try:
         return _llm_plan(
             batch,
@@ -183,7 +191,11 @@ def _load_active_catalog(
         if catalog:
             return catalog, active_by_id, "algolib:/algorithms"
     except AlgorithmLibraryError:
-        pass
+        if strict_llm_required():
+            raise
+
+    if strict_llm_required():
+        raise AlgorithmLibraryError("TIA strict LLM planning requires an active AlgoLib catalog.")
 
     host = str(lib.get("host") or "127.0.0.1")
     catalog = build_algorithm_catalog(host=host)
@@ -208,22 +220,67 @@ def _llm_plan(
     catalog, active_by_id, catalog_source = _load_active_catalog(config, algolib_client)
     if not catalog:
         raise AlgorithmPlannerError("No active algorithms available from library or local catalog.")
+    missing_required = sorted(TIA_REQUIRED_ALGORITHMS - active_by_id.keys())
+    if strict_llm_required() and missing_required:
+        raise AlgorithmLibraryError(f"Required TIA algorithms are not active: {', '.join(missing_required)}")
 
     modalities = [
         f.modality.value if hasattr(f.modality, "value") else str(f.modality) for f in batch.frames
     ]
     summary = batch_context_summary(batch.context)
 
-    raw = client.chat_json(
-        system_prompt=tia_prompts.ALGOLIB_SYSTEM_PROMPT,
-        user_prompt=tia_prompts.algolib_user_prompt(
-            algorithms=catalog,
-            batch_summary=summary,
-            modalities=modalities,
-        ),
+    prompt = tia_prompts.algolib_user_prompt(
+        algorithms=catalog,
+        batch_summary=summary,
+        modalities=modalities,
     )
-    calls = _normalize_and_validate_calls(raw, active_by_id=active_by_id)
-    calls = _ensure_required_and_order(calls, active_by_id=active_by_id)
+    retries = max(0, int(os.environ.get("TIA_PLAN_VALIDATION_RETRIES", "1"))) if strict_llm_required() else 0
+    for attempt in range(retries + 1):
+        audit_fields = {
+            "workflow_id": str(batch.mission_id),
+            "llm_call_id": new_call_id(),
+            "agent": "tactical_intelligence",
+            "phase": "observe",
+            "provider": settings.provider,
+            "model": settings.name,
+        }
+        try:
+            raw = client.chat_json(
+                system_prompt=tia_prompts.ALGOLIB_SYSTEM_PROMPT,
+                user_prompt=prompt,
+            )
+            calls = _normalize_and_validate_calls(raw, active_by_id=active_by_id)
+            calls = _ensure_required_and_order(calls, active_by_id=active_by_id)
+        except Exception as exc:
+            record_llm_call(
+                **audit_fields,
+                response_model=str(getattr(client, "last_response_model", "") or ""),
+                success=False,
+                fallback_reason=f"{type(exc).__name__}: {exc}",
+            )
+            if attempt >= retries or not isinstance(
+                exc, (LLMClientError, AlgorithmPlannerError, AlgorithmLibraryError, ValueError, TypeError)
+            ):
+                raise
+            prompt = tia_prompts.validation_retry_prompt(
+                required_algorithms=[
+                    {
+                        "algorithm_id": aid,
+                        "version": active_by_id[aid].get("version", "1.0.0"),
+                        "backend_type": active_by_id[aid].get("backend_type", "python_http_service"),
+                    }
+                    for aid in TIA_DEFAULT_PIPELINE
+                    if aid in TIA_REQUIRED_ALGORITHMS and aid in active_by_id
+                ],
+                error=str(exc),
+            )
+            continue
+        llm_call = record_llm_call(
+            **audit_fields,
+            response_model=str(getattr(client, "last_response_model", "") or ""),
+            success=True,
+        )
+        break
     return AlgorithmPlan(
         mode="llm",
         intent=str(raw.get("intent") or "llm_planned"),
@@ -232,6 +289,7 @@ def _llm_plan(
         missing_fields=[str(x) for x in (raw.get("missing_fields") or []) if x],
         raw_llm_plan=raw if isinstance(raw, dict) else None,
         catalog_source=catalog_source,
+        llm_call=llm_call,
     )
 
 
@@ -261,6 +319,8 @@ def _normalize_and_validate_calls(
         seen.add(algorithm_id)
 
         meta = active_by_id[algorithm_id]
+        if strict_llm_required() and not all(str(item.get(key) or "").strip() for key in ("version", "backend_type")):
+            raise AlgorithmPlannerError(f"LLM algorithm call lacks version or backend_type: {algorithm_id}")
         version = str(item.get("version") or meta.get("version") or TIA_ALGORITHM_VERSIONS.get(algorithm_id, "1.0.0"))
         backend = str(item.get("backend_type") or meta.get("backend_type") or "python_http_service")
         if str(meta.get("version")) and version != str(meta.get("version")):
@@ -290,6 +350,8 @@ def _ensure_required_and_order(
     active = active_by_id or {}
     for required in TIA_REQUIRED_ALGORITHMS:
         if required not in by_id:
+            if strict_llm_required():
+                raise AlgorithmPlannerError(f"LLM plan omitted required TIA algorithm: {required}")
             meta = active.get(required) or {}
             by_id[required] = AlgorithmCall(
                 algorithm_id=required,

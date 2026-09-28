@@ -22,7 +22,7 @@ if ! command -v docker >/dev/null 2>&1 || ! command docker info >/dev/null 2>&1;
 fi
 
 load_root_env() {
-  if [[ -f "$ROOT_DIR/.env" ]]; then
+  if [[ "${A2A_CONTAINER_MODE:-0}" != 1 && -f "$ROOT_DIR/.env" ]]; then
     set -a
     # shellcheck disable=SC1091
     source "$ROOT_DIR/.env"
@@ -33,7 +33,9 @@ load_root_env() {
 }
 
 resolve_a2a_python() {
-  if [[ -n "${A2A_CONDA_PREFIX:-}" && -x "$A2A_CONDA_PREFIX/bin/python" ]]; then
+  if [[ "${A2A_CONTAINER_MODE:-0}" == 1 ]]; then
+    A2A_PYTHON="$(command -v python3 || command -v python)"
+  elif [[ -n "${A2A_CONDA_PREFIX:-}" && -x "$A2A_CONDA_PREFIX/bin/python" ]]; then
     A2A_PYTHON="$A2A_CONDA_PREFIX/bin/python"
   elif [[ -x "$ROOT_DIR/../envs/a2a/bin/python" ]]; then
     # The release bundle ships its runtime beside the repository. This keeps

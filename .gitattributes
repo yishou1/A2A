@@ -1,2 +1,4 @@
 # Scenario media checksums cover the exact bytes, including line endings.
 amos-platform/static/assets/scenarios/**/*.svg text eol=lf
+*.sh text eol=lf
+*.bat text eol=crlf

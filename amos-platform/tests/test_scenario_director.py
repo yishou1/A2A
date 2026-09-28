@@ -884,6 +884,32 @@ def test_stage_workflows_wait_for_previous_analysis_before_submitting_next() -> 
     assert calls == ["MAR-CP-PERCEPTION", "MAR-CP-ASSESS"]
 
 
+def test_review_checkpoint_requires_completed_analysis_and_records_operator_action() -> None:
+    runtime = PlatformRuntime()
+    director = DirectorService(runtime)
+    director.configure(
+        scenario_id="coastal-joint-recon-strike",
+        mode="demonstration",
+        branch="standard",
+        seed=61023,
+    )
+    director._state["current_checkpoint"] = {
+        "checkpoint_id": "CJR-CP-CLOSE",
+        "requires_operator_action": True,
+        "operator_action_type": "review",
+        "analysis_status": "submitted",
+    }
+    with pytest.raises(DirectorError, match="analysis must complete"):
+        director.action("review_checkpoint")
+    director._state["current_checkpoint"]["analysis_status"] = "completed"
+    with pytest.raises(DirectorError, match="explicit operator review"):
+        director._ensure_checkpoint_can_advance()
+    reviewed = director.action("review_checkpoint")
+    assert reviewed["current_checkpoint"]["reviewed_at"]
+    assert reviewed["action_log"][-1]["action"] == "review_checkpoint"
+    director._ensure_checkpoint_can_advance()
+
+
 def test_first_analysis_advances_story_at_16x() -> None:
     runtime = PlatformRuntime()
     director = DirectorService(

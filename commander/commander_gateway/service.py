@@ -529,6 +529,24 @@ class GatewayService:
             ) from exc
 
     @staticmethod
+    def _has_completed_snapshot(projection: CommanderProjectionV1) -> bool:
+        """Whether the persisted terminal projection contains the full result.
+
+        Once Commander is completed, its checkpoint, work list, and trace are
+        immutable. Re-reading its multi-megabyte state for every browser,
+        Director, and verifier request wastes memory and can starve a small
+        Docker Desktop VM. A queued submission may already say completed
+        before its result has been fetched, so require resolved activities too.
+        """
+        activities = projection.result.get("activity_results")
+        return (
+            str(projection.status).lower() == "completed"
+            and bool(projection.work_list)
+            and isinstance(activities, list)
+            and bool(activities)
+        )
+
+    @staticmethod
     def _workflow_record(record: dict) -> dict:
         try:
             return StoredWorkflowRecordV1.model_validate(record).model_dump(mode="json")
@@ -819,14 +837,23 @@ class GatewayService:
             return self._load_projection(workflow_id)
 
     def _load_projection(self, workflow_id: str) -> CommanderProjectionV1:
+        record = self._read_workflow(workflow_id)
+        persisted = self._projection(record)
+        if self._has_completed_snapshot(persisted):
+            return persisted
         brief_call = getattr(self.commander, "get_workflow_brief", None)
         brief = brief_call(workflow_id) if brief_call is not None else None
         version = self._workflow_version(brief) if isinstance(brief, dict) else None
         cached = self._cached_projection(workflow_id, version)
         if cached is not None:
             return cached
-        record = self._read_workflow(workflow_id)
-        upstream = self.commander.get_workflow(workflow_id)
+        brief_status = str(brief.get("status") or "").lower() if isinstance(brief, dict) else ""
+        if isinstance(brief, dict) and brief_status not in {"completed", "checkpoint_only"}:
+            # Queued and running projections need only status, work list, and
+            # trace. Avoid materializing the full checkpoint until completion.
+            upstream = brief
+        else:
+            upstream = self.commander.get_workflow(workflow_id)
         checkpoint = upstream.get("checkpoint")
         if not isinstance(checkpoint, dict) and isinstance(upstream.get("context"), dict):
             checkpoint = upstream  # restored checkpoint after a manager restart
@@ -907,13 +934,18 @@ class GatewayService:
         }
 
     def get_work_list(self, workflow_id: str) -> list:
-        return self._get_checkpoint_field(workflow_id, "work_list")
+        with self._workflow_lock(workflow_id):
+            return self._get_checkpoint_field(workflow_id, "work_list")
 
     def get_trace(self, workflow_id: str) -> list:
-        return self._get_checkpoint_field(workflow_id, "trace")
+        with self._workflow_lock(workflow_id):
+            return self._get_checkpoint_field(workflow_id, "trace")
 
     def _get_checkpoint_field(self, workflow_id: str, field: str) -> list:
-        self._read_workflow(workflow_id)
+        record = self._read_workflow(workflow_id)
+        cached = self._projection(record)
+        if self._has_completed_snapshot(cached):
+            return copy.deepcopy(getattr(cached, field))
         # Independent list routes must not fetch the unrelated list or rewrite
         # a partially refreshed projection over a completed one.
         return self._read_checkpoint_list(workflow_id, field)

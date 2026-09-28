@@ -10,6 +10,8 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from llm.audit import strict_llm_required
+
 
 class LLMClientError(RuntimeError):
     pass
@@ -119,8 +121,10 @@ class OpenAICompatibleClient:
         self.strip_thinking = settings.strip_thinking
         self.json_retry_count = settings.json_retry_count
         self.reasoning_effort = settings.reasoning_effort
+        self.last_response_model = ""
 
     def chat(self, *, system_prompt: str, user_prompt: str) -> str:
+        self.last_response_model = ""
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": [
@@ -148,6 +152,12 @@ class OpenAICompatibleClient:
             raise LLMClientError(f"LLM request failed: {exc}") from exc
         except ValueError as exc:
             raise LLMClientError("LLM returned invalid JSON response.") from exc
+        self.last_response_model = str(data.get("model") or "") if isinstance(data, dict) else ""
+        if strict_llm_required() and self.last_response_model != self.model:
+            raise LLMClientError(
+                f"LLM response model mismatch: expected {self.model}, got "
+                f"{self.last_response_model or '<missing>'}."
+            )
         try:
             return data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:

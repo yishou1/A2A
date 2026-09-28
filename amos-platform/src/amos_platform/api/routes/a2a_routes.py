@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from flask import request
@@ -16,6 +17,21 @@ from amos_platform.api.responses import err, ok
 
 # Compatibility for focused route tests and downstream diagnostic imports.
 _upstream_error = normalize_upstream_error
+
+
+def _browser_media_urls(value: Any) -> Any:
+    """Translate AMOS container media references in browser-facing workflow views."""
+    internal = os.environ.get("AMOS_PUBLIC_BASE_URL", "").rstrip("/") + "/"
+    browser = os.environ.get("AMOS_BROWSER_BASE_URL", "").rstrip("/") + "/"
+    if not internal.strip("/") or not browser.strip("/"):
+        return value
+    if isinstance(value, str):
+        return browser + value[len(internal):] if value.startswith(internal) else value
+    if isinstance(value, list):
+        return [_browser_media_urls(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _browser_media_urls(item) for key, item in value.items()}
+    return value
 
 
 def register_a2a_routes(bp: Any) -> None:
@@ -62,7 +78,7 @@ def register_a2a_routes(bp: Any) -> None:
     @bp.route("/api/v1/a2a/workflows/<workflow_id>/view", methods=["GET"])
     def a2a_workflow_view(workflow_id: str):
         """Return the stable AMOS workflow-display contract."""
-        return ok(get_runtime().get_workflow_view(workflow_id))
+        return ok(_browser_media_urls(get_runtime().get_workflow_view(workflow_id)))
 
     @bp.route("/api/v1/a2a/workflows/<workflow_id>/brief", methods=["GET"])
     def a2a_workflow_brief(workflow_id: str):

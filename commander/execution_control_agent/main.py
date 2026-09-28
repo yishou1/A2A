@@ -16,6 +16,8 @@ EXECUTION_CONTROL_ALIASES = {
     "simulate_execution_control",
 }
 PASSTHROUGH_INPUT_KEYS = (
+    "workflow_id",
+    "request_id",
     "phase",
     "control_phase",
     "results",
@@ -140,7 +142,12 @@ class ExecutionControlAgent(A2ABaseAgent):
             else "execution_control_result"
         )
         output_hint = payload.get("output_hint") or default_output
-        return {output_hint: result}, "Execution control commands generated"
+        llm_plan = (result.get("output_data") or {}).get("llm_plan") or {}
+        llm_call = llm_plan.get("llm_call") if isinstance(llm_plan, dict) else None
+        return {
+            output_hint: result,
+            "llm_calls": [llm_call] if isinstance(llm_call, dict) else [],
+        }, "Execution control commands generated"
 
     async def execute_stream(self, payload):
         yield (

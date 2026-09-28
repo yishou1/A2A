@@ -1,0 +1,178 @@
+services:
+  nacos:
+    image: nacos/nacos-server:v2.4.3@sha256:00774155ca5816f81d8bdc9e3a73d2f41f40542c3bc47bbce7791d1cec9d3fae
+    platform: linux/amd64
+    environment:
+      MODE: standalone
+      PREFER_HOST_MODE: hostname
+      NACOS_AUTH_ENABLE: "false"
+      JVM_XMS: 256m
+      JVM_XMX: 512m
+      JVM_XMN: 128m
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/8848'"]
+      interval: 10s
+      timeout: 5s
+      start_period: 45s
+      retries: 15
+    restart: unless-stopped
+
+  auth-mock:
+    image: python:3.11-alpine@sha256:cd04730b8511def3fbf14204d66a0c1536f290b8e896ed5a94cd64cb15ac1356
+    command: ["python", "-u", "/app/auth_mock_server.py"]
+    environment:
+      A2A_AUTH_MOCK_HOST: 0.0.0.0
+      A2A_AUTH_MOCK_PORT: "8080"
+    volumes:
+      - ./commander/scripts/auth_mock_server.py:/app/auth_mock_server.py:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:0.34.1-rocm@sha256:7620e747881e59c2a6d5b67664dd2dbf2a1f557f2c808bd16f02aefa79e63da3
+    command: ["serve"]
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      # Qwen is a required runtime dependency. Keep it loaded while the stack
+      # is up so idle periods do not force an OOM-prone cold load beside A2A.
+      OLLAMA_KEEP_ALIVE: "-1"
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 10s
+      start_period: 20s
+      retries: 12
+    restart: unless-stopped
+
+  qwen-init:
+    build:
+      context: .
+      dockerfile: scripts/docker/Dockerfile.qwen-init
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: qwen3:1.7b
+      QWEN_DOWNLOAD_TIMEOUT_SECONDS: ${QWEN_DOWNLOAD_TIMEOUT_SECONDS:-3600}
+      QWEN_PULL_ATTEMPTS: ${QWEN_PULL_ATTEMPTS:-3}
+      QWEN_STALL_TIMEOUT_SECONDS: ${QWEN_STALL_TIMEOUT_SECONDS:-180}
+      NO_PROXY: localhost,127.0.0.1,ollama,nacos,auth-mock,a2a-core,amos
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+
+  a2a-core:
+    build:
+      context: .
+      dockerfile: scripts/docker/Dockerfile
+    image: a2a-613-app:local
+    command: ["bash", "scripts/start.sh", "--llm-profile", "local-qwen", "--require-llm"]
+    environment:
+      A2A_CONTAINER_MODE: "1"
+      A2A_LLM_STRICT: "true"
+      TIA_USE_MOCK: "1"
+      LLM_PROFILE: local-qwen
+      LLM_PROVIDER: openai_compatible
+      LOCAL_QWEN_BASE_URL: http://ollama:11434/v1
+      LOCAL_QWEN_MODEL_NAME: qwen3:1.7b
+      TOOL_LLM_URL: http://ollama:11434/v1
+      TOOL_LLM_NAME: qwen3:1.7b
+      API_KEY: ollama
+      ENABLE_LLM: "true"
+      ALGOLIB_ENABLE_LLM: "true"
+      A2A_ACT_AGENT_LLM: "true"
+      TIA_ALGORITHM_PLANNER: llm
+      TASK_SCHEDULING_ALGORITHM_PLANNER: llm
+      TOOL_LLM_REQUIRED: "true"
+      LLM_JSON_MODE: "true"
+      LLM_STRIP_THINKING: "true"
+      LLM_TIMEOUT_SECONDS: "180"
+      LLM_MAX_TOKENS: "1024"
+      LLM_REASONING_EFFORT: none
+      ALGOLIB_LLM_TIMEOUT_SECONDS: "180"
+      ALGOLIB_LLM_CONNECT_RETRIES: "2"
+      A2A_REQUEST_TIMEOUT: "360"
+      GATEWAY_REQUEST_TIMEOUT_SEC: "60"
+      STARTUP_TIMEOUT: "240"
+      LLM_AUDIT_PATH: /app/.runtime/llm_audit.jsonl
+      ALGOLIB_RESET_REGISTRY: "false"
+      ALGOLIB_FALLBACK_LOCAL: "false"
+      NACOS_ADDR: nacos:8848
+      A2A_AUTH_SERVER_BASE: http://auth-mock:8080
+      AMOS_BASE_URL: http://amos:5000
+      AMOS_PUBLIC_BASE_URL: http://amos:5000/
+      A2A_GATEWAY_URL: http://127.0.0.1:8030
+      A2A_COMMANDER_URL: http://127.0.0.1:8021
+      COMMANDER_BASE_URL: http://127.0.0.1:8021
+      GATEWAY_PUBLIC_BASE_URL: http://127.0.0.1:8030
+      ALGOLIB_BASE_URL: http://127.0.0.1:8088
+      PUBLIC_BIND_HOST: 0.0.0.0
+      COMMANDER_MANAGER_BIND_HOST: 0.0.0.0
+      ALGOLIB_BIND_HOST: 0.0.0.0
+      HF_HOME: /root/.cache/huggingface
+      SENTENCE_TRANSFORMERS_HOME: /root/.cache/huggingface/sentence_transformers
+      NO_PROXY: localhost,127.0.0.1,ollama,nacos,auth-mock,a2a-core,amos
+    volumes:
+      - a2a_runtime:/app/.runtime
+      - a2a_state:/app/commander/.a2a_state
+      - hf_cache:/root/.cache/huggingface
+    ports:
+      - "127.0.0.1:${A2A_GATEWAY_HOST_PORT:-8030}:8030"
+    depends_on:
+      nacos:
+        condition: service_healthy
+      auth-mock:
+        condition: service_healthy
+      qwen-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "scripts/docker/healthcheck.py", "core"]
+      interval: 15s
+      timeout: 15s
+      start_period: 600s
+      retries: 20
+    restart: unless-stopped
+
+  amos:
+    image: a2a-613-app:local
+    command: ["python", "-m", "amos_platform.api.app_factory", "--host", "0.0.0.0", "--port", "5000"]
+    environment:
+      A2A_CONTAINER_MODE: "1"
+      A2A_BACKEND_MODE: gateway
+      ENABLE_LLM: "true"
+      A2A_REQUEST_TIMEOUT: "360"
+      A2A_GATEWAY_URL: http://a2a-core:8030
+      A2A_COMMANDER_URL: http://a2a-core:8021
+      ALGOLIB_BASE_URL: http://a2a-core:8088
+      ALGOLIB_API_URL: http://a2a-core:8088
+      AMOS_PUBLIC_BASE_URL: http://amos:5000/
+      AMOS_BROWSER_BASE_URL: http://127.0.0.1:${AMOS_HOST_PORT:-5000}/
+      NO_PROXY: localhost,127.0.0.1,ollama,nacos,auth-mock,a2a-core,amos
+    volumes:
+      - amos_instance:/app/amos-platform/instance
+    ports:
+      - "127.0.0.1:${AMOS_HOST_PORT:-5000}:5000"
+    depends_on:
+      a2a-core:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "scripts/docker/healthcheck.py", "amos"]
+      interval: 15s
+      timeout: 20s
+      start_period: 30s
+      retries: 12
+    restart: unless-stopped
+
+volumes:
+  ollama_models:
+  a2a_runtime:
+  a2a_state:
+  amos_instance:
+  hf_cache:

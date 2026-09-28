@@ -33,6 +33,7 @@ class DirectorService:
         "step_tick",
         "advance_checkpoint",
         "refresh_analysis",
+        "review_checkpoint",
         "start_auto",
         "stop_auto",
     }
@@ -179,6 +180,12 @@ class DirectorService:
         checkpoint = self._state.get("current_checkpoint")
         if not isinstance(checkpoint, dict):
             return
+        if (
+            checkpoint.get("requires_operator_action")
+            and checkpoint.get("operator_action_type") == "review"
+            and not checkpoint.get("reviewed_at")
+        ):
+            raise DirectorError("checkpoint requires explicit operator review")
         analysis_status = str(checkpoint.get("analysis_status") or "").lower()
         if analysis_status == "submitting" and checkpoint.get("analysis_blocking", True):
             raise DirectorError("checkpoint analysis submission is not completed")
@@ -1010,6 +1017,9 @@ class DirectorService:
     def _auto_monitor(self, generation: int | None = None, run_id: str | None = None) -> None:
         generation = self._auto_generation if generation is None else generation
         run_id = str(self._state.get("run_id") or "") if run_id is None else run_id
+        analysis_poll_interval = 2.0
+        last_analysis_poll_at = 0.0
+        last_analysis_workflow_id: str | None = None
         try:
             while not self._auto_stop.wait(0.05):
                 if generation != self._auto_generation or str(self._state.get("run_id") or "") != run_id:
@@ -1059,15 +1069,23 @@ class DirectorService:
                             or self._state.get("awaiting_authorization")
                         )
                     )
+                    submission = current.get("submission")
+                    workflow_id = (
+                        str(submission.get("workflow_id") or "")
+                        if isinstance(submission, dict) else ""
+                    )
                     now = time.monotonic()
                     should_poll = (
                         threading.current_thread() is not self._auto_thread
-                        or now - self._last_analysis_poll_at >= 0.75
+                        or not workflow_id
+                        or workflow_id != last_analysis_workflow_id
+                        or now - last_analysis_poll_at >= analysis_poll_interval
                     )
                     if current.get("analysis_status") == "submitting" or not should_poll:
                         result = "pending"
                     else:
-                        self._last_analysis_poll_at = now
+                        last_analysis_workflow_id = workflow_id
+                        last_analysis_poll_at = now
                         result = self._poll_current_analysis(
                             resume_on_success=not wait_for_fire_authorization
                         )
@@ -1252,6 +1270,26 @@ class DirectorService:
 
                 checkpoint = self._next_checkpoint()
                 if checkpoint is None:
+                    current_checkpoint = self._state.get("current_checkpoint") or {}
+                    if (
+                        current_checkpoint.get("requires_operator_action")
+                        and current_checkpoint.get("operator_action_type") == "review"
+                        and not current_checkpoint.get("reviewed_at")
+                    ):
+                        engine.pause()
+                        with self._lock:
+                            waiting_for_analysis = current_checkpoint.get("analysis_status") != "completed"
+                            next_status = "awaiting_analysis" if waiting_for_analysis else "awaiting_review"
+                            if self._state.get("director_status") != next_status:
+                                self._set_status(next_status)
+                            if not waiting_for_analysis and not current_checkpoint.get("review_requested_at"):
+                                current_checkpoint["review_requested_at"] = _now_iso()
+                                self._record(
+                                    "review_required",
+                                    checkpoint_id=current_checkpoint.get("checkpoint_id"),
+                                )
+                            self.runtime.record_director_state(self.state())
+                        continue
                     if engine.clock.get("lifecycle") != "completed":
                         if not engine.clock.get("running"):
                             engine.resume()
@@ -1431,6 +1469,22 @@ class DirectorService:
             result = self.state()
             result["analysis_poll_result"] = analysis_result
             result["last_action"] = action
+            self.runtime.record_director_state(result)
+            return result
+        elif action == "review_checkpoint":
+            with self._lock:
+                checkpoint = self._state.get("current_checkpoint")
+                if not isinstance(checkpoint, dict) or checkpoint.get("operator_action_type") != "review":
+                    raise DirectorError("current checkpoint does not require operator review")
+                if checkpoint.get("analysis_status") != "completed":
+                    raise DirectorError("checkpoint analysis must complete before review")
+                checkpoint["reviewed_at"] = _now_iso()
+                self._set_status(
+                    "auto_running" if self._auto_thread and self._auto_thread.is_alive() else "paused"
+                )
+                self._record(action, checkpoint_id=checkpoint.get("checkpoint_id"))
+                result = self.state()
+                result["last_action"] = action
             self.runtime.record_director_state(result)
             return result
         elif action == "start_auto":

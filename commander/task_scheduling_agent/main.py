@@ -417,7 +417,13 @@ class TaskSchedulingA2AAgent(A2ABaseAgent):
         result = self.scheduler.run(build_scheduler_input(payload))
         normalized = normalize_task_scheduling_result(payload, result)
         output_hint = payload.get("output_hint") or "task_scheduling_result"
-        return {output_hint: normalized}, "Task scheduling and resource allocation completed"
+        llm_plan = normalized.get("llm_plan") if isinstance(normalized.get("llm_plan"), dict) else {}
+        llm_call = llm_plan.get("llm_call")
+        return {
+            output_hint: normalized,
+            "llm_plan": llm_plan,
+            "llm_calls": [llm_call] if isinstance(llm_call, dict) else [],
+        }, "Task scheduling and resource allocation completed"
 
 
 if __name__ == "__main__":
