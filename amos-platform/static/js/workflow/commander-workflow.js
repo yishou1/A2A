@@ -685,10 +685,16 @@ window.PlatformWorkflow = (function () {
   }
 
   function liveTacticalAttachmentFrames(scope, detail) {
+    var coastal = isCoastalJointScenario(currentScenarioId());
     if (scope === "output") {
       var annotated = collectOutputAnnotatedAttachments(detail);
       if (annotated && annotated.length) {
-        return annotated.map(function (row) {
+        var annotatedRows = coastal ? annotated.filter(function (row) {
+          var cap = String(row.caption || row.id || "").toLowerCase();
+          return cap.indexOf("光电") >= 0 || cap.indexOf("eo") >= 0 || cap.indexOf("cjr-media-03") >= 0;
+        }) : annotated;
+        if (!annotatedRows.length) annotatedRows = annotated.slice(0, 1);
+        return annotatedRows.slice(0, 1).map(function (row) {
           return {
             image: row.uri,
             caption: row.caption + " · 检测锚框",
@@ -698,7 +704,9 @@ window.PlatformWorkflow = (function () {
       var dets = collectOutputDetections(detail);
       if (dets.length) {
         var submission = lastView && lastView.submission || {};
-        var sources = (submission.attachments || []).filter(isImageAttachment).slice(0, 2);
+        var sources = coastal
+          ? coastalEoImageAttachments(submission.attachments || [])
+          : (submission.attachments || []).filter(isImageAttachment).slice(0, 2);
         var drawn = sources.map(function (item, index) {
           var sensorDets = dets.filter(function (det) {
             return !det.sensor_id || String(det.sensor_id) === String(item.id || item.sensor_id || "");
@@ -714,10 +722,12 @@ window.PlatformWorkflow = (function () {
       }
       return null;
     }
-    var submission = lastView && lastView.submission || {};
-    var rows = (submission.attachments || []).filter(isImageAttachment);
+    var submissionIn = lastView && lastView.submission || {};
+    var rows = coastal
+      ? coastalEoImageAttachments(submissionIn.attachments || [])
+      : (submissionIn.attachments || []).filter(isImageAttachment).slice(0, 2);
     if (!rows.length) return null;
-    return rows.slice(0, 2).map(function (item) {
+    return rows.map(function (item) {
       return {
         image: absoluteMediaUri(item.uri || item.url || item.media_uri),
         caption: (item.name || item.id || "传感器帧") + " · 输入帧",
@@ -729,24 +739,40 @@ window.PlatformWorkflow = (function () {
     return String(scenarioId || "") === "coastal-joint-recon-strike";
   }
 
+  function coastalEoImageAttachments(rows) {
+    var list = (rows || []).filter(isImageAttachment);
+    var eo = list.filter(function (item) {
+      var id = String(item.id || item.sensor_id || "");
+      var name = String(item.name || "").toLowerCase();
+      var uri = String(item.uri || item.url || "").toLowerCase();
+      if (id === "CJR-MEDIA-03" || id.indexOf("CJR-MEDIA-03") === 0) return true;
+      if (name.indexOf("光电") >= 0 || name.indexOf("eo") >= 0) return true;
+      if (uri.indexOf("coastal-eo") >= 0 || uri.indexOf("wz10-eo") >= 0) return true;
+      return false;
+    });
+    return (eo.length ? eo : list).slice(0, 1);
+  }
+
   function coastalObservePresentationView() {
-    // UI-only fallback so 流程执行 can show coastal missile-site inputs when
-    // Gateway/Commander are unavailable. Never used for maritime/other scenarios.
+    // UI-only fallback: coastal Observe shows a single WZ-10 EO frame +
+    // 97-class battlefield RT-DETR boxes. Never used for maritime/other scenarios.
+    // Presentation boxes from prior 97-class EO run (keep original RT-DETR profile imgsz).
+    var eoDets = [
+      { sensor_id: "CJR-MEDIA-03", class_name: "missile", confidence: 0.55, bbox: [829.3, 473.4, 886.2, 555.6] },
+      { sensor_id: "CJR-MEDIA-03", class_name: "missile", confidence: 0.34, bbox: [759.7, 460.3, 820.7, 540.9] },
+      { sensor_id: "CJR-MEDIA-03", class_name: "vehicle", confidence: 0.33, bbox: [715.7, 509.4, 765.3, 544.8] },
+      { sensor_id: "CJR-MEDIA-03", class_name: "vehicle", confidence: 0.13, bbox: [767.2, 505.6, 816.5, 540.0] },
+    ];
     return {
       workflow_id: "coastal-observe-presentation",
-      status: "running",
-      progress_pct: 40,
+      status: "completed",
+      progress_pct: 100,
+      terminal: true,
       _presentation: true,
       submission: {
         scenario_id: "coastal-joint-recon-strike",
         stage_transfer: { checkpoint_id: "CJR-CP-IDENTIFY", phase: "OBSERVE" },
         attachments: [
-          {
-            id: "CJR-MEDIA-01",
-            name: "卫星 SAR · 疑似岸基阵地",
-            mime_type: "image/png",
-            uri: "/static/ui-previews/coastal-sar-input.png",
-          },
           {
             id: "CJR-MEDIA-03",
             name: "无侦-10 光电 · 沿海导弹阵地",
@@ -756,34 +782,27 @@ window.PlatformWorkflow = (function () {
         ],
       },
       orchestration: {
-        counts: { completed: 0, total: 1, running: 1 },
+        counts: { completed: 1, total: 1, running: 0 },
         activities: [{
           index: 1,
           activity_id: "coastal-tia-observe",
           role: "tactical_intelligence",
           work_item: "感知识别融合",
-          status: "running",
+          status: "completed",
           agent: "Tactical Intelligence Agent",
-          description: "汇聚天基 SAR 与无侦-10 光电，识别沿海导弹阵地外形与候选阵位。",
+          description: "对无侦-10 光电帧运行 97 类战场 RT-DETR，识别沿海导弹阵地外形与候选阵位。",
         }],
       },
       activity_details: {
         "coastal-tia-observe": {
           role: "tactical_intelligence",
           input_detail: {
-            summary: "沿海导弹阵地传感器输入",
-            media: ["CJR-MEDIA-01", "CJR-MEDIA-03"],
+            summary: "无侦-10 光电识别输入",
+            media: ["CJR-MEDIA-03"],
           },
           output_detail: {
-            summary: "目标检测输出（阵地候选）",
+            summary: "目标检测输出（97 类 RT-DETR）",
             output_attachments: [
-              {
-                id: "CJR-MEDIA-01-DET",
-                name: "卫星 SAR · RT-DETR 锚框",
-                mime_type: "image/png",
-                uri: "/static/ui-previews/coastal-sar-annotated.png",
-                meta: { artifact_type: "annotated_detection", sensor_id: "CJR-MEDIA-01" },
-              },
               {
                 id: "CJR-MEDIA-03-DET",
                 name: "无侦-10 光电 · RT-DETR 锚框",
@@ -792,43 +811,19 @@ window.PlatformWorkflow = (function () {
                 meta: { artifact_type: "annotated_detection", sensor_id: "CJR-MEDIA-03" },
               },
             ],
-            detections: [
-              { sensor_id: "CJR-MEDIA-03", class_name: "missile", confidence: 0.55, bbox: [829.3, 473.4, 886.2, 555.6] },
-              { sensor_id: "CJR-MEDIA-03", class_name: "missile", confidence: 0.34, bbox: [759.7, 460.3, 820.7, 540.9] },
-              { sensor_id: "CJR-MEDIA-03", class_name: "vehicle", confidence: 0.33, bbox: [715.7, 509.4, 765.3, 544.8] },
-              { sensor_id: "CJR-MEDIA-03", class_name: "vehicle", confidence: 0.13, bbox: [767.2, 505.6, 816.5, 540.0] },
-              { sensor_id: "CJR-MEDIA-01", class_name: "elephant", confidence: 0.37, bbox: [795.4, 491.6, 941.5, 579.5] },
-              { sensor_id: "CJR-MEDIA-01", class_name: "person", confidence: 0.22, bbox: [828.1, 492.2, 860.5, 557.8] },
-            ],
+            detections: eoDets,
           },
           algorithms: [{
             algorithm_id: "battlefield_rtdetr_detector",
-            name: "RT-DETR 战场目标检测",
+            name: "RT-DETR 战场目标检测（97 类）",
             status: "completed",
-            output: {
-              count: 6,
-              detections: [
-                { sensor_id: "CJR-MEDIA-03", class_name: "missile", confidence: 0.55, bbox: [829.3, 473.4, 886.2, 555.6] },
-                { sensor_id: "CJR-MEDIA-03", class_name: "missile", confidence: 0.34, bbox: [759.7, 460.3, 820.7, 540.9] },
-                { sensor_id: "CJR-MEDIA-03", class_name: "vehicle", confidence: 0.33, bbox: [715.7, 509.4, 765.3, 544.8] },
-                { sensor_id: "CJR-MEDIA-03", class_name: "vehicle", confidence: 0.13, bbox: [767.2, 505.6, 816.5, 540.0] },
-                { sensor_id: "CJR-MEDIA-01", class_name: "elephant", confidence: 0.37, bbox: [795.4, 491.6, 941.5, 579.5] },
-                { sensor_id: "CJR-MEDIA-01", class_name: "person", confidence: 0.22, bbox: [828.1, 492.2, 860.5, 557.8] },
-              ],
-            },
+            output: { count: eoDets.length, detections: eoDets },
             output_attachments: [
               {
                 id: "CJR-MEDIA-03-DET",
                 name: "无侦-10 光电 · RT-DETR 锚框",
                 mime_type: "image/png",
                 uri: "/static/ui-previews/coastal-eo-missile-site-annotated.png",
-                meta: { artifact_type: "annotated_detection" },
-              },
-              {
-                id: "CJR-MEDIA-01-DET",
-                name: "卫星 SAR · RT-DETR 锚框",
-                mime_type: "image/png",
-                uri: "/static/ui-previews/coastal-sar-annotated.png",
                 meta: { artifact_type: "annotated_detection" },
               },
             ],
@@ -847,6 +842,30 @@ window.PlatformWorkflow = (function () {
     });
   }
 
+  function preferLiveCoastalObserveView() {
+    var best = null;
+    var bestRank = -1;
+    Object.keys(viewCache || {}).forEach(function (id) {
+      var view = viewCache[id];
+      if (!view || view._presentation) return;
+      if (!viewHasTacticalIntelligence(view)) return;
+      var submission = view.submission || {};
+      var scenarioId = submission.scenario_id || "";
+      if (scenarioId && !isCoastalJointScenario(scenarioId)) return;
+      var checkpoint = String(workflowCheckpoint(submission) || "");
+      var rank = 0;
+      if (checkpoint.indexOf("CJR-CP-IDENTIFY") >= 0) rank = 3;
+      else if (checkpoint.indexOf("CJR-CP-CUE") >= 0) rank = 2;
+      else if (checkpoint.indexOf("CJR-CP-") >= 0) rank = 1;
+      if (view.terminal || view.status === "completed") rank += 10;
+      if (rank > bestRank) {
+        bestRank = rank;
+        best = view;
+      }
+    });
+    return best;
+  }
+
   function ensurePresentationView(view) {
     var base = view && typeof view === "object" ? view : {};
     var scenarioId = (base.submission && base.submission.scenario_id) ||
@@ -855,16 +874,39 @@ window.PlatformWorkflow = (function () {
       "";
     if (!isCoastalJointScenario(scenarioId)) return base;
     if (viewHasTacticalIntelligence(base) && !base._presentation) return base;
+    var live = preferLiveCoastalObserveView();
+    if (live) {
+      activeWorkflowId = live.workflow_id || activeWorkflowId;
+      if (!workflowId || String(workflowId) === "coastal-observe-presentation") {
+        workflowId = live.workflow_id || workflowId;
+      }
+      return live;
+    }
     var presentation = coastalObservePresentationView();
     viewCache[String(presentation.workflow_id)] = presentation;
-    activeWorkflowId = presentation.workflow_id;
-    workflowId = presentation.workflow_id;
+    if (!activeWorkflowId || String(activeWorkflowId) === "coastal-observe-presentation") {
+      activeWorkflowId = presentation.workflow_id;
+    }
+    if (!workflowId || String(workflowId) === "coastal-observe-presentation") {
+      workflowId = presentation.workflow_id;
+    }
     return presentation;
   }
 
   function refreshPresentation() {
     var scenarioId = options.getScenarioId && options.getScenarioId() || "";
     if (!isCoastalJointScenario(scenarioId)) return;
+    var live = preferLiveCoastalObserveView();
+    if (live) {
+      lastView = live;
+      lastViewSignature = "";
+      activeWorkflowId = live.workflow_id;
+      workflowId = live.workflow_id;
+      renderTaskHistory();
+      renderActivities(live);
+      renderActivityDetail(live);
+      return;
+    }
     if (lastView && viewHasTacticalIntelligence(lastView) && !lastView._presentation) return;
     var view = coastalObservePresentationView();
     lastView = view;
@@ -872,18 +914,33 @@ window.PlatformWorkflow = (function () {
     viewCache[String(view.workflow_id)] = view;
     activeWorkflowId = view.workflow_id;
     workflowId = view.workflow_id;
+    // Seed local manifest so 任务执行检查器 shows OBSERVE slot without Gateway.
+    runManifest = {
+      workflow_ids: [view.workflow_id],
+      submissions: [{
+        workflow_id: view.workflow_id,
+        snapshot: view.submission || {},
+      }],
+      workflow_views: [{
+        workflow_id: view.workflow_id,
+        status: view.status || "completed",
+        terminal: true,
+        result: { cards: (view.orchestration && view.orchestration.activities) || [] },
+      }],
+    };
+    historyRunId = simulationRunId || historyRunId || "coastal-presentation";
     selectedActivityId = "coastal-tia-observe";
     activityTab = "input";
     followCurrentActivity = false;
-    setBadge(document.getElementById("wf-status-badge"), "running");
+    setBadge(document.getElementById("wf-status-badge"), "completed");
     var stateEl = document.getElementById("wf-state");
     var idEl = document.getElementById("wf-id");
     var summary = document.getElementById("wf-summary");
     var bar = document.getElementById("wf-progress-bar");
-    if (stateEl) stateEl.textContent = statusLabel("running");
+    if (stateEl) stateEl.textContent = statusLabel("completed");
     if (idEl) idEl.textContent = view.workflow_id;
-    if (summary) summary.textContent = "沿海观察与识别演示 · 导弹阵地传感器输入";
-    if (bar) bar.style.width = String(view.progress_pct || 40) + "%";
+    if (summary) summary.textContent = "沿海观察与识别 · 无侦-10 光电 + 97类 RT-DETR";
+    if (bar) bar.style.width = String(view.progress_pct || 100) + "%";
     selectTab("orchestration", false);
     renderTaskHistory();
     renderActivities(view);
@@ -905,20 +962,12 @@ window.PlatformWorkflow = (function () {
         frames = isOutput ? [
           {
             image: "/static/ui-previews/coastal-eo-missile-site-annotated.png",
-            caption: "无侦-10 光电 · RT-DETR 导弹阵地锚框",
-          },
-          {
-            image: "/static/ui-previews/coastal-sar-annotated.png",
-            caption: "天基 SAR · RT-DETR 岸基阵地锚框",
+            caption: "无侦-10 光电 · RT-DETR 锚框",
           },
         ] : [
           {
-            image: "/static/ui-previews/coastal-sar-input.png",
-            caption: "卫星 SAR · 疑似岸基阵地",
-          },
-          {
             image: "/static/ui-previews/coastal-eo-missile-site.png",
-            caption: "无侦-10 光电 · 阵地外形复核",
+            caption: "无侦-10 光电 · 沿海导弹阵地",
           },
         ];
       }

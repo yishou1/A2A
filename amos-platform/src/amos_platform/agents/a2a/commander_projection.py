@@ -17,6 +17,19 @@ PROTECTED_OBJECT_CLASSES = {
     "merchant_vessel",
 }
 
+# Observe/IDENTIFY may classify these before Orient ranks threats. Promote to
+# 「高风险」 at CJR-CP-IDENTIFY instead of waiting for FUSION assessment rows.
+HIGH_RISK_OBJECT_CLASSES = {
+    "coastal_missile_site",
+    "missile_site",
+    "missile_battery",
+    "fast_attack_craft",
+    "airfield_runway",
+    "airfield",
+    "mobile_coastal_air_defense",
+    "coastal_air_defense",
+}
+
 # These fields describe effects already produced by the simulation execution
 # loop.  A later Commander classification refresh may enrich the assessment,
 # but must never roll an impacted/destroyed track back to an intact state.
@@ -90,32 +103,32 @@ def _workflow_artifacts(workflow_status: dict[str, Any]) -> tuple[dict[str, Any]
     return tracking, assessment
 
 
+def _track_class_hint(item: dict[str, Any]) -> str:
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    for key in ("source_class", "classification", "object_type", "entity_type", "class_name"):
+        raw = metadata.get(key) if key in metadata else item.get(key)
+        value = str(raw or "").strip().lower()
+        if value and value not in {"unknown", "ship", "none", "null"}:
+            return value
+    return ""
+
+
 def _assessment_rows(artifact: dict[str, Any]) -> list[dict[str, Any]]:
     rows = artifact.get("threats") or artifact.get("ranked_threats") or artifact.get("unified_threat_ranking") or []
     if not rows:
         # Observe may identify a hostile coastal site before Orient ranks threats.
-        # Promote track metadata (source_class / threat_level) so AMOS can show
-        # 「高风险」 at CJR-CP-IDENTIFY instead of waiting for FUSION.
-        high_risk_classes = {
-            "coastal_missile_site",
-            "missile_site",
-            "missile_battery",
-            "fast_attack_craft",
-            "airfield_runway",
-            "airfield",
-            "mobile_coastal_air_defense",
-            "coastal_air_defense",
-        }
+        # Promote track class hints / threat_level so AMOS can show 「高风险」
+        # at CJR-CP-IDENTIFY instead of waiting for FUSION.
         rows = []
         for item in artifact.get("tracks") or []:
             if not isinstance(item, dict) or not (item.get("track_id") or item.get("id")):
                 continue
             metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
-            source_class = str(metadata.get("source_class") or "").lower()
-            if source_class in {"", "unknown", "ship"}:
+            source_class = _track_class_hint(item)
+            if not source_class:
                 continue
-            level = str(metadata.get("threat_level") or "").lower()
-            if not level and source_class in high_risk_classes:
+            level = str(metadata.get("threat_level") or item.get("threat_level") or "").lower()
+            if not level and source_class in HIGH_RISK_OBJECT_CLASSES:
                 level = "high"
             rows.append({
                 **item,
@@ -329,6 +342,40 @@ def apply_commander_assessments(
             track for track in local_tracks
             if str(getattr(track, "id", "")) in submitted_track_ids
         ]
+    # Live observe_workflow often returns tracks without source_class / ranking.
+    # Fall back to AMOS evidence-classified local tracks so IDENTIFY can confirm
+    # 「高风险」 before Orient/FUSION writes threat_assessment_result.
+    if not assessments and local_tracks:
+        for track in local_tracks:
+            track_id = str(getattr(track, "id", "") or "")
+            classification = str(getattr(track, "classification", "") or "").lower()
+            if not track_id or classification not in HIGH_RISK_OBJECT_CLASSES:
+                continue
+            existing = getattr(track, "agent_assessment", {}) or {}
+            if str(existing.get("status") or "").lower() == "confirmed":
+                continue
+            confidence = getattr(track, "confidence", None)
+            assessments.append({
+                "track_id": track_id,
+                "level": "high",
+                "score": confidence,
+                "entity_type": classification,
+            })
+            if track_id not in backend_tracks:
+                backend_row = {
+                    "track_id": track_id,
+                    "object_type": classification,
+                    "metadata": {
+                        "source_class": classification,
+                        "label": "hostile",
+                        "affiliation": "red",
+                        "threat_level": "high",
+                    },
+                    "lat": getattr(track, "lat", None),
+                    "lon": getattr(track, "lng", None),
+                }
+                backend_track_rows.append(backend_row)
+                backend_tracks[track_id] = backend_row
     assigned_local_ids: set[str] = set()
     associations: list[dict[str, Any]] = []
     association_by_backend_id: dict[str, tuple[Any | None, dict[str, Any]]] = {}

@@ -509,6 +509,43 @@ def _apply_observe_identify_assessment(engine: SimEngine, workflow_id: str = "wf
     return track.id
 
 
+def _apply_observe_identify_without_backend_class_hint(
+    engine: SimEngine, workflow_id: str = "wf-cjr-identify-local"
+) -> str:
+    """Live observe often returns tracks without source_class; promote local EO class."""
+    track = next(iter(engine.sensor_fusion.tracks.values()))
+    projection = apply_commander_assessments(
+        engine,
+        {
+            "workflow_id": workflow_id,
+            "status": "completed",
+            "result": {
+                "outputs": {
+                    "tracking_result": [{"value": {"tracks": [{
+                        "track_id": track.id,
+                        "object_type": "unknown",
+                        "metadata": {},
+                        "lat": track.lat,
+                        "lon": track.lng,
+                    }]}}],
+                },
+                "summary": {"verification": "observe-identify local-fallback"},
+            },
+        },
+        submission={
+            "run_id": str(engine.clock.get("run_id") or "run-cjr-identify-local"),
+            "transport": "gateway",
+            "package": {"package_id": "pkg-cjr-identify-local", "verified": True},
+            "snapshot_sequence": int(engine.sensor_fusion.last_observation_batch.get("tick_id", 0) or 0),
+            "simulation_time_sec": float(engine.clock["elapsed_sec"]),
+            "contacts": [{"contact_id": track.id}],
+        },
+    )
+    assert projection["status"] == "completed"
+    assert projection["applied_count"] == 1
+    return track.id
+
+
 def test_multimodal_evidence_releases_a_backend_classification_candidate() -> None:
     scenario = get_scenario(SCENARIO_ID)
     assert scenario is not None
@@ -553,6 +590,31 @@ def test_high_risk_confirmed_during_observe_before_orient_fusion() -> None:
     assert track.agent_assessment["status"] == "confirmed"
     assert track.agent_assessment["label"] == "高风险"
     assert track.agent_assessment["source"] == "A2A 后端工作流"
+
+
+def test_high_risk_promoted_from_local_eo_class_when_observe_omits_source_class() -> None:
+    """Live observe_workflow may omit source_class; still confirm 高风险 at IDENTIFY."""
+    scenario = get_scenario(SCENARIO_ID)
+    assert scenario is not None
+    engine = SimEngine(seed=int(scenario["default_seed"]))
+    engine.load_scenario(scenario)
+    engine.clock.update({
+        "run_id": "run-cjr-high-risk-local-fallback",
+        "scenario_id": SCENARIO_ID,
+        "scenario_branch": "standard",
+        "director_checkpoint_id": "CJR-CP-IDENTIFY",
+    })
+
+    _advance(engine, 1530)
+    track_id = _apply_observe_identify_without_backend_class_hint(engine)
+    track = engine.sensor_fusion.tracks[track_id]
+
+    assert float(engine.clock["elapsed_sec"]) < 2130
+    assert track.classification == "COASTAL_MISSILE_SITE"
+    assert track.threat_level == "HIGH"
+    assert track.agent_assessment["status"] == "confirmed"
+    assert track.agent_assessment["label"] == "高风险"
+    assert float(track.agent_assessment["source_simulation_time_sec"]) < 2130
 
 
 def test_individual_assets_loiter_or_patrol_instead_of_freezing_on_station() -> None:

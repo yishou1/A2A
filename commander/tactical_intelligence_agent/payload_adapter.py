@@ -60,6 +60,10 @@ def _is_visual_sensor_attachment(attachment: dict[str, Any]) -> bool:
 
     Maritime Observe continues to forward its historical attachment set,
     including precollected convoy EO and derived radar SVG products.
+
+    Coastal recognition is EO-only for RT-DETR (97-class battlefield weights):
+    SAR/radar cue products stay in the scenario story but are not forwarded as
+    detector frames, so stage-1 detection no longer runs on SAR imagery.
     """
     if not _is_coastal_scenario_attachment(attachment):
         return True
@@ -72,6 +76,9 @@ def _is_visual_sensor_attachment(attachment: dict[str, Any]) -> bool:
     if product_type == "external_precollected" and (
         mime == "image/svg+xml" or kind == "telemetry"
     ):
+        return False
+    modality = _modality_for_attachment(attachment)
+    if modality in {SensorModality.SAR, SensorModality.RADAR}:
         return False
     return True
 
