@@ -125,7 +125,14 @@ class PlatformRuntime:
         if brief is not None:
             payload = brief(workflow_id)
             state = str(payload.get("status") or "unknown").lower()
-            if state in TERMINAL_STATES:
+            # Commander reports a workflow with a failed activity as
+            # ``paused`` so it can be inspected or resumed.  The brief view
+            # does not include activity counts, therefore a paused workflow
+            # must be expanded once to distinguish a real failure from a
+            # live/operator pause.  The full workflow view marks failed
+            # activities terminal and lets the Director leave
+            # ``awaiting_analysis`` instead of polling forever.
+            if state in TERMINAL_STATES or state == "paused":
                 return self.get_workflow_view(workflow_id)
             if payload.get("error"):
                 return {
@@ -142,7 +149,7 @@ class PlatformRuntime:
         status = bridge.get_workflow(workflow_id)
         status.setdefault("workflow_id", workflow_id)
         state = str(status.get("status") or "unknown").lower()
-        if state in TERMINAL_STATES or status.get("error"):
+        if state in TERMINAL_STATES or state == "paused" or status.get("error"):
             return self.get_workflow_view(workflow_id)
         return {
             "workflow_id": workflow_id,

@@ -873,7 +873,11 @@ window.PlatformWorkflow = (function () {
       (options.getScenarioId && options.getScenarioId()) ||
       "";
     if (!isCoastalJointScenario(scenarioId)) return base;
-    if (viewHasTacticalIntelligence(base) && !base._presentation) return base;
+    // The local presentation is only a pre-workflow placeholder.  Once the
+    // operator selects any real history item, preserve that workflow even if
+    // it has no Tactical Intelligence activity; otherwise ORIENT/DECIDE/ACT
+    // are silently replaced by the OBSERVE timeline.
+    if (base.workflow_id && !base._presentation) return base;
     var live = preferLiveCoastalObserveView();
     if (live) {
       activeWorkflowId = live.workflow_id || activeWorkflowId;

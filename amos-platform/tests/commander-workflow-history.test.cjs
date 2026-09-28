@@ -159,7 +159,80 @@ test('coastal Engage and Assess activities share one execution timeline', async 
   for (let i = 0; i < 5; i += 1) await new Promise(setImmediate);
 
   const timeline = element('wf-activity-list').innerHTML;
-  assert.match(timeline, /simulation_execution/);
-  assert.match(timeline, /closed_loop/);
+  assert.match(timeline, /executionsimulation/);
+  assert.match(timeline, /effectevaluation/);
   assert.equal(element('wf-activity-count').textContent, '2 项');
+});
+
+test('selecting a coastal history stage replaces the activity timeline', async () => {
+  const elements = new Map();
+  const timers = new Map();
+  const element = id => {
+    if (!elements.has(id)) {
+      elements.set(id, {
+        innerHTML: '', textContent: '', className: '', hidden: false, checked: true,
+        style: {}, dataset: {}, listeners: {},
+        classList: {add() {}, toggle() {}}, setAttribute() {},
+        addEventListener(type, callback) { this.listeners[type] = callback; },
+      });
+    }
+    return elements.get(id);
+  };
+  const document = {
+    getElementById: element,
+    querySelectorAll() { return []; },
+    dispatchEvent() {},
+  };
+  const context = {
+    window: {}, document,
+    sessionStorage: {getItem() { return null; }, setItem() {}, removeItem() {}},
+    CustomEvent: function (type, options) { this.type = type; this.detail = options.detail; },
+    setInterval(callback, delay) { timers.set(delay, callback); return delay; },
+    clearInterval() {},
+  };
+  vm.runInNewContext(
+    readFileSync(resolve(__dirname, '../static/js/workflow/commander-workflow.js'), 'utf8'),
+    context
+  );
+  const submissions = [
+    {workflow_id: 'wf-cue', snapshot: {scenario_id: 'coastal-joint-recon-strike', run_id: 'run-cjr', stage_transfer: {
+      phase: 'FIND', checkpoint_id: 'CJR-CP-CUE', submission_ordinal: 1,
+    }}},
+    {workflow_id: 'wf-plan', snapshot: {scenario_id: 'coastal-joint-recon-strike', run_id: 'run-cjr', stage_transfer: {
+      phase: 'TARGET', checkpoint_id: 'CJR-CP-PLAN', submission_ordinal: 4,
+    }}},
+  ];
+  const views = {
+    'wf-cue': {
+      workflow_id: 'wf-cue', status: 'completed', terminal: true, progress_pct: 100,
+      submission: submissions[0].snapshot,
+      orchestration: {counts: {total: 1, completed: 1}, activities: [
+        {activity_id: 'cue-tia', role: 'tactical_intelligence', agent: 'agent-tia', status: 'completed', index: 1},
+      ], trace: []}, activity_details: {},
+    },
+    'wf-plan': {
+      workflow_id: 'wf-plan', status: 'completed', terminal: true, progress_pct: 100,
+      submission: submissions[1].snapshot,
+      orchestration: {counts: {total: 1, completed: 1}, activities: [
+        {activity_id: 'plan-decision', role: 'decision_planning', agent: 'agent-plan', status: 'completed', index: 1},
+      ], trace: []}, activity_details: {},
+    },
+  };
+  const api = {
+    getBackendHealth: async () => ({status: 'ok'}),
+    loadRun: async () => ({workflow_ids: ['wf-cue', 'wf-plan'], submissions, workflow_views: []}),
+    getWorkflowView: async id => views[id],
+  };
+
+  context.window.PlatformWorkflow.init(api, {getScenarioId: () => 'coastal-joint-recon-strike'});
+  context.window.PlatformWorkflow.syncRun('run-cjr');
+  context.window.PlatformWorkflow.track('wf-cue', 'run-cjr');
+  for (let i = 0; i < 5; i += 1) await new Promise(setImmediate);
+  assert.match(element('wf-activity-list').innerHTML, /agent-tia/);
+
+  element('wf-task-history').listeners.click({
+    target: {closest() { return {dataset: {workflowHistory: 'wf-plan'}}; }},
+  });
+  assert.match(element('wf-activity-list').innerHTML, /agent-plan/);
+  assert.doesNotMatch(element('wf-activity-list').innerHTML, /agent-tia/);
 });

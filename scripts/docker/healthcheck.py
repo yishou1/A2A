@@ -34,6 +34,13 @@ def probe_amos_backend(host: str = "127.0.0.1") -> None:
             raise RuntimeError(f"AMOS A2A backend is not ready: {payload}")
 
 
+def probe_synapserag(host: str = "amos") -> None:
+    with urlopen(f"http://{host}:5000/synapserag-api/health", timeout=15) as response:
+        payload = json.load(response)
+        if response.status != 200 or payload.get("status") != "ok" or payload.get("indexed") is not True:
+            raise RuntimeError(f"SynapseRAG is not ready: {payload}")
+
+
 def main() -> None:
     target = sys.argv[1]
     if target == "core":
@@ -52,6 +59,7 @@ def main() -> None:
         probe_amos_backend("amos")
         probe_http("http://amos:5000/algolib/")
         probe_http("http://amos:5000/algolib-api/health")
+        probe_synapserag()
     else:
         raise ValueError(f"unknown healthcheck target: {target}")
 

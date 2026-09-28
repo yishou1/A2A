@@ -8,6 +8,7 @@ import threading
 import time
 from copy import deepcopy
 from urllib.parse import urljoin
+from starlette.concurrency import run_in_threadpool
 
 from a2a_protocol.messages import (
     build_task_error_response,
@@ -197,6 +198,7 @@ class A2ABaseAgent:
             ),
         )
         self._recovery_notices = []
+        self._inflight_tasks = {}
         self._metrics = {
             "tasks_received": 0,
             "tasks_completed": 0,
@@ -570,6 +572,185 @@ class A2ABaseAgent:
         with self._state_lock:
             return deepcopy(self._last_error_details)
 
+    async def _send_message_idempotently(self, payload: dict, skill_id: str, work_item: str):
+        """Share in-flight work for duplicate work items within this process."""
+        loop = asyncio.get_running_loop()
+        with self._state_lock:
+            future = self._inflight_tasks.get(work_item)
+            is_owner = future is None
+            if is_owner:
+                future = loop.create_future()
+                self._inflight_tasks[work_item] = future
+
+        if not is_owner:
+            response = deepcopy(await asyncio.shield(future))
+            with self._state_lock:
+                self._metrics["cache_hits"] += 1
+            if is_success_response(response):
+                response["cached"] = True
+            return response
+
+        try:
+            response = await self._process_send_message(payload, skill_id, work_item)
+            if not future.done():
+                future.set_result(deepcopy(response))
+            return response
+        except BaseException:
+            if not future.done():
+                future.cancel()
+            raise
+        finally:
+            with self._state_lock:
+                if self._inflight_tasks.get(work_item) is future:
+                    self._inflight_tasks.pop(work_item, None)
+
+    async def _process_send_message(self, payload: dict, skill_id: str, work_item: str):
+        started = time.perf_counter()
+        with self._state_lock:
+            cached_response = self._task_response_cache.get(work_item)
+        if cached_response is None:
+            cached_response = self.idempotency_store.get(work_item)
+        if cached_response is not None and not is_success_response(cached_response):
+            with self._state_lock:
+                self._task_response_cache.pop(work_item, None)
+            self.idempotency_store.delete(work_item)
+            cached_response = None
+        if cached_response is not None:
+            try:
+                validate_task_response(
+                    payload,
+                    cached_response,
+                    self.skill_definition(skill_id),
+                )
+            except ContractValidationError:
+                with self._state_lock:
+                    self._task_response_cache.pop(work_item, None)
+                self.idempotency_store.delete(work_item)
+                cached_response = None
+        if cached_response is not None:
+            with self._state_lock:
+                self._metrics["cache_hits"] += 1
+            cached = deepcopy(cached_response)
+            cached["cached"] = True
+            return cached
+
+        accepted, error, error_code = self._reserve_task_capacity(work_item)
+        if not accepted:
+            return build_task_error_response(
+                workflow_id=payload.get("workflow_id"),
+                work_item=work_item,
+                agent=self.name,
+                role=self.role,
+                command=payload.get("command"),
+                error=error,
+                error_code=error_code,
+            )
+        try:
+            algorithm_started = time.perf_counter()
+            output, message = await run_in_threadpool(self.execute_task, payload)
+            algorithm_duration_ms = round(
+                (time.perf_counter() - algorithm_started) * 1000, 3
+            )
+            response = build_task_response(
+                workflow_id=payload.get("workflow_id"),
+                work_item=work_item,
+                agent=self.name,
+                role=self.role,
+                command=payload.get("command"),
+                status="completed",
+                output=output,
+                metrics={
+                    "latency_ms": algorithm_duration_ms,
+                    "duration_ms": algorithm_duration_ms,
+                    "algorithm_execution_ms": algorithm_duration_ms,
+                },
+                message=message,
+                work_list_size=len(self.get_work_list(payload.get("workflow_id"))),
+                extra={
+                    key: output[key]
+                    for key in (
+                        "agent_response",
+                        "selected_algorithms",
+                        "warnings",
+                        "rag_evidence",
+                    )
+                    if isinstance(output, dict) and key in output
+                },
+            )
+            validate_task_response(payload, response, self.skill_definition(skill_id))
+            service_duration_ms = round((time.perf_counter() - started) * 1000, 3)
+            response["metrics"].update(
+                {
+                    "latency_ms": service_duration_ms,
+                    "duration_ms": service_duration_ms,
+                }
+            )
+            persistence_started = time.perf_counter()
+            self.idempotency_store.put(work_item, response)
+            persistence_duration_ms = round(
+                (time.perf_counter() - persistence_started) * 1000, 3
+            )
+            total_duration_ms = round((time.perf_counter() - started) * 1000, 3)
+            response["metrics"].update(
+                {
+                    "latency_ms": total_duration_ms,
+                    "duration_ms": total_duration_ms,
+                    "idempotency_write_ms": persistence_duration_ms,
+                }
+            )
+            with self._state_lock:
+                self._metrics["tasks_completed"] += 1
+                self._metrics["total_duration_ms"] += total_duration_ms
+                self._task_response_cache[work_item] = response
+            return response
+        except Exception as exc:
+            diagnostics = exception_diagnostics(exc)
+            duration_ms = round((time.perf_counter() - started) * 1000, 3)
+            task_response = getattr(exc, "task_response", None)
+            if isinstance(task_response, dict):
+                response = deepcopy(task_response)
+                response.setdefault("metrics", {})
+                response["metrics"].update(
+                    {
+                        "latency_ms": duration_ms,
+                        "duration_ms": duration_ms,
+                    }
+                )
+                response.setdefault(
+                    "error_code",
+                    getattr(exc, "code", "AGENT_BUSINESS_ERROR"),
+                )
+            else:
+                response = build_task_error_response(
+                    workflow_id=payload.get("workflow_id"),
+                    work_item=work_item,
+                    agent=self.name,
+                    role=self.role,
+                    command=payload.get("command"),
+                    error=str(exc),
+                    error_code=getattr(exc, "code", "AGENT_BUSINESS_ERROR"),
+                    metrics={
+                        "latency_ms": duration_ms,
+                        "duration_ms": duration_ms,
+                    },
+                )
+            with self._state_lock:
+                self._metrics["tasks_failed"] += 1
+                self._metrics["total_duration_ms"] += duration_ms
+                self._metrics["last_error"] = str(exc)
+                self._last_error_details = diagnostics
+            log_event(
+                "agent_task_failed",
+                agent=self.name,
+                role=self.role,
+                workflow_id=payload.get("workflow_id"),
+                work_item=work_item,
+                **diagnostics,
+            )
+            return response
+        finally:
+            self._release_task_capacity()
+
     async def _replay_stream(self, cached_events):
         for event in cached_events:
             yield event
@@ -712,128 +893,7 @@ class A2ABaseAgent:
                 )
             self._capture_work_list(payload)
             work_item = self._work_item_from_payload(payload)
-            with self._state_lock:
-                cached_response = self._task_response_cache.get(work_item)
-            if cached_response is None:
-                cached_response = self.idempotency_store.get(work_item)
-            if cached_response is not None and not is_success_response(cached_response):
-                with self._state_lock:
-                    self._task_response_cache.pop(work_item, None)
-                self.idempotency_store.delete(work_item)
-                cached_response = None
-            if cached_response is not None:
-                try:
-                    validate_task_response(
-                        payload,
-                        cached_response,
-                        self.skill_definition(skill_id),
-                    )
-                except ContractValidationError:
-                    with self._state_lock:
-                        self._task_response_cache.pop(work_item, None)
-                    self.idempotency_store.delete(work_item)
-                    cached_response = None
-            if cached_response is not None:
-                with self._state_lock:
-                    self._metrics["cache_hits"] += 1
-                cached = deepcopy(cached_response)
-                cached["cached"] = True
-                return cached
-
-            started = time.perf_counter()
-            accepted, error, error_code = self._reserve_task_capacity(work_item)
-            if not accepted:
-                return build_task_error_response(
-                    workflow_id=payload.get("workflow_id"),
-                    work_item=work_item,
-                    agent=self.name,
-                    role=self.role,
-                    command=payload.get("command"),
-                    error=error,
-                    error_code=error_code,
-                )
-            try:
-                output, message = self.execute_task(payload)
-                duration_ms = round((time.perf_counter() - started) * 1000, 3)
-                response = build_task_response(
-                    workflow_id=payload.get("workflow_id"),
-                    work_item=work_item,
-                    agent=self.name,
-                    role=self.role,
-                    command=payload.get("command"),
-                    status="completed",
-                    output=output,
-                    metrics={
-                        "latency_ms": duration_ms,
-                        "duration_ms": duration_ms,
-                    },
-                    message=message,
-                    work_list_size=len(self.get_work_list(payload.get("workflow_id"))),
-                    extra={
-                        key: output[key]
-                        for key in (
-                            "agent_response",
-                            "selected_algorithms",
-                            "warnings",
-                            "rag_evidence",
-                        )
-                        if isinstance(output, dict) and key in output
-                    },
-                )
-                validate_task_response(payload, response, self.skill_definition(skill_id))
-                with self._state_lock:
-                    self._metrics["tasks_completed"] += 1
-                    self._metrics["total_duration_ms"] += duration_ms
-                    self._task_response_cache[work_item] = response
-                self.idempotency_store.put(work_item, response)
-                return response
-            except Exception as exc:
-                diagnostics = exception_diagnostics(exc)
-                duration_ms = round((time.perf_counter() - started) * 1000, 3)
-                task_response = getattr(exc, "task_response", None)
-                if isinstance(task_response, dict):
-                    response = deepcopy(task_response)
-                    response.setdefault("metrics", {})
-                    response["metrics"].update(
-                        {
-                            "latency_ms": duration_ms,
-                            "duration_ms": duration_ms,
-                        }
-                    )
-                    response.setdefault(
-                        "error_code",
-                        getattr(exc, "code", "AGENT_BUSINESS_ERROR"),
-                    )
-                else:
-                    response = build_task_error_response(
-                        workflow_id=payload.get("workflow_id"),
-                        work_item=work_item,
-                        agent=self.name,
-                        role=self.role,
-                        command=payload.get("command"),
-                        error=str(exc),
-                        error_code=getattr(exc, "code", "AGENT_BUSINESS_ERROR"),
-                        metrics={
-                            "latency_ms": duration_ms,
-                            "duration_ms": duration_ms,
-                        },
-                    )
-                with self._state_lock:
-                    self._metrics["tasks_failed"] += 1
-                    self._metrics["total_duration_ms"] += duration_ms
-                    self._metrics["last_error"] = str(exc)
-                    self._last_error_details = diagnostics
-                log_event(
-                    "agent_task_failed",
-                    agent=self.name,
-                    role=self.role,
-                    workflow_id=payload.get("workflow_id"),
-                    work_item=work_item,
-                    **diagnostics,
-                )
-                return response
-            finally:
-                self._release_task_capacity()
+            return await self._send_message_idempotently(payload, skill_id, work_item)
         
         @self.app.post("/sendMessageStream")
         async def send_message_stream(payload: dict, token: str = Depends(verify_token)):

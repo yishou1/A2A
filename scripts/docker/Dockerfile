@@ -36,6 +36,9 @@ RUN python -m pip install --upgrade pip==26.2.1 setuptools==84.0.0 wheel==0.48.0
     && python -m pip install torch==2.14.0+cpu torchvision==0.29.0+cpu \
        --index-url https://download.pytorch.org/whl/cpu \
     && python -m pip install -r requirements.docker.txt -c constraints.docker.txt
+COPY algorithmrepo/services/synapserag/requirements.docker.txt /app/algorithmrepo/services/synapserag/requirements.docker.txt
+RUN python -m pip install -r algorithmrepo/services/synapserag/requirements.docker.txt \
+    && python -m pip check
 COPY . /app
 COPY --from=web-build /web/dist /app/algorithmrepo/web/dist
 COPY --from=algolib-build /app/commander/build/algolib /app/commander/build/algolib

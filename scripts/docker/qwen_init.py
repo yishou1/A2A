@@ -10,7 +10,14 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://ollama:11434").rstrip("/")
-MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:1.7b")
+MODELS = tuple(
+    model.strip()
+    for model in os.environ.get(
+        "OLLAMA_MODELS",
+        os.environ.get("OLLAMA_MODEL", "qwen3:1.7b"),
+    ).split(",")
+    if model.strip()
+)
 
 
 def request_json(path: str, payload: dict | None = None, timeout: float = 30) -> dict:
@@ -35,15 +42,15 @@ def wait_for_server(timeout: float = 180) -> None:
     raise RuntimeError("Ollama API did not become ready")
 
 
-def model_present() -> bool:
+def model_present(model: str) -> bool:
     tags = request_json("/api/tags")
-    return any(item.get("name") == MODEL for item in tags.get("models", []))
+    return any(item.get("name") == model for item in tags.get("models", []))
 
 
-def pull_model(*, deadline: float) -> None:
+def pull_model(model: str, *, deadline: float) -> None:
     request = Request(
         BASE_URL + "/api/pull",
-        data=json.dumps({"model": MODEL, "stream": True}).encode("utf-8"),
+        data=json.dumps({"model": model, "stream": True}).encode("utf-8"),
         headers={"Content-Type": "application/json"},
     )
     last_status = ""
@@ -84,9 +91,19 @@ def pull_model(*, deadline: float) -> None:
                 last_bucket = 0
 
 
-def probe_model() -> None:
+def probe_model(model: str) -> None:
+    if "embedding" in model.lower():
+        reply = request_json(
+            "/v1/embeddings",
+            {"model": model, "input": ["A2A SynapseRAG readiness probe"]},
+            timeout=300,
+        )
+        rows = reply.get("data") or []
+        if not rows or not isinstance(rows[0].get("embedding"), list) or not rows[0]["embedding"]:
+            raise RuntimeError(f"Embedding probe for {model} returned no vector")
+        return
     payload = {
-        "model": MODEL,
+        "model": model,
         "messages": [{"role": "user", "content": "Return exactly one JSON object: {\"ok\": true}."}],
         "temperature": 0,
         "max_tokens": 512,
@@ -96,8 +113,8 @@ def probe_model() -> None:
     }
     reply = request_json("/v1/chat/completions", payload, timeout=300)
     response_model = reply.get("model", "")
-    if response_model != MODEL:
-        raise RuntimeError(f"Ollama returned model {response_model!r}, expected {MODEL!r}")
+    if response_model != model:
+        raise RuntimeError(f"Ollama returned model {response_model!r}, expected {model!r}")
     content = reply["choices"][0]["message"]["content"]
     parsed = json.loads(content)
     if not isinstance(parsed, dict) or parsed.get("ok") is not True:
@@ -106,35 +123,38 @@ def probe_model() -> None:
 
 def main() -> int:
     wait_for_server()
-    if model_present():
-        print(f"[qwen-init] Reusing cached {MODEL}", flush=True)
-    else:
-        if os.environ.get("OLLAMA_PULL_MISSING", "true").lower() not in {"true", "1", "yes"}:
-            raise RuntimeError(f"Required model {MODEL} is missing from Ollama")
-        print(f"[qwen-init] Downloading {MODEL}", flush=True)
-        timeout_seconds = max(60, float(os.environ.get("QWEN_DOWNLOAD_TIMEOUT_SECONDS", "3600")))
-        attempts = max(1, int(os.environ.get("QWEN_PULL_ATTEMPTS", "3")))
-        deadline = time.monotonic() + timeout_seconds
-        for attempt in range(1, attempts + 1):
-            try:
-                pull_model(deadline=deadline)
-                if not model_present():
-                    raise RuntimeError(f"Ollama did not list {MODEL} after pull attempt {attempt}")
-                break
-            except (HTTPError, URLError, TimeoutError, ValueError, RuntimeError) as exc:
+    if not MODELS:
+        raise RuntimeError("OLLAMA_MODELS did not contain a model name")
+    timeout_seconds = max(60, float(os.environ.get("QWEN_DOWNLOAD_TIMEOUT_SECONDS", "3600")))
+    attempts = max(1, int(os.environ.get("QWEN_PULL_ATTEMPTS", "3")))
+    deadline = time.monotonic() + timeout_seconds
+    for model in MODELS:
+        if model_present(model):
+            print(f"[qwen-init] Reusing cached {model}", flush=True)
+        else:
+            if os.environ.get("OLLAMA_PULL_MISSING", "true").lower() not in {"true", "1", "yes"}:
+                raise RuntimeError(f"Required model {model} is missing from Ollama")
+            print(f"[qwen-init] Downloading {model}", flush=True)
+            for attempt in range(1, attempts + 1):
                 try:
-                    if model_present():
-                        break
-                except (HTTPError, URLError, TimeoutError, ValueError):
-                    pass
-                if attempt == attempts or time.monotonic() >= deadline:
-                    raise
-                print(f"[qwen-init] Pull attempt {attempt}/{attempts} failed: {exc}; retrying", flush=True)
-                time.sleep(min(5 * attempt, 20))
-    if not model_present():
-        raise RuntimeError(f"Ollama did not list {MODEL} after pull")
-    probe_model()
-    print(f"[qwen-init] {MODEL} is ready for inference", flush=True)
+                    pull_model(model, deadline=deadline)
+                    if not model_present(model):
+                        raise RuntimeError(f"Ollama did not list {model} after pull attempt {attempt}")
+                    break
+                except (HTTPError, URLError, TimeoutError, ValueError, RuntimeError) as exc:
+                    try:
+                        if model_present(model):
+                            break
+                    except (HTTPError, URLError, TimeoutError, ValueError):
+                        pass
+                    if attempt == attempts or time.monotonic() >= deadline:
+                        raise
+                    print(f"[qwen-init] Pull attempt {attempt}/{attempts} failed: {exc}; retrying", flush=True)
+                    time.sleep(min(5 * attempt, 20))
+        if not model_present(model):
+            raise RuntimeError(f"Ollama did not list {model} after pull")
+        probe_model(model)
+        print(f"[qwen-init] {model} is ready for inference", flush=True)
     return 0
 
 

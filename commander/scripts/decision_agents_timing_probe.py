@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import contextlib
 import io
 import json
 import os
+import socket
+import statistics
 import sys
 import tempfile
 import time
@@ -13,6 +16,7 @@ from pathlib import Path
 
 import anyio
 import httpx
+import uvicorn
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -25,6 +29,7 @@ from decision_agents.common.a2a_adapter import DecisionAlgorithmA2AAgent  # noqa
 from decision_agents.compliance_authorization.agent import ComplianceAuthorizationAgent  # noqa: E402
 from decision_agents.common.definitions import AGENT_DEFINITIONS  # noqa: E402
 from decision_agents.decision_planning.agent import DecisionPlanningAgent  # noqa: E402
+from decision_support.config import get_settings  # noqa: E402
 from registry.nacos_manager import NacosRegistry  # noqa: E402
 
 
@@ -46,13 +51,16 @@ LOCAL_AGENTS = {
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Measure Project 613 decision-agent A2A timings")
-    parser.add_argument("--mode", choices=["local", "remote"], default="local")
+    parser.add_argument("--mode", choices=["local", "remote", "throughput"], default="local")
     parser.add_argument(
         "--request-timeout",
         type=float,
         default=float(os.environ.get("A2A_REQUEST_TIMEOUT", "120")),
         help="HTTP timeout for remote Agent and Commander calls.",
     )
+    parser.add_argument("--requests", type=int, default=30, help="Requests per agent in throughput mode.")
+    parser.add_argument("--concurrency", type=int, default=8, help="Maximum concurrent requests in throughput mode.")
+    parser.add_argument("--payload-bytes", type=int, default=1024, help="Serialized A2A request size in throughput mode.")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")
     return parser.parse_args()
 
@@ -78,6 +86,194 @@ def task_payload(role: str, sample_name: str, suffix: str) -> dict:
         "input": {"agent_request": sample_request(sample_name)},
         "output_hint": definition["output_hint"],
         "work_list": [],
+    }
+
+
+def throughput_payload(role: str, suffix: str, payload_bytes: int) -> tuple[dict, int]:
+    """Build a small valid task body and pad it to the requested wire size."""
+    definition = AGENT_DEFINITIONS[role]
+    workflow_id = f"throughput-{role}"
+    if role == "decision_planning":
+        agent_request = {
+            "request_id": f"{workflow_id}-{suffix}",
+            "scheduled_tasks": [
+                {"id": "TASK-001", "target_id": "TGT-001", "task_type": "monitor"}
+            ],
+            "resources": [
+                {"id": "RES-001", "type": "sensor", "status": "available"}
+            ],
+        }
+    else:
+        agent_request = {
+            "request_id": f"{workflow_id}-{suffix}",
+            "candidate_plans": [
+                {
+                    "id": "PLAN-001",
+                    "name": "Continue monitoring",
+                    "actions": ["monitor and report"],
+                    "score": 50.0,
+                }
+            ],
+            "authorization": {
+                "status": "pending_review",
+                "scope": ["simulation-only decision-support"],
+            },
+            "constraints": ["simulation-only decision-support"],
+        }
+    payload = {
+        "schema_version": "1.0",
+        "workflow_id": workflow_id,
+        "work_item": f"{workflow_id}:{suffix}",
+        "command": definition["command"],
+        "required_skill": definition["skill_id"],
+        "required_skills": [definition["skill_id"]],
+        "input": {"agent_request": agent_request, "benchmark_padding": ""},
+        "output_hint": definition["output_hint"],
+        "work_list": [],
+    }
+    encoded_size = len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    if encoded_size > payload_bytes:
+        raise ValueError(
+            f"minimal {role} request is already {encoded_size} bytes; "
+            f"increase --payload-bytes above that size"
+        )
+    payload["input"]["benchmark_padding"] = "x" * (payload_bytes - encoded_size)
+    actual_size = len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    return payload, actual_size
+
+
+async def measure_local_agent_throughput(
+    role: str,
+    agent_class,
+    name: str,
+    port: int,
+    *,
+    request_count: int,
+    concurrency: int,
+    payload_bytes: int,
+):
+    state_root = PROJECT_ROOT / ".a2a_state"
+    state_root.mkdir(parents=True, exist_ok=True)
+    state_dir = tempfile.TemporaryDirectory(
+        prefix=".throughput-", dir=state_root
+    )
+    agent = DecisionAlgorithmA2AAgent(
+        algorithm_agent=agent_class(),
+        name=name,
+        description=f"Throughput probe for {role}",
+        role=role,
+        port=port,
+        idempotency_db_path=str(Path(state_dir.name) / "idempotency.db"),
+        max_concurrent_tasks=concurrency,
+    )
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(128)
+    port = listener.getsockname()[1]
+    server = uvicorn.Server(
+        uvicorn.Config(
+            agent.app,
+            host="127.0.0.1",
+            port=port,
+            log_level="critical",
+            access_log=False,
+            lifespan="off",
+        )
+    )
+    server_task = asyncio.create_task(server.serve(sockets=[listener]))
+    try:
+        for _ in range(500):
+            if server.started:
+                break
+            if server_task.done():
+                await server_task
+                raise RuntimeError(f"{role} benchmark server stopped before startup")
+            await asyncio.sleep(0.01)
+        else:
+            raise TimeoutError(f"{role} benchmark server did not start")
+
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as client:
+            warmup_payload, _ = throughput_payload(role, "warmup", payload_bytes)
+            warmup = await client.post(
+                "/sendMessage",
+                json=warmup_payload,
+                headers={"Authorization": "Bearer timing-token"},
+            )
+            warmup.raise_for_status()
+            if warmup.json().get("status") != "completed":
+                raise RuntimeError(f"{role} warm-up failed: {warmup.json()}")
+
+            semaphore = asyncio.Semaphore(concurrency)
+            samples = []
+
+            async def send(index: int):
+                payload, actual_size = throughput_payload(role, f"send-{index}-{time.time_ns()}", payload_bytes)
+                async with semaphore:
+                    started = time.perf_counter()
+                    response = await client.post(
+                        "/sendMessage",
+                        json=payload,
+                        headers={"Authorization": "Bearer timing-token"},
+                    )
+                    elapsed_ms = (time.perf_counter() - started) * 1000.0
+                response.raise_for_status()
+                body = response.json()
+                samples.append({
+                    "elapsed_ms": elapsed_ms,
+                    "agent_latency_ms": (body.get("metrics") or {}).get("latency_ms"),
+                    "idempotency_write_ms": (body.get("metrics") or {}).get("idempotency_write_ms"),
+                    "response_bytes": len(response.content),
+                    "payload_bytes": actual_size,
+                    "status": body.get("status"),
+                    "error_code": body.get("error_code"),
+                })
+
+            started = time.perf_counter()
+            await asyncio.gather(*(send(index) for index in range(request_count)))
+            elapsed_seconds = time.perf_counter() - started
+    finally:
+        server.should_exit = True
+        await server_task
+        listener.close()
+        state_dir.cleanup()
+
+    successful = [sample for sample in samples if sample["status"] == "completed"]
+    latencies = sorted(sample["elapsed_ms"] for sample in successful)
+    agent_latencies = sorted(
+        float(sample["agent_latency_ms"])
+        for sample in successful
+        if sample["agent_latency_ms"] is not None
+    )
+    idempotency_latencies = sorted(
+        float(sample["idempotency_write_ms"])
+        for sample in successful
+        if sample["idempotency_write_ms"] is not None
+    )
+    if not successful:
+        raise RuntimeError(f"{role} throughput probe had no successful requests: {samples}")
+    p95_index = min(len(latencies) - 1, int(0.95 * len(latencies)))
+    return {
+        "role": role,
+        "phase": "local_send_message_throughput",
+        "backend": get_settings().decision_agent_backend,
+        "rag_backend": get_settings().rag_backend,
+        "requests": request_count,
+        "completed": len(successful),
+        "failed": len(samples) - len(successful),
+        "concurrency": concurrency,
+        "payload_bytes": payload_bytes,
+        "actual_payload_bytes_min": min(sample["payload_bytes"] for sample in samples),
+        "actual_payload_bytes_max": max(sample["payload_bytes"] for sample in samples),
+        "elapsed_seconds": round(elapsed_seconds, 4),
+        "throughput_msg_s": round(len(successful) / elapsed_seconds, 3),
+        "latency_p50_ms": round(statistics.median(latencies), 3),
+        "latency_p95_ms": round(latencies[p95_index], 3),
+        "latency_max_ms": round(max(latencies), 3),
+        "agent_latency_p50_ms": round(statistics.median(agent_latencies), 3) if agent_latencies else None,
+        "idempotency_write_p50_ms": round(statistics.median(idempotency_latencies), 3) if idempotency_latencies else None,
+        "response_bytes_p50": int(statistics.median(sample["response_bytes"] for sample in successful)),
+        "error_codes": sorted({sample["error_code"] for sample in samples if sample["error_code"]}),
     }
 
 
@@ -251,11 +447,22 @@ def measure_remote_discovery(request_timeout: float):
 
 async def main():
     args = parse_args()
+    if args.requests < 1 or args.concurrency < 1 or args.payload_bytes < 1:
+        raise SystemExit("--requests, --concurrency, and --payload-bytes must all be positive")
     rows = []
     if args.mode == "local":
         for role, definition in LOCAL_AGENTS.items():
             rows.append(await measure_local_agent(role, *definition))
         rows.append(measure_local_workflow())
+    elif args.mode == "throughput":
+        for role, definition in LOCAL_AGENTS.items():
+            rows.append(await measure_local_agent_throughput(
+                role,
+                *definition[:3],
+                request_count=args.requests,
+                concurrency=args.concurrency,
+                payload_bytes=args.payload_bytes,
+            ))
     else:
         rows.extend(measure_remote_discovery(args.request_timeout))
 

@@ -327,6 +327,33 @@ def test_paused_workflow_with_failed_activity_is_terminal_for_director() -> None
     assert view["orchestration"]["counts"]["failed"] == 1
 
 
+def test_light_director_poll_expands_paused_workflow(monkeypatch) -> None:
+    from amos_platform.runtime.platform_runtime import PlatformRuntime
+
+    runtime = PlatformRuntime()
+    runtime._bridge = SimpleNamespace(
+        get_workflow_brief=lambda _workflow_id: {"status": "paused"},
+    )
+    expanded = {
+        "workflow_id": "wf-paused-failed",
+        "status": "paused",
+        "terminal": True,
+        "orchestration": {
+            "counts": {"total": 2, "completed": 1, "running": 0, "failed": 1},
+        },
+    }
+    calls: list[str] = []
+
+    def full_view(workflow_id: str) -> dict:
+        calls.append(workflow_id)
+        return expanded
+
+    monkeypatch.setattr(runtime, "get_workflow_view", full_view)
+
+    assert runtime.get_workflow_status_view("wf-paused-failed", light=True) is expanded
+    assert calls == ["wf-paused-failed"]
+
+
 def test_workflow_view_v2_separates_agent_roles_instances_and_stubs() -> None:
     status = {
         "workflow_id": "wf-agents",

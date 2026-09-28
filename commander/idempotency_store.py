@@ -43,7 +43,6 @@ class IdempotencyStore:
     def _connect(self):
         connection = sqlite3.connect(str(self.database_path), timeout=10)
         try:
-            connection.execute("PRAGMA journal_mode=WAL")
             connection.execute("PRAGMA busy_timeout=10000")
             yield connection
             connection.commit()
@@ -55,6 +54,9 @@ class IdempotencyStore:
 
     def _initialize(self) -> None:
         with self._connect() as connection:
+            # The database remembers its journal mode. Reissuing this write
+            # pragma on every lookup adds lock/fsync overhead to each A2A call.
+            connection.execute("PRAGMA journal_mode=WAL")
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS idempotency_records (

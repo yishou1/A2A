@@ -479,3 +479,19 @@ cd /home/yl/yl/jzz/A2A
 ```bash
 ./timing_probe.py --roles recon,artillery,evaluator,assault --iterations 5 --json
 ```
+
+### Decision/Compliance 1 KiB 吞吐测试
+
+通过实际 HTTP `/sendMessage` 测量两个决策 Agent 的吞吐、p50/p95 时延和响应大小。测试会在 `.a2a_state` 下建临时目录并在结束时删除，沿用该目录所在文件系统的 SQLite 性能。建议在 Compose 容器内运行，并让 `.a2a_state` 保持在 Compose 的 `a2a_state` named volume 中；把 SQLite 状态目录绑定到 Windows NTFS 项目目录会显著拖慢每次幂等写入。使用 `RAG_BACKEND=synapserag` 时，需先在 Compose 外启动 SynapseRAG，并将 `SYNAPSERAG_BASE_URL` 设为容器可访问的地址；下面示例按宿主机端口 8000 配置。
+
+```bash
+docker compose exec \
+  -e DECISION_AGENT_BACKEND=algolib \
+  -e DECISION_AGENT_ALGOLIB_LLM=false \
+  -e RAG_BACKEND=synapserag \
+  -e SYNAPSERAG_BASE_URL=http://host.docker.internal:8000 \
+  -e SYNAPSERAG_TRACE_ENABLED=false \
+  a2a-core bash -lc 'cd /app/commander && python scripts/decision_agents_timing_probe.py --mode throughput --requests 30 --concurrency 8 --payload-bytes 1024 --json'
+```
+
+吞吐模式会预热一次，然后分别测试 `decision_planning` 和 `compliance_authorization`；成功响应数用于计算 msg/s。`--concurrency` 可按容器 CPU 资源调整。

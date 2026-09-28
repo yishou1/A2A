@@ -27,8 +27,8 @@ if (-not $projectName) {
 
 $volumeKeys = switch ($Target) {
     'Model' { @('ollama_models') }
-    'Runtime' { @('a2a_runtime', 'a2a_state', 'amos_instance', 'hf_cache') }
-    'All' { @('ollama_models', 'a2a_runtime', 'a2a_state', 'amos_instance', 'hf_cache') }
+    'Runtime' { @('a2a_runtime', 'a2a_state', 'amos_instance', 'hf_cache', 'synapserag_data') }
+    'All' { @('ollama_models', 'a2a_runtime', 'a2a_state', 'amos_instance', 'hf_cache', 'synapserag_data') }
 }
 
 Set-Location -LiteralPath $projectRoot

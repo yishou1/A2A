@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any
@@ -26,6 +27,12 @@ class SynapseRagClient:
         self.timeout = settings.synapserag_timeout_seconds
         self.transport = settings.synapserag_transport
         self.algolib_base_url = settings.algolib_base_url
+        self.trace_enabled = os.getenv("SYNAPSERAG_TRACE_ENABLED", "false").strip().lower() in {
+            "1", "true", "yes", "on"
+        }
+        self.trace_level = os.getenv("SYNAPSERAG_TRACE_LEVEL", "summary").strip().lower()
+        if self.trace_level not in {"summary", "detailed"}:
+            self.trace_level = "summary"
 
     def retrieve(
         self,
@@ -35,7 +42,7 @@ class SynapseRagClient:
         purpose: str,
         top_k: int,
         context: dict[str, str] | None = None,
-        explain_level: str = "detailed",
+        explain_level: str | None = None,
     ) -> RagResult:
         headers = {"Content-Type": "application/json"}
         if self.api_token:
@@ -46,7 +53,10 @@ class SynapseRagClient:
             "purpose": purpose,
             "top_k": max(1, min(10, top_k)),
             "context": {key: value for key, value in (context or {}).items() if value},
-            "explain": {"enabled": True, "level": explain_level},
+            "explain": {
+                "enabled": self.trace_enabled,
+                "level": explain_level or self.trace_level,
+            },
             "queries": [
                 {"query_id": item.query_id, "text": item.text}
                 for item in queries

@@ -16,7 +16,7 @@ cd 613
 docker compose build
 docker compose up -d ollama nacos auth-mock
 docker compose up --force-recreate --no-deps --exit-code-from qwen-init qwen-init
-docker compose up -d --wait a2a-core amos
+docker compose up -d --wait synapserag a2a-core amos
 docker compose exec -T a2a-core python scripts/docker/healthcheck.py full
 ```
 
@@ -34,16 +34,17 @@ powershell -File scripts/docker-compose.ps1 exec -e AMOS_BASE_URL=http://amos:50
 | --- | --- | --- |
 | `amos` | 剧本及网页 | <http://127.0.0.1:5000/> 与 `/algolib/` |
 | `a2a-core` | Commander、Gateway、七个 Agent、AlgoLib | <http://127.0.0.1:8030/gateway/v1/health> |
-| `ollama`、`qwen-init` | 模型服务、按需拉取并执行 JSON 推理探测 | 仅容器内网 |
+| `ollama`、`qwen-init` | 模型服务，拉取并探测 Qwen 对话与向量模型 | 仅容器内网 |
+| `synapserag` | 规则知识检索、任务轨迹与图谱覆盖层 | 由 AMOS 的 `/synapserag-api/` 代理 |
 | `nacos`、`auth-mock` | 注册发现和认证模拟 | 仅容器内网 |
 
-`ollama_models` 命名卷保存 `qwen3:1.7b`。`a2a_runtime`、`a2a_state`、`amos_instance` 保存算法注册与执行日志、工作流和剧本运行记录；`hf_cache` 保存 TIA 检索嵌入模型。再次启动会复用卷并仍执行 Qwen 推理探测。停止脚本不会删除卷。Windows 启动器根据克隆目录的绝对路径生成稳定的 ASCII Compose 项目名，因此目录包含空格或中文也可用；不同目录拥有独立卷。手动查看或操作容器时请使用 `scripts/docker-compose.ps1`，以便选中同一项目。
+`ollama_models` 命名卷保存 `qwen3:1.7b` 和 `qwen3-embedding:0.6b`。`synapserag_data` 从镜像初始化规则知识库，并持久保存检索轨迹；`a2a_runtime`、`a2a_state`、`amos_instance` 保存算法注册与执行日志、工作流和剧本运行记录；`hf_cache` 保存 TIA 检索嵌入模型。再次启动会复用卷并仍执行模型探测。停止脚本不会删除卷。Windows 启动器根据克隆目录的绝对路径生成稳定的 ASCII Compose 项目名，因此目录包含空格或中文也可用；不同目录拥有独立卷。手动查看或操作容器时请使用 `scripts/docker-compose.ps1`，以便选中同一项目。
 
 Qwen 在 Compose 栈运行期间保持加载。CPU 冷加载在本机约需 28 秒，并可能在 A2A 已占用大量内存后被系统终止；启动器因此先停止旧的 AMOS/A2A 应用容器（卷保留），完成模型加载与真实推理探测，再启动应用，并避免空闲期间卸载模型。AlgoLib 的模型客户端会对短暂的连接或 Docker DNS 失败做两次短间隔重试；HTTP 错误、模型错误和非法 JSON 不会被当成成功。
 
 默认 CPU 模式采用 Ollama 官方 `0.34.1-rocm` 镜像，它比同版本包含 CUDA 库的标准镜像小；没有可用 GPU 时由 Ollama 选择 CPU 推理。`-Gpu` 改用官方 `ollama/ollama:0.34.1` 镜像。两种模式使用同一 Compose 模型卷，且都必须通过实际 JSON 推理探测。
 
-一键入口明确设置 `local-qwen`、Ollama 兼容 API、`qwen3:1.7b` 和严格 LLM 模式，因此本机已有的 Azure `.env` 不会覆盖它。CUE 的 Tactical Intelligence 与 PLAN 的 Task Scheduling 必须产生真实 Qwen 调用和可关联的 `llm_call_id`；Track Threat 及启用模型的 Act 阶段也要求模型请求成功。Decision Planning 与 Compliance 目前不启用 LLM 算法选择。模型不可用或响应不合法时，业务工作流失败，不标为模型规划成功。审计日志保存在核心容器的 `/app/.runtime/llm_audit.jsonl`，只记录模型、Agent、工作流、调用标识和结果，不记录提示词、密钥或完整响应。
+一键入口明确设置 `local-qwen`、Ollama 兼容 API、`qwen3:1.7b`、`qwen3-embedding:0.6b` 和严格 LLM 模式，因此本机已有的 Azure `.env` 不会覆盖它。SynapseRAG 通过容器名访问 Ollama；Docker 环境默认开启详细检索轨迹，并把规划与合规任务提供给“证据与图谱”界面。CUE 的 Tactical Intelligence 与 PLAN 的 Task Scheduling 必须产生真实 Qwen 调用和可关联的 `llm_call_id`；Track Threat 及启用模型的 Act 阶段也要求模型请求成功。Decision Planning 与 Compliance 目前不启用 LLM 算法选择。模型不可用或响应不合法时，业务工作流失败，不标为模型规划成功。审计日志保存在核心容器的 `/app/.runtime/llm_audit.jsonl`，只记录模型、Agent、工作流、调用标识和结果，不记录提示词、密钥或完整响应。
 
 本镜像默认 `TIA_USE_MOCK=1`，因为仓库没有提交 `commander/models/checkpoints/*.pt` 等专用感知权重。它让剧本所需的部分感知算法按现有模拟实现运行；**Qwen 规划请求仍是真实推理**。这套环境适合调试 A2A 链路与剧本逻辑，不能用来声称未提供权重的感知模型达到真实精度。`paraphrase-MiniLM-L6-v2` 在 A2A 启动前预取到缓存卷；断网重启需先完成一次在线启动。
 
@@ -53,7 +54,7 @@ Qwen 在 Compose 栈运行期间保持加载。CPU 冷加载在本机约需 28 �
 
 ```powershell
 powershell -File scripts/docker-compose.ps1 ps
-powershell -File scripts/docker-compose.ps1 logs --tail=100 a2a-core amos qwen-init ollama
+powershell -File scripts/docker-compose.ps1 logs --tail=100 a2a-core amos synapserag qwen-init ollama
 powershell -File scripts/docker-compose.ps1 exec a2a-core sh -c 'tail -n 20 /app/.runtime/llm_audit.jsonl'
 ```
 
@@ -67,12 +68,12 @@ python scripts/verify_ollama_failure.py
 
 ## 资源与网络
 
-默认只用 CPU，不依赖 NVIDIA 驱动。首次启动会下载基础镜像、Python/Node 依赖、约 1.36 GB 的 Qwen 模型及 TIA 检索模型。建议宿主机至少 16 GB 内存、Docker Desktop 的 Linux 环境分配至少 8 GiB 内存，并在 Docker 数据盘预留 40 GB 空间；启动器在低于 7.5 GiB 时拒绝启动。本机 Docker 分配 7.7 GiB 时，常驻模型的验收样本约为 A2A 核心 4.0–4.6 GiB、Ollama 1.8–2.0 GiB、Nacos 0.42 GiB、AMOS 0.05–0.35 GiB。多次构建后镜像、命名卷与构建缓存约占 29 GB。
+默认只用 CPU，不依赖 NVIDIA 驱动。首次启动会下载基础镜像、Python/Node 依赖、Qwen 对话模型、Qwen 向量模型及 TIA 检索模型。建议宿主机至少 16 GB 内存、Docker Desktop 的 Linux/WSL2 环境分配 12 GB 内存，并在 Docker 数据盘预留 40 GB 空间；启动器要求 Docker 实际可见至少约 11.5 GiB（对应配置 12 GB）。实测 8 GB 配额下，A2A 核心常驻约 4.8 GiB，Qwen CPU runner 约 1.9 GiB，长上下文请求和提示缓存会耗尽余量并导致模型进程退出。多次构建后镜像、命名卷与构建缓存约占 29 GB。
 
 2026-09-28 在本机 CPU 环境进行的实测结果：无 `.git` 的独立项目副本放在含中文和空格的目录，使用全新 Compose 项目名和空模型卷，从启动到 `Ready` 共 1780 秒（29 分 40 秒），期间模型分块下载两次断流后续传成功；同一主项目缓存启动复用了模型，没有重复下载。剧本二最终运行 `run-5cc66665a7ad` 从配置到六检查点、授权、CLOSE 人工复核及导演完成共 602 秒（10 分 02 秒）。这些数值是本机与当时网络的实测值，不是其他机器的性能承诺。CPU 上模型推理可能耗时数分钟；配置中的 LLM 单次超时为 180 秒、工作流验收默认等待 900 秒。慢机器可通过启动器参数 `-StartupTimeoutSeconds` 延长 Compose 健康等待。
 模型下载默认总时限为 3600 秒，单次连续 180 秒无进度会重新连接，最多重试 3 次，并保留 Ollama 命名卷中的已完成分块。网络慢时可在启动前设置 `QWEN_DOWNLOAD_TIMEOUT_SECONDS`、`QWEN_STALL_TIMEOUT_SECONDS` 和 `QWEN_PULL_ATTEMPTS`；下载时限内仍无法取得完整模型时，A2A 不会启动为健康状态。
 
-有 NVIDIA GPU 且 Docker Desktop 已启用 GPU 容器支持时，可执行 `powershell -File scripts/docker-start.ps1 -Gpu`，它会加载 `compose.gpu.yaml`。普通双击入口始终按 CPU 模式启动。
+有 NVIDIA GPU 且 Docker Desktop 已启用 GPU 容器支持时，推荐双击 `docker-tools\启动Docker环境-GPU.bat`，或执行 `powershell -File scripts/docker-start.ps1 -Gpu`。它会加载 `compose.gpu.yaml`，改用包含 CUDA 运行库的官方 Ollama 镜像，并把 Qwen 推理卸载到显存；首次使用 GPU 模式需额外下载约 3.7 GB 的镜像层。原 `启动Docker环境.bat` 继续使用 CPU 模式。
 
 如果 Docker Hub、PyPI、npm、GitHub、Hugging Face 或 Ollama 仓库不可达，应先配置 Docker Desktop 和网络代理，再重新运行一键脚本。Compose 仅使用固定服务名在容器间访问，代理的 `NO_PROXY` 覆盖本项目服务。已有 `.env` 中的 Azure 密钥不会传入默认一键栈。
 

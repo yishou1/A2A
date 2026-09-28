@@ -2,7 +2,10 @@ import json
 import asyncio
 import contextlib
 import io
+import json
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -30,6 +33,131 @@ def sample_payload(name: str) -> dict:
 
 
 class DecisionAgentsA2ATest(unittest.TestCase):
+    def test_send_message_runs_sync_agent_work_concurrently_for_one_kilobyte_tasks(self):
+        algorithm_agent = DecisionPlanningAgent()
+        active = 0
+        max_active = 0
+        lock = threading.Lock()
+
+        def delayed_run(request):
+            nonlocal active, max_active
+            del request
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            try:
+                time.sleep(0.25)
+                return AgentResponse(
+                    agent="decision_planning_agent",
+                    result={"candidate_plans": [], "recommended_plan_id": None},
+                    summary="concurrency test",
+                )
+            finally:
+                with lock:
+                    active -= 1
+
+        algorithm_agent.run = delayed_run
+        with tempfile.TemporaryDirectory() as temp_dir:
+            agent = DecisionAlgorithmA2AAgent(
+                algorithm_agent=algorithm_agent,
+                name="Decision_Planning_Agent",
+                description="Concurrent request test.",
+                role="decision_planning",
+                port=10212,
+                idempotency_db_path=str(Path(temp_dir) / "idempotency.db"),
+                max_concurrent_tasks=8,
+            )
+            send_message = route_endpoint(agent.app, "/sendMessage")
+            payloads = []
+            for index in range(6):
+                payload = {
+                    "schema_version": "1.0",
+                    "workflow_id": "wf-throughput",
+                    "work_item": f"wf-throughput:{index}",
+                    "command": "decision_planning",
+                    "required_skill": "decision_planning_analysis",
+                    "input": {
+                        "agent_request": sample_payload("decision_planning_input.json"),
+                        "benchmark_padding": "x" * 1000,
+                    },
+                    "output_hint": "decision_planning_result",
+                }
+                payloads.append(payload)
+            self.assertGreaterEqual(
+                len(json.dumps(payloads[0], ensure_ascii=False).encode("utf-8")),
+                1024,
+            )
+
+            async def run_requests():
+                started = time.perf_counter()
+                responses = await asyncio.gather(
+                    *(send_message(payload, token="test-token") for payload in payloads)
+                )
+                return responses, time.perf_counter() - started
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                responses, elapsed = asyncio.run(run_requests())
+
+        self.assertTrue(all(response["status"] == "completed" for response in responses))
+        self.assertGreaterEqual(max_active, 5)
+        self.assertLess(elapsed, 0.8)
+        self.assertGreaterEqual(len(responses) / elapsed, 5.0)
+        self.assertGreaterEqual(
+            responses[0]["metrics"]["latency_ms"],
+            responses[0]["metrics"]["algorithm_execution_ms"],
+        )
+        self.assertIn("idempotency_write_ms", responses[0]["metrics"])
+
+    def test_concurrent_duplicate_work_item_runs_only_once(self):
+        algorithm_agent = DecisionPlanningAgent()
+        calls = 0
+        lock = threading.Lock()
+
+        def delayed_run(request):
+            nonlocal calls
+            del request
+            with lock:
+                calls += 1
+            time.sleep(0.1)
+            return AgentResponse(
+                agent="decision_planning_agent",
+                result={"candidate_plans": [], "recommended_plan_id": None},
+                summary="idempotency test",
+            )
+
+        algorithm_agent.run = delayed_run
+        with tempfile.TemporaryDirectory() as temp_dir:
+            agent = DecisionAlgorithmA2AAgent(
+                algorithm_agent=algorithm_agent,
+                name="Decision_Planning_Agent",
+                description="Concurrent idempotency test.",
+                role="decision_planning",
+                port=10212,
+                idempotency_db_path=str(Path(temp_dir) / "idempotency.db"),
+                max_concurrent_tasks=8,
+            )
+            send_message = route_endpoint(agent.app, "/sendMessage")
+            payload = {
+                "schema_version": "1.0",
+                "workflow_id": "wf-duplicate",
+                "work_item": "wf-duplicate:planning",
+                "command": "decision_planning",
+                "required_skill": "decision_planning_analysis",
+                "input": {"agent_request": sample_payload("decision_planning_input.json")},
+                "output_hint": "decision_planning_result",
+            }
+
+            async def run_requests():
+                return await asyncio.gather(
+                    *(send_message(payload, token="test-token") for _ in range(6))
+                )
+
+            responses = asyncio.run(run_requests())
+
+        self.assertEqual(calls, 1)
+        self.assertTrue(all(response["status"] == "completed" for response in responses))
+        self.assertEqual(sum(response.get("cached", False) for response in responses), 5)
+
     def test_empty_authorization_is_normalized_to_pending_operator_review(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             commander = CommanderAgent(

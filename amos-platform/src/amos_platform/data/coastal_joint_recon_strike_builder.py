@@ -559,16 +559,12 @@ def build_coastal_joint_recon_strike_scenario() -> dict[str, Any]:
             {"checkpoint_id": "CJR-CP-IDENTIFY", "title": "地面目标多模态识别输入就绪", "min_elapsed_sec": 1530, "conditions": {"stable_track_count_at_least": 1, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["CJR-MEDIA-03"]}, "pause": False, "continue_during_submission": True, "advance_story_during_analysis": True, "submit_analysis": True, "block_until_analysis_complete": True},
             {"checkpoint_id": "CJR-CP-FUSION", "title": "情报融合与共享输入就绪", "min_elapsed_sec": 2130, "conditions": {"stable_track_count_at_least": 1, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["CJR-MEDIA-03", "CJR-MEDIA-10"]}, "pause": False, "continue_during_submission": True, "advance_story_during_analysis": True, "submit_analysis": True, "block_until_analysis_complete": True},
             {"checkpoint_id": "CJR-CP-PLAN", "title": "战术指挥与协同方案输入就绪", "min_elapsed_sec": 2730, "conditions": {"stable_track_count_at_least": 1, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["CJR-MEDIA-03", "CJR-MEDIA-10"]}, "pause": False, "continue_during_submission": True, "advance_story_during_analysis": True, "submit_analysis": True, "block_until_analysis_complete": True},
-            # CJR-CP-PLAN 已经完成目标识别、保护区审查和武器链规划；授权边界
-            # 只负责向操作员展示最终方案。这里不得再次提交整套 A1-A6 工作流，
-            # 否则地图会先暂停十几秒，待重复分析完成后才出现授权弹窗。
-            {"checkpoint_id": "CJR-CP-ENGAGE", "title": "协同武器链等待明确授权", "min_elapsed_sec": 3300, "conditions": {"media_ids_released": ["CJR-MEDIA-06", "CJR-MEDIA-08", "CJR-MEDIA-09"]}, "pause": True, "submit_analysis": False, "block_until_analysis_complete": False, "requires_operator_action": True},
-            # 收尾检查点只承载复核结果，不得再次进入 FIRE 授权状态。否则首轮
-            # 齐射已经核销后不存在 eligible track，前端没有可展示目标，导演却会
-            # 永久等待一个不可能出现的第二个攻击弹窗。
-            # 毁伤评估事件本身已经是闭环结论。收尾检查点只做记账，不再暂停
-            # 仿真或重复提交分析，确保无人机在评估确认后立即连续返航。
-            {"checkpoint_id": "CJR-CP-CLOSE", "title": "毁伤评估与闭环建议就绪", "min_elapsed_sec": 4530, "conditions": {"media_ids_released": ["CJR-MEDIA-07"], "event_types_emitted": ["damage_assessment_confirmed"]}, "pause": False, "submit_analysis": False, "block_until_analysis_complete": False, "requires_operator_action": False, "operator_action_type": "review"},
+            # 先显示人工授权，授权事件落库后再提交 ENGAGE 工作流。这样不会让
+            # 后端分析挡住授权弹窗，同时仍为“执行与复核”保留真实活动证据。
+            {"checkpoint_id": "CJR-CP-ENGAGE", "title": "协同武器链等待明确授权", "min_elapsed_sec": 3300, "conditions": {"media_ids_released": ["CJR-MEDIA-06", "CJR-MEDIA-08", "CJR-MEDIA-09"]}, "pause": True, "submit_analysis": True, "submit_after_authorization": True, "block_until_analysis_complete": True, "requires_operator_action": True},
+            # CLOSE 使用独立的 ASSESS 工作流记录毁伤评估，并在分析完成后要求
+            # 操作员复核。operator_action_type=review 不会再次触发 FIRE 授权。
+            {"checkpoint_id": "CJR-CP-CLOSE", "title": "毁伤评估与闭环建议就绪", "min_elapsed_sec": 4530, "conditions": {"media_ids_released": ["CJR-MEDIA-07"], "event_types_emitted": ["damage_assessment_confirmed"]}, "pause": True, "submit_analysis": True, "block_until_analysis_complete": True, "requires_operator_action": True, "operator_action_type": "review"},
         ],
         "fault_injections": [
             {"fault_id": "CJR-FAULT-LINK", "type": "communication_degradation", "target": "J16-01", "at_checkpoint": "CJR-CP-PLAN", "status": "available"},

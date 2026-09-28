@@ -41,7 +41,7 @@ services:
       # is up so idle periods do not force an OOM-prone cold load beside A2A.
       OLLAMA_KEEP_ALIVE: "-1"
       OLLAMA_NUM_PARALLEL: "1"
-      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_MAX_LOADED_MODELS: "2"
     volumes:
       - ollama_models:/root/.ollama
     healthcheck:
@@ -58,15 +58,45 @@ services:
       dockerfile: scripts/docker/Dockerfile.qwen-init
     environment:
       OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_MODEL: qwen3:1.7b
+      OLLAMA_MODELS: qwen3:1.7b,qwen3-embedding:0.6b
       QWEN_DOWNLOAD_TIMEOUT_SECONDS: ${QWEN_DOWNLOAD_TIMEOUT_SECONDS:-3600}
       QWEN_PULL_ATTEMPTS: ${QWEN_PULL_ATTEMPTS:-3}
       QWEN_STALL_TIMEOUT_SECONDS: ${QWEN_STALL_TIMEOUT_SECONDS:-180}
-      NO_PROXY: localhost,127.0.0.1,ollama,nacos,auth-mock,a2a-core,amos
+      NO_PROXY: localhost,127.0.0.1,ollama,synapserag,nacos,auth-mock,a2a-core,amos
     depends_on:
       ollama:
         condition: service_healthy
     restart: "no"
+
+  synapserag:
+    image: a2a-613-app:local
+    command: ["bash", "-lc", "cd /app/algorithmrepo/services/synapserag && exec python -m uvicorn api_server:app --host 0.0.0.0 --port 8000"]
+    environment:
+      SYNAPSERAG_HOST: 0.0.0.0
+      SYNAPSERAG_PORT: "8000"
+      SYNAPSERAG_SAVE_DIR: /app/algorithmrepo/knowledge_bases/newport_roe_handbook_2022
+      SYNAPSERAG_RECORDS_DIR: /app/algorithmrepo/knowledge_bases/newport_roe_handbook_2022/records
+      SYNAPSERAG_INDEX_ID: newport-roe-handbook-2022-v1
+      SYNAPSERAG_EMBEDDING_MODEL: qwen3-embedding:0.6b
+      SYNAPSERAG_EMBEDDING_BASE_URL: http://ollama:11434/v1
+      SYNAPSERAG_EMBEDDING_API_KEY: ollama
+      SYNAPSERAG_QA_MODEL: qwen3:1.7b
+      SYNAPSERAG_QA_BASE_URL: http://ollama:11434/v1
+      SYNAPSERAG_QA_API_KEY: ollama
+      SYNAPSERAG_TRACE_ENABLED: "true"
+      NO_PROXY: localhost,127.0.0.1,ollama,synapserag,nacos,auth-mock,a2a-core,amos
+    volumes:
+      - synapserag_data:/app/algorithmrepo/knowledge_bases/newport_roe_handbook_2022
+    depends_on:
+      qwen-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request; p=json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=10)); assert p.get('status') == 'ok' and p.get('indexed') is True, p"]
+      interval: 15s
+      timeout: 15s
+      start_period: 120s
+      retries: 20
+    restart: unless-stopped
 
   a2a-core:
     build:
@@ -98,6 +128,15 @@ services:
       LLM_REASONING_EFFORT: none
       ALGOLIB_LLM_TIMEOUT_SECONDS: "180"
       ALGOLIB_LLM_CONNECT_RETRIES: "2"
+      RAG_BACKEND: synapserag
+      SYNAPSERAG_BASE_URL: http://synapserag:8000
+      SYNAPSERAG_EMBEDDING_MODEL: qwen3-embedding:0.6b
+      SYNAPSERAG_TIMEOUT_SECONDS: "60"
+      SYNAPSERAG_TRACE_ENABLED: "true"
+      SYNAPSERAG_TRACE_LEVEL: detailed
+      # Detailed graph traces can take longer than the legacy 10 s AlgoLib
+      # client default even though SynapseRAG itself is still healthy.
+      ALGOLIB_TIMEOUT_SECONDS: "90"
       A2A_REQUEST_TIMEOUT: "360"
       GATEWAY_REQUEST_TIMEOUT_SEC: "60"
       STARTUP_TIMEOUT: "240"
@@ -118,7 +157,7 @@ services:
       ALGOLIB_BIND_HOST: 0.0.0.0
       HF_HOME: /root/.cache/huggingface
       SENTENCE_TRANSFORMERS_HOME: /root/.cache/huggingface/sentence_transformers
-      NO_PROXY: localhost,127.0.0.1,ollama,nacos,auth-mock,a2a-core,amos
+      NO_PROXY: localhost,127.0.0.1,ollama,synapserag,nacos,auth-mock,a2a-core,amos
     volumes:
       - a2a_runtime:/app/.runtime
       - a2a_state:/app/commander/.a2a_state
@@ -132,6 +171,8 @@ services:
         condition: service_healthy
       qwen-init:
         condition: service_completed_successfully
+      synapserag:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "scripts/docker/healthcheck.py", "core"]
       interval: 15s
@@ -154,13 +195,17 @@ services:
       ALGOLIB_API_URL: http://a2a-core:8088
       AMOS_PUBLIC_BASE_URL: http://amos:5000/
       AMOS_BROWSER_BASE_URL: http://127.0.0.1:${AMOS_HOST_PORT:-5000}/
-      NO_PROXY: localhost,127.0.0.1,ollama,nacos,auth-mock,a2a-core,amos
+      SYNAPSERAG_BASE_URL: http://synapserag:8000
+      SYNAPSERAG_TIMEOUT_SECONDS: "60"
+      NO_PROXY: localhost,127.0.0.1,ollama,synapserag,nacos,auth-mock,a2a-core,amos
     volumes:
       - amos_instance:/app/amos-platform/instance
     ports:
       - "127.0.0.1:${AMOS_HOST_PORT:-5000}:5000"
     depends_on:
       a2a-core:
+        condition: service_healthy
+      synapserag:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "scripts/docker/healthcheck.py", "amos"]
@@ -176,3 +221,4 @@ volumes:
   a2a_state:
   amos_instance:
   hf_cache:
+  synapserag_data:

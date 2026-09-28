@@ -92,6 +92,16 @@ class LayeredQwenArchitectureTests(unittest.TestCase):
                 **common, qa_llm=local_endpoint("another-local-model")))
             self.assertEqual(first.working_dir, second.working_dir)
 
+    def test_ollama_model_tag_uses_portable_index_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            rag = SynapseRAG(global_config=BaseConfig(
+                save_dir=directory,
+                index_id="stable-kb-v1",
+                runtime_stage="openie",
+                embedding_model_name="qwen3-embedding:0.6b",
+            ))
+            self.assertEqual(Path(rag.working_dir).name, "qwen3-embedding_0.6b")
+
     def test_openie_stage_does_not_initialize_embedding(self):
         with tempfile.TemporaryDirectory() as directory:
             config = BaseConfig(

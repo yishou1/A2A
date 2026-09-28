@@ -113,6 +113,39 @@ class SynapseRagClientTests(unittest.TestCase):
         self.assertEqual(result.evidence[0].citation, "ROE.pdf p.12")
         self.assertEqual(result.duration_ms, 25.0)
         self.assertEqual(post.call_args.kwargs["headers"]["Authorization"], "Bearer secret")
+        self.assertEqual(
+            post.call_args.kwargs["json"]["explain"],
+            {"enabled": False, "level": "summary"},
+        )
+
+    def test_retrieval_traces_can_be_enabled_for_audit_runs(self):
+        body = {
+            "status": "success",
+            "results": [{"query_id": "RULE-1", "evidence": []}],
+            "retrieval_profile": {"duration_ms": 1.0},
+            "trace_id": "trace-audit",
+        }
+        env = {
+            **os.environ,
+            "RAG_BACKEND": "synapserag",
+            "SYNAPSERAG_TRACE_ENABLED": "true",
+        }
+        with patch.dict(os.environ, env, clear=True), patch(
+            "decision_support.knowledge.synapserag_client.requests.post",
+            return_value=FakeResponse(body),
+        ) as post:
+            result = SynapseRagClient(get_settings()).retrieve(
+                [EvidenceQuery("RULE-1", "rule")],
+                request_id="audit-run",
+                purpose="planning",
+                top_k=3,
+            )
+
+        self.assertEqual(result.model_profile["trace_id"], "trace-audit")
+        self.assertEqual(
+            post.call_args.kwargs["json"]["explain"],
+            {"enabled": True, "level": "summary"},
+        )
 
     def test_http_failure_is_returned_as_structured_rag_error(self):
         env = {**os.environ, "RAG_BACKEND": "synapserag"}

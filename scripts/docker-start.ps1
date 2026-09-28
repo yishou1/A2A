@@ -70,11 +70,13 @@ try {
     $memoryText = (& docker info --format '{{.MemTotal}}' 2>$null | Out-String).Trim()
     if ($LASTEXITCODE -eq 0 -and $memoryText -match '^\d+$') {
         $memoryGiB = [math]::Round(([double]$memoryText / 1GB), 1)
-        if ($memoryGiB -lt 7.5) {
-            throw "Docker Desktop has only $memoryGiB GiB RAM. Allocate at least 7.5 GiB before starting A2A and Qwen."
-        }
-        if ($memoryGiB -lt 8) {
-            Write-Warning "Docker Desktop has $memoryGiB GiB RAM. CPU Qwen and A2A have passed at 7.7 GiB here, but 8 GiB or more is recommended."
+        # A2A's agent and algorithm processes use about 5 GiB before Ollama
+        # loads Qwen.  An 8 GB Docker allocation leaves too little headroom
+        # for a full-context request and llama.cpp's prompt cache.  Docker
+        # reports slightly less than the configured limit, so 11.5 GiB is the
+        # observable threshold for a 12 GB Desktop/WSL allocation.
+        if ($memoryGiB -lt 11.5) {
+            throw "Docker Desktop exposes only $memoryGiB GiB RAM. Allocate at least 12 GB before starting A2A and Qwen."
         }
     }
 
@@ -99,16 +101,16 @@ try {
         Remove-A2AComposeBuildContext -Context $buildContext
     }
 
-    Write-Host '[3/4] Starting infrastructure and preparing qwen3:1.7b...'
+    Write-Host '[3/4] Starting infrastructure and preparing Qwen chat + embedding models...'
     # A configuration change may recreate Ollama while an older A2A container
     # is still using most of Docker Desktop's memory. Stop application services
     # first so the required CPU model can cold-load and pass its probe reliably.
-    Invoke-Compose -CommandArgs @('stop', 'amos', 'a2a-core')
+    Invoke-Compose -CommandArgs @('stop', 'amos', 'a2a-core', 'synapserag')
     Invoke-Compose -CommandArgs @('up', '-d', 'ollama', 'nacos', 'auth-mock')
     Invoke-Compose -CommandArgs @('up', '--force-recreate', '--no-deps', '--exit-code-from', 'qwen-init', 'qwen-init')
 
-    Write-Host '[4/4] Starting A2A and AMOS; waiting for healthy services...'
-    Invoke-Compose -CommandArgs @('up', '-d', '--wait', '--wait-timeout', "$StartupTimeoutSeconds", 'a2a-core', 'amos')
+    Write-Host '[4/4] Starting SynapseRAG, A2A and AMOS; waiting for healthy services...'
+    Invoke-Compose -CommandArgs @('up', '-d', '--wait', '--wait-timeout', "$StartupTimeoutSeconds", 'synapserag', 'a2a-core', 'amos')
     Invoke-Compose -CommandArgs @('exec', '-T', 'a2a-core', 'python', 'scripts/docker/healthcheck.py', 'full')
 
     $amosEndpoint = (& docker @composePrefix port amos 5000 | Out-String).Trim()
@@ -125,6 +127,6 @@ try {
 catch {
     [Console]::Error.WriteLine($_.Exception.Message)
     $composeHelper = Join-Path $PSScriptRoot 'docker-compose.ps1'
-    Write-Host "Inspect logs with: powershell -File `"$composeHelper`" logs --tail=100 qwen-init ollama a2a-core amos"
+    Write-Host "Inspect logs with: powershell -File `"$composeHelper`" logs --tail=100 qwen-init ollama synapserag a2a-core amos"
     exit 1
 }

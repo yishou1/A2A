@@ -126,8 +126,11 @@ class SynapseRAG:
 
         # New indexes are independent of the OpenIE and QA model names.  The
         # historical layout remains the default when index_id is not supplied.
-        llm_label = self.global_config.llm_name.replace("/", "_")
-        embedding_label = self.global_config.embedding_model_name.replace("/", "_")
+        llm_label = self.global_config.llm_name.replace("/", "_").replace(":", "_")
+        # Model tags such as ``qwen3-embedding:0.6b`` are valid in Ollama but
+        # the colon is not valid in a Windows directory name.  Index delivery
+        # therefore uses the same underscore normalization on every platform.
+        embedding_label = self.global_config.embedding_model_name.replace("/", "_").replace(":", "_")
         if self.global_config.index_dir:
             self.working_dir = self.global_config.index_dir
         elif self.global_config.index_id:

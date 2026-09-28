@@ -910,6 +910,29 @@ def test_review_checkpoint_requires_completed_analysis_and_records_operator_acti
     director._ensure_checkpoint_can_advance()
 
 
+def test_review_checkpoint_allows_checkpoint_without_analysis() -> None:
+    runtime = PlatformRuntime()
+    director = DirectorService(runtime)
+    director.configure(
+        scenario_id="coastal-joint-recon-strike",
+        mode="demonstration",
+        branch="standard",
+        seed=61023,
+    )
+    director._state["current_checkpoint"] = {
+        "checkpoint_id": "CJR-CP-CLOSE",
+        "requires_operator_action": True,
+        "operator_action_type": "review",
+        "analysis_status": "not_requested",
+    }
+
+    reviewed = director.action("review_checkpoint")
+
+    assert reviewed["current_checkpoint"]["reviewed_at"]
+    assert reviewed["action_log"][-1]["action"] == "review_checkpoint"
+    director._ensure_checkpoint_can_advance()
+
+
 def test_first_analysis_advances_story_at_16x() -> None:
     runtime = PlatformRuntime()
     director = DirectorService(

@@ -136,13 +136,14 @@ def test_coastal_joint_force_package_and_backend_contract_are_complete() -> None
     )
     assert engage_checkpoint["pause"] is True
     assert engage_checkpoint["min_elapsed_sec"] == 3300
-    assert engage_checkpoint["submit_analysis"] is False
-    assert engage_checkpoint["block_until_analysis_complete"] is False
+    assert engage_checkpoint["submit_analysis"] is True
+    assert engage_checkpoint["submit_after_authorization"] is True
+    assert engage_checkpoint["block_until_analysis_complete"] is True
     assert engage_checkpoint["requires_operator_action"] is True
-    assert close_checkpoint["pause"] is False
-    assert close_checkpoint["submit_analysis"] is False
-    assert close_checkpoint["block_until_analysis_complete"] is False
-    assert close_checkpoint["requires_operator_action"] is False
+    assert close_checkpoint["pause"] is True
+    assert close_checkpoint["submit_analysis"] is True
+    assert close_checkpoint["block_until_analysis_complete"] is True
+    assert close_checkpoint["requires_operator_action"] is True
     assert close_checkpoint["operator_action_type"] == "review"
     assert close_checkpoint["conditions"]["event_types_emitted"] == [
         "damage_assessment_confirmed"

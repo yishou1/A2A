@@ -1476,7 +1476,7 @@ class DirectorService:
                 checkpoint = self._state.get("current_checkpoint")
                 if not isinstance(checkpoint, dict) or checkpoint.get("operator_action_type") != "review":
                     raise DirectorError("current checkpoint does not require operator review")
-                if checkpoint.get("analysis_status") != "completed":
+                if checkpoint.get("analysis_status") not in {"completed", "not_requested"}:
                     raise DirectorError("checkpoint analysis must complete before review")
                 checkpoint["reviewed_at"] = _now_iso()
                 self._set_status(

@@ -22,7 +22,15 @@ CHECKPOINTS = (
     "CJR-CP-ENGAGE",
     "CJR-CP-CLOSE",
 )
-ACTIVITIES = (3, 3, 3, 4, 3, 3)
+ANALYSIS_ACTIVITIES = {
+    "CJR-CP-CUE": 3,
+    "CJR-CP-IDENTIFY": 3,
+    "CJR-CP-FUSION": 3,
+    "CJR-CP-PLAN": 4,
+    # ENGAGE/ASSESS each contain one sequence wrapper and one real invoke.
+    "CJR-CP-ENGAGE": 2,
+    "CJR-CP-CLOSE": 2,
+}
 TERMINAL = {"completed", "failed", "cancelled", "paused", "input_required"}
 
 
@@ -117,6 +125,17 @@ def dictionaries(value: Any):
             yield from dictionaries(nested)
 
 
+def has_algorithm_plan_calls(plan: dict[str, Any]) -> bool:
+    """Accept live and terminal Commander names for planned algorithm calls."""
+    calls = plan.get("algorithm_calls")
+    if not isinstance(calls, list):
+        # Commander canonicalizes runtime-call aliases when it compacts a
+        # terminal checkpoint.  The plan is unchanged, but its collection is
+        # then exposed as ``algorithm_invocations``.
+        calls = plan.get("algorithm_invocations")
+    return isinstance(calls, list) and bool(calls)
+
+
 def verify_llm(workflow_id: str, projection: dict[str, Any], *, agent: str) -> dict[str, Any]:
     result = projection.get("result") or {}
     activities = [
@@ -140,7 +159,7 @@ def verify_llm(workflow_id: str, projection: dict[str, Any], *, agent: str) -> d
         row for activity in activities for row in dictionaries(activity.get("output") or {})
         if row.get("mode") == "llm"
         and isinstance(row.get("raw_llm_plan"), dict)
-        and isinstance(row.get("algorithm_calls"), list)
+        and has_algorithm_plan_calls(row)
         and not row.get("fallback_reason")
         and isinstance(row.get("llm_call"), dict)
         and row["llm_call"].get("llm_call_id") in {item["llm_call_id"] for item in calls}
@@ -223,6 +242,21 @@ def authorize_engagement() -> dict[str, Any]:
     require(approved_status == 200, f"authorized fire failed: HTTP {approved_status}: {payload}")
     result = data_of(payload).get("result") or {}
     require(bool(result.get("weapon_id")), "authorized fire returned no weapon_id")
+    # ENGAGE analysis is submitted only after the explicit fire event. Wait
+    # until the Director publishes that workflow before stopping automatic
+    # progression; the backend workflow then continues independently.
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        director = state()
+        current = director.get("current_checkpoint") or {}
+        submission = current.get("submission") or {}
+        if submission.get("workflow_id"):
+            break
+        require(director.get("director_status") != "error",
+                f"post-authorization analysis failed: {director.get('last_error')}")
+        time.sleep(0.5)
+    else:
+        raise VerifyError("ENGAGE did not submit its post-authorization workflow")
     action("stop_auto")
     return {"track_id": track_id, "weapon_id": result["weapon_id"], "denied_http": denied_status}
 
@@ -247,37 +281,42 @@ def run(workflow_timeout: float) -> dict[str, Any]:
     require(run_id.startswith("run-"), "director returned no run_id")
     records = []
     authorization = None
-    for index, checkpoint_id in enumerate(CHECKPOINTS):
+    for checkpoint_id in CHECKPOINTS:
         advanced = action("advance_checkpoint")
-        require((advanced.get("current_checkpoint") or {}).get("checkpoint_id") == checkpoint_id,
-                f"unexpected checkpoint after advance: {advanced.get('current_checkpoint')}")
-        checkpoint, workflow_id = current_checkpoint(checkpoint_id)
-        print(f"[{checkpoint_id}] workflow {workflow_id} submitted", flush=True)
-        poll_workflow(workflow_id, workflow_timeout)
-        projection_deadline = time.monotonic() + 120
-        while True:
-            refreshed = action("refresh_analysis")
-            checkpoint_status = (refreshed.get("current_checkpoint") or {}).get("analysis_status")
-            if checkpoint_status == "completed":
-                break
-            require(checkpoint_status not in {"failed", "error", "projection_failed"},
-                    f"{checkpoint_id}: AMOS projection failed: {checkpoint_status}")
-            require(time.monotonic() < projection_deadline,
-                    f"{checkpoint_id}: analysis did not project into AMOS within 120s ({checkpoint_status})")
-            time.sleep(2)
-        projection_status, projection = request_json(
-            f"{GATEWAY}/gateway/v1/workflows/{workflow_id}", timeout=300
-        )
-        require(
-            projection_status == 200
-            and str(projection.get("status") or "").lower() == "completed",
-            f"{checkpoint_id}: completed Commander projection unavailable (HTTP {projection_status})",
-        )
-        record = verify_workflow(checkpoint_id, workflow_id, projection, ACTIVITIES[index])
-        records.append(record)
-        print(f"[{checkpoint_id}] completed ({record['activities']} activities)", flush=True)
+        current = advanced.get("current_checkpoint") or {}
+        require(current.get("checkpoint_id") == checkpoint_id,
+                f"unexpected checkpoint after advance: {current}")
         if checkpoint_id == "CJR-CP-ENGAGE":
+            require(current.get("analysis_status") == "awaiting_operator",
+                    f"ENGAGE analysis started before authorization: {current.get('analysis_status')}")
             authorization = authorize_engagement()
+        expected_activities = ANALYSIS_ACTIVITIES.get(checkpoint_id)
+        if expected_activities is not None:
+            checkpoint, workflow_id = current_checkpoint(checkpoint_id)
+            print(f"[{checkpoint_id}] workflow {workflow_id} submitted", flush=True)
+            poll_workflow(workflow_id, workflow_timeout)
+            projection_deadline = time.monotonic() + 120
+            while True:
+                refreshed = action("refresh_analysis")
+                checkpoint_status = (refreshed.get("current_checkpoint") or {}).get("analysis_status")
+                if checkpoint_status == "completed":
+                    break
+                require(checkpoint_status not in {"failed", "error", "projection_failed"},
+                        f"{checkpoint_id}: AMOS projection failed: {checkpoint_status}")
+                require(time.monotonic() < projection_deadline,
+                        f"{checkpoint_id}: analysis did not project into AMOS within 120s ({checkpoint_status})")
+                time.sleep(2)
+            projection_status, projection = request_json(
+                f"{GATEWAY}/gateway/v1/workflows/{workflow_id}", timeout=300
+            )
+            require(
+                projection_status == 200
+                and str(projection.get("status") or "").lower() == "completed",
+                f"{checkpoint_id}: completed Commander projection unavailable (HTTP {projection_status})",
+            )
+            record = verify_workflow(checkpoint_id, workflow_id, projection, expected_activities)
+            records.append(record)
+            print(f"[{checkpoint_id}] completed ({record['activities']} activities)", flush=True)
         if checkpoint_id == "CJR-CP-CLOSE":
             reviewed = action("review_checkpoint")
             require(bool((reviewed.get("current_checkpoint") or {}).get("reviewed_at")),
