@@ -810,7 +810,7 @@ class DirectorService:
 
         workflow_status = str(view.get("status") or "unknown").lower()
         checkpoint["workflow_status"] = workflow_status
-        if not view.get("terminal"):
+        if workflow_status in {"queued", "running", "submitted"} or not view.get("terminal"):
             checkpoint["analysis_status"] = "running" if workflow_status == "running" else "submitted"
             if bookkeeping_only:
                 return "pending"

@@ -10,10 +10,26 @@ BUILD_JOBS="${A2A_BUILD_JOBS:-2}"
 ALGOLIB_WITH_ONNXRUNTIME="${ALGOLIB_WITH_ONNXRUNTIME:-OFF}"
 ALGOLIB_ONNXRUNTIME_ROOT="${ALGOLIB_ONNXRUNTIME_ROOT:-}"
 
+# setup-a2a.ps1 may invoke this script through a non-interactive WSL shell.
+# Non-interactive shells do not necessarily load ~/.bashrc, so initialize
+# Conda explicitly when needed.
 if ! command -v conda >/dev/null 2>&1; then
-  echo "Conda was not found. Install Miniforge or Anaconda first." >&2
+  if [[ -f "$HOME/miniforge3/etc/profile.d/conda.sh" ]]; then
+    source "$HOME/miniforge3/etc/profile.d/conda.sh"
+  elif [[ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]]; then
+    source "$HOME/miniconda3/etc/profile.d/conda.sh"
+  elif [[ -f "$HOME/anaconda3/etc/profile.d/conda.sh" ]]; then
+    source "$HOME/anaconda3/etc/profile.d/conda.sh"
+  fi
+fi
+
+if ! command -v conda >/dev/null 2>&1; then
+  echo "Conda was not found. Install Miniforge, Miniconda, or Anaconda first." >&2
   exit 1
 fi
+
+echo "[conda] using $(command -v conda)"
+echo "[conda] $(conda --version)"
 
 cd "$ROOT_DIR"
 

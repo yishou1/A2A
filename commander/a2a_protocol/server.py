@@ -283,7 +283,9 @@ class A2ABaseAgent:
             coordinates = payload.get("input", {}).get("coordinates", "unknown coordinates")
             return f"Suppression barrage executed on {coordinates}."
         if output_hint == "eval_score":
-            return int(payload.get("input", {}).get("mock_eval_score", 40))
+            if payload.get("input", {}).get("mock_eval_score") is None:
+                return {"assessment_status": "insufficient_data", "missing_fields": ["mock_eval_score"]}
+            return int(payload.get("input", {}).get("mock_eval_score"))
         if output_hint == "assault_result":
             coordinates = payload.get("input", {}).get("coordinates", "unknown coordinates")
             return f"Assault unit captured objective at {coordinates}."
