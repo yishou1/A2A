@@ -13,10 +13,10 @@ Docker 是可选的独立入口，不替换原有启动方式：
 
 适用环境：Windows x64、Docker Desktop 的 Linux 容器模式、首次启动可访问 Docker Hub、PyPI、npm、GitHub、Hugging Face 与 Ollama 模型仓库。建议宿主机至少 16 GB 内存、Docker Desktop 分配 12 GB 内存，并预留 40 GB 磁盘空间。
 
-克隆 `lzh` 分支：
+克隆 `integration/maritime-algolib` 分支：
 
 ```powershell
-git clone --branch lzh --single-branch https://github.com/yishou1/A2A.git 613
+git clone --branch integration/maritime-algolib --single-branch https://github.com/yishou1/A2A.git 613
 cd 613
 ```
 
@@ -60,7 +60,7 @@ docker compose exec -T a2a-core python scripts/docker/healthcheck.py full
 powershell -File scripts/docker-compose.ps1 exec -e AMOS_BASE_URL=http://amos:5000 a2a-core python scripts/verify_coastal.py
 ```
 
-仓库随 `lzh` 分支提交了 Newport ROE Handbook 的 SynapseRAG 完整索引，使用
+仓库随 `integration/maritime-algolib` 分支提交了 Newport ROE Handbook 的 SynapseRAG 完整索引，使用
 `qwen3-embedding:0.6b`、1024 维向量。首次创建 `synapserag_data` 命名卷时，Docker 会从镜像初始化这套索引，因此新电脑无需执行手工建索引命令；随后产生的检索轨迹继续写入命名卷。
 
 宿主已安装 Python 3.11 或更新版本时，也可运行 `python .\scripts\verify_coastal.py`；修改宿主端口后，需同步设置 `AMOS_BASE_URL` 和 `A2A_GATEWAY_URL`。

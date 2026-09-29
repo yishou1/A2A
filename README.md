@@ -14,11 +14,12 @@ Docker 是可选的独立运行方式，只使用 `docker-tools`、`scripts/dock
 同一时间只选择一种启动方式，避免占用相同端口。
 
 准备 Windows x64、Docker Desktop（Linux 容器）和首次下载所需网络。建议宿主机至少
-16 GB 内存、Docker Desktop 分配 12 GB 内存并预留 40 GB 磁盘空间。克隆 `lzh` 分支后，
+16 GB 内存、Docker Desktop 分配 12 GB 内存并预留 40 GB 磁盘空间。克隆
+`integration/maritime-algolib` 分支后，
 有 NVIDIA GPU 且 Docker Desktop 已启用 GPU 支持时运行 GPU 入口；否则运行 CPU 入口：
 
 ```powershell
-git clone --branch lzh --single-branch https://github.com/yishou1/A2A.git 613
+git clone --branch integration/maritime-algolib --single-branch https://github.com/yishou1/A2A.git 613
 cd 613
 # NVIDIA GPU（推荐）
 .\docker-tools\启动Docker环境-GPU.bat
@@ -72,7 +73,7 @@ powershell -File .\scripts\docker-compose.ps1 exec -e AMOS_BASE_URL=http://amos:
 Nacos 自带 Java 运行时的 Docker 镜像，因此宿主机不需要单独安装 Java。克隆整合分支：
 
 ```bash
-git clone --branch lzh --single-branch \
+git clone --branch integration/maritime-algolib --single-branch \
   https://github.com/yishou1/A2A.git a2a-integrated
 cd a2a-integrated
 ```
@@ -285,7 +286,7 @@ conda run -n a2a ctest --test-dir commander/build --output-on-failure
 日常开发从整合分支创建个人分支，避免直接向共享分支强推：
 
 ```bash
-git switch lzh
+git switch integration/maritime-algolib
 git pull --ff-only
 git switch -c <姓名>/<功能名>
 ```
