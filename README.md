@@ -7,18 +7,30 @@
 
 源仓库、分支和提交版本见 [config/SOURCES.md](config/SOURCES.md)。
 
-## Windows 一键启动
+## Docker Desktop 一键启动（独立入口）
 
-准备 Windows x64、Docker Desktop（Linux 容器）和首次下载所需网络。克隆当前
-`integration/maritime-algolib` 分支后，双击 `docker-tools` 目录中的 `启动Docker环境.bat`。启动器构建
-应用、下载 Qwen 模型、等待健康检查，然后打开 AMOS 页面（默认 <http://127.0.0.1:5000/>）。
-停止时双击 `docker-tools\停止Docker环境.bat`；模型与运行记录保留在 Docker 命名卷中。
+Docker 是可选的独立运行方式，只使用 `docker-tools`、`scripts/docker-*.ps1` 和
+`compose*.yaml`。根目录原有的 `启动项目.bat`、`停止项目.bat` 及其本机运行逻辑保持不变。
+同一时间只选择一种启动方式，避免占用相同端口。
+
+准备 Windows x64、Docker Desktop（Linux 容器）和首次下载所需网络。建议宿主机至少
+16 GB 内存、Docker Desktop 分配 12 GB 内存并预留 40 GB 磁盘空间。克隆 `lzh` 分支后，
+有 NVIDIA GPU 且 Docker Desktop 已启用 GPU 支持时运行 GPU 入口；否则运行 CPU 入口：
 
 ```powershell
-git clone --branch integration/maritime-algolib --single-branch https://github.com/yishou1/A2A.git 613
+git clone --branch lzh --single-branch https://github.com/yishou1/A2A.git 613
 cd 613
+# NVIDIA GPU（推荐）
+.\docker-tools\启动Docker环境-GPU.bat
+
+# 无可用 GPU 时使用 CPU
 .\docker-tools\启动Docker环境.bat
 ```
+
+启动器会构建应用，下载 `qwen3:1.7b`、`qwen3-embedding:0.6b` 和 TIA 检索模型，
+等待健康检查，然后打开 AMOS 页面（默认 <http://127.0.0.1:5000/>）。仓库已包含
+SynapseRAG 的 Newport ROE Handbook 索引，新电脑无需先手工建索引。首次下载可能需要较长时间。
+停止时运行 `.\docker-tools\停止Docker环境.bat`；模型、索引卷和运行记录保留在 Docker 命名卷中。
 
 如需验收剧本二，可在服务运行时执行以下命令；它会创建新的剧本运行，并显式授权一次模拟攻击。
 命令在容器内使用 Python，宿主机无需安装 Python：
@@ -60,7 +72,7 @@ powershell -File .\scripts\docker-compose.ps1 exec -e AMOS_BASE_URL=http://amos:
 Nacos 自带 Java 运行时的 Docker 镜像，因此宿主机不需要单独安装 Java。克隆整合分支：
 
 ```bash
-git clone --branch integration/maritime-algolib --single-branch \
+git clone --branch lzh --single-branch \
   https://github.com/yishou1/A2A.git a2a-integrated
 cd a2a-integrated
 ```
@@ -273,7 +285,7 @@ conda run -n a2a ctest --test-dir commander/build --output-on-failure
 日常开发从整合分支创建个人分支，避免直接向共享分支强推：
 
 ```bash
-git switch integration/maritime-algolib
+git switch lzh
 git pull --ff-only
 git switch -c <姓名>/<功能名>
 ```

@@ -1,16 +1,50 @@
 # Docker Desktop 一键运行 613 A2A
 
-## 快速开始
+## 与原启动方式的关系
 
-适用环境：Windows x64、Docker Desktop 的 Linux 容器模式、首次启动可访问 Docker Hub、PyPI、npm、GitHub、Hugging Face 与 Ollama 模型仓库。双击 `docker-tools` 目录中的 `启动Docker环境.bat`，等待命令窗口显示 AMOS 的 `Ready` 地址（默认 `http://127.0.0.1:5000/`）。首次构建和模型下载可能较久，窗口会打印进度。停止时双击 `docker-tools\停止Docker环境.bat`。根目录的 `启动项目.bat` 与 `停止项目.bat` 保留原有本机启动逻辑。
+Docker 是可选的独立入口，不替换原有启动方式：
+
+- 根目录 `启动项目.bat` 和 `停止项目.bat` 继续执行原有本机启动逻辑；
+- Docker 只通过 `docker-tools` 目录中的批处理入口，或 `scripts/docker-*.ps1` 脚本管理；
+- Docker 的服务、模型、索引和运行记录保存在 Compose 容器及命名卷中；
+- 不要同时启动 Docker 环境和原生环境，因为两者默认使用相同的 `5000`、`8030` 等端口。
+
+## Windows 快速开始
+
+适用环境：Windows x64、Docker Desktop 的 Linux 容器模式、首次启动可访问 Docker Hub、PyPI、npm、GitHub、Hugging Face 与 Ollama 模型仓库。建议宿主机至少 16 GB 内存、Docker Desktop 分配 12 GB 内存，并预留 40 GB 磁盘空间。
+
+克隆 `lzh` 分支：
 
 ```powershell
-git clone --branch integration/maritime-algolib --single-branch https://github.com/yishou1/A2A.git 613
+git clone --branch lzh --single-branch https://github.com/yishou1/A2A.git 613
 cd 613
-.\docker-tools\启动Docker环境.bat
 ```
 
-项目启动不需要宿主 Python、Node、Conda、Java、Ollama 或 `.env`。非 Windows 宿主可按以下顺序启动，并检查模型下载和推理探测的退出码：
+有 NVIDIA GPU 且 Docker Desktop 已启用 GPU 容器支持时，推荐使用 GPU 入口：
+
+```powershell
+.\docker-tools\启动Docker环境-GPU.bat
+# 等价命令：
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\docker-start.ps1 -Gpu
+```
+
+没有可用 GPU 时使用 CPU 入口：
+
+```powershell
+.\docker-tools\启动Docker环境.bat
+# 等价命令：
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\docker-start.ps1
+```
+
+等待命令窗口显示 AMOS 的 `Ready` 地址，然后访问 <http://127.0.0.1:5000/>。启动脚本只启动平台，不会自动执行剧本二。首次构建和模型下载可能较久，窗口会持续打印进度。
+
+停止 Docker 环境：
+
+```powershell
+.\docker-tools\停止Docker环境.bat
+```
+
+停止脚本不会删除模型、索引或运行记录。项目启动不需要宿主 Python、Node、Conda、Java、Ollama 或 `.env`。非 Windows 宿主可按以下顺序启动，并检查模型下载和推理探测的退出码：
 
 ```bash
 docker compose build
@@ -25,6 +59,9 @@ docker compose exec -T a2a-core python scripts/docker/healthcheck.py full
 ```powershell
 powershell -File scripts/docker-compose.ps1 exec -e AMOS_BASE_URL=http://amos:5000 a2a-core python scripts/verify_coastal.py
 ```
+
+仓库随 `lzh` 分支提交了 Newport ROE Handbook 的 SynapseRAG 完整索引，使用
+`qwen3-embedding:0.6b`、1024 维向量。首次创建 `synapserag_data` 命名卷时，Docker 会从镜像初始化这套索引，因此新电脑无需执行手工建索引命令；随后产生的检索轨迹继续写入命名卷。
 
 宿主已安装 Python 3.11 或更新版本时，也可运行 `python .\scripts\verify_coastal.py`；修改宿主端口后，需同步设置 `AMOS_BASE_URL` 和 `A2A_GATEWAY_URL`。
 
