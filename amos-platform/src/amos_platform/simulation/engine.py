@@ -2680,6 +2680,24 @@ class SimEngine:
         if not authorized:
             return {"error": "攻击命令缺少操作员明确授权"}
         with self._lock:
+            prior_command = next(
+                (
+                    event
+                    for event in reversed(self.events)
+                    if event.get("type") == "authorized_fire_command"
+                    and str(event.get("target_track_id") or "") == str(track_id)
+                    and str(event.get("asset_id") or "") == str(asset_id)
+                    and event.get("weapon_id")
+                ),
+                None,
+            )
+            if prior_command is not None:
+                return {
+                    "weapon_id": str(prior_command["weapon_id"]),
+                    "status": "already_executed",
+                    "target_track_id": str(track_id),
+                    "asset_id": str(asset_id),
+                }
             eligibility = self.engagement_eligibility(
                 track_id,
                 asset_id=asset_id,

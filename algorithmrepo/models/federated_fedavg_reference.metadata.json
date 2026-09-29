@@ -7,7 +7,7 @@
   "experiment_script_sha256": "7d0597715ccd6a6904723a97d8ae9b2c4ff2ce8dac6aca861cba548fb35fe225",
   "dataset": {
     "path": "data/federated_fedavg/reference_client_data.csv",
-    "sha256": "0df6ebab040b76a09b6eb5ebb9cd2d91bb427051e65654de300e91b166500f1a",
+    "sha256": "7187bc42791e1f342aa8ea75ff7cf8f1f0b413d06a73b9bd1d1db639d65d5063",
     "source": "deterministic_non_iid_logistic_reference_generator",
     "seed": 20260820,
     "train_clients": 3,
