@@ -6,7 +6,7 @@ from typing import Any
 
 from flask import Response, request, stream_with_context
 
-from amos_platform.api.dependencies import get_engine, get_runtime
+from amos_platform.api.dependencies import get_director, get_engine, get_runtime
 from amos_platform.api.responses import err, ok
 from amos_platform.data.scenario_repository import get_scenario
 from amos_platform.realtime.sse import operator_state_event_stream
@@ -190,6 +190,7 @@ def register_sim_routes(bp: Any) -> None:
         )
         if result.get("error"):
             return err(409, str(result["error"])), 409
+        get_director().notify_operator_fire_authorized()
         return ok({"command_type": "fire", "status": "executed", "result": result})
 
     @bp.route("/api/v1/sim/stream", methods=["GET"])

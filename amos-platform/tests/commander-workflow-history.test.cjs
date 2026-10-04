@@ -164,6 +164,62 @@ test('coastal Engage and Assess activities share one execution timeline', async 
   assert.equal(element('wf-activity-count').textContent, '2 项');
 });
 
+test('carrier first-wave authorization workflow is grouped under execution and review', async () => {
+  const elements = new Map();
+  const timers = new Map();
+  const element = id => {
+    if (!elements.has(id)) {
+      elements.set(id, {
+        innerHTML: '', textContent: '', className: '', hidden: false, checked: true,
+        style: {}, dataset: {}, classList: {add() {}, toggle() {}},
+        addEventListener() {}, setAttribute() {},
+      });
+    }
+    return elements.get(id);
+  };
+  const document = {
+    getElementById: element,
+    querySelectorAll() { return []; },
+    dispatchEvent() {},
+  };
+  const context = {
+    window: {}, document,
+    sessionStorage: {getItem() { return null; }, setItem() {}, removeItem() {}},
+    CustomEvent: function (type, options) { this.type = type; this.detail = options.detail; },
+    setInterval(callback, delay) { timers.set(delay, callback); return delay; },
+    clearInterval() {},
+  };
+  vm.runInNewContext(
+    readFileSync(resolve(__dirname, '../static/js/workflow/commander-workflow.js'), 'utf8'),
+    context
+  );
+  const submission = {
+    run_id: 'run-asc',
+    stage_transfer: {phase: 'ACT', checkpoint_id: 'ASC-CP-WAVE1', submission_ordinal: 5},
+  };
+  context.window.PlatformWorkflow.init({
+    getBackendHealth: async () => ({status: 'ok'}),
+    loadRun: async () => ({
+      workflow_ids: ['wf-wave1'],
+      submissions: [{workflow_id: 'wf-wave1', snapshot: submission}],
+      workflow_views: [],
+    }),
+    getWorkflowView: async () => ({
+      workflow_id: 'wf-wave1', status: 'completed', terminal: true,
+      submission, orchestration: {counts: {total: 1, completed: 1}, activities: [], trace: []},
+      activity_details: {},
+    }),
+  });
+  context.window.PlatformWorkflow.syncRun('run-asc');
+  context.window.PlatformWorkflow.track('wf-wave1', 'run-asc');
+  for (let i = 0; i < 5; i += 1) await new Promise(setImmediate);
+
+  const taskHistory = element('wf-task-history').innerHTML;
+  assert.match(taskHistory, /执行与复核/);
+  assert.match(taskHistory, /ASC-CP-WAVE1/);
+  assert.doesNotMatch(taskHistory, /第4阶段.*未生成任务/);
+});
+
 test('selecting a coastal history stage replaces the activity timeline', async () => {
   const elements = new Map();
   const timers = new Map();

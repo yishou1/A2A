@@ -593,6 +593,69 @@ class DirectorService:
             "awaiting_authorization", restore=restore
         )
 
+    def notify_operator_fire_authorized(self) -> dict[str, Any]:
+        """Release a live fire checkpoint as soon as its command is accepted.
+
+        The auto-monitor also observes authorization events, but it polls on a
+        background interval.  Releasing the gate here prevents the simulation
+        from appearing permanently paused if that monitor is delayed or has
+        exited; its normal checkpoint loop remains responsible for progression
+        and any post-authorization analysis.
+        """
+        engine = self.runtime.get_engine()
+        with self._lock:
+            checkpoint = self._state.get("current_checkpoint")
+            if (
+                not isinstance(checkpoint, dict)
+                or not checkpoint.get("requires_operator_action")
+                or str(checkpoint.get("operator_action_type") or "fire") != "fire"
+                or not self._state.get("awaiting_authorization")
+                or self._state.get("authorization_stage") != "fire"
+                or not self._has_authorized_engagement(
+                    since_sec=float(checkpoint.get("reached_at_sec", 0) or 0),
+                )
+            ):
+                return self.state()
+
+            self._state["awaiting_authorization"] = False
+            self._state["authorization_stage"] = None
+            self._state["authorization_not_before_sec"] = None
+            self._leave_authorization_wait()
+            self._set_status("auto_running")
+
+            # A post-fire workflow may need a fresh snapshot.  Leave the clock
+            # frozen until the monitor has submitted it unless the checkpoint
+            # explicitly allows motion during submission.
+            if (
+                not checkpoint.get("analysis_after_authorization")
+                or checkpoint.get("continue_during_submission")
+            ):
+                engine.resume(announce=False)
+
+            auto_thread = self._auto_thread
+            if not auto_thread or not auto_thread.is_alive():
+                self._auto_stop.clear()
+                self._auto_generation += 1
+                generation = self._auto_generation
+                run_id = str(self._state.get("run_id") or "")
+                self._auto_thread = threading.Thread(
+                    target=self._auto_monitor,
+                    args=(generation, run_id),
+                    daemon=True,
+                    name="amos-director",
+                )
+                self._auto_thread.start()
+
+            self._record(
+                "authorization_completed",
+                phase="ENGAGE",
+                authorization_stage="fire",
+                resumed_by="operator_command",
+            )
+            result = self.state()
+        self.runtime.record_director_state(result)
+        return result
+
     def _analysis_progress_enabled(self, checkpoint: dict[str, Any]) -> bool:
         controls = (self._scenario or {}).get("demo_controls") or {}
         return bool(
@@ -904,8 +967,18 @@ class DirectorService:
             bool(self._state.get("awaiting_authorization"))
             or self._authorization_gate_required()
         )
+        fire_authorized = bool(
+            checkpoint.get("requires_operator_action")
+            and str(checkpoint.get("operator_action_type") or "fire") == "fire"
+            and self._has_authorized_engagement(
+                since_sec=float(checkpoint.get("reached_at_sec", 0) or 0),
+            )
+        )
         operator_paused = self._state.get("director_status") in {"paused", "stopped"}
-        can_resume = resume_on_success and not authorization_pending and not operator_paused
+        # The workflow poll may have started just before the operator's fire
+        # event arrived.  In that race, its captured resume_on_success=False
+        # must not override the now-recorded authorization event.
+        can_resume = (resume_on_success or fire_authorized) and not authorization_pending and not operator_paused
         if authorization_pending:
             self.runtime.get_engine().pause()
             next_status = (
@@ -1064,6 +1137,9 @@ class DirectorService:
                     wait_for_fire_authorization = bool(
                         current.get("requires_operator_action")
                         and str(current.get("operator_action_type") or "fire") == "fire"
+                        and not self._has_authorized_engagement(
+                            since_sec=float(current.get("reached_at_sec", 0) or 0),
+                        )
                         and (
                             not engine._engagement_warnings
                             or self._state.get("awaiting_authorization")
@@ -1166,6 +1242,12 @@ class DirectorService:
                         or self._state.get("authorization_stage") != authorization_stage
                     ):
                         with self._lock:
+                            # The operator can authorize between the stage read
+                            # above and acquiring this lock. Recheck before
+                            # opening the gate, otherwise the stale FIRE stage
+                            # pauses the engine again just after launch.
+                            if self._authorization_stage() != authorization_stage:
+                                continue
                             self._state["awaiting_authorization"] = True
                             self._state["authorization_stage"] = authorization_stage
                             warnings = list(engine._engagement_warnings.values())
@@ -1233,7 +1315,13 @@ class DirectorService:
                                 phase="ENGAGE",
                                 authorization_stage=completed_stage,
                             )
-                        if not engine.clock.get("running") and checkpoint.get("analysis_status") != "submitting":
+                        if (
+                            not engine.clock.get("running")
+                            and (
+                                not checkpoint.get("analysis_after_authorization")
+                                or checkpoint.get("analysis_status") != "submitting"
+                            )
+                        ):
                             engine.resume()
                         self.runtime.record_director_state(self.state())
 
@@ -1359,6 +1447,25 @@ class DirectorService:
             with self._lock:
                 if self._auto_thread is threading.current_thread():
                     self._auto_thread = None
+                engine = self.runtime.get_engine()
+                same_run = (
+                    generation == self._auto_generation
+                    and str(self._state.get("run_id") or "") == run_id
+                    and str(engine.clock.get("run_id") or "") == run_id
+                )
+                if (
+                    same_run
+                    and not engine.clock.get("running")
+                    and self._state.get("director_status") == "auto_running"
+                    and not self._state.get("awaiting_analysis")
+                    and not self._state.get("awaiting_authorization")
+                ):
+                    # A monitor can legitimately exit at a paused checkpoint
+                    # (for example, after an operator-authorized weapon launch).
+                    # Keep the director state in sync with the clock so the UI
+                    # enables Continue instead of reporting a dead auto-run.
+                    self._set_status("paused")
+                    self.runtime.record_director_state(self.state())
 
     def _stop_auto_thread(self, *, pause: bool) -> None:
         # Serialize cancellation with result application, but never hold the
