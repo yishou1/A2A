@@ -22,6 +22,36 @@ from bounded_cache import BoundedLRUCache, env_positive_int
 # 78 MB state file after ~200 cached work items, adding ~10 s per call).
 # 16 entries comfortably covers retries/replays across concurrent workflows.
 TASK_CACHE_MAX_ENTRIES = 16
+_PERSISTED_RESPONSE_REFS_KEY = "_track_agent_persisted_refs"
+
+
+def response_for_persistence(response: Dict[str, Any]) -> Dict[str, Any]:
+    """Deduplicate response aliases without changing replay semantics."""
+
+    persisted = deepcopy(response)
+    output = persisted.get("output")
+    if (
+        isinstance(output, dict)
+        and isinstance(output.get("artifact"), dict)
+        and persisted.get("artifact") == output["artifact"]
+    ):
+        persisted.pop("artifact", None)
+        persisted[_PERSISTED_RESPONSE_REFS_KEY] = {"artifact": "output.artifact"}
+    return persisted
+
+
+def restore_persisted_response(response: Dict[str, Any]) -> Dict[str, Any]:
+    restored = deepcopy(response)
+    refs = restored.pop(_PERSISTED_RESPONSE_REFS_KEY, {})
+    output = restored.get("output")
+    if (
+        isinstance(refs, dict)
+        and refs.get("artifact") == "output.artifact"
+        and isinstance(output, dict)
+        and isinstance(output.get("artifact"), dict)
+    ):
+        restored["artifact"] = output["artifact"]
+    return restored
 
 
 def _task_cache() -> BoundedLRUCache:
@@ -89,11 +119,18 @@ class A2ARuntimeState:
         self.cache_hit_count += 1
         return response
 
-    def set_task_response(self, work_item: str, response: Dict[str, Any]) -> None:
+    def set_task_response(
+        self,
+        work_item: str,
+        response: Dict[str, Any],
+        *,
+        count_processed: bool = True,
+    ) -> None:
         cached = deepcopy(response)
         cached["cached"] = False
         self._task_response_cache[work_item] = cached
-        self.processed_task_count += 1
+        if count_processed:
+            self.processed_task_count += 1
 
     def get_stream_events(self, work_item: str) -> List[str] | None:
         cached = self._stream_response_cache.get(work_item)
@@ -252,7 +289,11 @@ class A2ARuntimeState:
             "last_work_item": self.current_work_item,
         }
 
-    def export_persistent_state(self) -> Dict[str, Any]:
+    def export_persistent_state(
+        self,
+        *,
+        include_task_response_cache: bool = True,
+    ) -> Dict[str, Any]:
         """Return restart-safe runtime state.
 
         Busy/current fields are intentionally excluded. After a restart the
@@ -260,7 +301,7 @@ class A2ARuntimeState:
         item whose response was not cached.
         """
 
-        return {
+        state = {
             "agent_name": self.agent_name,
             "role": self.role,
             "ready": self.ready,
@@ -270,11 +311,17 @@ class A2ARuntimeState:
             "cache_hit_count": self.cache_hit_count,
             "rejected_task_count": self.rejected_task_count,
             "last_error": self.last_error,
-            "task_response_cache": deepcopy(dict(self._task_response_cache.items())),
             "stream_response_cache": deepcopy(dict(self._stream_response_cache.items())),
             "workflow_work_lists": deepcopy(dict(self._workflow_work_lists.items())),
             "recovery_notices": deepcopy(self._recovery_notices),
         }
+        if include_task_response_cache:
+            state["task_response_cache"] = {
+                key: response_for_persistence(value)
+                for key, value in self._task_response_cache.items()
+                if isinstance(value, dict)
+            }
+        return state
 
     def restore_persistent_state(self, state: Dict[str, Any]) -> None:
         self.agent_status = "idle"
@@ -289,9 +336,11 @@ class A2ARuntimeState:
         self.rejected_task_count = int(state.get("rejected_task_count", 0) or 0)
         self.last_error = state.get("last_error")
         self._task_response_cache.clear()
-        self._task_response_cache.update(
-            deepcopy(state.get("task_response_cache", {}) or {})
-        )
+        self._task_response_cache.update({
+            key: restore_persisted_response(value)
+            for key, value in (state.get("task_response_cache", {}) or {}).items()
+            if isinstance(value, dict)
+        })
         self._stream_response_cache.clear()
         self._stream_response_cache.update(
             deepcopy(state.get("stream_response_cache", {}) or {})

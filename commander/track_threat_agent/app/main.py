@@ -17,8 +17,9 @@ from pydantic import BaseModel, Field
 
 from a2a_protocol.messages import build_task_error_response, build_task_response
 from bounded_cache import process_rss_bytes
+from idempotency_store import IdempotencyStore
 
-from .a2a_runtime import A2ARuntimeState
+from .a2a_runtime import A2ARuntimeState, restore_persisted_response
 from .agent_model_registry import build_agent_model_registry
 from .algorithm_library_runtime import (
     AlgorithmLibrarySettings,
@@ -47,14 +48,20 @@ from .tracker import MultiTargetTracker
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 PROJECT_DIR = BACKEND_DIR.parent
 DEFAULT_STATE_PATH = PROJECT_DIR / ".a2a_state" / "track_threat_agent_state.json"
+DEFAULT_IDEMPOTENCY_PATH = PROJECT_DIR / ".a2a_state" / "track_threat_idempotency.db"
 INPUT_SCHEMA_VERSION = "perception_result/v1"
 ARTIFACT_SCHEMA_VERSION = "track_threat_group_artifact/v1"
 STATE_SUMMARY_SCHEMA_VERSION = 1
+PROJECTED_OUTPUT_KEYS = frozenset({"tracking_result", "threat_assessment_result"})
 
 
 registrar = NacosRegistrar()
 resource_monitor = AgentResourceMonitor()
 state_store = FileStateStore(os.getenv("TRACK_THREAT_STATE_PATH") or DEFAULT_STATE_PATH)
+idempotency_store = IdempotencyStore(
+    os.getenv("TRACK_THREAT_IDEMPOTENCY_DB") or DEFAULT_IDEMPOTENCY_PATH,
+    namespace="track-threat-group-agent",
+)
 
 
 @contextlib.asynccontextmanager
@@ -147,7 +154,7 @@ def health() -> Dict[str, Any]:
         "failed_task_count": runtime_snapshot["failed_task_count"],
         "cached_work_item_count": runtime_snapshot["cached_work_item_count"],
         "process_rss_bytes": process_rss_bytes(),
-        "cache": runtime.cache_metrics(),
+        "cache": _cache_metrics(),
         "current_workflow_id": runtime_snapshot["current_workflow_id"],
         "current_work_item": runtime_snapshot["current_work_item"],
         "algorithm_provider": runtime_snapshot["algorithm_provider"],
@@ -215,7 +222,7 @@ def metrics() -> Dict[str, Any]:
             "state_snapshot_exists": state_store.path.exists(),
             "resources": resource_monitor.snapshot(),
             "process_rss_bytes": process_rss_bytes(),
-            "cache": runtime.cache_metrics(),
+            "cache": _cache_metrics(),
         }
     )
     return snapshot
@@ -223,6 +230,13 @@ def metrics() -> Dict[str, Any]:
 
 def runtime_status() -> Dict[str, Any]:
     return runtime.snapshot(algorithm_provider=algorithm_provider.mode)
+
+
+def _cache_metrics() -> Dict[str, Dict[str, int]]:
+    return {
+        **runtime.cache_metrics(),
+        "idempotency": idempotency_store.stats(),
+    }
 
 
 @app.get("/resources")
@@ -238,6 +252,12 @@ def resources() -> Dict[str, Any]:
 @app.post("/recovery/notify")
 def recovery_notify(payload: Dict[str, Any]) -> Dict[str, Any]:
     acknowledgment = runtime.notify_recovery(payload)
+    if payload.get("reset_cache"):
+        workflow_id = str(payload.get("workflow_id") or "").strip()
+        if workflow_id:
+            idempotency_store.delete_workflow(workflow_id)
+        else:
+            idempotency_store.clear()
     if runtime.active_task_count == 0:
         runtime.agent_status = "idle"
         registrar.set_agent_status("idle", unavailable_reason="")
@@ -725,6 +745,13 @@ async def send_message(task_payload: Dict[str, Any], token: str = Depends(verify
         )
 
     cached = runtime.get_task_response(work_item)
+    if cached is None:
+        persisted = idempotency_store.get(work_item)
+        if isinstance(persisted, dict) and persisted.get("status") == "completed":
+            runtime.set_task_response(work_item, persisted, count_processed=False)
+            cached = runtime.get_task_response(work_item)
+        elif persisted is not None:
+            idempotency_store.delete(work_item)
     if cached is not None:
         return cached
 
@@ -766,6 +793,19 @@ async def send_message(task_payload: Dict[str, Any], token: str = Depends(verify
     output = _build_a2a_output(task_payload, requested_skills, result)
     duration_ms = round((time.perf_counter() - started) * 1000, 3)
     registrar.record_task_outcome(success=True, latency_ms=duration_ms)
+    response_extra = {
+        "task_id": result["task_id"],
+        "artifact_summary": result["artifact"]["summary"],
+        "safety_boundary": "simulation-only situation-awareness priority; no weapon control",
+        "token_accepted": bool(token),
+        "executed_skills": requested_skills,
+        "selected_algorithms": _selected_algorithms(requested_skills),
+        "algorithm_duration_ms": result["artifact"].get("trace", {}).get("algorithm_duration_ms", {}),
+        "output_hint_acknowledged": task_payload.get("output_hint"),
+    }
+    if _projected_output_key(task_payload) is None:
+        # Preserve the legacy full-artifact envelope for direct/debug callers.
+        response_extra["artifact"] = result["artifact"]
     response = build_task_response(
         workflow_id=workflow_id,
         work_item=work_item,
@@ -784,19 +824,10 @@ async def send_message(task_payload: Dict[str, Any], token: str = Depends(verify
         message="Track/threat situation analysis completed",
         work_list_size=len(runtime.get_work_list(workflow_id)) if workflow_id else None,
         cached=False,
-        extra={
-            "task_id": result["task_id"],
-            "artifact_summary": result["artifact"]["summary"],
-            "artifact": result["artifact"],
-            "safety_boundary": "simulation-only situation-awareness priority; no weapon control",
-            "token_accepted": bool(token),
-            "executed_skills": requested_skills,
-            "selected_algorithms": _selected_algorithms(requested_skills),
-            "algorithm_duration_ms": result["artifact"].get("trace", {}).get("algorithm_duration_ms", {}),
-            "output_hint_acknowledged": task_payload.get("output_hint"),
-        },
+        extra=response_extra,
     )
     runtime.set_task_response(work_item, response)
+    idempotency_store.put(work_item, response)
     _save_state_snapshot()
     return response
 
@@ -931,12 +962,14 @@ def workflow_work_list(workflow_id: str) -> Dict[str, Any]:
 @app.delete("/workflows/{workflow_id}/cache")
 def cleanup_workflow_cache(workflow_id: str) -> Dict[str, Any]:
     result = runtime.cleanup_workflow(workflow_id)
+    persistent_removed = idempotency_store.delete_workflow(workflow_id)
     _save_state_snapshot()
     return {
         "status": "ok",
         "agent": runtime.agent_name,
         **result,
-        "cache": runtime.cache_metrics(),
+        "persistent_removed": persistent_removed,
+        "cache": _cache_metrics(),
     }
 
 
@@ -1006,6 +1039,7 @@ def reset_runtime_state() -> Dict[str, Any]:
     _active_workflow_id = None
     last_artifact = artifact
     state_store.clear()
+    idempotency_store.clear()
     return {"status": "reset", "active_track_count": 0, "active_group_count": 0}
 
 
@@ -1234,9 +1268,51 @@ def _save_state_snapshot() -> None:
     state_store.save(
         tracks=tracker.tracks,
         groups=group_detector.groups,
-        last_artifact=last_artifact,
-        runtime_state=runtime.export_persistent_state(),
+        last_artifact=_persistent_artifact_snapshot(last_artifact),
+        # Completed responses are persisted incrementally in SQLite. Keeping
+        # them out of this JSON avoids rewriting megabytes on every frame.
+        runtime_state=runtime.export_persistent_state(include_task_response_cache=False),
     )
+
+
+def _persistent_artifact_snapshot(artifact: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep only state-summary data that is not persisted elsewhere."""
+
+    summary = artifact.get("summary") if isinstance(artifact.get("summary"), dict) else {}
+    compact_summary = {
+        key: deepcopy(summary[key])
+        for key in (
+            "track_count",
+            "threat_count",
+            "group_count",
+            "protected_asset_count",
+            "asset_impact_count",
+            "decision_risk_assessment_count",
+            "highest_track_score",
+            "highest_group_score",
+            "highest_asset_impact_score",
+            "prediction_eval",
+            "schema",
+        )
+        if key in summary
+    }
+    return {
+        "task_id": artifact.get("task_id"),
+        "artifact_schema_version": artifact.get("artifact_schema_version"),
+        "processed_at": artifact.get("processed_at"),
+        "protected_assets": deepcopy(artifact.get("protected_assets", [])),
+        "asset_impacts": deepcopy(artifact.get("asset_impacts", [])),
+        "unified_threat_ranking": [
+            {
+                key: deepcopy(item[key])
+                for key in ("rank", "entity_id", "entity_type", "score")
+                if key in item
+            }
+            for item in artifact.get("unified_threat_ranking", [])
+            if isinstance(item, dict)
+        ],
+        "summary": compact_summary,
+    }
 
 
 def _restore_state_snapshot() -> bool:
@@ -1247,7 +1323,17 @@ def _restore_state_snapshot() -> bool:
     tracker.restore_tracks(restored.tracks)
     group_detector.groups = restored.groups
     last_artifact = restored.last_artifact or last_artifact
-    runtime.restore_persistent_state(restored.runtime_state)
+    runtime_state = deepcopy(restored.runtime_state)
+    legacy_responses = runtime_state.pop("task_response_cache", {}) or {}
+    for work_item, response in legacy_responses.items():
+        if isinstance(response, dict):
+            idempotency_store.put(
+                str(work_item),
+                restore_persisted_response(response),
+            )
+    runtime.restore_persistent_state(runtime_state)
+    if legacy_responses:
+        _save_state_snapshot()
     return True
 
 
@@ -1336,22 +1422,24 @@ def _build_a2a_output(
     result: Dict[str, Any],
 ) -> Dict[str, Any]:
     artifact = result["artifact"]
-    output = {
+    output_hint = task_payload.get("output_hint")
+    output_key = output_hint.strip() if isinstance(output_hint, str) and output_hint.strip() else None
+    projected_output_key = _projected_output_key(task_payload)
+    output: Dict[str, Any] = {
         "task_id": result["task_id"],
         "message_type": result["message_type"],
-        "artifact": artifact,
         "algorithm_calls": artifact.get("algorithm_calls", []),
-        "algorithm_invocations": artifact.get("algorithm_invocations", []),
         "llm_calls": (
             ((artifact.get("trace") or {}).get("algorithm_library") or {}).get("llm_calls") or []
         ),
         "safety_boundary": "simulation-only situation-awareness priority; no weapon control",
     }
-    output_hint = task_payload.get("output_hint")
-    if not isinstance(output_hint, str) or not output_hint.strip():
+    if projected_output_key is None:
+        output["artifact"] = artifact
+        output["algorithm_invocations"] = artifact.get("algorithm_invocations", [])
+    if output_key is None:
         return output
 
-    output_key = output_hint.strip()
     if output_key == "tracking_result":
         output_value = _tracking_output(artifact)
     elif output_key == "threat_assessment_result":
@@ -1366,6 +1454,14 @@ def _build_a2a_output(
         "output_key": output_key,
     }
     return output
+
+
+def _projected_output_key(task_payload: Dict[str, Any]) -> str | None:
+    output_hint = task_payload.get("output_hint")
+    if not isinstance(output_hint, str):
+        return None
+    output_key = output_hint.strip()
+    return output_key if output_key in PROJECTED_OUTPUT_KEYS else None
 
 
 def _tracking_output(artifact: Dict[str, Any]) -> Dict[str, Any]:
