@@ -7,6 +7,7 @@ from app import main
 from app.algorithm_provider import LocalBuiltInAlgorithmProvider
 from app.a2a_runtime import A2ARuntimeState
 from app.state_store import FileStateStore
+from idempotency_store import IdempotencyStore
 
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "sample_data"
@@ -192,10 +193,41 @@ def test_runtime_state_can_export_and_restore_persistent_state():
     assert restored.snapshot()["processed_task_count"] == 1
 
 
+def test_persistent_runtime_deduplicates_and_restores_legacy_artifact_alias():
+    runtime = A2ARuntimeState(agent_name="agent-a", role="track_threat")
+    artifact = {"summary": {"track_count": 1}, "tracks": [{"track_id": "TRK-1"}]}
+    runtime.set_task_response(
+        "work-full",
+        {
+            "status": "completed",
+            "work_item": "work-full",
+            "output": {"artifact": artifact},
+            "artifact": artifact,
+            "cached": False,
+        },
+    )
+
+    persisted = runtime.export_persistent_state()
+    persisted_response = persisted["task_response_cache"]["work-full"]
+    assert "artifact" not in persisted_response
+
+    restored = A2ARuntimeState(agent_name="agent-a", role="track_threat")
+    restored.restore_persistent_state(persisted)
+    cached = restored.get_task_response("work-full")
+    assert cached["artifact"] == artifact
+    assert cached["output"]["artifact"] == artifact
+    assert cached["cached"] is True
+
+
 @pytest.mark.anyio
 async def test_send_message_saves_and_restores_agent_state_snapshot(tmp_path):
     old_store = main.state_store
+    old_idempotency_store = main.idempotency_store
     main.state_store = FileStateStore(tmp_path / "agent_state.json")
+    main.idempotency_store = IdempotencyStore(
+        tmp_path / "idempotency.db",
+        namespace="track-agent-test",
+    )
     try:
         main.reset_runtime_state()
         task_payload = _task_payload("wi-persist-001")
@@ -203,6 +235,9 @@ async def test_send_message_saves_and_restores_agent_state_snapshot(tmp_path):
         track_id = first["artifact"]["tracks"][0]["track_id"]
 
         assert main.state_store.path.exists()
+        snapshot = main.state_store.load()
+        assert "task_response_cache" not in snapshot.runtime_state
+        assert main.idempotency_store.get("wi-persist-001") == first
 
         main.tracker.reset()
         main.group_detector.reset()
@@ -213,8 +248,13 @@ async def test_send_message_saves_and_restores_agent_state_snapshot(tmp_path):
 
         assert restored is True
         assert track_id in main.tracker.tracks
-        assert main.runtime.get_task_response("wi-persist-001")["cached"] is True
+        assert main.runtime.get_task_response("wi-persist-001") is None
+        cached = await main.send_message(task_payload, token="unit-test")
+        assert cached["cached"] is True
+        assert cached["artifact"]["tracks"][0]["track_id"] == track_id
         assert main.last_artifact["summary"]["track_count"] == 7
+        assert "trace" not in main.last_artifact
     finally:
-        main.state_store = old_store
         main.reset_runtime_state()
+        main.state_store = old_store
+        main.idempotency_store = old_idempotency_store

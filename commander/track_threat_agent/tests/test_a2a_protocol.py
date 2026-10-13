@@ -280,6 +280,14 @@ async def test_commander_trajectory_tracking_skill_returns_requested_output_key(
     assert len(tracking_result["tracks"]) == len(payload["detections"])
     assert tracking_result["scene"] == payload["scene"]
     assert body["executed_skills"] == ["trajectory_tracking"]
+    assert "artifact" not in body
+    assert "artifact" not in body["output"]
+    assert "algorithm_invocations" not in body["output"]
+
+    cached = await send_message(task, token="unit-test")
+    assert cached["cached"] is True
+    assert cached["output"]["tracking_result"] == tracking_result
+    assert "artifact" not in cached
 
 
 @pytest.mark.anyio
@@ -363,6 +371,8 @@ async def test_commander_threat_ranking_consumes_tracking_context_without_retrac
     assert assessment["unified_threat_ranking"]
     assert assessment["decision_risk_assessments"]
     assert assessment["risk_assessments"] == assessment["decision_risk_assessments"]
+    assert "artifact" not in ranking_response
+    assert "artifact" not in ranking_response["output"]
     assert {
         track_id: len(main.tracker.tracks[track_id].history_path)
         for track_id in history_lengths_before
