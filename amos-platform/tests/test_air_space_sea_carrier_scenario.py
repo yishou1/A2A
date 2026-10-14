@@ -179,7 +179,8 @@ def test_carrier_scenario_uses_individual_resources_and_complete_offline_media()
     assert scenario["map_display"]["track_trail_window_sec"] == 360
     assert "SAT-A2S-01" not in scenario["map_display"]["trail_asset_ids"]
     assert scenario["map_display"]["label_asset_ids"] == [
-        "CV-01", "UAV-ONEWAY-01", "UAV-ISR-01", "UAV-STRIKE-01",
+        "SAT-A2S-01", "SAT-A2S-02", "SAT-COM-A2S-01", "CV-01", "DDG-01",
+        "FFG-01", "AEW-01", "UAV-ONEWAY-01", "UAV-ISR-01", "UAV-STRIKE-01",
     ]
     assert scenario["map_display"]["asset_label_aliases"]["UAV-ONEWAY-01"] == "自杀无人机 OW-01"
     assert scenario["map_display"]["asset_label_aliases"]["UAV-STRIKE-01"] == (
@@ -257,9 +258,12 @@ def test_carrier_scenario_uses_individual_resources_and_complete_offline_media()
     assert checkpoints["ASC-CP-WAVE1"]["conditions"]["media_ids_released"] == [
         "ASC-MEDIA-06"
     ]
+    assert checkpoints["ASC-CP-WAVE1"]["submit_analysis"] is True
     assert checkpoints["ASC-CP-WAVE2"]["engagement_wave"] == 2
+    assert checkpoints["ASC-CP-WAVE2"]["submit_analysis"] is True
     assert checkpoints["ASC-CP-CLOSE"].get("requires_operator_action") is not True
     assert "operator_action_type" not in checkpoints["ASC-CP-CLOSE"]
+    assert checkpoints["ASC-CP-CLOSE"]["submit_analysis"] is False
     assert checkpoints["ASC-CP-CLOSE"]["conditions"]["weapon_hit_target_ids"] == [
         "COASTAL-AIRFIELD-01", "MOBILE-COASTAL-AD-01",
     ]

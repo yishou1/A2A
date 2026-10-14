@@ -33,7 +33,7 @@ window.PlatformWorkflow = (function () {
     {phase:"OBSERVE", label:"观察与识别", subtitle:"第1阶段", checkpoints:["MAR-CP-PERCEPTION", "CJR-CP-CUE", "CJR-CP-IDENTIFY", "AMP-CP-PERCEPTION", "BOR-CP-DETECT"]},
     {phase:"ORIENT", label:"航迹评估", subtitle:"第2阶段", checkpoints:["MAR-CP-ASSESS", "CJR-CP-FUSION", "AMP-CP-ASSESS", "BOR-CP-TRACK"]},
     {phase:"DECIDE", label:"方案决策", subtitle:"第3阶段", checkpoints:["MAR-CP-PLAN", "CJR-CP-PLAN", "ASC-CP-PLAN", "AMP-CP-PLAN", "BOR-CP-LINK", "BOR-CP-PLAN"]},
-    {phase:"ACT", label:"执行与复核", subtitle:"第4阶段", checkpoints:["MAR-CP-ENGAGE", "MAR-CP-CLOSE", "CJR-CP-ENGAGE", "CJR-CP-CLOSE", "AMP-CP-BDA", "AMP-CP-CLOSE", "BOR-CP-CLOSE"]},
+    {phase:"ACT", label:"执行与复核", subtitle:"第4阶段", checkpoints:["MAR-CP-ENGAGE", "MAR-CP-CLOSE", "CJR-CP-ENGAGE", "CJR-CP-CLOSE", "ASC-CP-WAVE1", "ASC-CP-WAVE2", "ASC-CP-CLOSE", "AMP-CP-BDA", "AMP-CP-CLOSE", "BOR-CP-CLOSE"]},
   ];
 
   function escapeHtml(value) {
