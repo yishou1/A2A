@@ -252,6 +252,40 @@ def test_activity_detail_prefers_actual_agent_request_input_over_bpel_variable()
     assert "observations" not in detail["input_detail"]
 
 
+def test_large_agent_input_preview_is_used_instead_of_previous_bpel_variable() -> None:
+    preview = {"phase": "strike", "results": {"compliance_authorization": {"decision": "approved"}}}
+    status = {
+        "workflow_id": "wf-preview", "status": "completed",
+        "context": {"mission_input": {"observations": [{"observation_id": "OLD"}]}},
+        "result": {"activity_results": [{
+            "activity_id": "A-SIM", "role": "simulation_execution", "status": "completed",
+            "input_preview": preview,
+            "input_summary": {"type": "dict", "sha256": "a" * 64, "size_bytes": 315267},
+        }]},
+    }
+    work = {"work_list": [{"activity_id": "A-SIM", "role": "simulation_execution", "input_variable": "MissionInput"}]}
+    detail = build_workflow_view(status, work_list=work)["activity_details"]["A-SIM"]
+    assert detail["input_source"] == "agent_request.input_preview"
+    assert detail["input_detail"]["phase"]["value"] == "strike"
+    assert detail["input_detail"]["results"]["value"] == preview["results"]
+    assert "observations" not in detail["input_detail"]
+
+
+def test_legacy_large_agent_input_displays_retained_request_summary() -> None:
+    summary = {"type": "dict", "sha256": "a" * 64, "size_bytes": 315267, "keys": ["phase", "results", "context"]}
+    status = {
+        "workflow_id": "wf-legacy", "status": "completed",
+        "result": {"activity_results": [{
+            "activity_id": "A-SIM", "role": "simulation_execution", "status": "completed",
+            "input_summary": summary,
+        }]},
+    }
+    work = {"work_list": [{"activity_id": "A-SIM", "input_variable": "ComplianceAuthorizationResult"}]}
+    detail = build_workflow_view(status, work_list=work)["activity_details"]["A-SIM"]
+    assert detail["input_source"] == "agent_request.input_summary"
+    assert detail["input_detail"]["input_summary"]["value"] == summary
+
+
 def test_workflow_view_uses_real_work_list_progress_and_structured_results() -> None:
     status = {
         "workflow_id": "wf-1",

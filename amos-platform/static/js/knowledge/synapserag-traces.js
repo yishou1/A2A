@@ -212,7 +212,7 @@ window.SynapseTraceView = (function () {
       focus.type = "button";
       focus.disabled = !item.node_key;
       focus.addEventListener("click", function () { focusEvidence(item); });
-      var preview = element("a", "", "高亮原文");
+      var preview = element("a", "", "显示原文");
       preview.target = "_blank";
       preview.rel = "noopener noreferrer";
       preview.href = item.chunk_id ? API_ROOT + "/evidence/" + encodeURIComponent(item.chunk_id) + "/preview" : "#";

@@ -422,6 +422,21 @@ def apply_commander_assessments(
         semantic_label = str(metadata.get("label") or "").lower()
         semantic_threat_level = str(metadata.get("threat_level") or "").lower()
         existing_class = str(getattr(track, "classification", "") or "").lower()
+        existing_assessment = dict(getattr(track, "agent_assessment", {}) or {})
+        backend_level = level
+        # Some scripts keep an identified threat confirmed throughout the strike.
+        # Later ranking scores or generic ground classes must not erase that
+        # identification. Explicit civilian/friendly corrections still win.
+        retain_high_risk = (
+            existing_assessment.get("status") == "confirmed"
+            and str(existing_assessment.get("level") or "").upper() == "HIGH"
+            and object_type in {existing_class, "unknown", "ground", "ground_installation"}
+            and any(
+                rule.get("retain_confirmed_high_risk") is True
+                and str(rule.get("classification") or "").lower() == existing_class
+                for rule in getattr(engine, "_scenario_identification_rules", [])
+            )
+        )
         protected = (
             object_type in PROTECTED_OBJECT_CLASSES
             or any(value in object_type for value in {"fishing", "civilian", "merchant"})
@@ -439,6 +454,10 @@ def apply_commander_assessments(
             level = semantic_threat_level if semantic_threat_level in {"none", "low"} else "low"
         else:
             status = "confirmed" if level == "high" else ("watch" if level == "medium" else "cleared")
+        if retain_high_risk and not protected and semantic_label not in {"neutral", "friendly"}:
+            status = "confirmed"
+            level = "high"
+            object_type = existing_class
         if object_type != "unknown":
             track.classification = object_type.upper()
         track.threat_level = level.upper()
@@ -446,7 +465,6 @@ def apply_commander_assessments(
         while previous_phase != track.kill_chain_phase:
             previous_phase = track.kill_chain_phase
             track._advance_kill_chain()
-        existing_assessment = dict(getattr(track, "agent_assessment", {}) or {})
         execution_state = {
             key: existing_assessment[key]
             for key in EXECUTION_ASSESSMENT_FIELDS
@@ -463,6 +481,8 @@ def apply_commander_assessments(
             "backend_track_id": backend_id,
             "association_method": association.get("method"),
         }
+        if retain_high_risk and status == "confirmed":
+            assessment_record["backend_level"] = backend_level.upper()
         if submitted_run_id:
             assessment_record["source_run_id"] = submitted_run_id
         if submission.get("snapshot_sequence") is not None:

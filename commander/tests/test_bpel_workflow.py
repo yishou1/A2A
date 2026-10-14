@@ -443,6 +443,37 @@ class BPELWorkflowTest(unittest.TestCase):
         self.assertGreater(snapshot["input_size_bytes"], 16 * 1024)
         self.assertEqual(len(snapshot["input_sha256"]), 64)
         self.assertEqual(snapshot["input_summary"]["type"], "dict")
+        self.assertEqual(snapshot["input_preview"]["history"][:2], ["state", "state"])
+        self.assertEqual(snapshot["input_preview"]["history"][2], {"_truncated_item_count": 4998})
+        self.assertLessEqual(len(CommanderAgent._evidence_bytes(snapshot["input_preview"])), 8 * 1024)
+
+    def test_large_simulation_request_keeps_displayable_input_in_workflow_result(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            commander = CommanderAgent(mode="local", workflow="bpel",
+                workflow_file="integrated_system/workflows/act_workflow.bpel",
+                workflow_id="wf-preview", state_dir=temp_dir)
+            context = commander.initial_workflow_context()
+            context["work_list"] = [{"activity_id": "A-SIM", "work_item": "simulate",
+                                     "role": "simulation_execution", "status": "completed"}]
+            payload = {"command": "simulate_execution_control", "input": {
+                "phase": "strike", "results": {"compliance_authorization": {"decision": "approved"}},
+                "context": {"history": ["state"] * 5000},
+            }}
+            commander.workflow_context = context
+            commander._remember_task_response("simulate", {"status": "completed", "output": {}},
+                role="simulation_execution", target="test", request_payload=payload)
+            row = commander._build_workflow_result(context)["activity_results"][0]
+            self.assertNotIn("input", row)
+            self.assertEqual(row["input_preview"]["phase"], "strike")
+            self.assertEqual(row["input_preview"]["results"], payload["input"]["results"])
+            self.assertNotIn("input_preview", row["request"])
+
+    def test_large_request_preview_stays_bounded_with_many_nested_fields(self):
+        huge = {str(i): {str(j): "x" * 1000 for j in range(8)} for i in range(20)}
+        snapshot = CommanderAgent._task_request_snapshot({"input": huge})
+        self.assertNotIn("input", snapshot)
+        self.assertLessEqual(len(CommanderAgent._evidence_bytes(snapshot["input_preview"])), 8 * 1024)
+        self.assertEqual(snapshot["input_preview"]["_truncated_field_count"], 12)
 
     def test_terminal_context_drops_value_output_and_runtime_alias_duplicates(self):
         value = {"output_data": {"blob": "x" * 20_000}}

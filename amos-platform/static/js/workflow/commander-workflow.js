@@ -956,25 +956,23 @@ window.PlatformWorkflow = (function () {
     var isOutput = scope === "output";
     var title = isOutput ? "目标检测输出" : "目标检测输入";
     var scenarioId = String(currentScenarioId() || "");
+    if (scenarioId === "air-space-sea-carrier-strike") return "";
     var isCoastal = isCoastalJointScenario(scenarioId);
-    // Live attachment / coastal fallback ONLY for coastal-joint; all other
-    // scenarios keep the original maritime boat preview paths unchanged.
+    // Coastal presentation uses a fixed before/after pair throughout the run.
+    // Workflow requests and algorithm evidence still contain their real media.
     var frames = null;
     if (isCoastal) {
-      frames = liveTacticalAttachmentFrames(scope, detail);
-      if (!frames || !frames.length) {
-        frames = isOutput ? [
-          {
-            image: "/static/ui-previews/coastal-eo-missile-site-annotated.png",
-            caption: "无侦-10 光电 · RT-DETR 锚框",
-          },
-        ] : [
-          {
-            image: "/static/ui-previews/coastal-eo-missile-site.png",
-            caption: "无侦-10 光电 · 沿海导弹阵地",
-          },
-        ];
-      }
+      frames = isOutput ? [
+        {
+          image: "/static/ui-previews/coastal-eo-missile-site-annotated.png",
+          caption: "无侦-10 光电 · RT-DETR 锚框",
+        },
+      ] : [
+        {
+          image: "/static/ui-previews/coastal-eo-missile-site.png",
+          caption: "无侦-10 光电 · 沿海导弹阵地",
+        },
+      ];
     } else {
       frames = isOutput ? [
         {

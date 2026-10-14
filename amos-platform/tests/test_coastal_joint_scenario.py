@@ -137,6 +137,8 @@ def test_coastal_joint_force_package_and_backend_contract_are_complete() -> None
     assert engage_checkpoint["pause"] is True
     assert engage_checkpoint["min_elapsed_sec"] == 3300
     assert engage_checkpoint["submit_analysis"] is True
+    assert engage_checkpoint["continue_during_submission"] is True
+    assert engage_checkpoint["continue_past_phase_during_analysis"] is True
     assert engage_checkpoint["submit_after_authorization"] is True
     assert engage_checkpoint["block_until_analysis_complete"] is True
     assert engage_checkpoint["requires_operator_action"] is True
@@ -616,6 +618,112 @@ def test_high_risk_promoted_from_local_eo_class_when_observe_omits_source_class(
     assert track.agent_assessment["status"] == "confirmed"
     assert track.agent_assessment["label"] == "高风险"
     assert float(track.agent_assessment["source_simulation_time_sec"]) < 2130
+
+
+def test_early_backend_confirmation_survives_later_eo_evidence(tmp_path, monkeypatch):
+    monkeypatch.setenv("AMOS_RUN_DB", str(tmp_path / "runs.sqlite3"))
+    scenario = get_scenario(SCENARIO_ID)
+    engine = SimEngine(seed=int(scenario["default_seed"]))
+    engine.load_scenario(scenario)
+    engine.clock["run_id"] = "run-cjr-early-confirmation"
+    _advance(engine, 1490)
+    assert "CJR-MEDIA-03" not in engine.media_capture.captured_media_ids
+    track_id = _apply_observe_identify_assessment(engine, "wf-cjr-cue-early")
+    track = engine.sensor_fusion.tracks[track_id]
+    original = dict(track.agent_assessment)
+
+    # CUE can finish just before the EO frame arrives. Observe every intervening
+    # tick, including the one that used to erase the completed assessment.
+    while engine.clock["elapsed_sec"] < 1800:
+        engine._tick(min(10, 1800 - engine.clock["elapsed_sec"]))
+        assert track.agent_assessment["status"] == "confirmed"
+        assert track.agent_assessment["label"] == "高风险"
+        assert track.agent_assessment["source"] == original["source"]
+        assert track.agent_assessment["workflow_id"] == original["workflow_id"]
+    assert "CJR-MEDIA-03" in track.agent_assessment["evidence_media_ids"]
+
+
+def test_new_evidence_of_a_different_class_requires_confirmation(tmp_path, monkeypatch):
+    monkeypatch.setenv("AMOS_RUN_DB", str(tmp_path / "runs.sqlite3"))
+    scenario = deepcopy(get_scenario(SCENARIO_ID))
+    scenario["evidence_classification_rules"][0]["classification"] = "MOBILE_COASTAL_AIR_DEFENSE"
+    engine = SimEngine(seed=int(scenario["default_seed"]))
+    engine.load_scenario(scenario)
+    engine.clock["run_id"] = "run-cjr-conflicting-evidence"
+    _advance(engine, 1490)
+    track_id = _apply_observe_identify_assessment(engine)
+    _advance(engine, 1530)
+    track = engine.sensor_fusion.tracks[track_id]
+    assert track.classification == "MOBILE_COASTAL_AIR_DEFENSE"
+    assert track.agent_assessment["status"] == "pending"
+    assert track.agent_assessment["source"] is None
+
+
+def _apply_ranking_refresh(engine, track_id, level, workflow_id, object_type="ground_installation", metadata=None):
+    track = engine.sensor_fusion.tracks[track_id]
+    return apply_commander_assessments(engine, {
+        "workflow_id": workflow_id,
+        "status": "completed",
+        "result": {"outputs": {
+            "tracking_result": {"tracks": [{
+                "track_id": track_id, "object_type": object_type,
+                "metadata": metadata or {},
+                "lat": track.lat, "lon": track.lng,
+            }]},
+            "threat_assessment_result": {"threats": [{
+                "track_id": track_id, "score": 0.55, "level": level,
+            }]},
+        }},
+    }, submission={"run_id": engine.clock["run_id"]})
+
+
+def test_confirmed_coastal_site_stays_high_risk_through_ranking_refreshes(tmp_path, monkeypatch):
+    monkeypatch.setenv("AMOS_RUN_DB", str(tmp_path / "runs.sqlite3"))
+    scenario = get_scenario(SCENARIO_ID)
+    engine = SimEngine(seed=int(scenario["default_seed"]))
+    engine.load_scenario(scenario)
+    engine.clock["run_id"] = "run-cjr-retain-high"
+    _advance(engine, 1530)
+    track_id = _apply_observe_identify_assessment(engine)
+    track = engine.sensor_fusion.tracks[track_id]
+
+    # Orient may rank a stationary target lower than the earlier EO identification.
+    # That changes ranking, but must not turn this confirmed missile site yellow.
+    for index, level in enumerate(["medium", "low", "unknown", "high"]):
+        _advance(engine, 1800 + index * 300)
+        result = _apply_ranking_refresh(
+            engine, track_id, level, f"wf-ranking-{index}",
+            metadata={"label": "hostile", "affiliation": "red"} if index == 3 else {},
+        )
+        assert result["applied_count"] == 1
+        assert track.classification == "COASTAL_MISSILE_SITE"
+        assert track.threat_level == "HIGH"
+        assert track.agent_assessment["status"] == "confirmed"
+        assert track.agent_assessment["label"] == "高风险"
+        assert track.agent_assessment["backend_level"] == level.upper()
+
+    track.agent_assessment.update({"damage_state": "destroyed", "engagement_status": "destroyed"})
+    _apply_ranking_refresh(engine, track_id, "medium", "wf-ranking-post-bda")
+    assert track.agent_assessment["damage_state"] == "destroyed"
+    assert track.agent_assessment["engagement_status"] == "destroyed"
+
+
+def test_risk_retention_is_opt_in_and_protected_reclassification_can_clear(tmp_path, monkeypatch):
+    monkeypatch.setenv("AMOS_RUN_DB", str(tmp_path / "runs.sqlite3"))
+    for retain in [False, True]:
+        scenario = deepcopy(get_scenario(SCENARIO_ID))
+        scenario["evidence_classification_rules"][0]["retain_confirmed_high_risk"] = retain
+        engine = SimEngine(seed=int(scenario["default_seed"]))
+        engine.load_scenario(scenario)
+        engine.clock["run_id"] = f"run-cjr-policy-{retain}"
+        _advance(engine, 1530)
+        track_id = _apply_observe_identify_assessment(engine)
+        _apply_ranking_refresh(engine, track_id, "medium", "wf-policy-refresh")
+        track = engine.sensor_fusion.tracks[track_id]
+        assert track.threat_level == ("HIGH" if retain else "MEDIUM")
+        _apply_ranking_refresh(engine, track_id, "low", "wf-protected-refresh", "civilian")
+        assert track.agent_assessment["status"] == "cleared"
+        assert track.threat_level == "LOW"
 
 
 def test_individual_assets_loiter_or_patrol_instead_of_freezing_on_station() -> None:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from amos_platform.api.app_factory import create_app
 
 from test_maritime_engagement import _identified_tracks
@@ -36,3 +38,25 @@ def test_duplicate_authorized_fire_command_returns_existing_weapon(monkeypatch) 
     second_result = duplicate.get_json()["data"]["result"]
     assert second_result["weapon_id"] == first_result["weapon_id"]
     assert second_result["status"] == "already_executed"
+
+
+def test_fire_route_releases_director_only_after_command_is_accepted(monkeypatch) -> None:
+    from amos_platform.api.routes import sim_routes
+
+    engine, hostile, _ = _identified_tracks()
+    weapon_name = engine._engagement_policy["authorized_weapons"][0]
+    engine.issue_warning_at_track(hostile.id, authorized=True)
+    engine._tick(300.0)
+    notifications = []
+    monkeypatch.setattr(sim_routes, "get_engine", lambda: engine)
+    monkeypatch.setattr(sim_routes, "get_director", lambda: SimpleNamespace(
+        notify_operator_fire_authorized=lambda: notifications.append("accepted")))
+    client = create_app().test_client()
+    body = {"command_type": "fire", "params": {
+        "track_id": hostile.id, "asset_id": "ESCORT-01", "weapon_name": weapon_name,
+    }, "authorization": {"approved": False}}
+    assert client.post("/api/v1/sim/commands", json=body).status_code == 409
+    assert notifications == []
+    body["authorization"]["approved"] = True
+    assert client.post("/api/v1/sim/commands", json=body).status_code == 200
+    assert notifications == ["accepted"]

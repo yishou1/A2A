@@ -514,6 +514,7 @@ def build_coastal_joint_recon_strike_scenario() -> dict[str, Any]:
                 "target_ref": "COASTAL-SITE-01",
                 "required_media_ids": ["CJR-MEDIA-03"],
                 "classification": "COASTAL_MISSILE_SITE",
+                "retain_confirmed_high_risk": True,
                 "retain_until_sec": 5100,
             },
         ],
@@ -561,7 +562,8 @@ def build_coastal_joint_recon_strike_scenario() -> dict[str, Any]:
             {"checkpoint_id": "CJR-CP-PLAN", "title": "战术指挥与协同方案输入就绪", "min_elapsed_sec": 2730, "conditions": {"stable_track_count_at_least": 1, "minimum_track_confidence": 0.55, "minimum_track_samples": 2, "media_ids_released": ["CJR-MEDIA-03", "CJR-MEDIA-10"]}, "pause": False, "continue_during_submission": True, "advance_story_during_analysis": True, "submit_analysis": True, "block_until_analysis_complete": True},
             # 先显示人工授权，授权事件落库后再提交 ENGAGE 工作流。这样不会让
             # 后端分析挡住授权弹窗，同时仍为“执行与复核”保留真实活动证据。
-            {"checkpoint_id": "CJR-CP-ENGAGE", "title": "协同武器链等待明确授权", "min_elapsed_sec": 3300, "conditions": {"media_ids_released": ["CJR-MEDIA-06", "CJR-MEDIA-08", "CJR-MEDIA-09"]}, "pause": True, "submit_analysis": True, "submit_after_authorization": True, "block_until_analysis_complete": True, "requires_operator_action": True},
+            # 授权后保持武器飞行与命中动画运行，分析只约束工作流推进。
+            {"checkpoint_id": "CJR-CP-ENGAGE", "title": "协同武器链等待明确授权", "min_elapsed_sec": 3300, "conditions": {"media_ids_released": ["CJR-MEDIA-06", "CJR-MEDIA-08", "CJR-MEDIA-09"]}, "pause": True, "continue_during_submission": True, "continue_past_phase_during_analysis": True, "submit_analysis": True, "submit_after_authorization": True, "block_until_analysis_complete": True, "requires_operator_action": True},
             # CLOSE 使用独立的 ASSESS 工作流记录毁伤评估，并在分析完成后要求
             # 操作员复核。operator_action_type=review 不会再次触发 FIRE 授权。
             {"checkpoint_id": "CJR-CP-CLOSE", "title": "毁伤评估与闭环建议就绪", "min_elapsed_sec": 4530, "conditions": {"media_ids_released": ["CJR-MEDIA-07"], "event_types_emitted": ["damage_assessment_confirmed"]}, "pause": True, "submit_analysis": True, "block_until_analysis_complete": True, "requires_operator_action": True, "operator_action_type": "review"},

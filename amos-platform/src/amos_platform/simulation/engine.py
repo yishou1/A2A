@@ -1408,6 +1408,8 @@ class SimEngine:
                     or self._truth_target_for_track(matched_track) != target_ref
                 ):
                     continue
+                previous_classification = str(matched_track.classification or "").strip().upper()
+                previous_assessment = dict(matched_track.agent_assessment or {})
                 matched_track.classification = classification
                 # A collected intelligence product outlives the short sensor
                 # access window that created it.  Scenario authors may retain
@@ -1420,12 +1422,24 @@ class SimEngine:
                         float(matched_track.retain_until_sim_time or 0.0),
                         float(rule["retain_until_sec"]),
                     )
-                matched_track.agent_assessment = {
-                    "status": "pending",
-                    "label": "新证据待后端确认",
-                    "source": None,
-                    "evidence_media_ids": sorted(required_media),
-                }
+                if (
+                    previous_classification == classification
+                    and previous_assessment.get("status") == "confirmed"
+                ):
+                    # The backend may finish before this sensor product arrives.
+                    # Matching evidence enriches its confirmation instead of
+                    # replacing it with a pending assessment for one frame.
+                    previous_assessment["evidence_media_ids"] = sorted(
+                        set(previous_assessment.get("evidence_media_ids") or []) | required_media
+                    )
+                    matched_track.agent_assessment = previous_assessment
+                else:
+                    matched_track.agent_assessment = {
+                        "status": "pending",
+                        "label": "新证据待后端确认",
+                        "source": None,
+                        "evidence_media_ids": sorted(required_media),
+                    }
                 self._evidence_classification_applied.add(applied_key)
                 self.events.append({
                     "type": "sensor_classification_candidate",

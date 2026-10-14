@@ -303,6 +303,34 @@ class CommanderAgent:
         return summary
 
     @classmethod
+    def _evidence_preview(cls, value: object, *, depth: int = 0) -> object:
+        """Keep a bounded excerpt of the actual request for the inspector."""
+        if depth >= 4:
+            return cls._evidence_summary(value) if isinstance(value, (dict, list)) else (
+                value[:160] if isinstance(value, str) else deepcopy(value)
+            )
+        if isinstance(value, dict):
+            preview = {
+                str(key): (
+                    cls._evidence_summary(item)
+                    if str(key).lower() in {"content", "raw", "raw_bytes", "image", "image_data", "data_uri"}
+                    else cls._evidence_preview(item, depth=depth + 1)
+                )
+                for key, item in list(value.items())[:8]
+            }
+            if len(value) > 8:
+                preview["_truncated_field_count"] = len(value) - 8
+            return preview
+        if isinstance(value, list):
+            preview = [cls._evidence_preview(item, depth=depth + 1) for item in value[:2]]
+            if len(value) > 2:
+                preview.append({"_truncated_item_count": len(value) - 2})
+            return preview
+        if isinstance(value, str):
+            return value[:160] + ("...[truncated]" if len(value) > 160 else "")
+        return deepcopy(value) if isinstance(value, (int, float, bool)) or value is None else str(value)[:160]
+
+    @classmethod
     def _compact_runtime_record(cls, value: dict) -> dict:
         """Keep runtime provenance while dropping duplicate/large raw I/O."""
         record = deepcopy(value)
@@ -520,7 +548,7 @@ class CommanderAgent:
                     key: deepcopy(value)
                     for key, value in request.items()
                     if key not in {
-                        "input", "input_summary", "input_sha256", "input_size_bytes"
+                        "input", "input_preview", "input_summary", "input_sha256", "input_size_bytes"
                     }
                 },
                 "output_ref": output_ref,
@@ -531,6 +559,8 @@ class CommanderAgent:
                 activity_row["input"] = deepcopy(request["input"])
             elif request.get("input_summary"):
                 activity_row["input_summary"] = deepcopy(request["input_summary"])
+                if isinstance(request.get("input_preview"), dict):
+                    activity_row["input_preview"] = deepcopy(request["input_preview"])
                 activity_row["input_sha256"] = request.get("input_sha256")
                 activity_row["input_size_bytes"] = request.get("input_size_bytes")
             if isinstance(response_output, dict):
@@ -584,6 +614,17 @@ class CommanderAgent:
             snapshot["input_summary"] = summary
             snapshot["input_sha256"] = summary["sha256"]
             snapshot["input_size_bytes"] = summary["size_bytes"]
+            preview = cls._evidence_preview(input_value)
+            if isinstance(preview, dict) and len(cls._evidence_bytes(preview)) <= 8 * 1024:
+                snapshot["input_preview"] = preview
+            elif isinstance(input_value, dict):
+                snapshot["input_preview"] = {
+                    key: (cls._evidence_preview(item, depth=4) if isinstance(item, (str, int, float, bool)) or item is None
+                          else cls._evidence_summary(item))
+                    for key, item in list(input_value.items())[:8]
+                }
+                if len(input_value) > 8:
+                    snapshot["input_preview"]["_truncated_field_count"] = len(input_value) - 8
         if payload.get("workflow_id"):
             snapshot["workflow_id"] = payload.get("workflow_id")
         if payload.get("work_item"):

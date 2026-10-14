@@ -476,6 +476,256 @@ def test_authorization_wait_starts_only_at_reached_operator_checkpoint_and_is_wa
     assert director._authorization_stage() == "fire"
 
 
+@pytest.mark.parametrize("checkpoint_id,reached_sec", [("ASC-CP-WAVE1", 3390), ("ASC-CP-WAVE2", 4560)])
+def test_accepted_fire_command_immediately_releases_authorization_pause(checkpoint_id, reached_sec) -> None:
+    runtime = PlatformRuntime()
+    director = DirectorService(runtime)
+    director.configure(
+        scenario_id="air-space-sea-carrier-strike",
+        mode="demonstration",
+        branch="standard",
+        seed=76091,
+    )
+    engine = runtime.get_engine()
+    engine.clock["elapsed_sec"] = reached_sec
+    engine.pause()
+    engine.lock_speed_for_confirmation("awaiting_authorization")
+    director._state.update({
+        "director_status": "awaiting_authorization",
+        "awaiting_authorization": True,
+        "authorization_stage": "fire",
+        "current_checkpoint": {
+            "checkpoint_id": checkpoint_id,
+            "reached_at_sec": reached_sec,
+            "requires_operator_action": True,
+            "operator_action_type": "fire",
+            "analysis_status": "completed",
+        },
+    })
+    engine.clock["director_status"] = "awaiting_authorization"
+    engine.events.append({
+        "type": "authorized_fire_command",
+        "command_source": "operator",
+        "sim_time": reached_sec,
+    })
+
+    class ExistingAutoMonitor:
+        @staticmethod
+        def is_alive() -> bool:
+            return True
+
+    director._auto_thread = ExistingAutoMonitor()
+    state = director.notify_operator_fire_authorized()
+
+    assert state["director_status"] == "auto_running"
+    assert state["awaiting_authorization"] is False
+    assert state["authorization_stage"] is None
+    assert engine.clock["running"] is True
+    assert "speed_locked_reason" not in engine.clock
+
+
+def test_wave_analysis_finishing_after_fire_does_not_repause_simulation() -> None:
+    runtime = PlatformRuntime()
+    director = DirectorService(
+        runtime,
+        workflow_state_callback=lambda workflow_id: {
+            "status": "completed",
+            "terminal": True,
+            "run": {"current": True},
+            "orchestration": {"counts": {"total": 2, "completed": 2, "failed": 0}},
+            "result": {"projection_status": "completed"},
+        },
+    )
+    director.configure(
+        scenario_id="air-space-sea-carrier-strike",
+        mode="demonstration",
+        branch="standard",
+        seed=76091,
+    )
+    engine = runtime.get_engine()
+    engine.clock.update({"elapsed_sec": 3401.17, "running": False, "lifecycle": "paused"})
+    director._state.update({
+        "director_status": "auto_running",
+        "awaiting_authorization": False,
+        "authorization_stage": None,
+        "current_checkpoint": {
+            "checkpoint_id": "ASC-CP-WAVE1",
+            "reached_at_sec": 3401.17,
+            "requires_operator_action": True,
+            "operator_action_type": "fire",
+            "analysis_blocking": False,
+            "analysis_status": "submitted",
+            "submission": {"workflow_id": "wf-wave1"},
+        },
+    })
+    engine.clock["director_status"] = "auto_running"
+    engine.events.append({
+        "type": "authorized_fire_command",
+        "command_source": "operator",
+        "sim_time": 3401.17,
+    })
+
+    class StopAfterOnePoll:
+        polls = 0
+
+        def wait(self, timeout: float) -> bool:
+            self.polls += 1
+            return self.polls > 1
+
+    director._auto_stop = StopAfterOnePoll()
+    director._auto_thread = threading.current_thread()
+    director._auto_monitor()
+
+    state = director.state()
+    assert state["current_checkpoint"]["analysis_status"] == "completed"
+    assert state["director_status"] == "auto_running"
+    assert engine.clock["running"] is True
+
+
+def test_inflight_analysis_poll_honors_fire_event_that_arrives_during_poll() -> None:
+    runtime = PlatformRuntime()
+    director = DirectorService(
+        runtime,
+        workflow_state_callback=lambda workflow_id: {
+            "status": "completed",
+            "terminal": True,
+            "run": {"current": True},
+            "orchestration": {"counts": {"total": 2, "completed": 2, "failed": 0}},
+            "result": {"projection_status": "completed"},
+        },
+    )
+    director.configure(
+        scenario_id="air-space-sea-carrier-strike",
+        mode="demonstration",
+        branch="standard",
+        seed=76091,
+    )
+    engine = runtime.get_engine()
+    engine.clock.update({"elapsed_sec": 3401.17, "running": False, "lifecycle": "paused"})
+    director._state.update({
+        "director_status": "auto_running",
+        "current_checkpoint": {
+            "checkpoint_id": "ASC-CP-WAVE1",
+            "reached_at_sec": 3401.17,
+            "requires_operator_action": True,
+            "operator_action_type": "fire",
+            "analysis_blocking": False,
+            "analysis_status": "submitted",
+            "submission": {"workflow_id": "wf-wave1"},
+        },
+    })
+    engine.clock["director_status"] = "auto_running"
+    engine.events.append({
+        "type": "authorized_fire_command",
+        "command_source": "operator",
+        "sim_time": 3401.17,
+    })
+
+    assert director._poll_current_analysis(resume_on_success=False) == "completed"
+    assert director.state()["director_status"] == "auto_running"
+    assert engine.clock["running"] is True
+
+
+def test_auto_monitor_marks_paused_when_clock_stops_before_director() -> None:
+    runtime = PlatformRuntime()
+    director = DirectorService(runtime)
+    director.configure(
+        scenario_id="air-space-sea-carrier-strike",
+        mode="demonstration",
+        branch="standard",
+        seed=76091,
+    )
+    engine = runtime.get_engine()
+    run_id = str(director.state()["run_id"])
+    engine.clock.update({
+        "run_id": run_id,
+        "running": False,
+        "lifecycle": "paused",
+        "director_status": "auto_running",
+    })
+    director._state["director_status"] = "auto_running"
+
+    class ContinueUntilClockCheck:
+        @staticmethod
+        def wait(timeout: float) -> bool:
+            return False
+
+    director._auto_stop = ContinueUntilClockCheck()
+    director._auto_thread = threading.current_thread()
+    generation = director._auto_generation
+    director._auto_monitor(generation, run_id)
+
+    state = director.state()
+    assert state["director_status"] == "paused"
+    assert state["auto_running"] is False
+    assert engine.clock["director_status"] == "paused"
+
+
+def test_authorized_fire_resumes_while_checkpoint_workflow_is_submitting() -> None:
+    runtime = PlatformRuntime()
+    director = DirectorService(runtime)
+    director.configure(
+        scenario_id="air-space-sea-carrier-strike",
+        mode="demonstration",
+        branch="standard",
+        seed=76091,
+    )
+    engine = runtime.get_engine()
+    run_id = str(director.state()["run_id"])
+    checkpoint = {
+        "checkpoint_id": "ASC-CP-WAVE2",
+        "reached_at_sec": 4560.0,
+        "requires_operator_action": True,
+        "operator_action_type": "fire",
+        "analysis_after_authorization": False,
+        "analysis_blocking": False,
+        "analysis_status": "submitting",
+        "submission": {"workflow_id": "wf-wave2"},
+    }
+    director._state.update({
+        "director_status": "awaiting_authorization",
+        "awaiting_authorization": True,
+        "authorization_stage": "fire",
+        "current_checkpoint": checkpoint,
+    })
+    engine.clock.update({
+        "run_id": run_id,
+        "elapsed_sec": 4560.0,
+        "scenario_elapsed_sec": 4560.0,
+        "running": False,
+        "lifecycle": "paused",
+        "director_status": "awaiting_authorization",
+    })
+    engine.events.append({
+        "type": "authorized_fire_command",
+        "command_source": "operator",
+        "target_track_id": "track-wave2",
+        "sim_time": 4560.0,
+    })
+
+    class StopAfterAuthorizationPoll:
+        polls = 0
+
+        def wait(self, timeout: float) -> bool:
+            self.polls += 1
+            return self.polls > 1
+
+    director._auto_stop = StopAfterAuthorizationPoll()
+    director._auto_thread = threading.current_thread()
+    resume_calls: list[bool] = []
+
+    def mark_running(*, announce: bool = True) -> None:
+        resume_calls.append(announce)
+        engine.clock.update({"running": True, "lifecycle": "running"})
+
+    engine.resume = mark_running
+    director._auto_monitor(director._auto_generation, run_id)
+
+    assert resume_calls == [True]
+    assert director.state()["awaiting_authorization"] is False
+    assert engine.clock["running"] is True
+
+
 def test_carrier_wave_two_and_close_require_target_specific_bda() -> None:
     runtime = PlatformRuntime()
     director = DirectorService(runtime)
@@ -1894,6 +2144,91 @@ def test_post_fire_analysis_keeps_execution_and_return_running(dialog_wait, monk
         assert engine.assets["UAV-CONFIRM-01"].get("_follow_returning_home") is True
         assert director.state()["current_checkpoint"]["analysis_status"] == "submitting"
         assert pauses == []
+    finally:
+        release.set()
+        original_pause(announce=False)
+
+
+def test_coastal_authorized_strike_keeps_flying_across_phase_during_slow_analysis(monkeypatch, tmp_path) -> None:
+    from test_coastal_joint_scenario import _advance, _apply_ground_site_assessment
+
+    monkeypatch.setenv("AMOS_RUN_DB", str(tmp_path / "coastal-strike.sqlite3"))
+    runtime = PlatformRuntime()
+    started = threading.Event()
+    release = threading.Event()
+
+    def submit(context):
+        assert context["checkpoint_id"] == "CJR-CP-ENGAGE"
+        assert engine.clock["running"] is True
+        started.set()
+        assert release.wait(30.0)
+        context["on_snapshot_captured"]()
+        return {"workflow_id": "wf-coastal-post-fire"}
+
+    director = DirectorService(runtime, checkpoint_callback=submit,
+        workflow_state_callback=lambda workflow_id: {"status": "running", "terminal": False})
+    director.configure(scenario_id="coastal-joint-recon-strike", mode="demonstration",
+                       branch="standard", seed=61023)
+    engine = runtime.get_engine()
+    monkeypatch.setattr(engine, "_tick_loop", lambda: None)
+    _advance(engine, 3300)
+    track_id = _apply_ground_site_assessment(engine)
+    director._checkpoint_index = 3
+    checkpoint = director._reach_checkpoint(director._next_checkpoint())
+    assert checkpoint["analysis_status"] == "awaiting_operator"
+    # Phase boundaries remain effective until an explicit fire event exists.
+    assert director._analysis_motion_limit() == pytest.approx(4199.999)
+    engine.pause(announce=False)
+    director._state.update({"awaiting_authorization": True, "authorization_stage": "fire"})
+    fire = engine.fire_weapon_at_track(track_id, asset_id="SEA-C2-01",
+                                      weapon_name="舰载对陆巡航导弹", authorized=True)
+    assert fire["status"] == "launched"
+    pauses = []
+    original_pause = engine.pause
+
+    def record_pause(*, announce=True):
+        pauses.append(announce)
+        original_pause(announce=announce)
+
+    monkeypatch.setattr(engine, "pause", record_pause)
+
+    class StopAfterOnePoll:
+        polls = 0
+
+        def wait(self, timeout):
+            self.polls += 1
+            return self.polls > 1
+
+    def monitor_once():
+        director._auto_stop = StopAfterOnePoll()
+        director._auto_thread = threading.current_thread()
+        director._auto_monitor()
+
+    try:
+        monitor_once()
+        assert started.wait(1.0)
+        assert engine._director_motion_limit_sec is None
+        engine._tick(30.0)
+        monitor_once()
+        assert engine.clock["running"] is True
+        assert checkpoint["analysis_status"] == "submitting"
+        release.set()
+        deadline = time.monotonic() + 3.0
+        while checkpoint["analysis_status"] == "submitting" and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert checkpoint["analysis_status"] == "submitted"
+        while engine.clock["elapsed_sec"] < 4600:
+            engine._tick(min(30, 4600 - engine.clock["elapsed_sec"]))
+            monitor_once()
+            assert engine.clock["running"] is True, director.state()["action_log"][-3:]
+        assert not engine._engagement_warnings
+        assert len([event for event in engine.events if event.get("type") == "weapon_hit"]) == 4
+        assert "CJR-MEDIA-07" in engine.media_capture.captured_media_ids
+        assert director.state()["current_checkpoint"]["checkpoint_id"] == "CJR-CP-ENGAGE"
+        assert director.state()["current_checkpoint"]["analysis_status"] == "running"
+        assert pauses == []
+        with pytest.raises(DirectorError, match="analysis is not completed"):
+            director.action("advance_checkpoint")
     finally:
         release.set()
         original_pause(announce=False)

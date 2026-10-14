@@ -4,6 +4,86 @@ const {readFileSync} = require('node:fs');
 const {resolve} = require('node:path');
 const vm = require('node:vm');
 
+test('coastal tactical input and output previews stay fixed when workflow media changes', async () => {
+  const elements = new Map();
+  const element = id => {
+    if (!elements.has(id)) elements.set(id, {
+      innerHTML: '', textContent: '', className: '', checked: true, style: {}, dataset: {},
+      classList: {add() {}, toggle() {}}, addEventListener() {}, setAttribute() {},
+    });
+    return elements.get(id);
+  };
+  const context = {
+    window: {}, document: {getElementById: element, querySelectorAll() { return []; }, dispatchEvent() {}},
+    sessionStorage: {getItem() { return null; }, setItem() {}, removeItem() {}},
+    CustomEvent: function () {}, setInterval() { return 1; }, clearInterval() {},
+  };
+  vm.runInNewContext(readFileSync(resolve(__dirname, '../static/js/workflow/commander-workflow.js'), 'utf8'), context);
+  let stage = 0;
+  const api = {
+    getBackendHealth: async () => ({status: 'ok'}),
+    getWorkflowView: async () => ({
+      workflow_id: 'wf-' + stage, status: 'completed', terminal: true,
+      submission: {scenario_id: 'coastal-joint-recon-strike', attachments: [{
+        id: 'CJR-MEDIA-03-' + stage, name: 'EO changing frame', mime_type: 'image/png', uri: '/changing-input-' + stage + '.png',
+      }]},
+      orchestration: {counts: {total: 1, completed: 1}, activities: [{activity_id: 'tia', role: 'tactical_intelligence', status: 'completed'}]},
+      activity_details: {tia: {role: 'tactical_intelligence', input_detail: {}, output_detail: {}, output_attachments: [{
+        id: 'CJR-MEDIA-03-DET', name: 'EO annotated', mime_type: 'image/png', uri: '/changing-output-' + stage + '.png',
+      }]}},
+    }),
+  };
+  context.window.PlatformWorkflow.init(api, {getScenarioId: () => 'coastal-joint-recon-strike'});
+  for (stage = 0; stage < 2; stage++) {
+    context.window.PlatformWorkflow.track('wf-' + stage);
+    await new Promise(setImmediate);
+    for (const scope of ['input', 'output']) {
+      assert.equal(context.window.PlatformWorkflow.locateActivity('tia', scope), true);
+      const html = element('wf-activity-detail').innerHTML;
+      const file = scope === 'input' ? 'coastal-eo-missile-site.png' : 'coastal-eo-missile-site-annotated.png';
+      assert.match(html, new RegExp('/static/ui-previews/' + file));
+      assert.doesNotMatch(html, /changing-(input|output)/);
+    }
+  }
+});
+
+test('carrier tactical input and output keep structured details without images', async () => {
+  const elements = new Map();
+  const element = id => {
+    if (!elements.has(id)) elements.set(id, {
+      innerHTML: '', textContent: '', className: '', checked: true, style: {}, dataset: {},
+      classList: {add() {}, toggle() {}}, addEventListener() {}, setAttribute() {},
+    });
+    return elements.get(id);
+  };
+  const context = {
+    window: {}, document: {getElementById: element, querySelectorAll() { return []; }, dispatchEvent() {}},
+    sessionStorage: {getItem() { return null; }, setItem() {}, removeItem() {}},
+    CustomEvent: function () {}, setInterval() { return 1; }, clearInterval() {},
+  };
+  vm.runInNewContext(readFileSync(resolve(__dirname, '../static/js/workflow/commander-workflow.js'), 'utf8'), context);
+  context.window.PlatformWorkflow.init({
+    getBackendHealth: async () => ({status: 'ok'}),
+    getWorkflowView: async () => ({
+      workflow_id: 'wf-carrier', status: 'completed', terminal: true,
+      submission: {scenario_id: 'air-space-sea-carrier-strike'},
+      orchestration: {counts: {total: 1, completed: 1}, activities: [{activity_id: 'tia', role: 'tactical_intelligence', status: 'completed'}]},
+      activity_details: {tia: {role: 'tactical_intelligence',
+        input_detail: {__all__: {value: {input_marker: 'carrier-current-input'}}},
+        output_detail: {__all__: {value: {output_marker: 'carrier-current-output'}}},
+      }},
+    }),
+  }, {getScenarioId: () => 'air-space-sea-carrier-strike'});
+  context.window.PlatformWorkflow.track('wf-carrier');
+  await new Promise(setImmediate);
+  for (const scope of ['input', 'output']) {
+    assert.equal(context.window.PlatformWorkflow.locateActivity('tia', scope), true);
+    const html = element('wf-activity-detail').innerHTML;
+    assert.doesNotMatch(html, /<img|workflow-detection-preview/);
+    assert.match(html, new RegExp('carrier-current-' + scope));
+  }
+});
+
 test('automatic polls use brief status and fetch terminal details immediately', async () => {
   const timers = new Map();
   const context = {
