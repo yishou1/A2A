@@ -1,0 +1,11 @@
+{
+  "request_id": "synapse-demo-001",
+  "algorithm_id": "synapse_graph_explorer",
+  "version": "1.0.0",
+  "backend_type": "python_http_service",
+  "inputs": {
+    "operation": "neighbors",
+    "entity_id": "entity-acme"
+  },
+  "params": {}
+}

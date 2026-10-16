@@ -17,6 +17,32 @@ PROTECTED_OBJECT_CLASSES = {
     "merchant_vessel",
 }
 
+# Observe/IDENTIFY may classify these before Orient ranks threats. Promote to
+# 「高风险」 at CJR-CP-IDENTIFY instead of waiting for FUSION assessment rows.
+HIGH_RISK_OBJECT_CLASSES = {
+    "coastal_missile_site",
+    "missile_site",
+    "missile_battery",
+    "fast_attack_craft",
+    "airfield_runway",
+    "airfield",
+    "mobile_coastal_air_defense",
+    "coastal_air_defense",
+}
+
+# These fields describe effects already produced by the simulation execution
+# loop.  A later Commander classification refresh may enrich the assessment,
+# but must never roll an impacted/destroyed track back to an intact state.
+EXECUTION_ASSESSMENT_FIELDS = {
+    "damage_state",
+    "engagement_status",
+    "behavior_state",
+    "behavior_label",
+    "assessment_observer",
+    "impact_sim_time",
+    "assessed_sim_time",
+}
+
 
 def _first_mapping_with(node: Any, keys: set[str]) -> dict[str, Any]:
     if isinstance(node, dict):
@@ -77,30 +103,39 @@ def _workflow_artifacts(workflow_status: dict[str, Any]) -> tuple[dict[str, Any]
     return tracking, assessment
 
 
+def _track_class_hint(item: dict[str, Any]) -> str:
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    for key in ("source_class", "classification", "object_type", "entity_type", "class_name"):
+        raw = metadata.get(key) if key in metadata else item.get(key)
+        value = str(raw or "").strip().lower()
+        if value and value not in {"unknown", "ship", "none", "null"}:
+            return value
+    return ""
+
+
 def _assessment_rows(artifact: dict[str, Any]) -> list[dict[str, Any]]:
     rows = artifact.get("threats") or artifact.get("ranked_threats") or artifact.get("unified_threat_ranking") or []
     if not rows:
-        # FIX may produce an identified track before Orient computes a threat
-        # ranking. Preserve that backend-owned classification so the next
-        # stage receives it instead of reverting the contact to generic SHIP.
-        rows = [
-            {
+        # Observe may identify a hostile coastal site before Orient ranks threats.
+        # Promote track class hints / threat_level so AMOS can show 「高风险」
+        # at CJR-CP-IDENTIFY instead of waiting for FUSION.
+        rows = []
+        for item in artifact.get("tracks") or []:
+            if not isinstance(item, dict) or not (item.get("track_id") or item.get("id")):
+                continue
+            metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+            source_class = _track_class_hint(item)
+            if not source_class:
+                continue
+            level = str(metadata.get("threat_level") or item.get("threat_level") or "").lower()
+            if not level and source_class in HIGH_RISK_OBJECT_CLASSES:
+                level = "high"
+            rows.append({
                 **item,
                 "track_id": item.get("track_id") or item.get("id"),
                 "score": item.get("track_quality", item.get("confidence")),
-                "level": (
-                    (item.get("metadata") or {}).get("threat_level")
-                    if isinstance(item.get("metadata"), dict)
-                    else None
-                ),
-            }
-            for item in artifact.get("tracks") or []
-            if isinstance(item, dict)
-            and (item.get("track_id") or item.get("id"))
-            and isinstance(item.get("metadata"), dict)
-            and str((item.get("metadata") or {}).get("source_class") or "").lower()
-            not in {"", "unknown", "ship"}
-        ]
+                "level": level or None,
+            })
     normalized = []
     for row in rows:
         if not isinstance(row, dict):
@@ -307,6 +342,40 @@ def apply_commander_assessments(
             track for track in local_tracks
             if str(getattr(track, "id", "")) in submitted_track_ids
         ]
+    # Live observe_workflow often returns tracks without source_class / ranking.
+    # Fall back to AMOS evidence-classified local tracks so IDENTIFY can confirm
+    # 「高风险」 before Orient/FUSION writes threat_assessment_result.
+    if not assessments and local_tracks:
+        for track in local_tracks:
+            track_id = str(getattr(track, "id", "") or "")
+            classification = str(getattr(track, "classification", "") or "").lower()
+            if not track_id or classification not in HIGH_RISK_OBJECT_CLASSES:
+                continue
+            existing = getattr(track, "agent_assessment", {}) or {}
+            if str(existing.get("status") or "").lower() == "confirmed":
+                continue
+            confidence = getattr(track, "confidence", None)
+            assessments.append({
+                "track_id": track_id,
+                "level": "high",
+                "score": confidence,
+                "entity_type": classification,
+            })
+            if track_id not in backend_tracks:
+                backend_row = {
+                    "track_id": track_id,
+                    "object_type": classification,
+                    "metadata": {
+                        "source_class": classification,
+                        "label": "hostile",
+                        "affiliation": "red",
+                        "threat_level": "high",
+                    },
+                    "lat": getattr(track, "lat", None),
+                    "lon": getattr(track, "lng", None),
+                }
+                backend_track_rows.append(backend_row)
+                backend_tracks[track_id] = backend_row
     assigned_local_ids: set[str] = set()
     associations: list[dict[str, Any]] = []
     association_by_backend_id: dict[str, tuple[Any | None, dict[str, Any]]] = {}
@@ -353,6 +422,21 @@ def apply_commander_assessments(
         semantic_label = str(metadata.get("label") or "").lower()
         semantic_threat_level = str(metadata.get("threat_level") or "").lower()
         existing_class = str(getattr(track, "classification", "") or "").lower()
+        existing_assessment = dict(getattr(track, "agent_assessment", {}) or {})
+        backend_level = level
+        # Some scripts keep an identified threat confirmed throughout the strike.
+        # Later ranking scores or generic ground classes must not erase that
+        # identification. Explicit civilian/friendly corrections still win.
+        retain_high_risk = (
+            existing_assessment.get("status") == "confirmed"
+            and str(existing_assessment.get("level") or "").upper() == "HIGH"
+            and object_type in {existing_class, "unknown", "ground", "ground_installation"}
+            and any(
+                rule.get("retain_confirmed_high_risk") is True
+                and str(rule.get("classification") or "").lower() == existing_class
+                for rule in getattr(engine, "_scenario_identification_rules", [])
+            )
+        )
         protected = (
             object_type in PROTECTED_OBJECT_CLASSES
             or any(value in object_type for value in {"fishing", "civilian", "merchant"})
@@ -370,6 +454,10 @@ def apply_commander_assessments(
             level = semantic_threat_level if semantic_threat_level in {"none", "low"} else "low"
         else:
             status = "confirmed" if level == "high" else ("watch" if level == "medium" else "cleared")
+        if retain_high_risk and not protected and semantic_label not in {"neutral", "friendly"}:
+            status = "confirmed"
+            level = "high"
+            object_type = existing_class
         if object_type != "unknown":
             track.classification = object_type.upper()
         track.threat_level = level.upper()
@@ -377,7 +465,13 @@ def apply_commander_assessments(
         while previous_phase != track.kill_chain_phase:
             previous_phase = track.kill_chain_phase
             track._advance_kill_chain()
+        execution_state = {
+            key: existing_assessment[key]
+            for key in EXECUTION_ASSESSMENT_FIELDS
+            if key in existing_assessment
+        }
         assessment_record = {
+            **execution_state,
             "status": status,
             "label": {"high": "高风险", "medium": "关注", "low": "低风险"}.get(level, "已评估"),
             "score": assessment.get("score"),
@@ -387,6 +481,8 @@ def apply_commander_assessments(
             "backend_track_id": backend_id,
             "association_method": association.get("method"),
         }
+        if retain_high_risk and status == "confirmed":
+            assessment_record["backend_level"] = backend_level.upper()
         if submitted_run_id:
             assessment_record["source_run_id"] = submitted_run_id
         if submission.get("snapshot_sequence") is not None:

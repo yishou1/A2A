@@ -48,7 +48,7 @@ window.PlatformAPI = (function () {
     configureDirector: function (options) {
       return post("/api/v1/director/configure", options || {});
     },
-    getDirectorState: function () { return data("/api/v1/director/state"); },
+    getDirectorState: function () { return data("/api/v1/director/state?summary=1"); },
     loadRun: function (runId) {
       return data("/api/v1/runs/" + encodeURIComponent(runId));
     },
@@ -77,6 +77,9 @@ window.PlatformAPI = (function () {
     },
     getWorkflowView: function (workflowId) {
       return data("/api/v1/a2a/workflows/" + encodeURIComponent(workflowId) + "/view");
+    },
+    getWorkflowBrief: function (workflowId) {
+      return data("/api/v1/a2a/workflows/" + encodeURIComponent(workflowId) + "/brief");
     },
     resumeWorkflow: function (workflowId, options) {
       return post(

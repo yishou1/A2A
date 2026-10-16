@@ -366,6 +366,16 @@ def run_scenario(
             })
             validated_checkpoints.add(checkpoint_id)
 
+            if checkpoint_id == "MAR-CP-CLOSE":
+                review_status, review_payload = http_json(
+                    f"{AMOS}/api/v1/director/action",
+                    {"action": "review_checkpoint"},
+                )
+                require(
+                    review_status == 200,
+                    f"operator review failed with HTTP {review_status}: {review_payload.get('error')}",
+                )
+
             if checkpoint_id == "MAR-CP-PLAN":
                 _, plan_tracks = simulation_tracks()
                 fishing = next(

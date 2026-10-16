@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from a2a_protocol.server import A2ABaseAgent
 from decision_agents.common.a2a_payloads import (
     agent_response_to_a2a_response,
@@ -33,6 +35,11 @@ class DecisionAlgorithmA2AAgent(A2ABaseAgent):
         max_concurrent_tasks: int | None = None,
     ):
         self.algorithm_agent = algorithm_agent
+        if max_concurrent_tasks is None:
+            max_concurrent_tasks = max(
+                1,
+                int(os.getenv("DECISION_AGENT_MAX_CONCURRENT_TASKS", "8")),
+            )
         definition = agent_definition_for_role(role)
         skill_id = definition["skill_id"] if definition else f"{role}_analysis"
         skill_name = definition["skill_name"] if definition else name

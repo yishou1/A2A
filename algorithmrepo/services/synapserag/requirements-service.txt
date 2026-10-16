@@ -1,0 +1,26 @@
+# HTTP-model deployment profile; local vLLM/GritLM backends are optional.
+fastapi
+uvicorn
+requests
+httpx
+pydantic>=2.10,<3
+python-multipart
+openai>=1.92,<2
+litellm>=1.73,<2
+transformers>=4.45,<5
+torch>=2.5,<3
+python-igraph>=0.11,<0.12
+numpy
+scipy
+pandas
+tqdm
+tenacity
+tiktoken
+nest-asyncio
+einops
+boto3
+networkx
+charset-normalizer
+pymupdf
+python-docx
+PyYAML

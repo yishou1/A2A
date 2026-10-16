@@ -33,13 +33,15 @@ OBSERVE_WORKFLOW_FILE = "integrated_system/workflows/observe_workflow.bpel"
 ORIENT_WORKFLOW_FILE = "integrated_system/workflows/orient_workflow.bpel"
 DECIDE_WORKFLOW_FILE = "integrated_system/workflows/decide_workflow.bpel"
 ACT_WORKFLOW_FILE = "integrated_system/workflows/act_workflow.bpel"
+ENGAGE_WORKFLOW_FILE = "integrated_system/workflows/engage_workflow.bpel"
+ASSESS_WORKFLOW_FILE = "integrated_system/workflows/assess_workflow.bpel"
 PHASE_WORKFLOW_FILES = {
     "FIND": OBSERVE_WORKFLOW_FILE,
     "FIX": OBSERVE_WORKFLOW_FILE,
     "TRACK": ORIENT_WORKFLOW_FILE,
     "TARGET": DECIDE_WORKFLOW_FILE,
     "ENGAGE": ACT_WORKFLOW_FILE,
-    "ASSESS": ACT_WORKFLOW_FILE,
+    "ASSESS": ASSESS_WORKFLOW_FILE,
 }
 CHECKPOINT_WORKFLOW_FILES = {
     "MAR-CP-PERCEPTION": OBSERVE_WORKFLOW_FILE,
@@ -47,11 +49,20 @@ CHECKPOINT_WORKFLOW_FILES = {
     "MAR-CP-PLAN": DECIDE_WORKFLOW_FILE,
     "MAR-CP-CLOSE": ACT_WORKFLOW_FILE,
     "CJR-CP-CUE": OBSERVE_WORKFLOW_FILE,
-    "CJR-CP-IDENTIFY": ORIENT_WORKFLOW_FILE,
+    # Ground EO identification is still Observe/FIND-FIX work: TIA must see the
+    # coastal-missile-site frame before TrackThreat ranks the fixed track.
+    "CJR-CP-IDENTIFY": OBSERVE_WORKFLOW_FILE,
     "CJR-CP-FUSION": ORIENT_WORKFLOW_FILE,
     "CJR-CP-PLAN": DECIDE_WORKFLOW_FILE,
-    "CJR-CP-ENGAGE": ACT_WORKFLOW_FILE,
-    "CJR-CP-CLOSE": ACT_WORKFLOW_FILE,
+    "CJR-CP-ENGAGE": ENGAGE_WORKFLOW_FILE,
+    "CJR-CP-CLOSE": ASSESS_WORKFLOW_FILE,
+    "ASC-CP-SAT": OBSERVE_WORKFLOW_FILE,
+    "ASC-CP-FIX": OBSERVE_WORKFLOW_FILE,
+    "ASC-CP-TRACK": ORIENT_WORKFLOW_FILE,
+    "ASC-CP-PLAN": DECIDE_WORKFLOW_FILE,
+    "ASC-CP-WAVE1": ACT_WORKFLOW_FILE,
+    "ASC-CP-WAVE2": ACT_WORKFLOW_FILE,
+    "ASC-CP-CLOSE": ACT_WORKFLOW_FILE,
 }
 ALLOWED_WORKFLOW_FILES = {
     DEFAULT_WORKFLOW_FILE,
@@ -100,7 +111,12 @@ class CommanderBridge:
     def client(self) -> CommanderClient | GatewayClient:
         _configure_local_proxy_bypass()
         if self._client is None:
-            timeout = float(os.environ.get("A2A_REQUEST_TIMEOUT", "30"))
+            # Gateway submission includes Commander enqueueing and package
+            # verification.  A short implicit default makes a manually
+            # launched AMOS process report a misleading "Gateway unavailable"
+            # error even though the Gateway has accepted the request.
+            default_timeout = "180" if self.mode == "gateway" else "60"
+            timeout = float(os.environ.get("A2A_REQUEST_TIMEOUT", default_timeout))
             if self.mode == "gateway":
                 self._client = GatewayClient(
                     base_url=self.gateway_url,
@@ -242,6 +258,19 @@ class CommanderBridge:
                     detail = self._fetch_json(detail_url)
                     health_endpoint = self._runtime_health_endpoint(item, detail)
                     if health_endpoint:
+                        parsed_health = urllib.parse.urlsplit(health_endpoint)
+                        if (
+                            os.environ.get("A2A_CONTAINER_MODE") == "1"
+                            and parsed_health.hostname in {"127.0.0.1", "localhost"}
+                        ):
+                            identity = "/".join(
+                                urllib.parse.quote(part, safe="")
+                                for part in (algorithm_id, version, backend_type)
+                            )
+                            health_endpoint = (
+                                f"{self.gateway_url.rstrip('/')}/gateway/v1/algorithms/"
+                                f"{identity}/health"
+                            )
                         health_payload = self._fetch_json(health_endpoint, timeout=1.5)
                         runtime_status = "ready" if self._runtime_is_ready(health_payload) else "unavailable"
                         model_loaded = health_payload.get("model_loaded")
@@ -436,10 +465,16 @@ class CommanderBridge:
         """Fetch and independently verify the exact Gateway input package."""
         if self.mode != "gateway" or not package_id:
             return {}, False
-        package = self.client.get_package(package_id)  # type: ignore[union-attr]
+        get_package_with_raw = getattr(self.client, "get_package_with_raw", None)
+        raw_body = b""
+        response_checksum = ""
+        if get_package_with_raw is not None:
+            package, raw_body, response_checksum = get_package_with_raw(package_id)
+        else:
+            package = self.client.get_package(package_id)  # type: ignore[union-attr]
         if package.get("error"):
             return {}, False
-        encoded = json.dumps(
+        encoded = raw_body or json.dumps(
             package,
             ensure_ascii=False,
             sort_keys=True,
@@ -450,6 +485,8 @@ class CommanderBridge:
             expected_checksum
             and secrets.compare_digest(actual_checksum, expected_checksum)
         )
+        if response_checksum and expected_checksum:
+            verified = verified and secrets.compare_digest(response_checksum, expected_checksum)
         return package, verified
 
     def get_work_list(self, workflow_id: str) -> dict[str, Any]:

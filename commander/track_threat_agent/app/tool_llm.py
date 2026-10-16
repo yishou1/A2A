@@ -8,8 +8,11 @@ plan separately.
 from __future__ import annotations
 
 import json
+import os
+import re
 from typing import Any, Callable
 from urllib import error, request
+from llm.audit import strict_llm_required
 
 
 class ToolLLMError(RuntimeError):
@@ -30,6 +33,7 @@ class AzureToolLLM:
         self.provider = str(getattr(settings, "llm_provider", "azure_openai")).strip().lower()
         self.timeout_seconds = float(settings.llm_timeout_seconds)
         self.transport = transport or _post_json
+        self.last_response_model = ""
 
     def plan(
         self,
@@ -74,12 +78,21 @@ class AzureToolLLM:
             "temperature": 0,
             "response_format": {"type": "json_object"},
         }
+        effort = os.environ.get("LLM_REASONING_EFFORT", "").strip()
+        if effort and not self._is_azure_provider():
+            payload["reasoning_effort"] = effort
         response = self.transport(
             self._chat_completions_url(),
             self._headers(),
             payload,
             self.timeout_seconds,
         )
+        self.last_response_model = str(response.get("model") or "")
+        if strict_llm_required() and self.last_response_model != self.deployment:
+            raise ToolLLMError(
+                f"LLM response model mismatch: expected {self.deployment}, "
+                f"got {self.last_response_model or '<missing>'}."
+            )
         try:
             content = response["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
@@ -136,7 +149,11 @@ def _post_json(
 
 
 def _strip_json_fence(content: str) -> str:
-    text = content.strip()
+    text = re.sub(r"<think\b[^>]*>.*?</think>", "", content, flags=re.IGNORECASE | re.DOTALL).strip()
+    if text.lower().startswith("<think") and "</think>" not in text.lower():
+        object_start = text.find("{")
+        if object_start >= 0:
+            text = text[object_start:].strip()
     if text.startswith("```"):
         lines = text.splitlines()
         if lines and lines[0].startswith("```"):

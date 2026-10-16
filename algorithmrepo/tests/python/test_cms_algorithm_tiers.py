@@ -21,12 +21,12 @@ def test_three_tiers_keep_the_same_preferred_detector_weight() -> None:
     assert [config["param_tier"] for config in configs] == ["low", "mid", "high"]
 
 
-def test_missing_finetune_weight_uses_bundled_detector_without_fake_odconv() -> None:
+def test_missing_finetune_weight_uses_battlefield_alias_without_fake_odconv() -> None:
     config = apply_tier({}, tier="low")
     config["detection_model"] = "models/checkpoints/not-shipped-cms-weight.pt"
-    assert resolve_detector_weights(config).name == "rtdetr-l.pt"
+    assert resolve_detector_weights(config).name == "battlefield_rtdetr.pt"
     profile = detector_runtime_profile(config)
-    assert profile["detector_model"] == "rtdetr-l.pt"
+    assert profile["detector_model"] == "battlefield_rtdetr.pt"
     assert profile["odconv_enabled"] is False
 
 

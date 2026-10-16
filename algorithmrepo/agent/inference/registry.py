@@ -38,17 +38,17 @@ def _resolve_weights_path(config: dict[str, Any], key: str, default: str) -> str
 
 
 def resolve_detector_weights(config: dict[str, Any]) -> Path:
-    """Resolve a local detector checkpoint, falling back to the bundled RT-DETR-L."""
-    requested = Path(_resolve_weights_path(config, "detection_model", "rtdetr-l.pt"))
+    """Resolve battlefield weights; generic models require an explicit fallback."""
+    requested = Path(_resolve_weights_path(config, "detection_model", "models/checkpoints/battlefield_rtdetr.pt"))
     if requested.is_file():
         return requested.resolve()
 
-    fallback_name = str(config.get("detection_fallback_model") or "rtdetr-l.pt")
+    fallback_name = str(config.get("detection_fallback_model") or "models/checkpoints/battlefield_rtdetr.pt")
     fallback = Path(
         _resolve_weights_path(
             {"detection_fallback_model": fallback_name},
             "detection_fallback_model",
-            "rtdetr-l.pt",
+            "models/checkpoints/battlefield_rtdetr.pt",
         )
     )
     if fallback.is_file():
@@ -57,7 +57,7 @@ def resolve_detector_weights(config: dict[str, Any]) -> Path:
     raise FileNotFoundError(
         "detector checkpoint not found: "
         f"requested={requested}; fallback={fallback}. "
-        "Provide inference.detection_model or place rtdetr-l.pt in the project root."
+        "Install the battlefield RT-DETR release bundle or set inference.detection_model."
     )
 
 

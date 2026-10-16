@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 
-from decision_agents.common.config import Settings
+from decision_support.config import Settings
 
 
 class LLMClientError(RuntimeError):

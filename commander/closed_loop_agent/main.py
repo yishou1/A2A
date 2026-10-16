@@ -15,6 +15,8 @@ CLOSED_LOOP_COMMAND_ALIASES = {
     "evaluate_mission_effect",
 }
 PASSTHROUGH_INPUT_KEYS = (
+    "workflow_id",
+    "request_id",
     "targets",
     "results",
     "previous_results",
@@ -88,7 +90,12 @@ class ClosedLoopAgent(A2ABaseAgent):
             if meets_requirements is not False
             else "Closed loop optimization completed with unmet requirements"
         )
-        return {output_hint: result}, message
+        llm_calls = [
+            plan["llm_call"]
+            for plan in output_data.get("llm_algorithm_plans", [])
+            if isinstance(plan, dict) and isinstance(plan.get("llm_call"), dict)
+        ]
+        return {output_hint: result, "llm_calls": llm_calls}, message
 
     async def execute_stream(self, payload):
         yield (

@@ -433,6 +433,7 @@ def _build_closed_loop_stage_plan(
     client: AlgorithmLibraryClient,
     *,
     request_id: str,
+    workflow_id: str,
     feature_mode: str,
     preferred_damage_mode: str,
     device: Optional[str],
@@ -496,6 +497,15 @@ def _build_closed_loop_stage_plan(
             warnings=warnings,
         )
 
+    from llm.audit import new_call_id, record_llm_call, strict_llm_required
+    audit_fields = {
+        "workflow_id": workflow_id,
+        "llm_call_id": new_call_id(),
+        "agent": "closed_loop",
+        "phase": "act",
+        "provider": settings.llm_provider,
+        "model": settings.llm_model,
+    }
     try:
         calls, plan = plan_algorithm_calls(
             settings=settings,
@@ -505,7 +515,20 @@ def _build_closed_loop_stage_plan(
         )
         if isinstance(plan, dict):
             plan["request_id"] = request_id
+            plan["llm_call"] = record_llm_call(
+                **audit_fields,
+                response_model=str(plan.get("response_model") or ""),
+                success=not bool(plan.get("fallback_reason")),
+                fallback_reason=str(plan.get("fallback_reason") or ""),
+            )
     except (AlgorithmLibraryError, AlgolibLLMPlannerError, ValueError, TypeError) as exc:
+        record_llm_call(
+            **audit_fields,
+            success=False,
+            fallback_reason=f"{type(exc).__name__}: {exc}",
+        )
+        if strict_llm_required():
+            raise
         warnings.append(f"closed_loop_stage_plan:llm_failed:{exc}")
         calls = [
             _default_stage_call(
@@ -947,6 +970,7 @@ def run_closed_loop_via_algolib(arguments: dict) -> dict:
     stage_plan = _build_closed_loop_stage_plan(
         client,
         request_id=request_id,
+        workflow_id=str(arguments.get("workflow_id") or request_id),
         feature_mode=feature_mode,
         preferred_damage_mode=damage_mode_pref,
         device=device,

@@ -130,7 +130,16 @@ class AlgorithmLibraryClient:
         task: str = "algorithm_call",
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         from algolib_bridge.llm_planner import AlgolibLLMPlannerError, plan_algorithm_call
+        from llm.audit import new_call_id, record_llm_call, strict_llm_required
 
+        audit_fields = {
+            "workflow_id": trace_id,
+            "llm_call_id": new_call_id(),
+            "agent": "algolib_bridge",
+            "phase": task,
+            "provider": self.settings.llm_provider,
+            "model": self.settings.llm_model,
+        }
         try:
             algorithms = self.list_algorithms()
             call, plan = plan_algorithm_call(
@@ -142,7 +151,22 @@ class AlgorithmLibraryClient:
                 params=params,
                 task=task,
             )
+            if self.settings.enable_llm:
+                plan["llm_call"] = record_llm_call(
+                    **audit_fields,
+                    response_model=str(plan.get("response_model") or ""),
+                    success=True,
+                    fallback_reason=str(plan.get("fallback_reason") or ""),
+                )
         except AlgolibLLMPlannerError as exc:
+            if self.settings.enable_llm:
+                record_llm_call(
+                    **audit_fields,
+                    success=False,
+                    fallback_reason=f"{type(exc).__name__}: {exc}",
+                )
+            if strict_llm_required():
+                raise
             raise AlgorithmLibraryError(f"LLM algorithm planning failed: {exc}") from exc
 
         result = self.run_algorithm(request_id=request_id, trace_id=trace_id, call=call)

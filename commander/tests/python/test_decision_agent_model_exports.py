@@ -1,89 +1,40 @@
 from __future__ import annotations
 
-import sys
-
 import json
-
-from math import exp
+import sys
 from pathlib import Path
-
-import numpy as np
-import onnxruntime as ort
 
 
 ROOT = Path(__file__).resolve().parents[2]
-A2A_ROOT = ROOT.parent / "A2A"
+COMMANDER_ROOT = ROOT if (ROOT / "decision_support").is_dir() else ROOT.parent / "commander"
 SERVICES = ROOT / "services"
+sys.path.insert(0, str(COMMANDER_ROOT))
 sys.path.insert(0, str(SERVICES))
-sys.path.insert(0, str(A2A_ROOT))
 
-from decision_agents.compliance_authorization.local_algorithm import (  # noqa: E402
-    COMPLIANCE_LOGISTIC_WEIGHTS,
-)
-from decision_agents.decision_planning.local_algorithm import (  # noqa: E402
-    LSTM_BIASES,
-    LSTM_INPUT_WEIGHTS,
-    LSTM_RECURRENT_WEIGHTS,
-    PLANNING_LOGISTIC_WEIGHTS,
-)
 from a2a_algorithms_common.decision_agent_predictors import (  # noqa: E402
     predict_compliance_authorization_core,
     predict_decision_planning_core,
 )
 
 
-PLANNING_LR_FEATURES = [
-    "coverage",
-    "risk_alignment",
-    "resource_efficiency",
-    "constraint_fit",
-    "authorization",
-    "lstm_trend",
-    "priority",
-    "objective_fit",
-]
-COMPLIANCE_LR_FEATURES = [
-    "blocking_violation_count",
-    "warning_violation_count",
-    "authorization_status_score",
-    "authorization_out_of_scope",
-    "rag_evidence_count",
-    "law_of_war_rule_hit",
-]
+CAPABILITY_PACKAGES = {
+    "decision_plan_recommender_onnx",
+    "target_trend_predictor_onnx",
+    "compliance_risk_scorer_onnx",
+}
 
 
-def test_decision_planning_lr_onnx_matches_agent_weights():
-    features = np.array([[0.7, 0.8, 0.6, 0.9, 1.0, 0.55, 0.5, 0.85]], dtype=np.float32)
-    actual = _run_onnx(ROOT / "models" / "decision_planning_lr.onnx", features)
-    expected = _logistic_expected(features[0], PLANNING_LR_FEATURES, PLANNING_LOGISTIC_WEIGHTS)
-    assert round(actual, 6) == round(expected, 6)
+def test_decision_capabilities_are_independent_algorithm_packages():
+    for algorithm_id in CAPABILITY_PACKAGES:
+        package = ROOT / "examples" / algorithm_id / "1.0.0"
+        assert (package / "algorithm_card.yaml").is_file()
+        assert (package / "input.schema.json").is_file()
+        assert (package / "output.schema.json").is_file()
+        assert (package / "model.onnx").is_file()
+        assert (package / "model.metadata.json").is_file()
 
 
-def test_compliance_authorization_lr_onnx_matches_agent_weights():
-    features = np.array([[0.0, 0.2, 0.55, 0.0, 0.0, 1.0]], dtype=np.float32)
-    actual = _run_onnx(ROOT / "models" / "compliance_authorization_lr.onnx", features)
-    expected = _logistic_expected(features[0], COMPLIANCE_LR_FEATURES, COMPLIANCE_LOGISTIC_WEIGHTS)
-    assert round(actual, 6) == round(expected, 6)
-
-
-def test_decision_planning_lstm_onnx_matches_agent_weights():
-    sequence = np.array(
-        [
-            [
-                [0.2, 0.5, 1.0, 0.1],
-                [0.4, 0.6, 0.5, 0.2],
-                [0.7, 0.8, 0.33333334, 0.4],
-            ]
-            + [[0.0, 0.0, 0.0, 0.0]] * 9
-        ],
-        dtype=np.float32,
-    )
-    actual = _run_onnx(ROOT / "models" / "decision_planning_lstm.onnx", sequence)
-    expected = _lstm_expected(sequence)
-    assert round(actual, 6) == round(expected, 6)
-
-
-def test_decision_agent_core_predictors_use_onnx_runtime():
+def test_decision_agent_core_composes_independent_capabilities():
     planning_payload = _load_case("decision_planning_core")
     compliance_payload = _load_case("compliance_authorization_core")
 
@@ -96,18 +47,29 @@ def test_decision_agent_core_predictors_use_onnx_runtime():
         compliance_payload.get("params", {}),
     )
 
-    planning_lr_runtime = planning_outputs["model_runtime"]["decision_planning_lr"]
-    assert any(item["used"] is True for item in planning_lr_runtime["plans"])
-    assert {item["backend"] for item in planning_lr_runtime["plans"]} == {"onnxruntime"}
-    assert planning_outputs["model_runtime"]["decision_planning_lstm"]["targets"][0]["fallback"] is True
+    plan_runtime = planning_outputs["model_runtime"]["plan_recommendation"]
+    assert plan_runtime["algorithm_id"] == "decision_plan_recommender_onnx"
+    assert plan_runtime["version"] == "1.0.0"
+    assert plan_runtime["plans"]
+    assert all(item["backend"] == "onnxruntime" for item in plan_runtime["plans"])
+    assert all(item["used"] is True for item in plan_runtime["plans"])
 
-    compliance_runtime = compliance_outputs["model_runtime"]["compliance_authorization_lr"]
-    assert compliance_runtime["used"] is True
+    trend_runtime = planning_outputs["model_runtime"]["target_trend"]
+    assert trend_runtime["algorithm_id"] == "target_trend_predictor_onnx"
+    assert trend_runtime["version"] == "1.0.0"
+    assert trend_runtime["targets"]
+
+    compliance_runtime = compliance_outputs["model_runtime"]["compliance_risk"]
+    assert compliance_runtime["algorithm_id"] == "compliance_risk_scorer_onnx"
+    assert compliance_runtime["version"] == "1.0.0"
     assert compliance_runtime["backend"] == "onnxruntime"
+    assert compliance_runtime["used"] is True
 
 
-def test_decision_agent_core_predictors_fallback_when_models_missing(monkeypatch, tmp_path):
-    monkeypatch.setenv("DECISION_AGENT_MODEL_DIR", str(tmp_path))
+def test_decision_agent_core_falls_back_when_capability_packages_are_missing(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("DECISION_CAPABILITY_PACKAGE_ROOT", str(tmp_path))
     planning_payload = _load_case("decision_planning_core")
     compliance_payload = _load_case("compliance_authorization_core")
 
@@ -120,50 +82,40 @@ def test_decision_agent_core_predictors_fallback_when_models_missing(monkeypatch
         compliance_payload.get("params", {}),
     )
 
-    planning_lr_runtime = planning_outputs["model_runtime"]["decision_planning_lr"]
-    assert all(item["fallback"] is True for item in planning_lr_runtime["plans"])
-    assert all(item["backend"] == "python_formula" for item in planning_lr_runtime["plans"])
-    compliance_runtime = compliance_outputs["model_runtime"]["compliance_authorization_lr"]
+    plan_runtime = planning_outputs["model_runtime"]["plan_recommendation"]
+    assert all(item["fallback"] is True for item in plan_runtime["plans"])
+    assert all(item["backend"] == "python_formula" for item in plan_runtime["plans"])
+
+    compliance_runtime = compliance_outputs["model_runtime"]["compliance_risk"]
     assert compliance_runtime["fallback"] is True
     assert compliance_runtime["backend"] == "python_formula"
 
 
-def _run_onnx(model_path: Path, inputs: np.ndarray) -> float:
-    session = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
-    output = session.run(None, {session.get_inputs()[0].name: inputs})[0]
-    return float(output.reshape(-1)[0])
+def test_core_predictor_does_not_import_agent_implementations():
+    source = (
+        ROOT / "services" / "a2a_algorithms_common" / "decision_agent_predictors.py"
+    ).read_text(encoding="utf-8")
+    assert "decision_agents" not in source
+    assert "from decision_support." in source
+
+
+def test_commander_fixture_uses_the_canonical_capability_adapters():
+    a2a_root = ROOT.parent
+    for filename in ("decision_capabilities.py", "decision_agent_predictors.py"):
+        canonical = (
+            a2a_root / "algorithmrepo" / "services" / "a2a_algorithms_common" / filename
+        )
+        fixture = a2a_root / "commander" / "services" / "a2a_algorithms_common" / filename
+        assert fixture.read_bytes() == canonical.read_bytes()
 
 
 def _load_case(algorithm_id: str) -> dict:
-    path = ROOT / "examples" / algorithm_id / "1.0.0" / "golden_cases" / "case_001_request.json"
+    path = (
+        ROOT
+        / "examples"
+        / algorithm_id
+        / "1.0.0"
+        / "golden_cases"
+        / "case_001_request.json"
+    )
     return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _logistic_expected(row: np.ndarray, names: list[str], weights: dict[str, float]) -> float:
-    z = weights["intercept"] + sum(weights[name] * float(row[index]) for index, name in enumerate(names))
-    return _sigmoid(z)
-
-
-def _lstm_expected(sequence: np.ndarray) -> float:
-    hidden = 0.0
-    cell = 0.0
-    for vector in sequence[0]:
-        gates = {}
-        for name in ("input", "forget", "output", "candidate"):
-            z = (
-                LSTM_BIASES[name]
-                + sum(LSTM_INPUT_WEIGHTS[name][index] * float(vector[index]) for index in range(4))
-                + LSTM_RECURRENT_WEIGHTS[name] * hidden
-            )
-            gates[name] = np.tanh(z) if name == "candidate" else _sigmoid(z)
-        cell = gates["forget"] * cell + gates["input"] * gates["candidate"]
-        hidden = gates["output"] * np.tanh(cell)
-    return (hidden + 1.0) / 2.0
-
-
-def _sigmoid(value: float) -> float:
-    if value >= 0:
-        z = exp(-value)
-        return 1.0 / (1.0 + z)
-    z = exp(value)
-    return z / (1.0 + z)

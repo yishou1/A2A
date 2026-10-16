@@ -2114,6 +2114,20 @@ def _build_activity_details(
         output_value = merged.get("output") if isinstance(merged.get("output"), dict) else {}
         input_source = str(merged.get("input_source") or "activity.input")
         output_source = "activity.output"
+        if not input_value and isinstance(merged.get("input_preview"), dict):
+            input_value = merged["input_preview"]
+            input_source = "agent_request.input_preview"
+        if not input_value and isinstance(merged.get("input_summary"), dict):
+            summary = merged["input_summary"]
+            # Old checkpoints retain only request evidence. A BPEL variable
+            # from an earlier stage must not replace that request in the UI.
+            if summary.get("type") and summary.get("sha256") and summary.get("size_bytes") is not None:
+                input_value = {"input_summary": {
+                    key: deepcopy(summary[key])
+                    for key in ("type", "size_bytes", "sha256", "keys", "field_count", "item_count")
+                    if key in summary
+                }}
+                input_source = "agent_request.input_summary"
         if merged.get("input_variable") and not input_value:
             variable_input, variable_input_source = _variable_value(
                 merged.get("input_variable"),

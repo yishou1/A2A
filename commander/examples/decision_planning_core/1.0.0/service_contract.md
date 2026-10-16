@@ -30,8 +30,9 @@ Request envelope:
 Output includes candidate plans, recommended plan id, rule-adjusted plan scores,
 target trends, `model_runtime`, `rag_evidence`, and `rag_duration_ms`.
 
-The service loads `models/decision_planning_lr.onnx` for candidate-plan scoring. It also loads
-`models/decision_planning_lstm.onnx` when a target has 12 history steps; shorter histories fall
-back to the Python formula and are marked in `model_runtime`.
+The core composes `decision_plan_recommender_onnx:1.0.0` for candidate-plan
+scoring and `target_trend_predictor_onnx:1.0.0` for 12-step target histories.
+The models live in their own algorithm packages. Short histories and unavailable
+capability packages use deterministic formula fallbacks recorded in `model_runtime`.
 
 Port: `9036`

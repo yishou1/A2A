@@ -5,6 +5,7 @@ import re
 import argparse
 import threading
 import queue
+import hashlib
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 from copy import deepcopy
 
@@ -33,6 +34,7 @@ from telemetry import traced_method
 from workflow_state_store import WorkflowStateStore, new_workflow_id, utc_now_iso
 from workflow_payloads import attachment_snapshot, merge_attachments, normalize_attachments
 from closed_loop_agent.agent_results_mapping import build_standard_results_from_context
+from distributed_coordination.integration import coordinate_task_schedule
 import json
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -71,7 +73,39 @@ def load_env_file(path=os.path.join(PROJECT_ROOT, ".env")):
             if key and key not in os.environ:
                 os.environ[key] = value
 
+
+def verified_stage_contexts(state_store, mission_input: dict) -> list[dict]:
+    """Resolve completed AMOS checkpoint references within the same run."""
+    run_id = str((mission_input.get("metadata") or {}).get("run_id") or "")
+    mission = mission_input
+    contexts: list[dict] = []
+    seen: set[str] = set()
+    for _ in range(8):
+        stage = mission.get("stage_transfer") if isinstance(mission.get("stage_transfer"), dict) else {}
+        supplemental = stage.get("supplemental_inputs") if isinstance(stage.get("supplemental_inputs"), dict) else {}
+        reference = supplemental.get("workflow_result_ref")
+        if not isinstance(reference, dict):
+            return contexts
+        workflow_id = str(reference.get("workflow_id") or "")
+        if not re.fullmatch(r"amos-[0-9a-f]{24}", workflow_id) or workflow_id in seen:
+            raise ContractValidationError("Invalid or cyclic prior AMOS workflow reference", code="INVALID_STAGE_REFERENCE")
+        if not run_id or reference.get("source_run_id") != run_id or reference.get("status") != "completed":
+            raise ContractValidationError("Prior AMOS workflow is not completed in this run", code="INVALID_STAGE_REFERENCE")
+        if reference.get("package_verified") is False or not state_store.exists(workflow_id):
+            raise ContractValidationError("Prior AMOS workflow evidence is unavailable", code="INVALID_STAGE_REFERENCE")
+        prior = state_store.load(workflow_id)
+        prior_context = prior.get("context") if isinstance(prior.get("context"), dict) else {}
+        prior_mission = prior_context.get("mission_input") if isinstance(prior_context.get("mission_input"), dict) else {}
+        if prior.get("status") != "completed" or (prior_mission.get("metadata") or {}).get("run_id") != run_id:
+            raise ContractValidationError("Prior AMOS workflow state failed verification", code="INVALID_STAGE_REFERENCE")
+        seen.add(workflow_id)
+        contexts.append(prior_context)
+        mission = prior_mission
+    raise ContractValidationError("Prior AMOS workflow chain is too long", code="INVALID_STAGE_REFERENCE")
+
 class CommanderAgent:
+    _EVIDENCE_INLINE_LIMIT_BYTES = 16 * 1024
+
     def __init__(
         self,
         mode: str = None,
@@ -242,7 +276,145 @@ class CommanderAgent:
         print("========================")
 
     @staticmethod
-    def _runtime_records_from_output(value: object) -> dict[str, list[dict]]:
+    def _evidence_bytes(value: object) -> bytes:
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+
+    @classmethod
+    def _evidence_summary(cls, value: object) -> dict:
+        body = cls._evidence_bytes(value)
+        summary = {
+            "type": type(value).__name__,
+            "size_bytes": len(body),
+            "sha256": hashlib.sha256(body).hexdigest(),
+        }
+        if isinstance(value, dict):
+            summary["keys"] = sorted(str(key) for key in value)[:32]
+            summary["field_count"] = len(value)
+        elif isinstance(value, list):
+            summary["item_count"] = len(value)
+        elif isinstance(value, str):
+            summary["character_count"] = len(value)
+        return summary
+
+    @classmethod
+    def _evidence_preview(cls, value: object, *, depth: int = 0) -> object:
+        """Keep a bounded excerpt of the actual request for the inspector."""
+        if depth >= 4:
+            return cls._evidence_summary(value) if isinstance(value, (dict, list)) else (
+                value[:160] if isinstance(value, str) else deepcopy(value)
+            )
+        if isinstance(value, dict):
+            preview = {
+                str(key): (
+                    cls._evidence_summary(item)
+                    if str(key).lower() in {"content", "raw", "raw_bytes", "image", "image_data", "data_uri"}
+                    else cls._evidence_preview(item, depth=depth + 1)
+                )
+                for key, item in list(value.items())[:8]
+            }
+            if len(value) > 8:
+                preview["_truncated_field_count"] = len(value) - 8
+            return preview
+        if isinstance(value, list):
+            preview = [cls._evidence_preview(item, depth=depth + 1) for item in value[:2]]
+            if len(value) > 2:
+                preview.append({"_truncated_item_count": len(value) - 2})
+            return preview
+        if isinstance(value, str):
+            return value[:160] + ("...[truncated]" if len(value) > 160 else "")
+        return deepcopy(value) if isinstance(value, (int, float, bool)) or value is None else str(value)[:160]
+
+    @classmethod
+    def _compact_runtime_record(cls, value: dict) -> dict:
+        """Keep runtime provenance while dropping duplicate/large raw I/O."""
+        record = deepcopy(value)
+        for singular, plural in (("input", "inputs"), ("output", "outputs")):
+            if singular in record and plural in record and record[singular] == record[plural]:
+                record.pop(plural, None)
+
+        for field, summary_key in (
+            ("input", "input_summary"),
+            ("inputs", "input_summary"),
+            ("output", "result_summary"),
+            ("outputs", "result_summary"),
+        ):
+            if field not in record:
+                continue
+            body = cls._evidence_bytes(record[field])
+            if len(body) <= cls._EVIDENCE_INLINE_LIMIT_BYTES:
+                continue
+            summary = cls._evidence_summary(record[field])
+            record.setdefault(summary_key, summary)
+            prefix = "input" if field.startswith("input") else "output"
+            record.setdefault(f"{prefix}_sha256", summary["sha256"])
+            record.setdefault(f"{prefix}_size_bytes", summary["size_bytes"])
+            record.pop(field, None)
+        return record
+
+    @classmethod
+    def _compact_terminal_evidence(cls, value: object) -> object:
+        """Recursively compact immutable terminal evidence.
+
+        Running checkpoints remain fully resumable.  At terminal state the
+        same request/response objects otherwise appear under aliases such as
+        ``input``/``inputs``, ``output``/``outputs`` and ``value``/``output``.
+        """
+        if isinstance(value, list):
+            return [cls._compact_terminal_evidence(item) for item in value]
+        if not isinstance(value, dict):
+            return deepcopy(value)
+
+        compacted = deepcopy(value)
+        if compacted.get("algorithm_id") or compacted.get("model_id"):
+            compacted = cls._compact_runtime_record(compacted)
+
+        for canonical, alias in (
+            ("algorithm_invocations", "algorithm_calls"),
+            ("model_invocations", "model_calls"),
+        ):
+            primary = compacted.get(canonical)
+            alternate = compacted.get(alias)
+            if isinstance(primary, list):
+                compacted[canonical] = [
+                    cls._compact_runtime_record(item) if isinstance(item, dict) else item
+                    for item in primary
+                ]
+                compacted.pop(alias, None)
+            elif isinstance(alternate, list):
+                compacted[canonical] = [
+                    cls._compact_runtime_record(item) if isinstance(item, dict) else item
+                    for item in alternate
+                ]
+                compacted.pop(alias, None)
+
+        if "value" in compacted and isinstance(compacted.get("output"), dict):
+            output = compacted["output"]
+            if len(output) == 1 and next(iter(output.values())) == compacted["value"]:
+                compacted["output_keys"] = [str(next(iter(output)))]
+                compacted["output_ref"] = "value"
+                compacted.pop("output", None)
+
+        if "input_data" in compacted:
+            body = cls._evidence_bytes(compacted["input_data"])
+            if len(body) > cls._EVIDENCE_INLINE_LIMIT_BYTES:
+                compacted["input_data_summary"] = cls._evidence_summary(
+                    compacted["input_data"]
+                )
+                compacted.pop("input_data", None)
+
+        for key, child in list(compacted.items()):
+            if isinstance(child, (dict, list)):
+                compacted[key] = cls._compact_terminal_evidence(child)
+        return compacted
+
+    @classmethod
+    def _runtime_records_from_output(cls, value: object) -> dict[str, list[dict]]:
         """Collect runtime call records from an agent's output envelope.
 
         Agents commonly return ``{output_hint: {output_data: {...}}}``, while
@@ -250,13 +422,18 @@ class CommanderAgent:
         Keep both protocol shapes visible at the activity level so consumers
         do not need to know the agent-specific envelope.
         """
-        runtime_keys = (
+        runtime_keys = {
             "algorithm_calls",
             "algorithm_invocations",
             "model_calls",
             "model_invocations",
-        )
-        records: dict[str, list[dict]] = {key: [] for key in runtime_keys}
+            "llm_calls",
+        }
+        records: dict[str, list[dict]] = {
+            "algorithm_invocations": [],
+            "model_invocations": [],
+            "llm_calls": [],
+        }
 
         def visit(node: object, depth: int = 0) -> None:
             if depth > 8:
@@ -267,15 +444,45 @@ class CommanderAgent:
                 return
             if not isinstance(node, dict):
                 return
-            for key in runtime_keys:
-                value = node.get(key)
-                if isinstance(value, list):
-                    records[key].extend(deepcopy(item) for item in value)
-            for child in node.values():
+            llm_calls = node.get("llm_calls")
+            if isinstance(llm_calls, list):
+                records["llm_calls"].extend(
+                    deepcopy(item) for item in llm_calls if isinstance(item, dict)
+                )
+            for canonical, alias in (
+                ("algorithm_invocations", "algorithm_calls"),
+                ("model_invocations", "model_calls"),
+            ):
+                collection = node.get(canonical)
+                if not isinstance(collection, list):
+                    collection = node.get(alias)
+                if isinstance(collection, list):
+                    records[canonical].extend(
+                        cls._compact_runtime_record(item)
+                        for item in collection
+                        if isinstance(item, dict)
+                    )
+            for key, child in node.items():
+                if key in runtime_keys or key in {"input", "inputs"}:
+                    continue
                 if isinstance(child, (dict, list)):
                     visit(child, depth + 1)
 
         visit(value)
+        # Some agents expose the same call both beside the output hint and
+        # inside its detailed trace. Persist one business event per call ID.
+        seen_llm_call_ids: set[str] = set()
+        unique_llm_calls: list[dict] = []
+        for call in records["llm_calls"]:
+            if not isinstance(call, dict):
+                continue
+            call_id = str(call.get("llm_call_id") or "")
+            if call_id and call_id in seen_llm_call_ids:
+                continue
+            if call_id:
+                seen_llm_call_ids.add(call_id)
+            unique_llm_calls.append(call)
+        records["llm_calls"] = unique_llm_calls
         return {key: value for key, value in records.items() if value}
 
     def _build_workflow_result(self, context: dict) -> dict:
@@ -336,17 +543,26 @@ class CommanderAgent:
                     response.get("execution_mode")
                     or ("local_agent" if response.get("mode") == "local" else response.get("mode"))
                 ),
-                "input": deepcopy(request.get("input") or {}),
                 "input_source": request.get("input_source") or "agent_request.input",
                 "request": {
                     key: deepcopy(value)
                     for key, value in request.items()
-                    if key != "input"
+                    if key not in {
+                        "input", "input_preview", "input_summary", "input_sha256", "input_size_bytes"
+                    }
                 },
                 "output_ref": output_ref,
                 "output_keys": output_keys_for_activity,
                 "metrics": response.get("metrics", {}),
             }
+            if "input" in request:
+                activity_row["input"] = deepcopy(request["input"])
+            elif request.get("input_summary"):
+                activity_row["input_summary"] = deepcopy(request["input_summary"])
+                if isinstance(request.get("input_preview"), dict):
+                    activity_row["input_preview"] = deepcopy(request["input_preview"])
+                activity_row["input_sha256"] = request.get("input_sha256")
+                activity_row["input_size_bytes"] = request.get("input_size_bytes")
             if isinstance(response_output, dict):
                 activity_row.update(self._runtime_records_from_output(response_output))
             activity_results.append(activity_row)
@@ -378,18 +594,37 @@ class CommanderAgent:
             "trace_id": self.workflow_id,
         }
 
-    @staticmethod
-    def _task_request_snapshot(task_payload: dict | None) -> dict:
+    @classmethod
+    def _task_request_snapshot(cls, task_payload: dict | None) -> dict:
         """Persist the actual activity request input without duplicating large context blobs."""
         payload = deepcopy(task_payload or {})
+        input_value = deepcopy(payload.get("input") or {})
         snapshot = {
-            "input": deepcopy(payload.get("input") or {}),
             "input_source": "agent_request.input",
             "command": payload.get("command"),
             "required_skill": payload.get("required_skill"),
             "required_skills": list(payload.get("required_skills") or []),
             "output_hint": payload.get("output_hint"),
         }
+        input_body = cls._evidence_bytes(input_value)
+        if len(input_body) <= cls._EVIDENCE_INLINE_LIMIT_BYTES:
+            snapshot["input"] = input_value
+        else:
+            summary = cls._evidence_summary(input_value)
+            snapshot["input_summary"] = summary
+            snapshot["input_sha256"] = summary["sha256"]
+            snapshot["input_size_bytes"] = summary["size_bytes"]
+            preview = cls._evidence_preview(input_value)
+            if isinstance(preview, dict) and len(cls._evidence_bytes(preview)) <= 8 * 1024:
+                snapshot["input_preview"] = preview
+            elif isinstance(input_value, dict):
+                snapshot["input_preview"] = {
+                    key: (cls._evidence_preview(item, depth=4) if isinstance(item, (str, int, float, bool)) or item is None
+                          else cls._evidence_summary(item))
+                    for key, item in list(input_value.items())[:8]
+                }
+                if len(input_value) > 8:
+                    snapshot["input_preview"]["_truncated_field_count"] = len(input_value) - 8
         if payload.get("workflow_id"):
             snapshot["workflow_id"] = payload.get("workflow_id")
         if payload.get("work_item"):
@@ -1325,18 +1560,27 @@ class CommanderAgent:
             entry.setdefault("status", status or "completed")
             entry.setdefault("error", error)
             entry.setdefault("duration_ms", duration_ms)
+            if isinstance(entry.get("output"), dict):
+                candidate = entry["output"]
+                if len(candidate) == 1 and next(iter(candidate.values())) == entry.get("value"):
+                    entry["output_keys"] = [str(next(iter(candidate)))]
+                    entry["output_ref"] = "value"
+                    entry.pop("output", None)
             return entry
-        return {
+        entry = {
             "activity_id": activity_id,
             "work_item": work_item,
             "role": role,
             "value": value,
-            "output": deepcopy(output or {}),
             "status": status or "completed",
             "error": error,
             "duration_ms": duration_ms,
             "created_at": created_at or utc_now_iso(),
         }
+        if isinstance(output, dict) and output:
+            entry["output_keys"] = sorted(str(key) for key in output)
+            entry["output_ref"] = "value"
+        return entry
 
     @classmethod
     def _context_entries(cls, context: dict, key: str):
@@ -1576,6 +1820,8 @@ class CommanderAgent:
                 closed_loop = persisted_context.get("closed_loop_result")
                 if isinstance(closed_loop, list) and closed_loop and isinstance(closed_loop[0], dict):
                     persisted_context["closed_loop_result"] = [{"$ref": "effect_evaluation_result"}]
+
+                persisted_context = self._compact_terminal_evidence(persisted_context)
 
             state = {
                 "workflow_id": self.workflow_id,
@@ -1820,10 +2066,19 @@ class CommanderAgent:
             # Preserve the decision chain explicitly.  The BPEL input variable
             # is the compliance result, but execution control also needs the
             # selected plan, scheduled resources, and current targets.
-            plan_result = self._latest_context_value(context, "decision_planning_result") or {}
-            compliance_result = self._latest_context_value(context, "compliance_authorization_result") or {}
-            planning = deepcopy(context.get("planning_input", {}))
             mission = context.get("mission_input") if isinstance(context.get("mission_input"), dict) else {}
+            planning_context = deepcopy(context)
+            for prior_context in verified_stage_contexts(self.state_store, mission):
+                for key in (
+                    "task_scheduling_result", "decision_planning_result",
+                    "compliance_authorization_result", "threat_assessment_result",
+                    "intelligence_packet", "planning_input", "commander_decision",
+                ):
+                    if planning_context.get(key) in (None, [], {}) and prior_context.get(key) not in (None, [], {}):
+                        planning_context[key] = deepcopy(prior_context[key])
+            plan_result = self._latest_context_value(planning_context, "decision_planning_result") or {}
+            compliance_result = self._latest_context_value(planning_context, "compliance_authorization_result") or {}
+            planning = deepcopy(planning_context.get("planning_input", {}))
             stage_transfer = (
                 mission.get("stage_transfer")
                 if isinstance(mission.get("stage_transfer"), dict)
@@ -1841,45 +2096,36 @@ class CommanderAgent:
             )
             plan_output = plan_result.get("output_data", plan_result) if isinstance(plan_result, dict) else {}
             compliance_output = compliance_result.get("output_data", compliance_result) if isinstance(compliance_result, dict) else {}
-            if not compliance_output and operator_authorization.get("status") == "approved":
+            if operator_authorization.get("status") == "approved":
                 compliance_output = {
+                    **compliance_output,
                     "decision": "approved",
                     "status": "approved",
                     "approved_for_demo_handoff": True,
                     "authorization_evidence": deepcopy(operator_authorization),
                 }
-            results = self.build_closed_loop_results_from_context(context)
+            results = self.build_closed_loop_results_from_context(planning_context)
+            if "threat_evaluation" not in results:
+                risk_rows = [row for row in planning.get("risk_assessments") or [] if isinstance(row, dict)]
+                risk_scores = []
+                for row in risk_rows:
+                    value = row.get("probability", row.get("threat_score"))
+                    try:
+                        score = float(value)
+                    except (TypeError, ValueError):
+                        continue
+                    risk_scores.append(max(0.0, min(1.0, score / 100.0 if score > 1.0 else score)))
+                if risk_scores:
+                    results["threat_evaluation"] = {"output_data": {
+                        "priority_score": max(risk_scores),
+                        "risk_assessments": deepcopy(risk_rows),
+                    }}
             results["plan_decision"] = {"output_data": deepcopy(plan_output)}
-            results["resource_allocation"] = {
-                "output_data": {
-                    "scheduled_tasks": deepcopy(planning.get("scheduled_tasks", [])),
-                    "resources": deepcopy(planning.get("resources", [])),
-                    "target_histories": deepcopy(planning.get("target_histories", [])),
-                }
-            }
+            resource_output = results.setdefault("resource_allocation", {}).setdefault("output_data", {})
+            for key in ("scheduled_tasks", "resources", "target_histories"):
+                if planning.get(key):
+                    resource_output[key] = deepcopy(planning[key])
             results["compliance_authorization"] = {"output_data": deepcopy(compliance_output)}
-            results["data_fusion"] = {
-                "output_data": {
-                    "tracks": [
-                        {
-                            "track_id": item.get("track_id") or item.get("contact_id"),
-                            "history": [
-                                {
-                                    "t": point.get("sim_time", index),
-                                    "x": point.get("lng", point.get("lon", 0.0)),
-                                    "y": point.get("lat", 0.0),
-                                }
-                                for index, point in enumerate(
-                                    (item.get("metadata") or {}).get("history_path") or []
-                                )
-                                if isinstance(point, dict)
-                            ],
-                        }
-                        for item in mission.get("contacts") or []
-                        if isinstance(item, dict)
-                    ]
-                }
-            }
             return {
                 "schema_version": PROTOCOL_VERSION,
                 "workflow_id": self.workflow_id,
@@ -1898,6 +2144,7 @@ class CommanderAgent:
                     "context": {
                         "workflow_id": self.workflow_id,
                         "mission_input": deepcopy(mission),
+                        "authorization": deepcopy(context.get("authorization") or {}),
                     },
                 },
                 "context": context_snapshot,
@@ -2387,6 +2634,13 @@ class CommanderAgent:
             output_value = output.get(target_key)
             if output_value is None:
                 output_value = self._first_output_value(output)
+            if isinstance(output_value, dict):
+                output_value = coordinate_task_schedule(
+                    output_value,
+                    context,
+                    mode=self.mode,
+                    registry=self.registry,
+                )
             self._append_output_collection(
                 context,
                 target_key,
@@ -2410,6 +2664,10 @@ class CommanderAgent:
                     context["target_histories"] = deepcopy(output_value["target_histories"])
                 if isinstance(output_value.get("planning_objectives"), list):
                     context["planning_objectives"] = list(output_value["planning_objectives"])
+                if isinstance(output_value.get("distributed_allocation"), dict):
+                    context["distributed_allocation"] = deepcopy(
+                        output_value["distributed_allocation"]
+                    )
                 planning_input = {
                     "risk_assessments": deepcopy(context.get("risk_assessments", [])),
                     "scheduled_tasks": deepcopy(context.get("scheduled_tasks", [])),
@@ -2417,6 +2675,9 @@ class CommanderAgent:
                     "target_histories": deepcopy(context.get("target_histories", [])),
                     "planning_objectives": deepcopy(context.get("planning_objectives", [])),
                     "constraints": deepcopy(context.get("constraints", [])),
+                    "distributed_allocation": deepcopy(
+                        context.get("distributed_allocation", {})
+                    ),
                     "authorization": deepcopy(
                         self._normalize_authorization(context.get("authorization"))
                     ),
@@ -2819,6 +3080,7 @@ class CommanderAgent:
                 "planning_objectives",
                 "constraints",
                 "authorization",
+                "distributed_allocation",
             ):
                 if request.get(field) in (None, [], {}):
                     value = task_scheduling_result.get(field)
@@ -2833,6 +3095,7 @@ class CommanderAgent:
             "planning_objectives",
             "candidate_plans",
             "constraints",
+            "distributed_allocation",
         ):
             if field not in request and context.get(field) not in (None, [], {}):
                 request[field] = deepcopy(context[field])

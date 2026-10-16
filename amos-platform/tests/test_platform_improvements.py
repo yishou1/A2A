@@ -343,6 +343,8 @@ def test_frontend_keeps_director_stream_and_interpolates_live_markers() -> None:
     assert "var runChanged = Boolean(" in controller
     assert "runChanged &&" in controller
     assert "Map.focusScenarioView();" in controller
+    assert "DIRECTOR_REFRESH_INTERVAL_MS = 1000" in controller
+    assert 'String(asset.status || "").toLowerCase() === "recovered"' in map_script
 
 
 def test_frontend_fails_closed_after_analysis_error_and_uses_panel_width() -> None:
@@ -418,11 +420,13 @@ def test_live_renderers_do_not_rebuild_unchanged_panels_or_map_layers() -> None:
     assert "顺序流程容器" in workflow
     assert "showWeaponImpact" in map_script
     assert "impact_sim_time" in map_script
-    assert 'return "civilianSurface"' in map_script
-    assert 'return "destroyed"' in map_script
+    assert "SymbolLibrary.trackKind(track)" in map_script
+    assert '/^destroyed/.test(kind)' in map_script
     assert "updateDestroyedImpactMarkers" in map_script
     assert "destroyedImpactMarkers" in map_script
-    assert 'return "impact"' in map_script
+    assert 'return "impact" + suffix' in (
+        ROOT / "static/js/map/tactical-symbols.js"
+    ).read_text(encoding="utf-8")
     assert "damage_assessment_confirmed" in map_script
 
 
@@ -478,6 +482,23 @@ def test_execution_workspace_inspects_current_run_workflows_and_real_activity_de
     assert "后端未上报该活动的算法调用" in workflow
     assert "processActiveView(view)" in workflow
     assert 'String(view.workflow_id || "") !== String(activeWorkflowId || "")' in workflow
+
+
+def test_workflow_history_uses_checkpoint_identity_before_live_phase() -> None:
+    workflow = (ROOT / "static/js/workflow/commander-workflow.js").read_text(
+        encoding="utf-8"
+    )
+
+    checkpoint_lookup = workflow.index(
+        "for (var i = 0; i < workflowTasks.length; i += 1)"
+    )
+    live_phase_fallback = workflow.index(
+        'if (phase === "FIND" || phase === "FIX") return "OBSERVE";'
+    )
+    assert checkpoint_lookup < live_phase_fallback
+    assert '"MAR-CP-PLAN", "CJR-CP-PLAN", "ASC-CP-PLAN"' in workflow
+    assert '"MAR-CP-ENGAGE", "MAR-CP-CLOSE"' in workflow
+    assert "slot.id = id;" in workflow
 
 
 def test_algorithm_coverage_uses_runtime_backend_catalog() -> None:

@@ -20,6 +20,31 @@ def _advance(engine: SimEngine, elapsed_sec: float) -> None:
         engine._tick(min(30, elapsed_sec - float(engine.clock["elapsed_sec"])))
 
 
+def test_satellite_revisit_moves_at_constant_speed() -> None:
+    """SAT-RECON-02 过境全程匀速：不得出现分段变速或瞬移。"""
+    scenario = get_scenario(SCENARIO_ID)
+    assert scenario is not None
+    engine = SimEngine(seed=int(scenario["default_seed"]))
+    engine.load_scenario(scenario)
+    samples: list[tuple[float, float]] = []
+    step = 35
+    elapsed = 1685
+    while elapsed <= 2025:
+        _advance(engine, elapsed)
+        position = engine.assets["SAT-RECON-02"]["position"]
+        samples.append((float(position["lat"]), float(position["lng"])))
+        elapsed += step
+    legs = [
+        distance_nm(a[0], a[1], b[0], b[1]) for a, b in zip(samples, samples[1:])
+    ]
+    mean_leg = sum(legs) / len(legs)
+    expected = 2848.0 * step / 3600.0  # 匀速 2848 节对应的每步位移
+    assert abs(mean_leg - expected) < expected * 0.05
+    for leg in legs:
+        # 匀速容差：导航/取整误差之外不允许明显的变速或跳变
+        assert abs(leg - mean_leg) < mean_leg * 0.12, legs
+
+
 def _apply_ground_site_assessment(engine: SimEngine, workflow_id: str = "wf-cjr") -> str:
     track = next(iter(engine.sensor_fusion.tracks.values()))
     projection = apply_commander_assessments(
@@ -83,9 +108,14 @@ def test_coastal_joint_force_package_and_backend_contract_are_complete() -> None
     assert len(scenario["function_point_coverage"]) == 28
     assert len(scenario["coordination_links"]) == 11
     assert len(scenario["engagement_policy"]["coordinated_engagement"]["participants"]) == 4
+    assert scenario["engagement_policy"]["coordinated_engagement"]["max_launch_stagger_sec"] == 180
     assert scenario["map_display"]["default_layers"]["coordination"] is True
     assert scenario["map_display"]["coordination_link_types"] == ["weapon"]
     assert scenario["map_display"]["trail_window_sec"] == 240
+    start_bounds = scenario["map_display"]["start_focus_bounds"]
+    assert start_bounds == scenario["theater"]["ao"]
+    assert scenario["map_display"]["start_zoom"] == 9
+    assert scenario["map_display"]["expand_on_start"] is False
     assert len(scenario["media_cues"]) == 12
     assert scenario["map_display"]["space_visual_speed_factor"] == 0.035
     assert "SAT-RECON-01" not in scenario["map_display"]["trail_asset_ids"]
@@ -100,6 +130,22 @@ def test_coastal_joint_force_package_and_backend_contract_are_complete() -> None
         item for item in scenario["demo_checkpoints"]
         if item["checkpoint_id"] == "CJR-CP-CLOSE"
     )
+    engage_checkpoint = next(
+        item for item in scenario["demo_checkpoints"]
+        if item["checkpoint_id"] == "CJR-CP-ENGAGE"
+    )
+    assert engage_checkpoint["pause"] is True
+    assert engage_checkpoint["min_elapsed_sec"] == 3300
+    assert engage_checkpoint["submit_analysis"] is True
+    assert engage_checkpoint["continue_during_submission"] is True
+    assert engage_checkpoint["continue_past_phase_during_analysis"] is True
+    assert engage_checkpoint["submit_after_authorization"] is True
+    assert engage_checkpoint["block_until_analysis_complete"] is True
+    assert engage_checkpoint["requires_operator_action"] is True
+    assert close_checkpoint["pause"] is True
+    assert close_checkpoint["submit_analysis"] is True
+    assert close_checkpoint["block_until_analysis_complete"] is True
+    assert close_checkpoint["requires_operator_action"] is True
     assert close_checkpoint["operator_action_type"] == "review"
     assert close_checkpoint["conditions"]["event_types_emitted"] == [
         "damage_assessment_confirmed"
@@ -174,7 +220,9 @@ def test_backend_assessment_unlocks_four_individual_weapon_nodes_without_truth_l
     engine = SimEngine(seed=int(scenario["default_seed"]))
     engine.load_scenario(scenario)
     engine.clock["run_id"] = "run-cjr-test"
-    _advance(engine, 3340)
+    # T+3600 used to exceed the engine's implicit 90-second launch stagger
+    # even though all four nodes were following their valid release orbits.
+    _advance(engine, 3600)
     track_id = _apply_ground_site_assessment(engine)
 
     operator = engine.get_operator_state()
@@ -199,25 +247,72 @@ def test_backend_assessment_unlocks_four_individual_weapon_nodes_without_truth_l
     assert {item["asset_id"] for item in launched["participants"]} == {
         "SEA-C2-01", "J16-01", "ATTACK-UAV-01", "ATTACK-UAV-02",
     }
+    weapons_by_asset = {
+        item["source_asset_id"]: item for item in engine.weapons.values()
+    }
+    assert weapons_by_asset["J16-01"]["status"] == "in_flight"
     assert engine.waypoint_nav.get_route("J16-01")[-1]["label"] == "J16-RTB"
-    assert engine.waypoint_nav.get_route("ATTACK-UAV-01")[-1]["label"] == "UAV01-RECOVERY"
-    assert engine.waypoint_nav.get_route("ATTACK-UAV-02")[-1]["label"] == "UAV02-RECOVERY"
     assert engine.assets["J16-01"]["_current_behavior"] == "post_launch_egress"
-    assert engine.assets["ATTACK-UAV-01"]["_current_behavior"] == "north_axis_egress"
-    assert engine.assets["ATTACK-UAV-02"]["_current_behavior"] == "south_axis_egress"
     assert engine.assets["J16-01"]["speed_kts"] == 480
-    assert engine.assets["ATTACK-UAV-01"]["speed_kts"] == 130
-    assert engine.assets["ATTACK-UAV-02"]["speed_kts"] == 130
+    # The two delayed-release UAV weapons remain attached to their real
+    # launchers.  Their aircraft must continue the declared release orbits,
+    # rather than beginning an egress before the weapon has left the rail.
+    delayed_loiters = {
+        "ATTACK-UAV-01": ("north_release_station_orbit", "north_axis_post_strike_loiter"),
+        "ATTACK-UAV-02": ("south_release_station_orbit", "south_axis_post_strike_loiter"),
+    }
+    for asset_id, (hold_behavior, _) in delayed_loiters.items():
+        weapon = weapons_by_asset[asset_id]
+        asset = engine.assets[asset_id]
+        assert weapon["status"] == "scheduled"
+        assert asset["_current_behavior"] == hold_behavior
+        assert distance_nm(
+            weapon["lat"], weapon["lng"],
+            asset["position"]["lat"], asset["position"]["lng"],
+        ) < 0.01
     assert any(
         item.get("type") == "post_launch_egress_started"
-        and set(item.get("asset_ids") or []) == {"J16-01", "ATTACK-UAV-01", "ATTACK-UAV-02"}
+        and item.get("asset_ids") == ["J16-01"]
         for item in engine.events
     )
+    for asset_id, (_, loiter_behavior) in sorted(
+        delayed_loiters.items(),
+        key=lambda row: float(weapons_by_asset[row[0]]["scheduled_launch_time"]),
+    ):
+        weapon = weapons_by_asset[asset_id]
+        _advance(engine, float(weapon["scheduled_launch_time"]))
+        asset = engine.assets[asset_id]
+        launch_position = weapon["launch_position"]
+        assert weapon["status"] == "in_flight"
+        assert distance_nm(
+            launch_position["lat"], launch_position["lng"],
+            asset["position"]["lat"], asset["position"]["lng"],
+        ) < 0.01
+        # 攻击后不返航：保持在释放阵位附近的盘旋航线等待毁伤评估。
+        assert asset["_current_behavior"] == loiter_behavior
+        assert engine.waypoint_nav.get_mode(asset_id) == "loop"
+        loiter_labels = {
+            "UAV01-LOITER-SOUTH", "UAV01-LOITER-NORTH",
+            "UAV01-LOITER-NORTHWEST", "UAV01-LOITER-EAST",
+        } if asset_id == "ATTACK-UAV-01" else {
+            "UAV02-LOITER-NORTH", "UAV02-LOITER-SOUTHWEST",
+            "UAV02-LOITER-EAST", "UAV02-LOITER-NORTHEAST",
+        }
+        assert {point["label"] for point in engine.waypoint_nav.get_route(asset_id)} == loiter_labels
+        assert any(
+            item.get("type") == "post_launch_egress_started"
+            and item.get("asset_ids") == [asset_id]
+            and item.get("weapon_ids") == [weapon["id"]]
+            for item in engine.events
+        )
+    assert engine.assets["ATTACK-UAV-01"]["_current_behavior"] == "north_axis_post_strike_loiter"
+    assert engine.assets["ATTACK-UAV-02"]["_current_behavior"] == "south_axis_post_strike_loiter"
+    assert engine.assets["ATTACK-UAV-01"]["speed_kts"] == 130
+    assert engine.assets["ATTACK-UAV-02"]["speed_kts"] == 130
     planned_arrivals = {
         item["planned_time_on_target_sec"] for item in engine.weapons.values()
     }
     assert len(planned_arrivals) == 1
-    assert any(item["status"] == "scheduled" for item in engine.weapons.values())
     assert find_truth_leaks(launched) == []
 
     duplicate = engine.fire_weapon_at_track(
@@ -266,12 +361,192 @@ def test_backend_assessment_unlocks_four_individual_weapon_nodes_without_truth_l
     assert engine.assets["SEA-C2-01"]["_current_behavior"] == "command_ship_recovery"
     assert any(
         item.get("type") == "post_bda_return_started"
-        and set(item.get("asset_ids") or []) == {"WZ10-01", "SEA-C2-01"}
+        and set(item.get("asset_ids") or []) == {
+            "WZ10-01", "SEA-C2-01", "ATTACK-UAV-01", "ATTACK-UAV-02",
+        }
         for item in engine.events
     )
+    # 两架攻击无人机在毁伤确认后转入保障舰甲板回收航线。
+    assert engine.waypoint_nav.get_route("ATTACK-UAV-01")[-1]["label"] == "SEA-C2-RECOVERY-DECK"
+    assert engine.waypoint_nav.get_route("ATTACK-UAV-02")[-1]["label"] == "SEA-C2-RECOVERY-DECK"
+    assert engine.assets["ATTACK-UAV-01"]["_current_behavior"] == "north_axis_recovered_to_support_ship"
+    assert engine.assets["ATTACK-UAV-02"]["_current_behavior"] == "south_axis_recovered_to_support_ship"
+    recovery_position = engine.assets["SEA-C2-01"]["position"]
+    for asset_id in ("ATTACK-UAV-01", "ATTACK-UAV-02"):
+        asset = engine.assets[asset_id]
+        recovery_waypoint = engine.waypoint_nav.get_route(asset_id)[-1]
+        assert asset["_recover_to_asset_id"] == "SEA-C2-01"
+        assert distance_nm(
+            recovery_waypoint["lat"], recovery_waypoint["lng"],
+            recovery_position["lat"], recovery_position["lng"],
+        ) <= asset["_recovery_radius_nm"]
     assert "CJR-MEDIA-07" in {
         item["media_id"] for item in engine.media_capture.public_captures()
     }
+    # 两架攻击无人机在 BDA 后返回保障舰，到达最终回收点完成甲板回收。
+    # 5720 覆盖从盘旋环最远端出发的最坏飞行时间（BDA≈4510 + ~1075s + 余量）。
+    _advance(engine, 5720)
+    recovery_position = engine.assets["SEA-C2-01"]["position"]
+    for asset_id in ("ATTACK-UAV-01", "ATTACK-UAV-02"):
+        asset = engine.assets[asset_id]
+        assert asset["status"] == "recovered", asset_id
+        assert asset["speed_kts"] == 0.0, asset_id
+        assert asset["_recovered_on_asset_id"] == "SEA-C2-01", asset_id
+        assert asset["position"]["lat"] == recovery_position["lat"], asset_id
+        assert asset["position"]["lng"] == recovery_position["lng"], asset_id
+    assert {
+        item.get("asset_id")
+        for item in engine.events
+        if item.get("type") == "aircraft_recovered"
+    } == {"ATTACK-UAV-01", "ATTACK-UAV-02"}
+    assert {
+        item.get("recovery_asset_id")
+        for item in engine.events
+        if item.get("type") == "aircraft_recovered"
+    } == {"SEA-C2-01"}
+
+
+def test_maritime_observe_attachments_unchanged_by_coastal_filters() -> None:
+    """剧本二附件过滤不得收缩剧本一观察阶段的历史附件集合。"""
+    scenario = get_scenario("maritime-convoy-air-defense")
+    assert scenario is not None
+    engine = SimEngine(seed=int(scenario["default_seed"]))
+    engine.load_scenario(scenario)
+    engine.clock.update({
+        "run_id": "run-mar-observe-regression",
+        "scenario_id": "maritime-convoy-air-defense",
+        "scenario_branch": "standard",
+        "director_checkpoint_id": "MAR-CP-PERCEPTION",
+    })
+    _advance(engine, 1470)
+    payload = CommanderBridge(mode="gateway").build_workflow_payload(scenario, {}, engine)
+    assert payload["workflow_file"].endswith("observe_workflow.bpel")
+    assert [item["id"] for item in payload.get("attachments") or []] == [
+        "MAR-MEDIA-00", "MAR-MEDIA-01", "MAR-MEDIA-02",
+    ]
+    uris = [str(item.get("uri") or "") for item in payload.get("attachments") or []]
+    assert any(uri.endswith("00-convoy-overview.png") for uri in uris)
+    assert all("/coastal-joint-recon-strike/" not in uri for uri in uris)
+
+
+def test_observe_identify_feeds_coastal_missile_site_not_ship_imagery() -> None:
+    """剧本二观察与识别：TIA 应收到沿海阵地传感器图，而不是海面船图或舰艇示意图。"""
+    scenario = get_scenario(SCENARIO_ID)
+    assert scenario is not None
+    expected = {
+        "CJR-CP-CUE": {
+            "elapsed": 930,
+            "workflow": "observe_workflow.bpel",
+            "must_include": {"01-satellite-sar-v2.png", "02-wz10-sar-v2.png"},
+            "must_exclude_names": {"00-theater-overview.svg", "03-fast-surface-contact.png"},
+        },
+        "CJR-CP-IDENTIFY": {
+            "elapsed": 1530,
+            "workflow": "observe_workflow.bpel",
+            "must_include": {"03-wz10-eo-v2.png"},
+            "must_exclude_names": {
+                "00-theater-overview.svg",
+                "03-fast-surface-contact.png",
+                "00-convoy-overview.png",
+            },
+        },
+    }
+    for checkpoint_id, spec in expected.items():
+        engine = SimEngine(seed=int(scenario["default_seed"]))
+        engine.load_scenario(scenario)
+        engine.clock.update({
+            "run_id": f"run-tia-media-{checkpoint_id}",
+            "scenario_id": SCENARIO_ID,
+            "scenario_branch": "standard",
+            "director_checkpoint_id": checkpoint_id,
+        })
+        _advance(engine, float(spec["elapsed"]))
+        payload = CommanderBridge(mode="gateway").build_workflow_payload(scenario, {}, engine)
+        assert payload["workflow_file"].endswith(spec["workflow"])
+        stage = payload["mission_input"]["stage_transfer"]
+        assert stage["checkpoint_id"] == checkpoint_id
+        uris = [str(item.get("uri") or "") for item in payload.get("attachments") or []]
+        names = {uri.rsplit("/", 1)[-1] for uri in uris}
+        assert all("/coastal-joint-recon-strike/" in uri for uri in uris if uri.endswith((".png", ".svg")))
+        assert not any("/maritime-convoy-air-defense/" in uri for uri in uris)
+        assert spec["must_include"] <= names
+        assert names.isdisjoint(spec["must_exclude_names"])
+
+
+def _apply_observe_identify_assessment(engine: SimEngine, workflow_id: str = "wf-cjr-identify") -> str:
+    """Simulate observe_workflow tracking output (no Orient threat ranking)."""
+    track = next(iter(engine.sensor_fusion.tracks.values()))
+    projection = apply_commander_assessments(
+        engine,
+        {
+            "workflow_id": workflow_id,
+            "status": "completed",
+            "result": {
+                "outputs": {
+                    "tracking_result": [{"value": {"tracks": [{
+                        "track_id": track.id,
+                        "object_type": "unknown",
+                        "metadata": {
+                            "source_class": "coastal_missile_site",
+                            "label": "hostile",
+                            "affiliation": "red",
+                            "threat_level": "high",
+                        },
+                        "lat": track.lat,
+                        "lon": track.lng,
+                    }]}}],
+                },
+                "summary": {"verification": "observe-identify fixture"},
+            },
+        },
+        submission={
+            "run_id": str(engine.clock.get("run_id") or "run-cjr-identify"),
+            "transport": "gateway",
+            "package": {"package_id": "pkg-cjr-identify", "verified": True},
+            "snapshot_sequence": int(engine.sensor_fusion.last_observation_batch.get("tick_id", 0) or 0),
+            "simulation_time_sec": float(engine.clock["elapsed_sec"]),
+        },
+    )
+    assert projection["status"] == "completed"
+    assert projection["applied_count"] == 1
+    return track.id
+
+
+def _apply_observe_identify_without_backend_class_hint(
+    engine: SimEngine, workflow_id: str = "wf-cjr-identify-local"
+) -> str:
+    """Live observe often returns tracks without source_class; promote local EO class."""
+    track = next(iter(engine.sensor_fusion.tracks.values()))
+    projection = apply_commander_assessments(
+        engine,
+        {
+            "workflow_id": workflow_id,
+            "status": "completed",
+            "result": {
+                "outputs": {
+                    "tracking_result": [{"value": {"tracks": [{
+                        "track_id": track.id,
+                        "object_type": "unknown",
+                        "metadata": {},
+                        "lat": track.lat,
+                        "lon": track.lng,
+                    }]}}],
+                },
+                "summary": {"verification": "observe-identify local-fallback"},
+            },
+        },
+        submission={
+            "run_id": str(engine.clock.get("run_id") or "run-cjr-identify-local"),
+            "transport": "gateway",
+            "package": {"package_id": "pkg-cjr-identify-local", "verified": True},
+            "snapshot_sequence": int(engine.sensor_fusion.last_observation_batch.get("tick_id", 0) or 0),
+            "simulation_time_sec": float(engine.clock["elapsed_sec"]),
+            "contacts": [{"contact_id": track.id}],
+        },
+    )
+    assert projection["status"] == "completed"
+    assert projection["applied_count"] == 1
+    return track.id
 
 
 def test_multimodal_evidence_releases_a_backend_classification_candidate() -> None:
@@ -280,23 +555,175 @@ def test_multimodal_evidence_releases_a_backend_classification_candidate() -> No
     engine = SimEngine(seed=int(scenario["default_seed"]))
     engine.load_scenario(scenario)
 
+    # EO evidence alone should classify before Orient/FUSION (T+2130).
     _advance(engine, 1530)
-    assert all(
-        track.classification == "UNKNOWN"
-        for track in engine.sensor_fusion.tracks.values()
-    )
-
-    _advance(engine, 1710)
     candidates = list(engine.sensor_fusion.tracks.values())
     assert candidates
     assert all(track.classification == "COASTAL_MISSILE_SITE" for track in candidates)
     assert all(track.agent_assessment["status"] == "pending" for track in candidates)
+    assert float(engine.clock["elapsed_sec"]) < 2130
 
-    payload = CommanderBridge().build_workflow_payload(scenario, {}, engine)
-    mission = payload["attachments"][0]["meta"]["amos_mission"]
-    assert {contact["classification"] for contact in mission["contacts"]} == {
+    payload = CommanderBridge(mode="gateway").build_workflow_payload(scenario, {}, engine)
+    contacts = payload["mission_input"]["contacts"]
+    assert {contact["classification"] for contact in contacts} == {
         "coastal_missile_site",
     }
+
+
+def test_high_risk_confirmed_during_observe_before_orient_fusion() -> None:
+    """高风险应在观察与识别（IDENTIFY）结束时写出，早于航迹评估 FUSION。"""
+    scenario = get_scenario(SCENARIO_ID)
+    assert scenario is not None
+    engine = SimEngine(seed=int(scenario["default_seed"]))
+    engine.load_scenario(scenario)
+    engine.clock.update({
+        "run_id": "run-cjr-high-risk-early",
+        "scenario_id": SCENARIO_ID,
+        "scenario_branch": "standard",
+        "director_checkpoint_id": "CJR-CP-IDENTIFY",
+    })
+
+    _advance(engine, 1530)
+    track_id = _apply_observe_identify_assessment(engine)
+    track = engine.sensor_fusion.tracks[track_id]
+
+    assert float(engine.clock["elapsed_sec"]) < 2130
+    assert track.classification == "COASTAL_MISSILE_SITE"
+    assert track.threat_level == "HIGH"
+    assert track.agent_assessment["status"] == "confirmed"
+    assert track.agent_assessment["label"] == "高风险"
+    assert track.agent_assessment["source"] == "A2A 后端工作流"
+
+
+def test_high_risk_promoted_from_local_eo_class_when_observe_omits_source_class() -> None:
+    """Live observe_workflow may omit source_class; still confirm 高风险 at IDENTIFY."""
+    scenario = get_scenario(SCENARIO_ID)
+    assert scenario is not None
+    engine = SimEngine(seed=int(scenario["default_seed"]))
+    engine.load_scenario(scenario)
+    engine.clock.update({
+        "run_id": "run-cjr-high-risk-local-fallback",
+        "scenario_id": SCENARIO_ID,
+        "scenario_branch": "standard",
+        "director_checkpoint_id": "CJR-CP-IDENTIFY",
+    })
+
+    _advance(engine, 1530)
+    track_id = _apply_observe_identify_without_backend_class_hint(engine)
+    track = engine.sensor_fusion.tracks[track_id]
+
+    assert float(engine.clock["elapsed_sec"]) < 2130
+    assert track.classification == "COASTAL_MISSILE_SITE"
+    assert track.threat_level == "HIGH"
+    assert track.agent_assessment["status"] == "confirmed"
+    assert track.agent_assessment["label"] == "高风险"
+    assert float(track.agent_assessment["source_simulation_time_sec"]) < 2130
+
+
+def test_early_backend_confirmation_survives_later_eo_evidence(tmp_path, monkeypatch):
+    monkeypatch.setenv("AMOS_RUN_DB", str(tmp_path / "runs.sqlite3"))
+    scenario = get_scenario(SCENARIO_ID)
+    engine = SimEngine(seed=int(scenario["default_seed"]))
+    engine.load_scenario(scenario)
+    engine.clock["run_id"] = "run-cjr-early-confirmation"
+    _advance(engine, 1490)
+    assert "CJR-MEDIA-03" not in engine.media_capture.captured_media_ids
+    track_id = _apply_observe_identify_assessment(engine, "wf-cjr-cue-early")
+    track = engine.sensor_fusion.tracks[track_id]
+    original = dict(track.agent_assessment)
+
+    # CUE can finish just before the EO frame arrives. Observe every intervening
+    # tick, including the one that used to erase the completed assessment.
+    while engine.clock["elapsed_sec"] < 1800:
+        engine._tick(min(10, 1800 - engine.clock["elapsed_sec"]))
+        assert track.agent_assessment["status"] == "confirmed"
+        assert track.agent_assessment["label"] == "高风险"
+        assert track.agent_assessment["source"] == original["source"]
+        assert track.agent_assessment["workflow_id"] == original["workflow_id"]
+    assert "CJR-MEDIA-03" in track.agent_assessment["evidence_media_ids"]
+
+
+def test_new_evidence_of_a_different_class_requires_confirmation(tmp_path, monkeypatch):
+    monkeypatch.setenv("AMOS_RUN_DB", str(tmp_path / "runs.sqlite3"))
+    scenario = deepcopy(get_scenario(SCENARIO_ID))
+    scenario["evidence_classification_rules"][0]["classification"] = "MOBILE_COASTAL_AIR_DEFENSE"
+    engine = SimEngine(seed=int(scenario["default_seed"]))
+    engine.load_scenario(scenario)
+    engine.clock["run_id"] = "run-cjr-conflicting-evidence"
+    _advance(engine, 1490)
+    track_id = _apply_observe_identify_assessment(engine)
+    _advance(engine, 1530)
+    track = engine.sensor_fusion.tracks[track_id]
+    assert track.classification == "MOBILE_COASTAL_AIR_DEFENSE"
+    assert track.agent_assessment["status"] == "pending"
+    assert track.agent_assessment["source"] is None
+
+
+def _apply_ranking_refresh(engine, track_id, level, workflow_id, object_type="ground_installation", metadata=None):
+    track = engine.sensor_fusion.tracks[track_id]
+    return apply_commander_assessments(engine, {
+        "workflow_id": workflow_id,
+        "status": "completed",
+        "result": {"outputs": {
+            "tracking_result": {"tracks": [{
+                "track_id": track_id, "object_type": object_type,
+                "metadata": metadata or {},
+                "lat": track.lat, "lon": track.lng,
+            }]},
+            "threat_assessment_result": {"threats": [{
+                "track_id": track_id, "score": 0.55, "level": level,
+            }]},
+        }},
+    }, submission={"run_id": engine.clock["run_id"]})
+
+
+def test_confirmed_coastal_site_stays_high_risk_through_ranking_refreshes(tmp_path, monkeypatch):
+    monkeypatch.setenv("AMOS_RUN_DB", str(tmp_path / "runs.sqlite3"))
+    scenario = get_scenario(SCENARIO_ID)
+    engine = SimEngine(seed=int(scenario["default_seed"]))
+    engine.load_scenario(scenario)
+    engine.clock["run_id"] = "run-cjr-retain-high"
+    _advance(engine, 1530)
+    track_id = _apply_observe_identify_assessment(engine)
+    track = engine.sensor_fusion.tracks[track_id]
+
+    # Orient may rank a stationary target lower than the earlier EO identification.
+    # That changes ranking, but must not turn this confirmed missile site yellow.
+    for index, level in enumerate(["medium", "low", "unknown", "high"]):
+        _advance(engine, 1800 + index * 300)
+        result = _apply_ranking_refresh(
+            engine, track_id, level, f"wf-ranking-{index}",
+            metadata={"label": "hostile", "affiliation": "red"} if index == 3 else {},
+        )
+        assert result["applied_count"] == 1
+        assert track.classification == "COASTAL_MISSILE_SITE"
+        assert track.threat_level == "HIGH"
+        assert track.agent_assessment["status"] == "confirmed"
+        assert track.agent_assessment["label"] == "高风险"
+        assert track.agent_assessment["backend_level"] == level.upper()
+
+    track.agent_assessment.update({"damage_state": "destroyed", "engagement_status": "destroyed"})
+    _apply_ranking_refresh(engine, track_id, "medium", "wf-ranking-post-bda")
+    assert track.agent_assessment["damage_state"] == "destroyed"
+    assert track.agent_assessment["engagement_status"] == "destroyed"
+
+
+def test_risk_retention_is_opt_in_and_protected_reclassification_can_clear(tmp_path, monkeypatch):
+    monkeypatch.setenv("AMOS_RUN_DB", str(tmp_path / "runs.sqlite3"))
+    for retain in [False, True]:
+        scenario = deepcopy(get_scenario(SCENARIO_ID))
+        scenario["evidence_classification_rules"][0]["retain_confirmed_high_risk"] = retain
+        engine = SimEngine(seed=int(scenario["default_seed"]))
+        engine.load_scenario(scenario)
+        engine.clock["run_id"] = f"run-cjr-policy-{retain}"
+        _advance(engine, 1530)
+        track_id = _apply_observe_identify_assessment(engine)
+        _apply_ranking_refresh(engine, track_id, "medium", "wf-policy-refresh")
+        track = engine.sensor_fusion.tracks[track_id]
+        assert track.threat_level == ("HIGH" if retain else "MEDIUM")
+        _apply_ranking_refresh(engine, track_id, "low", "wf-protected-refresh", "civilian")
+        assert track.agent_assessment["status"] == "cleared"
+        assert track.threat_level == "LOW"
 
 
 def test_individual_assets_loiter_or_patrol_instead_of_freezing_on_station() -> None:

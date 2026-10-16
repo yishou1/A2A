@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "required": [
+    "status",
+    "results",
+    "retrieval_profile"
+  ],
+  "properties": {
+    "status": {
+      "type": "string"
+    },
+    "results": {
+      "type": "array"
+    },
+    "retrieval_profile": {
+      "type": "object"
+    },
+    "trace_id": {
+      "type": "string"
+    },
+    "warnings": {
+      "type": "array"
+    }
+  },
+  "additionalProperties": true
+}

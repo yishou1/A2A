@@ -80,6 +80,10 @@
     .node.dim { opacity: .08 !important; }
     .node.match circle { stroke: var(--warning); stroke-width: 2.5px; }
     .node.selected circle { stroke: #e8c87f; stroke-width: 3px; filter: drop-shadow(0 0 5px rgba(214,163,77,.6)); }
+    .node.trace-seed circle { stroke: #4aa3c7; stroke-width: 2px; }
+    .node.trace-recall circle { stroke: #8eb0bf; stroke-width: 2px; }
+    .node.trace-fusion circle { stroke: #d6a34d; stroke-width: 2.4px; }
+    .node.trace-evidence circle { stroke: #e66f61; stroke-width: 2.8px; filter: drop-shadow(0 0 5px rgba(230,111,97,.65)); }
     #tooltip { position: fixed; z-index: 20; display: none; max-width: 420px; max-height: 40vh; overflow: hidden; padding: 9px 10px; pointer-events: none; white-space: pre-wrap; border: 1px solid var(--line-strong); border-radius: var(--radius); background: rgba(9,19,27,.98); box-shadow: 0 12px 28px rgba(0,0,0,.42); color: var(--text); font-size: 11px; line-height: 1.5; }
     @media (max-width: 680px) {
       #toolbar { inset: 8px 8px auto; width: auto; max-height: 52vh; }
@@ -157,6 +161,20 @@
     const nodes = payload.nodes;
     const links = payload.links;
     const communities = payload.communities || [];
+    const nodeIndexByKey = new Map(nodes.map((node, index) => [node.name, index]));
+    let traceOverlayNodes = new Map();
+    let traceOverlayEdges = new Map();
+
+    function graphEdgeKey(sourceKey, targetKey) {
+      return `${sourceKey}\u0000${targetKey}`;
+    }
+
+    function overlayEdgeFor(link) {
+      const sourceKey = nodes[link.source].name;
+      const targetKey = nodes[link.target].name;
+      return traceOverlayEdges.get(graphEdgeKey(sourceKey, targetKey)) ||
+        traceOverlayEdges.get(graphEdgeKey(targetKey, sourceKey));
+    }
     const themeLegend = document.getElementById("themeLegend");
     communities.forEach(community => {
       const item = document.createElement("div");
@@ -396,8 +414,14 @@ ${typeLabels[node.type] || node.type} · ${community?.label || "未分类"} · $
           if (matched.has(link.target)) searchContext.add(link.source);
         });
       }
+      const overlayNodeIndexes = new Set(
+        Array.from(traceOverlayNodes.keys())
+          .map(key => nodeIndexByKey.get(key))
+          .filter(index => index !== undefined)
+      );
       const visibleNode = index => (
-        (activeNodeRank.get(index) ?? nodes.length) < nodeLimit || searchContext.has(index)
+        (activeNodeRank.get(index) ?? nodes.length) < nodeLimit ||
+        searchContext.has(index) || overlayNodeIndexes.has(index)
       );
       const selectedNeighbors = new Set();
       if (selectedNodeId !== null) {
@@ -423,9 +447,10 @@ ${typeLabels[node.type] || node.type} · ${community?.label || "未分类"} · $
         if (searchTerm) {
           visible = matched.has(link.source) || matched.has(link.target);
         }
+        if (overlayEdgeFor(link)) visible = true;
         if (visible) visibleEdges.add(index);
       });
-      cachedState = { matched, searchContext, visibleNode, selectedNeighbors, visibleEdges };
+      cachedState = { matched, searchContext, visibleNode, selectedNeighbors, visibleEdges, overlayNodeIndexes };
       return cachedState;
     }
 
@@ -464,11 +489,15 @@ ${typeLabels[node.type] || node.type} · ${community?.label || "未分类"} · $
         const hasCorpusNode = sourceNode.type === "chunk" || targetNode.type === "chunk";
         const crossCommunity = sourceNode.community !== targetNode.community;
         const densityOpacity = Math.max(.09, .28 - edgeDensity * .0017);
-        const opacity = focused ? .72 : densityOpacity * (.72 + depth * .28);
+        const traceEdge = overlayEdgeFor(link);
+        const baseOpacity = focused ? .72 : densityOpacity * (.72 + depth * .28);
+        const opacity = traceOverlayNodes.size && !traceEdge ? baseOpacity * .08 : baseOpacity;
         edgeContext.beginPath();
         edgeContext.setLineDash([]);
         edgeContext.lineWidth = Math.max(.4, Math.min(1.6, Math.sqrt(Math.max(link.weight, .01)) * .5));
-        edgeContext.strokeStyle = hasCorpusNode
+        edgeContext.strokeStyle = traceEdge
+          ? `rgba(74,163,199,${Math.max(.72, opacity)})`
+          : hasCorpusNode
           ? `rgba(77,182,139,${opacity * .9})`
           : crossCommunity
             ? `rgba(91,157,184,${opacity})`
@@ -514,9 +543,16 @@ ${typeLabels[node.type] || node.type} · ${community?.label || "未分类"} · $
         text.style.display = showNodeLabels || active ? "block" : "none";
         group.classList.toggle("selected", index === selectedNodeId);
         group.classList.toggle("match", state.matched.has(index));
+        const traceNode = traceOverlayNodes.get(node.name);
+        const traceRoles = traceNode && traceNode.roles || [];
+        group.classList.toggle("trace-seed", traceRoles.includes("ppr_seed"));
+        group.classList.toggle("trace-recall", traceRoles.includes("ppr_recall") || traceRoles.includes("graph_recall"));
+        group.classList.toggle("trace-fusion", traceRoles.includes("fusion_result"));
+        group.classList.toggle("trace-evidence", traceRoles.includes("final_evidence"));
         const dimBySelection = selectedNodeId !== null && !state.selectedNeighbors.has(index);
         const dimBySearch = Boolean(searchTerm) && !state.searchContext.has(index);
-        group.classList.toggle("dim", dimBySelection || dimBySearch);
+        const dimByTrace = traceOverlayNodes.size > 0 && selectedNodeId === null && !state.overlayNodeIndexes.has(index);
+        group.classList.toggle("dim", dimBySelection || dimBySearch || dimByTrace);
       });
 
       const selectedNode = selectedNodeId === null ? null : nodes[selectedNodeId];
@@ -524,7 +560,8 @@ ${typeLabels[node.type] || node.type} · ${community?.label || "未分类"} · $
       renderNodeDetail(selectedNode);
       const shownEntityCount = nodes.filter((node, index) => state.visibleNode(index) && node.type === "entity").length;
       const shownChunkCount = nodes.filter((node, index) => state.visibleNode(index) && node.type === "chunk").length;
-      stats.textContent = `${shownNodes} 节点 · ${shownEntityCount} 实体 · ${shownChunkCount} 语料 · ${state.visibleEdges.size} 关系 · ${shownCommunityCount} 主题`;
+      const traceLabel = traceOverlayNodes.size ? ` · ${traceOverlayNodes.size} 轨迹节点` : "";
+      stats.textContent = `${shownNodes} 节点 · ${shownEntityCount} 实体 · ${shownChunkCount} 语料 · ${state.visibleEdges.size} 关系 · ${shownCommunityCount} 主题${traceLabel}`;
     }
 
     svg.addEventListener("wheel", event => {
@@ -668,7 +705,40 @@ ${typeLabels[node.type] || node.type} · ${community?.label || "未分类"} · $
       }
     });
 
+    window.addEventListener("message", event => {
+      if (event.source !== window.parent || event.origin !== window.location.origin || !event.data) return;
+      if (event.data.type === "synapserag:apply-overlay") {
+        const overlay = event.data.overlay || {};
+        traceOverlayNodes = new Map((overlay.nodes || []).map(node => [node.node_key, node]));
+        traceOverlayEdges = new Map((overlay.edges || []).map(edge => [graphEdgeKey(edge.source_key, edge.target_key), edge]));
+        selectedNodeId = null;
+        cachedState = null;
+        render();
+      }
+      if (event.data.type === "synapserag:clear-overlay") {
+        traceOverlayNodes = new Map();
+        traceOverlayEdges = new Map();
+        selectedNodeId = null;
+        cachedState = null;
+        render();
+      }
+      if (event.data.type === "synapserag:focus-node") {
+        const index = nodeIndexByKey.get(event.data.nodeKey);
+        if (index === undefined) return;
+        selectedNodeId = index;
+        const point = project(nodes[index]);
+        camera.panX += width / 2 - point.x;
+        camera.panY += height / 2 - point.y;
+        cachedState = null;
+        render();
+        emitNodeSelection(nodes[index]);
+      }
+    });
+
     render();
+    if (window.parent !== window) {
+      window.parent.postMessage({type: "synapserag:ready"}, window.location.origin);
+    }
   </script>
 </body>
 </html>

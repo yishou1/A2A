@@ -2,6 +2,8 @@ import type {
   AlgorithmDetailResponse,
   AlgorithmListResponse,
   AlgorithmMutationResponse,
+  AlgorithmStatus,
+  AlgorithmSummary,
   BackendType,
   HealthResponse,
   ModelLoadResponse,
@@ -58,13 +60,54 @@ export interface AlgorithmKey {
   backendType: BackendType
 }
 
+const algorithmStatuses: AlgorithmStatus[] = ['draft', 'validated', 'active', 'disabled', 'deleted']
+
+function asAlgorithmStatus(value: unknown): AlgorithmStatus | undefined {
+  return typeof value === 'string' && algorithmStatuses.includes(value as AlgorithmStatus)
+    ? value as AlgorithmStatus
+    : undefined
+}
+
+function normalizeAlgorithmSummary(item: AlgorithmSummary): AlgorithmSummary {
+  const raw = item as AlgorithmSummary & { status?: unknown; summary?: unknown }
+  const registryStatus = asAlgorithmStatus(raw.registry_status) ?? asAlgorithmStatus(raw.status) ?? 'active'
+  const summary = typeof raw.summary === 'string' ? raw.summary : ''
+  return {
+    ...raw,
+    registry_status: registryStatus,
+    card_status: asAlgorithmStatus(raw.card_status) ?? registryStatus,
+    deployments: raw.deployments ?? [],
+    ready_endpoints: raw.ready_endpoints ?? [],
+    operational_functions: raw.operational_functions ?? [],
+    agent_card: {
+      summary: raw.agent_card?.summary ?? summary,
+      when_to_use: raw.agent_card?.when_to_use ?? [],
+      when_not_to_use: raw.agent_card?.when_not_to_use ?? [],
+      input_description: raw.agent_card?.input_description ?? '',
+      output_description: raw.agent_card?.output_description ?? '',
+      examples: raw.agent_card?.examples ?? [],
+    },
+  }
+}
+
+function normalizeAlgorithmList(response: AlgorithmListResponse): AlgorithmListResponse {
+  const algorithms = (response.algorithms ?? []).map(normalizeAlgorithmSummary)
+  return {
+    ...response,
+    ok: response.ok ?? true,
+    count: response.count ?? algorithms.length,
+    filter: response.filter ?? {},
+    algorithms,
+  }
+}
+
 export function algorithmPath(key: AlgorithmKey): string {
   return `/algorithms/${encodeURIComponent(key.algorithmId)}/${encodeURIComponent(key.version)}/${encodeURIComponent(key.backendType)}`
 }
 
 export const api = {
   health: () => requestJson<HealthResponse>('/health'),
-  algorithms: () => requestJson<AlgorithmListResponse>('/algorithms?active_only=false'),
+  algorithms: async () => normalizeAlgorithmList(await requestJson<AlgorithmListResponse>('/algorithms?active_only=false')),
   algorithm: (key: AlgorithmKey) => requestJson<AlgorithmDetailResponse>(algorithmPath(key)),
   schema: (key: AlgorithmKey, kind: 'input' | 'output') =>
     requestJson<Record<string, unknown>>(`${algorithmPath(key)}/schemas/${kind}`),

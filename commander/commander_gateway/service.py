@@ -4,12 +4,14 @@ import copy
 import hashlib
 import math
 import threading
+import time
 from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import ValidationError
 
 from commander_gateway.clients import AmosClient, CommanderClient
+from bounded_cache import BoundedLRUCache, env_positive_int, process_rss_bytes
 from commander_gateway.config import GatewayConfig
 from commander_gateway.errors import GatewayError, UpstreamError
 from commander_gateway.schemas import (
@@ -100,6 +102,15 @@ def _gateway_mission_input(snapshot: dict, chain: dict) -> dict[str, Any]:
         if isinstance(chain.get("submission_context"), dict)
         else {}
     )
+    protected_assets = stage_transfer.get("protected_assets")
+    if not isinstance(protected_assets, list):
+        protected_assets = (
+            (stage_transfer.get("supplemental_inputs") or {}).get("protected_assets")
+            if isinstance(stage_transfer.get("supplemental_inputs"), dict)
+            else []
+        )
+    if not isinstance(protected_assets, list):
+        protected_assets = []
 
     contacts = []
     for track in tracks:
@@ -228,7 +239,7 @@ def _gateway_mission_input(snapshot: dict, chain: dict) -> dict[str, Any]:
                 }
             )
     frame_times = sorted(detections_by_time)[-10:]
-    scene = {"scenario_id": scenario_id, "protected_assets": []}
+    scene = {"scenario_id": scenario_id, "protected_assets": copy.deepcopy(protected_assets)}
     perception_frames = [
         {
             "task_id": f"{scenario_id}-frame-{int(round(timestamp * 1000)):09d}",
@@ -252,7 +263,7 @@ def _gateway_mission_input(snapshot: dict, chain: dict) -> dict[str, Any]:
         ),
         "contacts": contacts,
         "friendly_platforms": friendly_platforms,
-        "protected_assets": [],
+        "protected_assets": copy.deepcopy(protected_assets),
         "perception_frames": perception_frames,
         "observations": copy.deepcopy(snapshot.get("observations") or []),
         "evidence": copy.deepcopy(stage_transfer.get("evidence_items") or []),
@@ -302,6 +313,44 @@ class GatewayService:
         self.amos = amos_client or AmosClient(config)
         self.commander = commander_client or CommanderClient(config)
         self._submit_lock = threading.RLock()
+        self._workflow_locks = [threading.RLock() for _ in range(32)]
+        self._cache_lock = threading.Lock()
+        self._projection_cache = BoundedLRUCache(
+            max_items=env_positive_int("GATEWAY_VIEW_CACHE_MAX_ITEMS", 4),
+            max_bytes=env_positive_int("GATEWAY_VIEW_CACHE_MAX_BYTES", 16 * 1024 * 1024),
+        )
+        self._terminal_projection_cache = BoundedLRUCache(
+            max_items=env_positive_int("GATEWAY_TERMINAL_CACHE_MAX_ITEMS", 12),
+            max_bytes=env_positive_int("GATEWAY_TERMINAL_CACHE_MAX_BYTES", 128 * 1024 * 1024),
+        )
+
+    def _workflow_lock(self, workflow_id: str):
+        return self._workflow_locks[hash(workflow_id) % len(self._workflow_locks)]
+
+    @staticmethod
+    def _workflow_version(brief: dict) -> tuple:
+        return tuple(brief.get(key) for key in ("status", "submitted_at", "started_at", "finished_at", "checkpoint_version"))
+
+    def _cached_projection(self, workflow_id: str, version: tuple | None):
+        if version is None:
+            return None
+        with self._cache_lock:
+            cached = self._terminal_projection_cache.get(workflow_id)
+            if cached is not None:
+                cached_version, projection = cached
+                if cached_version == version:
+                    return projection.model_copy(deep=True)
+            cached = self._projection_cache.get(workflow_id)
+            if cached is not None:
+                cached_version, cached_at, projection = cached
+                if cached_version == version and time.monotonic() - cached_at < 0.8:
+                    return projection.model_copy(deep=True)
+        return None
+
+    def _invalidate_projection(self, workflow_id: str) -> None:
+        with self._cache_lock:
+            self._projection_cache.pop(workflow_id, None)
+            self._terminal_projection_cache.pop(workflow_id, None)
 
     @staticmethod
     def _validate_provenance(payload: dict, label: str) -> None:
@@ -480,6 +529,24 @@ class GatewayService:
             ) from exc
 
     @staticmethod
+    def _has_completed_snapshot(projection: CommanderProjectionV1) -> bool:
+        """Whether the persisted terminal projection contains the full result.
+
+        Once Commander is completed, its checkpoint, work list, and trace are
+        immutable. Re-reading its multi-megabyte state for every browser,
+        Director, and verifier request wastes memory and can starve a small
+        Docker Desktop VM. A queued submission may already say completed
+        before its result has been fetched, so require resolved activities too.
+        """
+        activities = projection.result.get("activity_results")
+        return (
+            str(projection.status).lower() == "completed"
+            and bool(projection.work_list)
+            and isinstance(activities, list)
+            and bool(activities)
+        )
+
+    @staticmethod
     def _workflow_record(record: dict) -> dict:
         try:
             return StoredWorkflowRecordV1.model_validate(record).model_dump(mode="json")
@@ -534,6 +601,11 @@ class GatewayService:
                 raise exc
 
     def _finish_submission(self, workflow_id: str, upstream: dict) -> CommanderProjectionV1:
+        with self._workflow_lock(workflow_id):
+            self._invalidate_projection(workflow_id)
+            return self._finish_submission_locked(workflow_id, upstream)
+
+    def _finish_submission_locked(self, workflow_id: str, upstream: dict) -> CommanderProjectionV1:
         record = self._read_workflow(workflow_id)
         projection = self._projection(record)
         projection = projection.model_copy(
@@ -759,32 +831,49 @@ class GatewayService:
         return result
 
     def get_projection(self, workflow_id: str) -> CommanderProjectionV1:
+        # A UI refresh and Director terminal poll share the same projection.
+        # Serializing per workflow also prevents a stale query overwriting resume.
+        with self._workflow_lock(workflow_id):
+            return self._load_projection(workflow_id)
+
+    def _load_projection(self, workflow_id: str) -> CommanderProjectionV1:
         record = self._read_workflow(workflow_id)
-        upstream = self.commander.get_workflow(workflow_id)
-        try:
-            work_list = self._checkpoint_list(
-                self.commander.get_work_list(workflow_id), "work_list"
-            )
-        except UpstreamError as exc:
-            if exc.status_code != 404:
-                raise
-            work_list = []
-        try:
-            trace = self._checkpoint_list(self.commander.get_trace(workflow_id), "trace")
-        except UpstreamError as exc:
-            if exc.status_code != 404:
-                raise
-            trace = []
+        persisted = self._projection(record)
+        if self._has_completed_snapshot(persisted):
+            return persisted
+        brief_call = getattr(self.commander, "get_workflow_brief", None)
+        brief = brief_call(workflow_id) if brief_call is not None else None
+        version = self._workflow_version(brief) if isinstance(brief, dict) else None
+        cached = self._cached_projection(workflow_id, version)
+        if cached is not None:
+            return cached
+        brief_status = str(brief.get("status") or "").lower() if isinstance(brief, dict) else ""
+        if isinstance(brief, dict) and brief_status not in {"completed", "checkpoint_only"}:
+            # Queued and running projections need only status, work list, and
+            # trace. Avoid materializing the full checkpoint until completion.
+            upstream = brief
+        else:
+            upstream = self.commander.get_workflow(workflow_id)
+        checkpoint = upstream.get("checkpoint")
+        if not isinstance(checkpoint, dict) and isinstance(upstream.get("context"), dict):
+            checkpoint = upstream  # restored checkpoint after a manager restart
+        context = checkpoint.get("context") if isinstance(checkpoint, dict) else None
+        if isinstance(context, dict):
+            work_list = self._checkpoint_list(context.get("work_list", []), "work_list")
+            trace = self._checkpoint_list(context.get("trace", []), "trace")
+        else:
+            work_list = self._read_checkpoint_list(workflow_id, "work_list")
+            trace = self._read_checkpoint_list(workflow_id, "trace")
 
         result: dict[str, Any] = {}
         if str(upstream.get("status") or "").lower() == "completed":
-            try:
-                result = self._resolved_workflow_result(
-                    self.commander.get_checkpoint(workflow_id)
-                )
-            except UpstreamError as exc:
-                if exc.status_code != 404:
-                    raise
+            if not isinstance(checkpoint, dict):
+                try:
+                    checkpoint = self.commander.get_checkpoint(workflow_id)
+                except UpstreamError as exc:
+                    if exc.status_code != 404:
+                        raise
+            result = self._resolved_workflow_result(checkpoint)
 
         projection = self._projection(record)
         updated = projection.model_copy(
@@ -793,13 +882,29 @@ class GatewayService:
                 "work_list": work_list,
                 "trace": trace,
                 "result": result,
-                "updated_at": str(upstream.get("updated_at") or utc_now()),
+                "updated_at": str(upstream.get("updated_at") or upstream.get("finished_at") or utc_now()),
                 "last_error": upstream.get("last_error"),
             }
         )
         record["projection"] = updated.model_dump(mode="json")
         self.store.save_workflow(workflow_id, record)
+        same_state = isinstance(brief, dict) and (str(brief.get("status") or "").lower() == updated.status.lower() or (brief.get("status") == "checkpoint_only" and brief.get("checkpoint_version") and updated.status == "completed"))
+        if version is not None and same_state and updated.status == "completed" and bool(result):
+            with self._cache_lock:
+                self._terminal_projection_cache[workflow_id] = (version, updated.model_copy(deep=True))
+        elif version is not None and same_state:
+            with self._cache_lock:
+                self._projection_cache[workflow_id] = (version, time.monotonic(), updated.model_copy(deep=True))
         return updated
+
+    def _read_checkpoint_list(self, workflow_id: str, field: str) -> list:
+        call = self.commander.get_work_list if field == "work_list" else self.commander.get_trace
+        try:
+            return self._checkpoint_list(call(workflow_id), field)
+        except UpstreamError as exc:
+            if exc.status_code != 404:
+                raise
+            return []
 
     def get_brief(self, workflow_id: str) -> dict:
         """Status-only passthrough for fast pollers.
@@ -813,6 +918,14 @@ class GatewayService:
         if not isinstance(upstream, dict):
             raise UpstreamError("COMMANDER_INVALID_RESPONSE", "commander brief is invalid", 502, True)
         status = str(upstream.get("status") or "unknown").lower()
+        if status == "checkpoint_only":
+            # Recovered terminal workflows keep cheap lifecycle polling even
+            # after restart. File version changes invalidate this answer.
+            version = self._workflow_version(upstream)
+            with self._cache_lock:
+                cached = self._terminal_projection_cache.get(workflow_id)
+                if cached is not None and cached[0] == version and cached[1].status == "completed":
+                    status = "completed"
         return {
             "workflow_id": str(upstream.get("workflow_id") or workflow_id),
             "status": status,
@@ -821,39 +934,28 @@ class GatewayService:
         }
 
     def get_work_list(self, workflow_id: str) -> list:
-        return self._get_checkpoint_field(workflow_id, "work_list")
+        with self._workflow_lock(workflow_id):
+            return self._get_checkpoint_field(workflow_id, "work_list")
 
     def get_trace(self, workflow_id: str) -> list:
-        return self._get_checkpoint_field(workflow_id, "trace")
+        with self._workflow_lock(workflow_id):
+            return self._get_checkpoint_field(workflow_id, "trace")
 
     def _get_checkpoint_field(self, workflow_id: str, field: str) -> list:
         record = self._read_workflow(workflow_id)
-        upstream = self.commander.get_workflow(workflow_id)
-        call = (
-            self.commander.get_work_list
-            if field == "work_list"
-            else self.commander.get_trace
-        )
-        try:
-            value = self._checkpoint_list(call(workflow_id), field)
-        except UpstreamError as exc:
-            if exc.status_code != 404:
-                raise
-            value = []
-        current_projection = self._projection(record)
-        projection = current_projection.model_copy(
-            update={
-                "status": str(upstream.get("status") or current_projection.status),
-                field: value,
-                "updated_at": str(upstream.get("updated_at") or utc_now()),
-                "last_error": upstream.get("last_error"),
-            }
-        )
-        record["projection"] = projection.model_dump(mode="json")
-        self.store.save_workflow(workflow_id, record)
-        return value
+        cached = self._projection(record)
+        if self._has_completed_snapshot(cached):
+            return copy.deepcopy(getattr(cached, field))
+        # Independent list routes must not fetch the unrelated list or rewrite
+        # a partially refreshed projection over a completed one.
+        return self._read_checkpoint_list(workflow_id, field)
 
     def resume(self, workflow_id: str) -> CommanderProjectionV1:
+        with self._workflow_lock(workflow_id):
+            self._invalidate_projection(workflow_id)
+            return self._resume_locked(workflow_id)
+
+    def _resume_locked(self, workflow_id: str) -> CommanderProjectionV1:
         record = self._read_workflow(workflow_id)
         payload = copy.deepcopy(record["commander_payload"])
         payload.pop("workflow_id", None)
@@ -903,6 +1005,13 @@ class GatewayService:
         status = "ok" if healthy else "degraded"
         return (200 if healthy else 503), {
             "status": status,
-            "gateway": {"status": "ok", "single_worker_only": True},
+            "gateway": {
+                "status": "ok",
+                "single_worker_only": True,
+                "process_rss_bytes": process_rss_bytes(),
+                "view_cache": self._projection_cache.stats(),
+                "terminal_cache": self._terminal_projection_cache.stats(),
+                "retention": self.store.stats(),
+            },
             "dependencies": dependencies,
         }

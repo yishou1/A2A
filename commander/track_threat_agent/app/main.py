@@ -16,6 +16,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from a2a_protocol.messages import build_task_error_response, build_task_response
+from bounded_cache import process_rss_bytes
 
 from .a2a_runtime import A2ARuntimeState
 from .agent_model_registry import build_agent_model_registry
@@ -145,6 +146,8 @@ def health() -> Dict[str, Any]:
         "processed_task_count": runtime_snapshot["processed_task_count"],
         "failed_task_count": runtime_snapshot["failed_task_count"],
         "cached_work_item_count": runtime_snapshot["cached_work_item_count"],
+        "process_rss_bytes": process_rss_bytes(),
+        "cache": runtime.cache_metrics(),
         "current_workflow_id": runtime_snapshot["current_workflow_id"],
         "current_work_item": runtime_snapshot["current_work_item"],
         "algorithm_provider": runtime_snapshot["algorithm_provider"],
@@ -211,6 +214,8 @@ def metrics() -> Dict[str, Any]:
             "last_task_id": last_artifact.get("task_id"),
             "state_snapshot_exists": state_store.path.exists(),
             "resources": resource_monitor.snapshot(),
+            "process_rss_bytes": process_rss_bytes(),
+            "cache": runtime.cache_metrics(),
         }
     )
     return snapshot
@@ -302,6 +307,7 @@ def _agent_card_payload() -> Dict[str, Any]:
             "sendMessageEndpoint": "/sendMessage",
             "sendMessageStreamEndpoint": "/sendMessageStream",
             "workListEndpoint": "/workflows/{workflow_id}/work-list",
+            "workflowCleanupEndpoint": "/workflows/{workflow_id}/cache",
             "artifact_events": [
                 "asset.updated",
                 "asset.relationship.updated",
@@ -318,6 +324,7 @@ def _agent_card_payload() -> Dict[str, Any]:
         "sendMessageEndpoint": "/sendMessage",
         "sendMessageStreamEndpoint": "/sendMessageStream",
         "workListEndpoint": "/workflows/{workflow_id}/work-list",
+        "workflowCleanupEndpoint": "/workflows/{workflow_id}/cache",
         "healthEndpoint": "/health",
         "readyEndpoint": "/ready",
         "modelsEndpoint": "/models",
@@ -333,8 +340,8 @@ def _agent_card_payload() -> Dict[str, Any]:
         "securitySchemes": {
             "openIdConnect": {
                 "type": "openIdConnect",
-                "authorizationUrl": "http://127.0.0.1:8080/auth",
-                "tokenUrl": "http://127.0.0.1:8080/post",
+                "authorizationUrl": f"{os.getenv('A2A_AUTH_SERVER_BASE', 'http://127.0.0.1:8080').rstrip('/')}/auth",
+                "tokenUrl": f"{os.getenv('A2A_AUTH_SERVER_BASE', 'http://127.0.0.1:8080').rstrip('/')}/post",
             }
         },
         "discovery": {
@@ -921,6 +928,18 @@ def workflow_work_list(workflow_id: str) -> Dict[str, Any]:
     }
 
 
+@app.delete("/workflows/{workflow_id}/cache")
+def cleanup_workflow_cache(workflow_id: str) -> Dict[str, Any]:
+    result = runtime.cleanup_workflow(workflow_id)
+    _save_state_snapshot()
+    return {
+        "status": "ok",
+        "agent": runtime.agent_name,
+        **result,
+        "cache": runtime.cache_metrics(),
+    }
+
+
 @app.get("/state/summary")
 def state_summary() -> Dict[str, Any]:
     runtime_snapshot = runtime_status()
@@ -1323,6 +1342,9 @@ def _build_a2a_output(
         "artifact": artifact,
         "algorithm_calls": artifact.get("algorithm_calls", []),
         "algorithm_invocations": artifact.get("algorithm_invocations", []),
+        "llm_calls": (
+            ((artifact.get("trace") or {}).get("algorithm_library") or {}).get("llm_calls") or []
+        ),
         "safety_boundary": "simulation-only situation-awareness priority; no weapon control",
     }
     output_hint = task_payload.get("output_hint")
@@ -1593,6 +1615,7 @@ def _algorithm_request_summary_from_task(task_payload: Dict[str, Any]) -> Dict[s
         context = task_payload.get("context")
         scene = context.get("scene", {}) if isinstance(context, dict) else {}
     return {
+        "workflow_id": str(task_payload.get("workflow_id") or ""),
         "command": str(task_payload.get("command") or ""),
         "detection_count": len(detections) if isinstance(detections, list) else 0,
         "track_count": len(tracks) if isinstance(tracks, list) else 0,

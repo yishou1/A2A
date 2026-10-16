@@ -8,6 +8,8 @@ import json
 import sys
 from pathlib import Path
 
+import mlxtend
+
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services"))
@@ -96,6 +98,7 @@ def train(
         "model_id": "execution_rule_matcher",
         "model_version": "1.0.0",
         "model_family": "apriori_association_rule_miner",
+        "library": {"name": "mlxtend", "version": mlxtend.__version__},
         "artifact_path": str(rules_path.relative_to(ROOT)).replace("\\", "/"),
         "artifact_sha256": normalized_text_sha256(rules_path),
         "rule_count": len(rules),
@@ -118,7 +121,7 @@ def train(
         },
         "mining_parameters": mining_parameters,
         "evaluation": evaluation,
-        "runtime": {"language": "python", "external_ml_dependencies": []},
+        "runtime": {"language": "python", "external_ml_dependencies": ["pandas", "mlxtend"]},
     }
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
     metadata_path.write_text(

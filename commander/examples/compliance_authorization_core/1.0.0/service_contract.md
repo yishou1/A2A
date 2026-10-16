@@ -31,8 +31,9 @@ Output includes compliance decision, selected plan id, authorization status,
 violations with evidence IDs, risk probability, `model_runtime`,
 `rag_evidence`, and `rag_duration_ms`.
 
-The service loads `models/compliance_authorization_lr.onnx` for compliance risk calibration. If
-the model is unavailable, it falls back to the Python formula and records the reason in
-`model_runtime`.
+The core composes `compliance_risk_scorer_onnx:1.0.0` for risk calibration.
+The model lives in its own algorithm package. If the package or runtime is
+unavailable, the adapter uses the deterministic formula and records the reason
+in `model_runtime`.
 
 Port: `9037`

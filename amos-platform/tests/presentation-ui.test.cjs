@@ -74,6 +74,72 @@ test('carrier scenario resources use dedicated offline tactical symbols', () => 
   }
 });
 
+test('live weapons use distinct cruise, air-ground and one-way symbols', () => {
+  const {window} = load('map/tactical-symbols.js');
+  const symbols = window.TacticalSymbols;
+  assert.equal(symbols.weaponKind({type:'SIM-LACM-01', weapon_type:'舰载对陆巡航导弹'}), 'cruiseMissile');
+  assert.equal(symbols.weaponKind({type:'SIM-CARRIER-AGM-01', weapon_type:'舰载无人机空地导弹'}), 'airGroundMissile');
+  assert.equal(symbols.weaponKind({type:'SIM-ONEWAY-UAV-01', weapon_type:'自杀式无人机战斗部'}), 'oneWayWeapon');
+  assert.notEqual(symbols.svg('cruiseMissile', 0), symbols.svg('airGroundMissile', 0));
+  assert.notEqual(symbols.svg('airGroundMissile', 0), symbols.svg('oneWayWeapon', 0));
+  for (const kind of ['cruiseMissile', 'airGroundMissile', 'oneWayWeapon']) {
+    assert.equal(symbols.affiliation(kind), 'friendly');
+    assert.match(symbols.svg(kind, 25), /symbol-body/);
+  }
+});
+
+test('authorization deferral re-prompts without sending a rejection command', () => {
+  const source = readFileSync(resolve(__dirname, '../static/js/app/platform.js'), 'utf8');
+  assert.match(source, /AUTHORIZATION_REMINDER_MS = 15000/);
+  assert.match(source, /function deferAuthorizationDialog\(\)/);
+  assert.match(source, /authorizationDeferredKey = authorizationPromptKey/);
+  assert.match(source, /Date\.now\(\) < authorizationDeferredUntil/);
+  assert.match(source, /仿真已暂停在阶段边界；稍后决定将再次提示/);
+  assert.match(source, /authorization-cancel"\)\.addEventListener\("click", deferAuthorizationDialog\)/);
+  const deferBody = source.slice(
+    source.indexOf('function deferAuthorizationDialog()'),
+    source.indexOf('function showAuthorizationDialog(')
+  );
+  assert.doesNotMatch(deferBody, /issueSimCommand|approved:\s*false|command_type:\s*["']reject/);
+});
+
+test('map uses displayed asset kinds for trails and separates coordinated impacts', () => {
+  const source = readFileSync(resolve(__dirname, '../static/js/map/platform-map.js'), 'utf8');
+  assert.match(source, /function ownTrailStyle\(asset\) \{\s*var kind = displayedOwnKind\(asset\)/);
+  assert.match(source, /function weaponImpactGroupKey\(weapon\)/);
+  assert.match(source, /协同 ['"] \+\s*\(index \+ 1\) \+ "\/" \+ count/);
+  assert.match(source, /kind: weaponKind\(weapon\)/);
+});
+
+test('destroyed contacts preserve their target type instead of becoming ship wrecks', () => {
+  const {window} = load('map/tactical-symbols.js');
+  const symbols = window.TacticalSymbols;
+  const destroyed = {agent_assessment:{damage_state:'destroyed', status:'confirmed', level:'high'}};
+  assert.equal(symbols.trackKind({...destroyed, classification:'AIRFIELD_RUNWAY', domain:'ground'}), 'destroyedRunway');
+  assert.equal(symbols.trackKind({...destroyed, classification:'MOBILE_COASTAL_AIR_DEFENSE', domain:'ground'}), 'destroyedRadarVehicle');
+  assert.equal(symbols.trackKind({...destroyed, classification:'UNKNOWN', domain:'air'}), 'destroyedAir');
+  assert.equal(symbols.trackKind({agent_assessment:{damage_state:'impact_pending'}, classification:'AIRFIELD_RUNWAY', domain:'ground'}), 'impactRunway');
+  assert.equal(symbols.trackKind({agent_assessment:{}, classification:'CIVILIAN_PORT', domain:'ground'}), 'civilianGround');
+  assert.equal(symbols.affiliation('destroyedRunway'), 'destroyed');
+  assert.equal(symbols.affiliation('impactRadarVehicle'), 'impact');
+  assert.match(symbols.svg('destroyedRunway', 20), /damage-overlay/);
+  assert.match(symbols.svg('impactRadarVehicle', 20), /impact-overlay/);
+  assert.match(symbols.svg('destroyedRunway', 20), /M28 9v8/);
+  assert.doesNotMatch(symbols.svg('destroyedRunway', 20), /q7 3 14 0t14 0/);
+});
+
+test('backend-cleared fishing contacts keep civilian symbols without AIS', () => {
+  const {window} = load('map/tactical-symbols.js');
+  const symbols = window.TacticalSymbols;
+  const fishing = {
+    classification: 'FISHING_VESSEL', domain: 'maritime', ais_match: false,
+    agent_assessment: {source: 'A2A 后端工作流', status: 'cleared', level: 'LOW', label: '低风险'},
+  };
+  assert.equal(symbols.trackKind(fishing), 'civilianSurface');
+  assert.equal(symbols.trackKind({...fishing, agent_assessment: {}}), 'unknownSurface');
+  assert.equal(symbols.trackKind({...fishing, agent_assessment: {...fishing.agent_assessment, damage_state: 'destroyed'}}), 'destroyedSurface');
+});
+
 test('new land-target classifications use operator-facing Chinese labels', () => {
   const {window} = load('panels/platform-panels.js');
   const assessed = {agent_assessment:{source:'backend'}};

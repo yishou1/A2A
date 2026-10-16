@@ -84,3 +84,8 @@ desktop.ini
 models/checkpoints/battlefield_rtdetr*.pt
 models/battlefield_rtdetr.onnx
 examples/battlefield_rtdetr_detector_onnx/1.0.0/model.onnx
+
+runtime-data/
+.venv-synapse/
+*.sqlite3-shm
+*.sqlite3-wal

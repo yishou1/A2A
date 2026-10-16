@@ -5,13 +5,44 @@ from __future__ import annotations
 from typing import Any
 
 
+def _event_target_refs(engine: Any, event: dict[str, Any]) -> set[str]:
+    """Resolve the scenario target(s) affected by an execution event.
+
+    New events carry ``target_threat_id`` directly.  The fallbacks keep state
+    projection compatible with recordings created before that field was
+    added to damage-assessment and authorization events.
+    """
+    refs = {
+        str(event.get(key))
+        for key in ("target_threat_id", "target_ref")
+        if event.get(key)
+    }
+    track_ids = {
+        str(value)
+        for value in [event.get("target_track_id"), *(event.get("target_track_ids") or [])]
+        if value
+    }
+    for track_id in track_ids:
+        track = getattr(engine.sensor_fusion, "tracks", {}).get(track_id)
+        truth_ref = engine._truth_target_for_track(track) if track is not None else None
+        if truth_ref:
+            refs.add(str(truth_ref))
+    weapon_ids = {
+        str(value)
+        for value in [event.get("weapon_id"), *(event.get("weapon_ids") or [])]
+        if value
+    }
+    for weapon_id in weapon_ids:
+        weapon = getattr(engine, "weapons", {}).get(weapon_id) or {}
+        if weapon.get("target_threat_id"):
+            refs.add(str(weapon["target_threat_id"]))
+    return refs
+
+
 def _coordination_links(engine: Any, tracks: dict[str, dict[str, Any]], topology: dict[str, Any]) -> list[dict[str, Any]]:
     """Project only currently active, operator-safe coordination endpoints."""
     elapsed = float(engine.clock.get("elapsed_sec", 0) or 0)
     events = [item for item in engine.events if isinstance(item, dict)]
-    has_authorized_fire = any(item.get("type") == "authorized_fire_command" for item in events)
-    has_impact = any(item.get("type") == "weapon_hit" for item in events)
-    has_assessment = any(item.get("type") == "damage_assessment_confirmed" for item in events)
     network_quality = {
         frozenset((str(item.get("from") or ""), str(item.get("to") or ""))): float(item.get("quality", 0) or 0)
         for item in topology.get("link_records") or []
@@ -47,8 +78,22 @@ def _coordination_links(engine: Any, tracks: dict[str, dict[str, Any]], topology
             target_position = target_track or {}
         link_type = str(raw.get("link_type") or "coordination")
         if link_type == "weapon":
+            target_ref = str(raw.get("target_ref") or "")
+            target_events = (
+                [event for event in events if target_ref in _event_target_refs(engine, event)]
+                if target_ref else events
+            )
+            has_authorized_fire = any(
+                item.get("type") == "authorized_fire_command" for item in target_events
+            )
+            has_impact = any(item.get("type") == "weapon_hit" for item in target_events)
+            has_assessment = any(
+                item.get("type") == "damage_assessment_confirmed" for item in target_events
+            )
             status = "complete" if has_assessment else (
-                "effect_pending" if has_impact else ("executing" if has_authorized_fire else "ready")
+                "effect_pending" if has_impact else (
+                    "executing" if has_authorized_fire else "ready"
+                )
             )
         else:
             endpoint_statuses = {
@@ -185,6 +230,7 @@ def build_internal_state(engine: Any) -> dict:
             "category": weapon.get("category", ""),
             "domain": weapon.get("domain", "air"),
             "position": {"lat": weapon.get("lat", 0), "lng": weapon.get("lng", 0)},
+            "launch_position": dict(weapon.get("launch_position") or {}),
             "heading": weapon.get("heading", 0),
             "speed_kts": weapon.get("speed_kts", 0),
             "source_asset_id": weapon.get("source_asset_id"),

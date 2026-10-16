@@ -141,8 +141,8 @@ M 类状态是类别级结论。例如 M15 由 `multimodal_mamba_fusion` 完成�
 - M06/M14 ONNX 相对源 PyTorch checkpoint 的最大绝对误差分别为 1.20e-7 和 3.82e-6。
 - M15/M20 ONNX 相对源 PyTorch checkpoint 的最大绝对误差分别为 5.97e-8 和 7.63e-6。
 - M08/M13 ONNX 相对源 PyTorch artifact/checkpoint 的最大绝对误差分别为 1.20e-7 和 1.44e-6。
-- 全量 `tests/python` 当前受合并后缺失的 `decision_agents.common.schemas` 与
-  `decision_agents.compliance_authorization.local_algorithm` 模块阻塞于收集阶段；该问题不在本次 ONNX 包内。
+- 决策支持公共契约、规则、RAG 和流程已迁移至 `decision_support`，算法库 core
+  不再反向导入 `decision_agents` 业务实现；独立能力包通过 core 组合调用。
 - C++ CTest：1/1 通过。
 - TIA Mock：11/11 可用。
 - TIA Real：6/11 可用；M15 `multimodal_mamba_fusion` 已进入真实通过集合，其余失败项主要是

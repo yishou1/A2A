@@ -832,7 +832,8 @@ class MediaCaptureRuntime:
 
     def evaluate(self, engine: Any) -> list[dict[str, Any]]:
         """Capture every newly satisfied due plan and inject its media refs."""
-        elapsed = _number(engine.clock.get("elapsed_sec"))
+        elapsed = _number(engine.clock.get("scenario_elapsed_sec", engine.clock.get("elapsed_sec")))
+        capture_sim_time = _number(engine.clock.get("elapsed_sec"))
         branch = str(engine.clock.get("scenario_branch") or self._default_branch)
         batch = engine.sensor_fusion.last_observation_batch
         tracks = engine.sensor_fusion.tracks
@@ -884,6 +885,20 @@ class MediaCaptureRuntime:
                 if value
             }
             if required_hit_targets - hit_target_ids:
+                continue
+            assessed_target_ids = {
+                str(event.get("target_threat_id") or event.get("target_ref") or "")
+                for event in engine.events
+                if isinstance(event, dict)
+                and event.get("type") == "damage_assessment_confirmed"
+                and (event.get("target_threat_id") or event.get("target_ref"))
+            }
+            required_assessed_targets = {
+                str(value)
+                for value in parameters.get("required_damage_assessment_target_ids") or []
+                if value
+            }
+            if required_assessed_targets - assessed_target_ids:
                 continue
             if not self._task_ready(plan, engine.tasks, elapsed, branch):
                 continue
@@ -953,7 +968,7 @@ class MediaCaptureRuntime:
             record = self._freeze_capture(
                 plan,
                 cue,
-                elapsed=elapsed,
+                elapsed=capture_sim_time,
                 tick_id=int(batch.get("tick_id", 0) or 0),
                 run_id=str(engine.clock.get("run_id") or ""),
                 platform=platform if product_type in {"sensor", "derived"} else None,

@@ -2,6 +2,7 @@ import os
 import tempfile
 import time
 import unittest
+from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,8 +11,9 @@ import requests
 from bpel_workflow import BPELWorkflowCatalog
 from commander_agent.agent_leases import AgentLeaseManager
 from commander_agent.main import CommanderAgent
+from commander_gateway.service import GatewayService
 from decision_agents.common.a2a_payloads import build_agent_request_payload
-from decision_agents.common.schemas import AgentRequest
+from decision_support.schemas import AgentRequest
 from protocol_contracts import ContractValidationError
 from scripts.demo_bpel_workflows import main as demo_bpel_workflows_main
 
@@ -111,6 +113,8 @@ class BPELWorkflowTest(unittest.TestCase):
                 "task_scheduling", "decision_planning", "compliance_authorization",
             ],
             "act_workflow.bpel": ["simulation_execution", "closed_loop"],
+            "engage_workflow.bpel": ["simulation_execution"],
+            "assess_workflow.bpel": ["closed_loop"],
         }
 
         for filename, roles in expected.items():
@@ -245,6 +249,75 @@ class BPELWorkflowTest(unittest.TestCase):
             self.assertEqual(activity["algorithm_invocations"], [invocation])
             self.assertNotIn("tracking_result", activity["algorithm_invocations"][0])
 
+    def test_completed_workflow_projects_track_and_act_llm_calls(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workflow_id = "wf-business-llm-audit"
+            commander = CommanderAgent(
+                mode="local", workflow_id=workflow_id, state_dir=temp_dir,
+            )
+            context = commander.initial_workflow_context()
+            track_call = {
+                "workflow_id": workflow_id,
+                "llm_call_id": "llm-track-1",
+                "agent": "track_threat",
+                "status": "success",
+                "model": "qwen3:1.7b",
+            }
+            act_call = {
+                "workflow_id": workflow_id,
+                "llm_call_id": "llm-act-1",
+                "agent": "algolib_bridge",
+                "status": "success",
+                "model": "qwen3:1.7b",
+            }
+            context["work_list"] = [
+                {
+                    "activity_id": "A-TRACK",
+                    "work_item": f"{workflow_id}:A-TRACK",
+                    "role": "track_threat",
+                    "status": "completed",
+                },
+                {
+                    "activity_id": "A-ACT",
+                    "work_item": f"{workflow_id}:A-ACT",
+                    "role": "simulation_execution",
+                    "status": "completed",
+                },
+            ]
+            track_result = {"tracks": [{"track_id": "TRK-1"}]}
+            act_result = {"output_data": {"commands": [{"action": "simulate"}]}}
+            context["tracking_result"] = [commander._make_context_entry(track_result)]
+            context["execution_simulation_result"] = [commander._make_context_entry(act_result)]
+            context["agent_results"] = {
+                f"{workflow_id}:A-TRACK": {
+                    "agent": "TrackThreatAgent",
+                    "output": {
+                        "tracking_result": track_result,
+                        "llm_calls": [track_call],
+                        "artifact": {"trace": {"algorithm_library": {"llm_calls": [track_call]}}},
+                    },
+                },
+                f"{workflow_id}:A-ACT": {
+                    "agent": "ExecutionControlAgent",
+                    "output": {
+                        "execution_simulation_result": act_result,
+                        "llm_calls": [act_call],
+                    },
+                },
+            }
+            context["workflow_result"] = commander._build_workflow_result(context)
+            commander._save_workflow_checkpoint(context, status="completed")
+
+            checkpoint = commander.state_store.load(workflow_id)
+            self.assertEqual(checkpoint["context"]["agent_results"], {})
+            projection_result = GatewayService._resolved_workflow_result(checkpoint)
+            activities = {
+                row["activity_id"]: row
+                for row in projection_result["activity_results"]
+            }
+            self.assertEqual(activities["A-TRACK"]["llm_calls"], [track_call])
+            self.assertEqual(activities["A-ACT"]["llm_calls"], [act_call])
+
     def test_workflow_result_promotes_nested_act_algorithm_invocations(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             commander = CommanderAgent(
@@ -325,6 +398,112 @@ class BPELWorkflowTest(unittest.TestCase):
                 "closed_loop_decision_advisor",
             )
             self.assertEqual(activities["closed_loop"]["algorithm_invocations"][0]["duration_ms"], 11.0)
+
+    def test_large_runtime_evidence_is_summarized_and_aliases_are_deduplicated(self):
+        large_input = {"history": ["track-state"] * 5000}
+        invocation = {
+            "algorithm_id": "mission_feature_adapter",
+            "request_id": "REQ-LARGE",
+            "input": large_input,
+            "inputs": deepcopy(large_input),
+            "output": {"score": 0.9},
+            "outputs": {"score": 0.9},
+            "duration_ms": 4.0,
+        }
+        upstream_invocation = {
+            "algorithm_id": "upstream-only",
+            "request_id": "REQ-UPSTREAM",
+        }
+        invocation["input"]["algorithm_invocations"] = [upstream_invocation]
+        invocation["inputs"] = deepcopy(invocation["input"])
+        output = {
+            "algorithm_invocations": [invocation],
+            "algorithm_calls": [deepcopy(invocation)],
+        }
+
+        records = CommanderAgent._runtime_records_from_output(output)
+
+        self.assertEqual(list(records), ["algorithm_invocations"])
+        self.assertEqual(len(records["algorithm_invocations"]), 1)
+        compact = records["algorithm_invocations"][0]
+        self.assertEqual(compact["algorithm_id"], "mission_feature_adapter")
+        self.assertNotIn("input", compact)
+        self.assertNotIn("inputs", compact)
+        self.assertNotIn("outputs", compact)
+        self.assertIn("input_summary", compact)
+        self.assertEqual(compact["output"], {"score": 0.9})
+
+    def test_large_activity_request_keeps_summary_instead_of_raw_input(self):
+        snapshot = CommanderAgent._task_request_snapshot({
+            "command": "closed_loop_optimization",
+            "input": {"history": ["state"] * 5000},
+        })
+
+        self.assertNotIn("input", snapshot)
+        self.assertGreater(snapshot["input_size_bytes"], 16 * 1024)
+        self.assertEqual(len(snapshot["input_sha256"]), 64)
+        self.assertEqual(snapshot["input_summary"]["type"], "dict")
+        self.assertEqual(snapshot["input_preview"]["history"][:2], ["state", "state"])
+        self.assertEqual(snapshot["input_preview"]["history"][2], {"_truncated_item_count": 4998})
+        self.assertLessEqual(len(CommanderAgent._evidence_bytes(snapshot["input_preview"])), 8 * 1024)
+
+    def test_large_simulation_request_keeps_displayable_input_in_workflow_result(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            commander = CommanderAgent(mode="local", workflow="bpel",
+                workflow_file="integrated_system/workflows/act_workflow.bpel",
+                workflow_id="wf-preview", state_dir=temp_dir)
+            context = commander.initial_workflow_context()
+            context["work_list"] = [{"activity_id": "A-SIM", "work_item": "simulate",
+                                     "role": "simulation_execution", "status": "completed"}]
+            payload = {"command": "simulate_execution_control", "input": {
+                "phase": "strike", "results": {"compliance_authorization": {"decision": "approved"}},
+                "context": {"history": ["state"] * 5000},
+            }}
+            commander.workflow_context = context
+            commander._remember_task_response("simulate", {"status": "completed", "output": {}},
+                role="simulation_execution", target="test", request_payload=payload)
+            row = commander._build_workflow_result(context)["activity_results"][0]
+            self.assertNotIn("input", row)
+            self.assertEqual(row["input_preview"]["phase"], "strike")
+            self.assertEqual(row["input_preview"]["results"], payload["input"]["results"])
+            self.assertNotIn("input_preview", row["request"])
+
+    def test_large_request_preview_stays_bounded_with_many_nested_fields(self):
+        huge = {str(i): {str(j): "x" * 1000 for j in range(8)} for i in range(20)}
+        snapshot = CommanderAgent._task_request_snapshot({"input": huge})
+        self.assertNotIn("input", snapshot)
+        self.assertLessEqual(len(CommanderAgent._evidence_bytes(snapshot["input_preview"])), 8 * 1024)
+        self.assertEqual(snapshot["input_preview"]["_truncated_field_count"], 12)
+
+    def test_terminal_context_drops_value_output_and_runtime_alias_duplicates(self):
+        value = {"output_data": {"blob": "x" * 20_000}}
+        context = {
+            "workflow_status": "completed",
+            "effect_evaluation_result": [{
+                "value": value,
+                "output": {"effect_evaluation_result": deepcopy(value)},
+            }],
+            "algorithm_invocations": [{
+                "algorithm_id": "closed_loop_decision_advisor",
+                "input": {"blob": "y" * 20_000},
+                "inputs": {"blob": "y" * 20_000},
+                "output": {"action": "monitor"},
+                "outputs": {"action": "monitor"},
+            }],
+            "algorithm_calls": [{
+                "algorithm_id": "closed_loop_decision_advisor",
+            }],
+        }
+
+        compact = CommanderAgent._compact_terminal_evidence(context)
+        entry = compact["effect_evaluation_result"][0]
+        invocation = compact["algorithm_invocations"][0]
+        self.assertNotIn("output", entry)
+        self.assertEqual(entry["output_ref"], "value")
+        self.assertNotIn("algorithm_calls", compact)
+        self.assertNotIn("input", invocation)
+        self.assertNotIn("inputs", invocation)
+        self.assertNotIn("outputs", invocation)
 
     def test_decide_phase_builds_valid_planning_and_compliance_contracts(self):
         with tempfile.TemporaryDirectory() as temp_dir:

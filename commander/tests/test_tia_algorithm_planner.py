@@ -9,7 +9,10 @@ from unittest.mock import patch
 
 from agent.algorithm_library.catalog import TIA_DEFAULT_PIPELINE, TIA_REQUIRED_ALGORITHMS
 from agent.algorithm_library.planner_runtime import (
+    AlgorithmCall,
     AlgorithmPlannerError,
+    _ensure_required_and_order,
+    _normalize_and_validate_calls,
     plan_algorithms,
     resolve_planner_mode,
 )
@@ -188,6 +191,78 @@ class PlannerRuntimeTest(unittest.TestCase):
         # 顺序：感知必选在前
         ids = [c.algorithm_id for c in plan.algorithm_calls]
         self.assertLess(ids.index("battlefield_rtdetr_detector"), ids.index("knowledge_semantic_comm"))
+
+    def test_strict_llm_rejects_missing_required_algorithm(self):
+        with patch.dict(os.environ, {"A2A_LLM_STRICT": "true"}):
+            with self.assertRaisesRegex(AlgorithmPlannerError, "omitted required TIA algorithm"):
+                _ensure_required_and_order(
+                    [AlgorithmCall(algorithm_id="knowledge_semantic_comm", version="1.0.0")],
+                    active_by_id={aid: {"version": "1.0.0"} for aid in TIA_REQUIRED_ALGORITHMS},
+                )
+
+    def test_strict_llm_retries_invalid_plan_with_new_audited_call(self):
+        class SequenceLLM:
+            last_response_model = "qwen3:1.7b"
+
+            def __init__(self):
+                self.prompts = []
+
+            def chat_json(self, *, system_prompt, user_prompt):
+                self.prompts.append(user_prompt)
+                ids = ["battlefield_rtdetr_detector", "edl_evidential_verifier"]
+                if len(self.prompts) == 2:
+                    ids.append("motr_neural_kalman_tracker")
+                return {
+                    "intent": "minimal perception",
+                    "algorithm_calls": [
+                        {"algorithm_id": aid, "version": "1.0.0", "backend_type": "python_http_service"}
+                        for aid in ids
+                    ],
+                }
+
+        catalog = [
+            {"algorithm_id": aid, "version": "1.0.0", "backend_type": "python_http_service"}
+            for aid in TIA_REQUIRED_ALGORITHMS
+        ]
+        fake = SequenceLLM()
+        audits = []
+
+        def capture_audit(**fields):
+            audits.append(fields)
+            return {"llm_call_id": fields["llm_call_id"], "status": "success" if fields["success"] else "failed"}
+
+        with patch.dict(os.environ, {
+            "A2A_LLM_STRICT": "true", "ENABLE_LLM": "true", "TIA_PLAN_VALIDATION_RETRIES": "1",
+            "TOOL_LLM_NAME": "qwen3:1.7b", "LLM_PROVIDER": "openai_compatible",
+        }):
+            with patch("agent.algorithm_library.planner_runtime._load_active_catalog", return_value=(
+                catalog, {row["algorithm_id"]: row for row in catalog}, "algolib:/algorithms",
+            )):
+                with patch("agent.algorithm_library.planner_runtime.record_llm_call", side_effect=capture_audit):
+                    plan = plan_algorithms(_batch(), llm_client=fake)
+
+        self.assertEqual(len(fake.prompts), 2)
+        self.assertIn("motr_neural_kalman_tracker", fake.prompts[1])
+        self.assertEqual([row["success"] for row in audits], [False, True])
+        self.assertNotEqual(audits[0]["llm_call_id"], audits[1]["llm_call_id"])
+        self.assertEqual(plan.llm_call["llm_call_id"], audits[1]["llm_call_id"])
+        self.assertEqual(
+            [row["algorithm_id"] for row in plan.raw_llm_plan["algorithm_calls"]],
+            [aid for aid in TIA_DEFAULT_PIPELINE if aid in TIA_REQUIRED_ALGORITHMS],
+        )
+        self.assertFalse(plan.fallback_reason)
+
+    def test_strict_llm_rejects_missing_algorithm_identity(self):
+        with patch.dict(os.environ, {"A2A_LLM_STRICT": "true"}):
+            with self.assertRaisesRegex(AlgorithmPlannerError, "lacks version or backend_type"):
+                _normalize_and_validate_calls(
+                    {"algorithm_calls": [{"algorithm_id": "battlefield_rtdetr_detector"}]},
+                    active_by_id={
+                        "battlefield_rtdetr_detector": {
+                            "version": "1.0.0", "backend_type": "python_http_service"
+                        }
+                    },
+                )
 
     def test_llm_failure_falls_back_to_fixed(self):
         from tactical_intelligence_agent.llm.client import LLMClientError

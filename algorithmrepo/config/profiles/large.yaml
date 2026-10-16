@@ -5,7 +5,7 @@ param_tier: high
 
 inference:
   param_tier: high
-  detection_model: models/checkpoints/battlefield_rtdetr_unit17_coco25_ap_kaggle_best.pt
+  detection_model: models/checkpoints/battlefield_rtdetr.pt
   detection_imgsz: 1280
   detection_half: false
   odconv_enable: true

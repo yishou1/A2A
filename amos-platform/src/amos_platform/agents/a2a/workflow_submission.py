@@ -8,7 +8,7 @@ or run/chain checks.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from amos_platform.agents.a2a.workflow_run_store import get_workflow_run_store
 from amos_platform.agents.a2a.workflow_view import build_submission_snapshot
@@ -54,6 +54,7 @@ def submit_current_workflow(
     bridge: Any,
     scenario_support: dict[str, Any],
     run_manifest_store: Any | None = None,
+    on_snapshot_captured: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """Freeze the active causal state and submit it through the real backend."""
     if data.get("sim_context") is False:
@@ -121,6 +122,11 @@ def submit_current_workflow(
         raise
     except ValueError as exc:
         raise WorkflowSubmissionError(400, str(exc)) from exc
+
+    # The immutable input is ready. The Director may now advance story time
+    # while gateway submission and package verification finish.
+    if on_snapshot_captured is not None:
+        on_snapshot_captured()
 
     result = bridge.submit_workflow(backend_payload)
     workflow_id = str(result.get("workflow_id") or "")

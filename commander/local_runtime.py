@@ -889,7 +889,10 @@ class LocalAgentRuntime:
             structured, _message = execute_artillery_command(payload)
             value = structured
         elif role == "evaluator":
-            value = int(payload.get("input", {}).get("mock_eval_score", 40))
+            if payload.get("input", {}).get("mock_eval_score") is None:
+                value = {"assessment_status": "insufficient_data", "missing_fields": ["mock_eval_score"]}
+            else:
+                value = int(payload.get("input", {}).get("mock_eval_score"))
         elif role == "assault":
             from assault_agent.main import execute_assault_command
 

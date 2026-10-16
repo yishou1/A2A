@@ -128,6 +128,11 @@ def _wrap_planner_outputs(
         "situation": outputs.get("situation") or {},
         "matched_items": outputs.get("matched_items") or [],
         "commands": list(outputs.get("commands") or []),
+        "proposed_commands": list(outputs.get("proposed_commands") or []),
+        "assessment_status": outputs.get("assessment_status"),
+        "execution_mode": outputs.get("execution_mode"),
+        "execution_blocked": bool(outputs.get("execution_blocked")),
+        "authorization": deepcopy(outputs.get("authorization") or {}),
         "tracks": list(outputs.get("tracks") or []),
         "coordination": outputs.get("coordination") or {"groups": []},
         "latency_ms": latency_ms,
@@ -195,7 +200,7 @@ def run_execution_control_via_algolib(arguments: dict) -> dict:
             inputs=inputs,
             params=params,
             request_id=request_id,
-            trace_id=request_id,
+            trace_id=str(arguments.get("workflow_id") or request_id),
             task="execution_control",
         )
         outputs = dict(outputs)
@@ -231,6 +236,25 @@ def run_execution_control_via_algolib(arguments: dict) -> dict:
         raise AlgorithmLibraryError(
             f"execution_control_planner contract failed: {','.join(hard_failures)}"
         )
+    mission_input = context.get("mission_input") if isinstance(context.get("mission_input"), dict) else {}
+    stage = mission_input.get("stage_transfer") if isinstance(mission_input.get("stage_transfer"), dict) else {}
+    supplemental = stage.get("supplemental_inputs") if isinstance(stage.get("supplemental_inputs"), dict) else {}
+    authorization = supplemental.get("operator_authorization") or context.get("authorization") or {}
+    if isinstance(authorization, dict) and authorization:
+        decision = str(authorization.get("status") or authorization.get("decision") or "").strip().lower()
+        blocked = decision in {"pending_review", "review_required", "blocked", "denied"}
+        if decision:
+            outputs["authorization"] = {
+                "decision": decision,
+                "approved_for_demo_handoff": decision == "approved",
+                "execution_blocked": blocked,
+            }
+            outputs["execution_mode"] = "simulation"
+            if blocked:
+                outputs["proposed_commands"] = deepcopy(outputs["commands"])
+                outputs["commands"] = []
+                outputs["assessment_status"] = "awaiting_authorization"
+                outputs["execution_blocked"] = True
     return _wrap_planner_outputs(arguments, outputs, warnings=contract_problems, invocation=invocation)
 
 

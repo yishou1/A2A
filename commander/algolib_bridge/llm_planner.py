@@ -2,13 +2,16 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import time
 from typing import Any, Optional, Sequence
 
 import requests
 
 from algolib_bridge.client import AlgorithmRunCall
 from algolib_bridge.config import AlgolibSettings
+from llm.audit import strict_llm_required
 
 
 class AlgolibLLMPlannerError(RuntimeError):
@@ -27,8 +30,13 @@ class OpenAICompatiblePlannerClient:
         if not settings.llm_api_key:
             raise AlgolibLLMPlannerError("AZURE_OPENAI_API_KEY or ALGOLIB_LLM_API_KEY is required.")
         self.settings = settings
+        self.last_response_model = ""
 
     def chat_json(self, *, system_prompt: str, user_prompt: str) -> dict[str, Any]:
+        # Qwen3 otherwise spends the entire CPU request budget generating
+        # reasoning for a small algorithm-selection JSON object.
+        if self.settings.llm_model.lower().startswith("qwen3:") and not self._is_azure_provider():
+            user_prompt = f"{user_prompt}\n/no_think"
         payload = {
             "model": self.settings.llm_model,
             "messages": [
@@ -38,17 +46,39 @@ class OpenAICompatiblePlannerClient:
             "temperature": self.settings.llm_temperature,
             "response_format": {"type": "json_object"},
         }
+        token_limit = os.environ.get("LLM_MAX_TOKENS", "").strip()
+        if token_limit:
+            payload["max_tokens"] = max(1, int(token_limit))
+        effort = os.environ.get("LLM_REASONING_EFFORT", "").strip()
+        if effort and not self._is_azure_provider():
+            payload["reasoning_effort"] = effort
         url, headers = self._request_target()
         try:
-            response = requests.post(
-                url,
-                headers=headers,
-                json=payload,
-                timeout=self.settings.llm_timeout_seconds,
-            )
+            connect_retries = max(0, int(os.environ.get("ALGOLIB_LLM_CONNECT_RETRIES", "2")))
+            for attempt in range(connect_retries + 1):
+                try:
+                    response = requests.post(
+                        url,
+                        headers=headers,
+                        json=payload,
+                        timeout=self.settings.llm_timeout_seconds,
+                    )
+                    break
+                except requests.ConnectionError:
+                    if attempt >= connect_retries:
+                        raise
+                    time.sleep(0.25 * (attempt + 1))
             response.raise_for_status()
             data = response.json()
+            self.last_response_model = str(data.get("model") or "")
+            if strict_llm_required() and self.last_response_model != self.settings.llm_model:
+                raise AlgolibLLMPlannerError(
+                    f"LLM response model mismatch: expected {self.settings.llm_model}, "
+                    f"got {self.last_response_model or '<missing>'}."
+                )
             content = data["choices"][0]["message"]["content"]
+        except AlgolibLLMPlannerError:
+            raise
         except (requests.RequestException, ValueError, KeyError, IndexError, TypeError) as exc:
             raise AlgolibLLMPlannerError(f"LLM request failed: {exc}") from exc
         return _loads_json_object(content)
@@ -116,6 +146,7 @@ def plan_algorithm_call(
     calls = payload.get("algorithm_calls")
     if not isinstance(calls, list) or not calls or not isinstance(calls[0], dict):
         raise AlgolibLLMPlannerError("LLM plan did not include algorithm_calls[0].")
+    _require_llm_identity(calls[0], index=0)
     raw_call = {
         **calls[0],
         "inputs": inputs,
@@ -124,7 +155,11 @@ def plan_algorithm_call(
     call = _normalize_and_validate(raw_call, active, allowed)
     plan = {
         **payload,
+        "raw_llm_plan": dict(payload),
         "algorithm_calls": [{**raw_call, "inputs": {"_source": "caller_structured_inputs"}}],
+        "mode": "llm",
+        "fallback_reason": "",
+        "response_model": str(getattr(planner, "last_response_model", "") or ""),
     }
     return call, plan
 
@@ -184,13 +219,19 @@ def plan_algorithm_calls(
     raw_calls = payload.get("algorithm_calls")
     if not isinstance(raw_calls, list) or not raw_calls:
         raise AlgolibLLMPlannerError("LLM plan did not include algorithm_calls.")
+    if strict_llm_required() and len(raw_calls) != len(call_specs):
+        raise AlgolibLLMPlannerError("LLM stage plan must contain one call per requested task.")
 
     calls: list[AlgorithmRunCall] = []
     normalized_plan_calls: list[dict[str, Any]] = []
+    fallback_reasons: list[str] = []
     for index, spec in enumerate(call_specs):
         default_algorithm_id = str(spec.get("default_algorithm_id") or "")
         algorithm = _require_active(default_algorithm_id, active)
         raw_item = raw_calls[index] if index < len(raw_calls) and isinstance(raw_calls[index], dict) else {}
+        if strict_llm_required() and not raw_item:
+            raise AlgolibLLMPlannerError(f"LLM stage call {index} is missing or invalid.")
+        _require_llm_identity(raw_item, index=index)
         raw_call = {
             **raw_item,
             "task": str(raw_item.get("task") or spec.get("task") or f"task-{index}"),
@@ -204,6 +245,9 @@ def plan_algorithm_calls(
         try:
             call = _normalize_and_validate(raw_call, active, {default_algorithm_id})
         except AlgolibLLMPlannerError as exc:
+            if strict_llm_required():
+                raise
+            fallback_reasons.append(f"task {index}: {exc}")
             raw_call = {
                 "task": str(spec.get("task") or task),
                 "algorithm_id": default_algorithm_id,
@@ -219,9 +263,12 @@ def plan_algorithm_calls(
 
     plan = {
         **payload,
+        "raw_llm_plan": dict(payload),
         "task": task,
         "algorithm_calls": normalized_plan_calls,
-        "mode": "llm",
+        "mode": "fallback" if fallback_reasons else "llm",
+        "fallback_reason": "; ".join(fallback_reasons),
+        "response_model": str(getattr(planner, "last_response_model", "") or ""),
     }
     return calls, plan
 
@@ -231,6 +278,8 @@ _SYSTEM_PROMPT = (
     "Return only one JSON object. Use only algorithms from the catalog. "
     "Do not invent algorithm ids, versions, or backend types. "
     "If the default algorithm fits, choose it. "
+    "Never copy input data. Use an empty params object unless a catalog option requires a parameter. "
+    "Keep reason and explanation under eight words each. "
     "Schema: {\"intent\": string, \"algorithm_calls\": [{\"algorithm_id\": string, "
     "\"version\": string, \"backend_type\": string, \"params\": object, \"reason\": string}], "
     "\"missing_fields\": array, \"explanation\": string}."
@@ -248,17 +297,17 @@ _SYSTEM_PROMPT_STAGE = (
 
 
 def _user_prompt(*, task: str, inputs: dict[str, Any], algorithms: list[dict[str, Any]]) -> str:
-    preview = json.dumps(inputs, ensure_ascii=False, default=str)
-    if len(preview) > 6000:
-        preview = preview[:6000] + "...<truncated>"
-    return json.dumps(
-        {
-            "task": task,
-            "algorithm_catalog": algorithms,
-            "inputs_preview": preview,
-        },
-        ensure_ascii=False,
-    )
+    request = {
+        "task": task,
+        "algorithm_catalog": algorithms,
+        "input_keys": sorted(str(key) for key in inputs),
+    }
+    # A single allowed algorithm needs no nested mission data in the prompt.
+    # The bridge still passes the complete structured inputs to AlgoLib.
+    if len(algorithms) != 1:
+        preview = json.dumps(inputs, ensure_ascii=False, default=str)
+        request["inputs_preview"] = preview[:1000] + ("...<truncated>" if len(preview) > 1000 else "")
+    return json.dumps(request, ensure_ascii=False)
 
 
 def _user_prompt_stage(
@@ -285,6 +334,10 @@ def _user_prompt_stage(
 
 def _loads_json_object(content: str) -> dict[str, Any]:
     text = _THINK_BLOCK_RE.sub("", str(content)).strip()
+    if text.lower().startswith("<think") and "</think>" not in text.lower():
+        object_start = text.find("{")
+        if object_start >= 0:
+            text = text[object_start:].strip()
     if text.startswith("```"):
         lines = text.splitlines()
         if lines and lines[0].startswith("```"):
@@ -307,6 +360,16 @@ def _active_by_id(algorithms: Sequence[dict[str, Any]]) -> dict[str, dict[str, A
         for item in algorithms
         if isinstance(item, dict) and isinstance(item.get("algorithm_id"), str)
     }
+
+
+def _require_llm_identity(raw_call: dict[str, Any], *, index: int) -> None:
+    if not strict_llm_required():
+        return
+    missing = [key for key in ("algorithm_id", "version", "backend_type") if not str(raw_call.get(key) or "").strip()]
+    if missing:
+        raise AlgolibLLMPlannerError(
+            f"LLM algorithm call {index} is missing required fields: {', '.join(missing)}."
+        )
 
 
 def _require_active(algorithm_id: str, active: dict[str, dict[str, Any]]) -> dict[str, Any]:

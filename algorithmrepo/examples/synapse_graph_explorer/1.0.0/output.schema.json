@@ -1,0 +1,38 @@
+{
+  "type": "object",
+  "required": [
+    "status",
+    "nodes",
+    "edges",
+    "paths",
+    "truncated",
+    "index_id"
+  ],
+  "properties": {
+    "status": {
+      "type": "string"
+    },
+    "nodes": {
+      "type": "array"
+    },
+    "edges": {
+      "type": "array"
+    },
+    "paths": {
+      "type": "array"
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "index_id": {
+      "type": "string"
+    },
+    "index_version": {
+      "type": "string"
+    },
+    "duration_ms": {
+      "type": "number"
+    }
+  },
+  "additionalProperties": true
+}

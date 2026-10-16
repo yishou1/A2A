@@ -5,9 +5,17 @@ import os
 import unittest
 from unittest import mock
 
+import requests
+
 from algolib_bridge.client import AlgorithmLibraryClient, AlgorithmLibraryError
 from algolib_bridge.config import AlgolibSettings, use_algolib_backend
-from algolib_bridge.llm_planner import AlgolibLLMPlannerError, plan_algorithm_call
+from algolib_bridge.llm_planner import (
+    AlgolibLLMPlannerError,
+    OpenAICompatiblePlannerClient,
+    _user_prompt,
+    plan_algorithm_call,
+    plan_algorithm_calls,
+)
 from closed_loop_agent.algolib_runtime import run_closed_loop_with_backend
 from execution_control_agent.algolib_runtime import run_execution_control_with_backend
 from a2a_sdk import AgentRuntimeSDK
@@ -90,6 +98,84 @@ class _FakePlannerClient:
 
 
 class AlgolibLLMPlannerTest(unittest.TestCase):
+    def test_single_algorithm_prompt_omits_nested_mission_payload(self):
+        prompt = _user_prompt(
+            task="execution_control",
+            inputs={"context": {"mission_input": "LARGE_SECRET_MISSION_DATA"}},
+            algorithms=[{"algorithm_id": "execution_control_planner", "version": "1.0.0"}],
+        )
+        self.assertNotIn("LARGE_SECRET_MISSION_DATA", prompt)
+        self.assertIn('"input_keys": ["context"]', prompt)
+
+    def test_qwen_algorithm_selection_uses_bounded_non_thinking_json_request(self):
+        settings = AlgolibSettings(
+            backend="algolib", transport="direct", base_url="http://127.0.0.1:8088",
+            timeout_seconds=5.0, fallback_local=False, default_version="1.0.0",
+            default_backend_type="python_http_service", enable_llm=True,
+            llm_provider="openai_compatible", llm_base_url="http://ollama:11434/v1",
+            llm_model="qwen3:1.7b", llm_api_key="ollama",
+        )
+        response = mock.Mock()
+        response.json.return_value = {
+            "model": "qwen3:1.7b", "choices": [{"message": {"content": '{"algorithm_calls":[]}'}}],
+        }
+        with mock.patch.dict(os.environ, {"LLM_MAX_TOKENS": "1024", "LLM_REASONING_EFFORT": "none"}), \
+             mock.patch("algolib_bridge.llm_planner.requests.post", return_value=response) as post:
+            OpenAICompatiblePlannerClient(settings).chat_json(
+                system_prompt="Select algorithm", user_prompt="Choose the active algorithm"
+            )
+        payload = post.call_args.kwargs["json"]
+        self.assertTrue(payload["messages"][1]["content"].endswith("\n/no_think"))
+        self.assertEqual(payload["max_tokens"], 1024)
+        self.assertEqual(payload["response_format"], {"type": "json_object"})
+
+    def test_qwen_planner_retries_transient_connection_failure(self):
+        settings = AlgolibSettings(
+            backend="algolib", transport="direct", base_url="http://127.0.0.1:8088",
+            timeout_seconds=5.0, fallback_local=False, default_version="1.0.0",
+            default_backend_type="python_http_service", enable_llm=True,
+            llm_provider="openai_compatible", llm_base_url="http://ollama:11434/v1",
+            llm_model="qwen3:1.7b", llm_api_key="ollama",
+        )
+        response = mock.Mock()
+        response.json.return_value = {
+            "model": "qwen3:1.7b", "choices": [{"message": {"content": "{}"}}],
+        }
+        with mock.patch.dict(os.environ, {"ALGOLIB_LLM_CONNECT_RETRIES": "2"}), \
+             mock.patch("algolib_bridge.llm_planner.requests.post",
+                        side_effect=[requests.ConnectionError("temporary DNS failure"), response]) as post:
+            result = OpenAICompatiblePlannerClient(settings).chat_json(
+                system_prompt="Select algorithm", user_prompt="Choose the active algorithm"
+            )
+        self.assertEqual(result, {})
+        self.assertEqual(post.call_count, 2)
+
+    def test_strict_stage_rejects_missing_model_selected_identity(self):
+        settings = AlgolibSettings(
+            backend="algolib", transport="direct", base_url="http://127.0.0.1:8088",
+            timeout_seconds=5.0, fallback_local=False, default_version="1.0.0",
+            default_backend_type="python_http_service", enable_llm=True, llm_api_key="secret",
+        )
+        with mock.patch.dict(os.environ, {"A2A_LLM_STRICT": "true"}):
+            for missing in ("algorithm_id", "version", "backend_type"):
+                with self.subTest(missing=missing):
+                    model_call = {
+                        "algorithm_id": "execution_control_planner",
+                        "version": "1.0.0",
+                        "backend_type": "python_http_service",
+                    }
+                    del model_call[missing]
+                    with self.assertRaisesRegex(AlgolibLLMPlannerError, missing):
+                        plan_algorithm_calls(
+                            settings=settings,
+                            algorithms=[{
+                                "algorithm_id": "execution_control_planner",
+                                "version": "1.0.0", "backend_type": "python_http_service",
+                            }],
+                            call_specs=[{"task": "execute", "default_algorithm_id": "execution_control_planner"}],
+                            client=_FakePlannerClient({"algorithm_calls": [model_call]}),
+                        )
+
     def test_planner_uses_llm_call_but_preserves_structured_inputs(self):
         settings = AlgolibSettings(
             backend="algolib",

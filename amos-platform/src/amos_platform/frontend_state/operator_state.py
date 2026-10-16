@@ -36,8 +36,9 @@ def build_operator_state(
     clock = deepcopy(internal_state.get("clock") or {})
     story = project_story_at_time(
         internal_state.get("scenario_story") or {},
-        float(clock.get("elapsed_sec", 0) or 0),
+        float(clock.get("scenario_elapsed_sec", clock.get("elapsed_sec", 0)) or 0),
         branch=str(clock.get("scenario_branch") or "") or None,
+        capture_elapsed_sec=float(clock.get("elapsed_sec", 0) or 0),
     )
     mission_phases = build_mission_phase_state(story, clock)
     network = deepcopy(internal_state.get("network") or {})

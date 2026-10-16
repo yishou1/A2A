@@ -130,6 +130,11 @@ class TacticalIntelligenceCommanderAgent(A2ABaseAgent):
             "consumer_guide": packet.consumer_guide,
         }
         provenance = packet.provenance if isinstance(packet.provenance, dict) else {}
+        llm_plan = provenance.get("llm_plan") if isinstance(provenance.get("llm_plan"), dict) else {}
+        if llm_plan:
+            output["llm_plan"] = llm_plan
+            llm_call = llm_plan.get("llm_call")
+            output["llm_calls"] = [llm_call] if isinstance(llm_call, dict) else []
         if isinstance(provenance.get("algorithm_calls"), list):
             output["algorithm_calls"] = provenance["algorithm_calls"]
         if isinstance(provenance.get("algorithm_invocations"), list):

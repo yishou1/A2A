@@ -21,7 +21,9 @@ window.Platform = (function () {
   var directorWorkflowId = null;
   var handledDirectorCheckpoint = null;
   var SIM_POLL_INTERVAL_MS = 3000;
-  var DIRECTOR_REFRESH_INTERVAL_MS = 5000;
+  // Authorization is a local, lightweight state read. Poll it frequently so
+  // the dialog follows the paused engagement boundary without a visible gap.
+  var DIRECTOR_REFRESH_INTERVAL_MS = 1000;
   var ALGORITHM_REFRESH_INTERVAL_MS = 60000;
   var running = false;
   var paused = false;
@@ -40,6 +42,9 @@ window.Platform = (function () {
   var authorizationWeaponName = null;
   var authorizationSubmitting = false;
   var authorizationPreviousFocus = null;
+  var authorizationDeferredKey = null;
+  var authorizationDeferredUntil = 0;
+  var AUTHORIZATION_REMINDER_MS = 15000;
   var storyHeroGeneration = 0;
   var storyHeroTarget = null;
   var activeStoryCueId = null;
@@ -443,7 +448,9 @@ window.Platform = (function () {
     }
     latestStory = definition;
     if (state) latestState = state;
-    var elapsed = Number(state && state.clock && state.clock.elapsed_sec || 0);
+    var physicalElapsed = Number(state && state.clock && state.clock.elapsed_sec || 0);
+    var elapsed = Number(state && state.clock &&
+      (state.clock.scenario_elapsed_sec != null ? state.clock.scenario_elapsed_sec : state.clock.elapsed_sec) || 0);
     var reached = (definition.timeline || []).filter(function (cue) {
       return Number(cue.at_sec || 0) <= elapsed;
     });
@@ -465,7 +472,7 @@ window.Platform = (function () {
     document.getElementById("story-current-prompt").textContent = activeMedia
       ? (activeMedia.title || "观测资料") + " · " + activeSource.platformId + " / " + activeSource.sensorId + " · " + formatSimTime(activeSource.capturedAt)
       : "尚无可用传感器资料";
-    document.getElementById("story-elapsed").textContent = formatSimTime(elapsed);
+    document.getElementById("story-elapsed").textContent = formatSimTime(physicalElapsed);
     document.getElementById("story-media-count").textContent = availableMedia.length;
     document.getElementById("story-track-count").textContent = state && (state.fused_tracks || []).length || 0;
 
@@ -480,7 +487,8 @@ window.Platform = (function () {
     var item = latestStory && (latestStory.media_cues || []).find(function (entry) {
       return entry.media_id === mediaId;
     });
-    var elapsed = Number(latestState && latestState.clock && latestState.clock.elapsed_sec || 0);
+    var elapsed = Number(latestState && latestState.clock &&
+      (latestState.clock.scenario_elapsed_sec != null ? latestState.clock.scenario_elapsed_sec : latestState.clock.elapsed_sec) || 0);
     if (!item || Number(item.at_sec || 0) > elapsed) return;
     var source = sourceMetadata(item);
     var sourceLabels = {
@@ -631,12 +639,14 @@ window.Platform = (function () {
     if (!frame.getAttribute("src")) frame.setAttribute("src", frame.dataset.src);
     dialog.classList.add("open");
     dialog.setAttribute("aria-hidden", "false");
+    if (window.SynapseTraceView) window.SynapseTraceView.open();
   }
 
   function closeKnowledgeGraph() {
     var dialog = document.getElementById("knowledge-graph-dialog");
     dialog.classList.remove("open");
     dialog.setAttribute("aria-hidden", "true");
+    if (window.SynapseTraceView) window.SynapseTraceView.close();
   }
 
   async function switchScenario(scenarioId, options) {
@@ -660,6 +670,8 @@ window.Platform = (function () {
       currentMediaId = null;
       activeWorkflowStoryContext = null;
       authorizationPromptKey = null;
+      authorizationDeferredKey = null;
+      authorizationDeferredUntil = 0;
       authorizationSubmitting = false;
       closeAuthorizationDialog();
       resetEvidenceProducts();
@@ -694,6 +706,10 @@ window.Platform = (function () {
       ["terrain", "hillshade", "contours", "sensors", "coordination", "ao"].forEach(function (name) {
         document.getElementById("btn-toggle-" + name).classList.toggle("layer-active", Boolean(layerState[name]));
       });
+      var workflowApi = window.Workflow || window.PlatformWorkflow;
+      if (workflowApi && typeof workflowApi.refreshPresentation === "function") {
+        workflowApi.refreshPresentation();
+      }
       refreshDirectorState();
     } catch (error) {
       document.getElementById("status-text").textContent = "场景加载失败：" + errorMessage(error);
@@ -726,7 +742,8 @@ window.Platform = (function () {
     startButton.disabled = running || directorBusy || analysisFailed || !currentScenarioId;
     startButton.textContent = analysisFailed ? "分析失败" :
       (directorStatus === "awaiting_analysis" ? "等待分析" :
-        (directorStatus === "awaiting_authorization" ? "等待授权" : (paused ? "继续" : "启动")));
+        (directorStatus === "awaiting_authorization" ? "等待授权" :
+          (directorStatus === "awaiting_review" ? "确认复核" : (paused ? "继续" : "启动"))));
     document.getElementById("btn-pause").disabled = !running;
     document.getElementById("btn-stop").disabled = !running && !directorBusy && !analysisFailed;
     document.querySelectorAll(".speed-btn").forEach(function (button) {
@@ -737,7 +754,7 @@ window.Platform = (function () {
       speedGroup.classList.toggle("speed-locked", speedLocked);
       speedGroup.setAttribute("aria-busy", pendingSpeedRequests > 0 ? "true" : "false");
       speedGroup.title = speedLocked
-        ? "等待武器授权期间固定为 1×，授权完成后恢复 " +
+        ? "等待武器授权：仿真暂停在阶段边界，授权后恢复 " +
           Number(clock.speed_resume_value || speedResumeValue || 1) + "×"
         : "仿真倍率";
     }
@@ -745,12 +762,25 @@ window.Platform = (function () {
 
   async function startSim() {
     if (running || !currentScenarioId) return;
+    if (currentDirectorState && currentDirectorState.director_status === "awaiting_review") {
+      var reviewed = await runDirectorAction("review_checkpoint", document.getElementById("btn-start"));
+      if (!reviewed) throw new Error("人工复核未记录");
+      onState(await API.loadSimState());
+      return;
+    }
     var directorState = await runDirectorAction("start_auto", document.getElementById("btn-start"));
     if (!directorState) throw new Error("导演未能启动自动流程");
     var speed = Number(currentScenario && currentScenario.demo_controls && currentScenario.demo_controls.recommended_speed || 1);
     await setSpeed(speed);
     onState(await API.loadSimState());
     connectSSE();
+    var mapDisplay = currentScenario && currentScenario.map_display || {};
+    if (mapDisplay.expand_on_start) setMapExpanded(true);
+    window.requestAnimationFrame(function () {
+      Map.invalidateSize();
+      if (Map.focusMissionView) Map.focusMissionView();
+      else Map.focusScenarioView();
+    });
   }
 
   async function pauseSim() {
@@ -913,6 +943,20 @@ window.Platform = (function () {
     authorizationPreviousFocus = null;
   }
 
+  function deferAuthorizationDialog() {
+    if (authorizationSubmitting) return;
+    if (authorizationMode === "fire" || authorizationMode === "warn") {
+      authorizationDeferredKey = authorizationPromptKey;
+      authorizationDeferredUntil = Date.now() + AUTHORIZATION_REMINDER_MS;
+      authorizationPromptKey = null;
+      var status = document.getElementById("status-text");
+      if (status) {
+        status.textContent = "已选择稍后决定；仿真仍暂停在授权点，15 秒后再次提示";
+      }
+    }
+    closeAuthorizationDialog();
+  }
+
   function showAuthorizationDialog(trackId, options) {
     options = options || {};
     var track = trackById(trackId);
@@ -946,7 +990,7 @@ window.Platform = (function () {
     var cancelButton = document.getElementById("authorization-cancel");
     if (cancelButton) {
       cancelButton.disabled = false;
-      cancelButton.textContent = options.cancelText || "暂不打击";
+      cancelButton.textContent = options.cancelText || "稍后决定（15秒后提醒）";
     }
     dialog.hidden = false;
     dialog.classList.add("open");
@@ -959,6 +1003,8 @@ window.Platform = (function () {
     var status = directorState && (directorState.director_status || directorState.status);
     var awaiting = status === "awaiting_authorization" || Boolean(directorState && directorState.awaiting_authorization);
     if (!awaiting) {
+      authorizationDeferredKey = null;
+      authorizationDeferredUntil = 0;
       var dialog = document.getElementById("authorization-dialog");
       if (
         dialog && !dialog.hidden && !authorizationSubmitting &&
@@ -977,6 +1023,11 @@ window.Platform = (function () {
     var checkpointId = typeof checkpoint === "object" ? checkpoint.checkpoint_id : checkpoint;
     var runId = directorState.run_id || latestState && latestState.clock && latestState.clock.run_id || "run";
     var key = [runId, checkpointId || "ENGAGE", stage, target.id || target.track_id].join(":");
+    if (key === authorizationDeferredKey) {
+      if (Date.now() < authorizationDeferredUntil) return;
+      authorizationDeferredKey = null;
+      authorizationDeferredUntil = 0;
+    }
     if (key === authorizationPromptKey) return;
     if (stage === "warning") {
       if (showAuthorizationDialog(target.id || target.track_id, {
@@ -987,7 +1038,7 @@ window.Platform = (function () {
         actionLabel: "警告内容",
         actionValue: "立即停止航行并驶离警戒海域",
         confirmText: "发出警告",
-        cancelText: "暂不处置"
+        cancelText: "稍后处置（15秒后提醒）"
       })) authorizationPromptKey = key;
       return;
     }
@@ -1013,7 +1064,7 @@ window.Platform = (function () {
       actionLabel: action.coordinated ? "协同武器链" : "拟用武器",
       actionValue: action.actionLabel,
       confirmText: waveLabel ? ("授权" + waveLabel + "打击") : "确认打击",
-      cancelText: "暂不打击"
+      cancelText: "稍后决定（15秒后提醒）"
     } : {
       mode: "fire",
       assetId: action.assetId,
@@ -1024,6 +1075,7 @@ window.Platform = (function () {
       actionLabel: action.coordinated ? "协同武器链" : "拟用武器",
       actionValue: action.actionLabel,
       confirmText: waveLabel ? ("授权" + waveLabel + "打击") : "确认打击",
+      cancelText: "稍后决定（15秒后提醒）",
     })) authorizationPromptKey = key;
   }
 
@@ -1230,8 +1282,11 @@ window.Platform = (function () {
       error: "异常", ready: "就绪", empty: "就绪",
     })[lifecycle] || "就绪";
     if (directorStatus === "awaiting_authorization") {
-      statusText = "等待操作员授权，仿真以 1× 继续运行";
+      statusText = "等待操作员授权，仿真已暂停在阶段边界；稍后决定将再次提示";
       modeText = "待授权";
+    } else if (directorStatus === "awaiting_review") {
+      statusText = "后端分析已完成，等待操作员复核收尾结果";
+      modeText = "待复核";
     } else if (followLaunchPrompt()) {
       statusText = "等待无人机派遣确认，仿真按当前倍率继续";
       modeText = "待确认";
@@ -1484,6 +1539,8 @@ window.Platform = (function () {
       directorWorkflowId = null;
       handledDirectorCheckpoint = null;
       authorizationPromptKey = null;
+      authorizationDeferredKey = null;
+      authorizationDeferredUntil = 0;
       authorizationSubmitting = false;
       closeAuthorizationDialog();
       renderDirectorState(state);
@@ -1564,7 +1621,7 @@ window.Platform = (function () {
       var button = event.target.closest("[data-story-media-id]");
       if (button) showMedia(button.dataset.storyMediaId);
     });
-    document.getElementById("authorization-cancel").addEventListener("click", closeAuthorizationDialog);
+    document.getElementById("authorization-cancel").addEventListener("click", deferAuthorizationDialog);
     document.getElementById("authorization-confirm").addEventListener("click", function () {
       if (authorizationMode === "launch_follow_uav") {
         issueFollowUavLaunch(authorizationTrackId, authorizationAssetId);
@@ -1589,7 +1646,7 @@ window.Platform = (function () {
         closeKnowledgeGraph();
       }
       if (event.key === "Escape" && !document.getElementById("authorization-dialog").hidden) {
-        closeAuthorizationDialog();
+        deferAuthorizationDialog();
       }
     });
     document.querySelectorAll(".speed-btn").forEach(function (button) {

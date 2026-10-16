@@ -7,7 +7,7 @@ param_tier: low
 inference:
   param_tier: low
   # 识别：与高档同一权重（97 类）
-  detection_model: models/checkpoints/battlefield_rtdetr_unit17_coco25_ap_kaggle_best.pt
+  detection_model: models/checkpoints/battlefield_rtdetr.pt
   detection_imgsz: 416
   detection_half: true
   odconv_enable: false

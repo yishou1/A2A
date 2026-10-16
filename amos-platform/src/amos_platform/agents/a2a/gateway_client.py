@@ -80,10 +80,32 @@ class GatewayClient:
             timeout_sec=10.0,
         )
 
-    def get_package(self, package_id: str) -> dict[str, Any]:
-        return self._request(
-            "GET", f"/gateway/v1/packages/{package_id}", timeout_sec=self.VIEW_TIMEOUT_SEC
+    def get_package_with_raw(self, package_id: str) -> tuple[dict[str, Any], bytes, str]:
+        """Return the decoded package together with the exact signed bytes."""
+        request = urllib.request.Request(
+            f"{self.base_url}/gateway/v1/packages/{package_id}",
+            headers=self._headers(),
+            method="GET",
         )
+        try:
+            with urllib.request.urlopen(request, timeout=self.VIEW_TIMEOUT_SEC) as response:
+                raw = response.read()
+                return (
+                    json.loads(raw.decode("utf-8")),
+                    raw,
+                    str(response.headers.get("X-Checksum-SHA256") or ""),
+                )
+        except urllib.error.HTTPError as exc:
+            try:
+                detail = json.loads(exc.read().decode("utf-8"))
+            except Exception:
+                detail = {"detail": str(exc)}
+            return {"error": True, "code": exc.code, **detail}, b"", ""
+        except Exception as exc:
+            return {"error": True, "code": 503, "detail": str(exc)}, b"", ""
+
+    def get_package(self, package_id: str) -> dict[str, Any]:
+        return self.get_package_with_raw(package_id)[0]
 
     def get_work_list(self, workflow_id: str) -> dict[str, Any]:
         return self._request(

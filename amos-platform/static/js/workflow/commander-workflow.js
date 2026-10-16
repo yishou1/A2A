@@ -5,6 +5,8 @@ window.PlatformWorkflow = (function () {
   var options = {};
   var pollTimer = null;
   var healthTimer = null;
+  var historyTimer = null;
+  var pendingViewsInFlight = false;
   var workflowId = null;
   var activeWorkflowId = null;
   var workflowRunId = null;
@@ -17,6 +19,7 @@ window.PlatformWorkflow = (function () {
   var historyRunId = null;
   var historyLoadingRunId = null;
   var viewCache = {};
+  var viewFetchedAt = {};
   var viewLoadInFlight = false;
   var selectedActivityId = null;
   var selectedFunctionPointId = null;
@@ -27,10 +30,10 @@ window.PlatformWorkflow = (function () {
   var submitting = false;
   var notifiedTerminalKey = null;
   var workflowTasks = [
-    {phase:"OBSERVE", label:"观察与识别", subtitle:"Observe · Find/Fix", checkpoints:["MAR-CP-PERCEPTION", "AMP-CP-PERCEPTION", "BOR-CP-DETECT"]},
-    {phase:"ORIENT", label:"航迹评估", subtitle:"Orient · Track", checkpoints:["MAR-CP-ASSESS", "AMP-CP-ASSESS", "BOR-CP-TRACK"]},
-    {phase:"DECIDE", label:"方案决策", subtitle:"Decide · Target", checkpoints:["MAR-CP-PLAN", "AMP-CP-PLAN", "BOR-CP-LINK", "BOR-CP-PLAN"]},
-    {phase:"ACT", label:"执行与复核", subtitle:"Act · Engage/Assess", checkpoints:["MAR-CP-CLOSE", "AMP-CP-BDA", "AMP-CP-CLOSE", "BOR-CP-CLOSE"]},
+    {phase:"OBSERVE", label:"观察与识别", subtitle:"第1阶段", checkpoints:["MAR-CP-PERCEPTION", "CJR-CP-CUE", "CJR-CP-IDENTIFY", "AMP-CP-PERCEPTION", "BOR-CP-DETECT"]},
+    {phase:"ORIENT", label:"航迹评估", subtitle:"第2阶段", checkpoints:["MAR-CP-ASSESS", "CJR-CP-FUSION", "AMP-CP-ASSESS", "BOR-CP-TRACK"]},
+    {phase:"DECIDE", label:"方案决策", subtitle:"第3阶段", checkpoints:["MAR-CP-PLAN", "CJR-CP-PLAN", "ASC-CP-PLAN", "AMP-CP-PLAN", "BOR-CP-LINK", "BOR-CP-PLAN"]},
+    {phase:"ACT", label:"执行与复核", subtitle:"第4阶段", checkpoints:["MAR-CP-ENGAGE", "MAR-CP-CLOSE", "CJR-CP-ENGAGE", "CJR-CP-CLOSE", "ASC-CP-WAVE1", "ASC-CP-WAVE2", "ASC-CP-CLOSE", "AMP-CP-BDA", "AMP-CP-CLOSE", "BOR-CP-CLOSE"]},
   ];
 
   function escapeHtml(value) {
@@ -104,7 +107,7 @@ window.PlatformWorkflow = (function () {
   }
 
   function activityKey(item) {
-    return String(item && (item.activity_id || item.work_item || ("activity-" + item.index)) || "");
+    return String(item && (item._timeline_activity_key || item.activity_id || item.work_item || ("activity-" + item.index)) || "");
   }
 
   function workflowCheckpoint(submission) {
@@ -116,13 +119,13 @@ window.PlatformWorkflow = (function () {
     var stage = submission && submission.stage_transfer || {};
     var phase = String(stage.phase || submission && submission.phase || "").toUpperCase();
     var checkpoint = String(stage.checkpoint_id || submission && submission.checkpoint_id || "").toUpperCase();
+    for (var i = 0; i < workflowTasks.length; i += 1) {
+      if ((workflowTasks[i].checkpoints || []).indexOf(checkpoint) >= 0) return workflowTasks[i].phase;
+    }
     if (phase === "FIND" || phase === "FIX") return "OBSERVE";
     if (phase === "TRACK") return "ORIENT";
     if (phase === "TARGET") return "DECIDE";
     if (phase === "ENGAGE" || phase === "ASSESS") return "ACT";
-    for (var i = 0; i < workflowTasks.length; i += 1) {
-      if ((workflowTasks[i].checkpoints || []).indexOf(checkpoint) >= 0) return workflowTasks[i].phase;
-    }
     if (/-(PERCEPTION|DETECT)$/.test(checkpoint)) return "OBSERVE";
     if (/-(ASSESS|TRACK)$/.test(checkpoint)) return "ORIENT";
     if (/-(PLAN|LINK)$/.test(checkpoint)) return "DECIDE";
@@ -270,23 +273,50 @@ window.PlatformWorkflow = (function () {
     (runManifest && runManifest.workflow_views || []).forEach(function (row) {
       if (row && row.workflow_id) archived[String(row.workflow_id)] = row;
     });
-    var slots = workflowTasks.map(function (task) { return {task:task, id:null}; });
+    var slots = workflowTasks.map(function (task) { return {task:task, ids:[]}; });
+    function workflowOrder(id) {
+      var submission = submissions[id] || (viewCache[id] || {}).submission || {};
+      var stage = submission.stage_transfer || {};
+      var windowStart = stage.window && stage.window.start_sec;
+      var ordinal = Number(stage.submission_ordinal);
+      if (stage.submission_ordinal != null && Number.isFinite(ordinal)) return ordinal;
+      var numericStart = Number(windowStart);
+      if (windowStart != null && Number.isFinite(numericStart)) return numericStart / 1000000;
+      return 999999;
+    }
     ids.forEach(function (id) {
       var live = viewCache[id] || {};
       var slotPhase = workflowPhaseKey(submissions[id] || live.submission || {});
       var slot = slots.find(function (item) { return item.task.phase === slotPhase; });
-      if (!slot) slot = slots.find(function (item) { return !item.id; });
-      if (slot && !slot.id) slot.id = id;
+      if (slot) {
+        slot.ids.push(id);
+        slot.id = id;
+      }
     });
+    slots.forEach(function (slot) {
+      slot.ids.sort(function (left, right) {
+        var orderDelta = workflowOrder(left) - workflowOrder(right);
+        return orderDelta || String(left).localeCompare(String(right));
+      });
+    });
+    function displayWorkflowId(slot) {
+      if (!slot.ids.length) return null;
+      var selected = slot.ids.find(function (id) { return String(id) === String(workflowId || ""); });
+      if (selected) return selected;
+      var active = slot.ids.find(function (id) { return String(id) === String(activeWorkflowId || ""); });
+      if (active) return active;
+      return slot.ids[slot.ids.length - 1];
+    }
     root.innerHTML = slots.map(function (slot) {
-      var id = slot.id;
+      var id = displayWorkflowId(slot);
       if (!id) {
         return '<button type="button" disabled><small>' + escapeHtml(slot.task.subtitle) + '</small><b>' +
           escapeHtml(slot.task.label) + '</b><span>未生成任务</span></button>';
       }
       var view = viewCache[id] || {};
       var record = archived[id] || {};
-      var state = view.status || record.status || "unknown";
+      var state = view.terminal ? view.status :
+        (record.terminal ? record.status : (view.status || record.status || "unknown"));
       var counts = view.orchestration && view.orchestration.counts || {};
       var activityCount = counts.total;
       if (activityCount == null && record.result && Array.isArray(record.result.cards)) activityCount = record.result.cards.length;
@@ -294,16 +324,16 @@ window.PlatformWorkflow = (function () {
       var meta = [statusLabel(state)];
       var submission = view.submission || submissions[id] || {};
       var checkpoint = workflowCheckpoint(submission);
-      var phaseKey = workflowPhaseKey(submission);
       if (activityCount != null) meta.push(activityCount + " 项活动");
       if (duration) meta.push(duration);
+      if (checkpoint) meta.push(checkpoint);
       var classes = [state];
       if (String(id) === String(workflowId || "")) classes.push("selected");
       if (String(id) === String(activeWorkflowId || "")) classes.push("current");
       return '<button type="button" class="' + escapeHtml(classes.join(" ")) + '" data-workflow-history="' +
         escapeHtml(id) + '" aria-pressed="' + (String(id) === String(workflowId || "")) + '"><small>' +
         escapeHtml(slot.task.subtitle) + '</small><b>' + escapeHtml(slot.task.label) + '</b><span>' +
-        escapeHtml([checkpoint || "未提供检查点", phaseKey ? "OODA · " + phaseKey : "未提供阶段", meta.join(" · ")].filter(Boolean).join(" · ")) + '</span></button>';
+        escapeHtml(meta.join(" · ")) + '</span></button>';
     }).join("");
   }
 
@@ -322,13 +352,18 @@ window.PlatformWorkflow = (function () {
       renderTaskHistory();
       var ids = (runManifest.workflow_ids || []).map(String);
       var archivedViews = await Promise.all(ids.map(function (id) {
-        if (viewCache[id]) return Promise.resolve(viewCache[id]);
+        if (viewCache[id] && viewCache[id].terminal) return Promise.resolve(viewCache[id]);
         return API.getWorkflowView(id).catch(function () { return null; });
       }));
       if (generation !== runHistoryGeneration || requestedRunId !== simulationRunId) return null;
       archivedViews.forEach(function (view) {
         if (view && view.workflow_id) viewCache[String(view.workflow_id)] = view;
       });
+      if (lastView && String(lastView.workflow_id || "") === String(workflowId || "")) {
+        // The coastal strike's Engage and Assess checkpoints are separate
+        // backend workflows, but belong to one user-facing execution page.
+        renderActivities(lastView);
+      }
       document.dispatchEvent(new CustomEvent("amos:workflow-view-history", {
         detail: {run_id: requestedRunId, views: archivedViews.filter(Boolean)},
       }));
@@ -343,6 +378,32 @@ window.PlatformWorkflow = (function () {
       return null;
     } finally {
       if (generation === runHistoryGeneration) historyLoadingRunId = null;
+    }
+  }
+
+  async function refreshPendingHistoryViews() {
+    if (!API || !simulationRunId || !runManifest || pendingViewsInFlight || historyLoadingRunId || viewLoadInFlight) return;
+    var requestedRunId = simulationRunId;
+    var generation = runHistoryGeneration;
+    var ids = (runManifest.workflow_ids || []).map(String).filter(function (id) {
+      return id !== String(activeWorkflowId || "") && (!viewCache[id] || !viewCache[id].terminal);
+    });
+    if (!ids.length) return;
+    pendingViewsInFlight = true;
+    try {
+      for (var i = 0; i < ids.length; i += 1) {
+        var id = ids[i];
+        var view;
+        try { view = await API.getWorkflowView(id); }
+        catch (error) { continue; }
+        if (generation !== runHistoryGeneration || requestedRunId !== simulationRunId) return;
+        if (!view || String(view.workflow_id || "") !== id) continue;
+        viewCache[id] = view;
+        renderTaskHistory();
+        if (String(workflowId || "") === id) renderView(view);
+      }
+    } finally {
+      pendingViewsInFlight = false;
     }
   }
 
@@ -496,29 +557,443 @@ window.PlatformWorkflow = (function () {
       text.indexOf("战术情报") >= 0;
   }
 
+  function currentScenarioId() {
+    // Prefer the workflow submission being rendered so switching the UI
+    // scenario dropdown cannot retarget another run's TIA preview.
+    return (lastView && lastView.submission && lastView.submission.scenario_id) ||
+      (lastView && lastView.scenario_id) ||
+      (options.getScenarioId && options.getScenarioId()) ||
+      "";
+  }
+
+  function absoluteMediaUri(uri) {
+    var value = String(uri || "");
+    if (!value) return "";
+    if (/^https?:\/\//i.test(value) || value.indexOf("/") === 0) return value;
+    return "/" + value.replace(/^\/+/, "");
+  }
+
+  function isImageAttachment(item) {
+    var mime = String(item && item.mime_type || "").toLowerCase();
+    var uri = String(item && (item.uri || item.url || item.media_uri) || "");
+    return !!uri && (mime.indexOf("image/") === 0 || /\.(png|jpe?g|webp)$/i.test(uri)) &&
+      mime.indexOf("svg") < 0;
+  }
+
+  function collectOutputAnnotatedAttachments(detail) {
+    var bags = [];
+    var outputDetail = detail && detail.output_detail || {};
+    var value = outputDetail.value && typeof outputDetail.value === "object" ? outputDetail.value : outputDetail;
+    bags.push(value.output_attachments, value.attachments, detail && detail.output_attachments);
+    (detail && detail.algorithms || []).forEach(function (algo) {
+      bags.push(algo && algo.output_attachments);
+      (algo && algo.invocations || []).forEach(function (inv) {
+        var out = inv && inv.output || {};
+        bags.push(out.output_attachments, out.attachments);
+      });
+    });
+    var rows = [];
+    bags.forEach(function (bag) {
+      if (!Array.isArray(bag)) return;
+      bag.forEach(function (item) {
+        if (!isImageAttachment(item)) return;
+        var meta = item.meta || item.metadata || {};
+        var artifact = String(meta.artifact_type || item.artifact_type || "").toLowerCase();
+        var name = String(item.name || item.id || "");
+        var annotated = artifact.indexOf("annotated") >= 0 ||
+          name.indexOf("det") >= 0 ||
+          name.indexOf("annotated") >= 0 ||
+          name.indexOf("检测") >= 0;
+        rows.push({
+          item: item,
+          annotated: annotated,
+          uri: absoluteMediaUri(item.uri || item.url || item.media_uri),
+          caption: name || "检测结果帧",
+        });
+      });
+    });
+    rows.sort(function (a, b) { return Number(b.annotated) - Number(a.annotated); });
+    return rows.length ? rows.slice(0, 2) : null;
+  }
+
+  function collectOutputDetections(detail) {
+    var bags = [];
+    var outputDetail = detail && detail.output_detail || {};
+    var value = outputDetail.value && typeof outputDetail.value === "object" ? outputDetail.value : outputDetail;
+    bags.push(value.detections, value.perception && value.perception.detections);
+    (detail && detail.algorithms || []).forEach(function (algo) {
+      var id = String(algo && (algo.algorithm_id || algo.name) || "").toLowerCase();
+      if (id && id.indexOf("rtdetr") < 0 && id.indexOf("detector") < 0 && id.indexOf("battlefield") < 0) {
+        // still accept detections if present
+      }
+      bags.push(algo && algo.output && algo.output.detections);
+      (algo && algo.invocations || []).forEach(function (inv) {
+        bags.push(inv && inv.output && inv.output.detections);
+      });
+    });
+    var dets = [];
+    bags.forEach(function (bag) {
+      if (!Array.isArray(bag)) return;
+      bag.forEach(function (det) {
+        if (!det || !det.bbox || det.bbox.length < 4) return;
+        dets.push(det);
+      });
+    });
+    return dets;
+  }
+
+  function drawDetectionsOnCanvas(imageUri, detections, caption) {
+    if (!detections || !detections.length || !imageUri || typeof document === "undefined") return null;
+    try {
+      var canvas = document.createElement("canvas");
+      var ctx = canvas.getContext("2d");
+      if (!ctx) return null;
+      var img = new Image();
+      img.decoding = "async";
+      // Same-origin static/preview URIs; keep sync decode via cache when available.
+      img.src = imageUri;
+      if (!img.complete || !img.naturalWidth) return null;
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      ctx.drawImage(img, 0, 0);
+      detections.slice(0, 12).forEach(function (det) {
+        var bbox = det.bbox || [];
+        var x1 = Number(bbox[0]) || 0;
+        var y1 = Number(bbox[1]) || 0;
+        var x2 = Number(bbox[2]) || 0;
+        var y2 = Number(bbox[3]) || 0;
+        var label = String(det.class_name || det.label || "object");
+        var conf = Number(det.confidence);
+        var text = label + (Number.isFinite(conf) ? (" " + conf.toFixed(2)) : "");
+        ctx.lineWidth = Math.max(2, Math.round(canvas.width / 600));
+        ctx.strokeStyle = label.indexOf("missile") >= 0 || label.indexOf("coastal") >= 0 ? "#ff4040" : "#00ffff";
+        ctx.strokeRect(x1, y1, Math.max(1, x2 - x1), Math.max(1, y2 - y1));
+        ctx.font = "14px sans-serif";
+        var tw = ctx.measureText(text).width + 8;
+        ctx.fillStyle = ctx.strokeStyle;
+        ctx.fillRect(x1, Math.max(0, y1 - 18), tw, 18);
+        ctx.fillStyle = "#000";
+        ctx.fillText(text, x1 + 4, Math.max(12, y1 - 4));
+      });
+      return {
+        image: canvas.toDataURL("image/jpeg", 0.9),
+        caption: caption || "RT-DETR 检测锚框",
+      };
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function liveTacticalAttachmentFrames(scope, detail) {
+    var coastal = isCoastalJointScenario(currentScenarioId());
+    if (scope === "output") {
+      var annotated = collectOutputAnnotatedAttachments(detail);
+      if (annotated && annotated.length) {
+        var annotatedRows = coastal ? annotated.filter(function (row) {
+          var cap = String(row.caption || row.id || "").toLowerCase();
+          return cap.indexOf("光电") >= 0 || cap.indexOf("eo") >= 0 || cap.indexOf("cjr-media-03") >= 0;
+        }) : annotated;
+        if (!annotatedRows.length) annotatedRows = annotated.slice(0, 1);
+        return annotatedRows.slice(0, 1).map(function (row) {
+          return {
+            image: row.uri,
+            caption: row.caption + " · 检测锚框",
+          };
+        });
+      }
+      var dets = collectOutputDetections(detail);
+      if (dets.length) {
+        var submission = lastView && lastView.submission || {};
+        var sources = coastal
+          ? coastalEoImageAttachments(submission.attachments || [])
+          : (submission.attachments || []).filter(isImageAttachment).slice(0, 2);
+        var drawn = sources.map(function (item, index) {
+          var sensorDets = dets.filter(function (det) {
+            return !det.sensor_id || String(det.sensor_id) === String(item.id || item.sensor_id || "");
+          });
+          if (!sensorDets.length) sensorDets = index === 0 ? dets : [];
+          return drawDetectionsOnCanvas(
+            absoluteMediaUri(item.uri || item.url),
+            sensorDets,
+            (item.name || item.id || "传感器帧") + " · RT-DETR 锚框"
+          );
+        }).filter(Boolean);
+        if (drawn.length) return drawn;
+      }
+      return null;
+    }
+    var submissionIn = lastView && lastView.submission || {};
+    var rows = coastal
+      ? coastalEoImageAttachments(submissionIn.attachments || [])
+      : (submissionIn.attachments || []).filter(isImageAttachment).slice(0, 2);
+    if (!rows.length) return null;
+    return rows.map(function (item) {
+      return {
+        image: absoluteMediaUri(item.uri || item.url || item.media_uri),
+        caption: (item.name || item.id || "传感器帧") + " · 输入帧",
+      };
+    });
+  }
+
+  function isCoastalJointScenario(scenarioId) {
+    return String(scenarioId || "") === "coastal-joint-recon-strike";
+  }
+
+  function coastalEoImageAttachments(rows) {
+    var list = (rows || []).filter(isImageAttachment);
+    var eo = list.filter(function (item) {
+      var id = String(item.id || item.sensor_id || "");
+      var name = String(item.name || "").toLowerCase();
+      var uri = String(item.uri || item.url || "").toLowerCase();
+      if (id === "CJR-MEDIA-03" || id.indexOf("CJR-MEDIA-03") === 0) return true;
+      if (name.indexOf("光电") >= 0 || name.indexOf("eo") >= 0) return true;
+      if (uri.indexOf("coastal-eo") >= 0 || uri.indexOf("wz10-eo") >= 0) return true;
+      return false;
+    });
+    return (eo.length ? eo : list).slice(0, 1);
+  }
+
+  function coastalObservePresentationView() {
+    // UI-only fallback: coastal Observe shows a single WZ-10 EO frame +
+    // 97-class battlefield RT-DETR boxes. Never used for maritime/other scenarios.
+    // Presentation boxes from prior 97-class EO run (keep original RT-DETR profile imgsz).
+    var eoDets = [
+      { sensor_id: "CJR-MEDIA-03", class_name: "missile", confidence: 0.55, bbox: [829.3, 473.4, 886.2, 555.6] },
+      { sensor_id: "CJR-MEDIA-03", class_name: "missile", confidence: 0.34, bbox: [759.7, 460.3, 820.7, 540.9] },
+      { sensor_id: "CJR-MEDIA-03", class_name: "vehicle", confidence: 0.33, bbox: [715.7, 509.4, 765.3, 544.8] },
+      { sensor_id: "CJR-MEDIA-03", class_name: "vehicle", confidence: 0.13, bbox: [767.2, 505.6, 816.5, 540.0] },
+    ];
+    return {
+      workflow_id: "coastal-observe-presentation",
+      status: "completed",
+      progress_pct: 100,
+      terminal: true,
+      _presentation: true,
+      submission: {
+        scenario_id: "coastal-joint-recon-strike",
+        stage_transfer: { checkpoint_id: "CJR-CP-IDENTIFY", phase: "OBSERVE" },
+        attachments: [
+          {
+            id: "CJR-MEDIA-03",
+            name: "无侦-10 光电 · 沿海导弹阵地",
+            mime_type: "image/png",
+            uri: "/static/ui-previews/coastal-eo-missile-site.png",
+          },
+        ],
+      },
+      orchestration: {
+        counts: { completed: 1, total: 1, running: 0 },
+        activities: [{
+          index: 1,
+          activity_id: "coastal-tia-observe",
+          role: "tactical_intelligence",
+          work_item: "感知识别融合",
+          status: "completed",
+          agent: "Tactical Intelligence Agent",
+          description: "对无侦-10 光电帧运行 97 类战场 RT-DETR，识别沿海导弹阵地外形与候选阵位。",
+        }],
+      },
+      activity_details: {
+        "coastal-tia-observe": {
+          role: "tactical_intelligence",
+          input_detail: {
+            summary: "无侦-10 光电识别输入",
+            media: ["CJR-MEDIA-03"],
+          },
+          output_detail: {
+            summary: "目标检测输出（97 类 RT-DETR）",
+            output_attachments: [
+              {
+                id: "CJR-MEDIA-03-DET",
+                name: "无侦-10 光电 · RT-DETR 锚框",
+                mime_type: "image/png",
+                uri: "/static/ui-previews/coastal-eo-missile-site-annotated.png",
+                meta: { artifact_type: "annotated_detection", sensor_id: "CJR-MEDIA-03" },
+              },
+            ],
+            detections: eoDets,
+          },
+          algorithms: [{
+            algorithm_id: "battlefield_rtdetr_detector",
+            name: "RT-DETR 战场目标检测（97 类）",
+            status: "completed",
+            output: { count: eoDets.length, detections: eoDets },
+            output_attachments: [
+              {
+                id: "CJR-MEDIA-03-DET",
+                name: "无侦-10 光电 · RT-DETR 锚框",
+                mime_type: "image/png",
+                uri: "/static/ui-previews/coastal-eo-missile-site-annotated.png",
+                meta: { artifact_type: "annotated_detection" },
+              },
+            ],
+          }],
+        },
+      },
+      backend: { available: true },
+    };
+  }
+
+  function viewHasTacticalIntelligence(view) {
+    var rows = view && view.orchestration && view.orchestration.activities || [];
+    var details = view && view.activity_details || {};
+    return rows.some(function (row) {
+      return isTacticalIntelligenceActivity(row, details[activityKey(row)]);
+    });
+  }
+
+  function preferLiveCoastalObserveView() {
+    var best = null;
+    var bestRank = -1;
+    Object.keys(viewCache || {}).forEach(function (id) {
+      var view = viewCache[id];
+      if (!view || view._presentation) return;
+      if (!viewHasTacticalIntelligence(view)) return;
+      var submission = view.submission || {};
+      var scenarioId = submission.scenario_id || "";
+      if (scenarioId && !isCoastalJointScenario(scenarioId)) return;
+      var checkpoint = String(workflowCheckpoint(submission) || "");
+      var rank = 0;
+      if (checkpoint.indexOf("CJR-CP-IDENTIFY") >= 0) rank = 3;
+      else if (checkpoint.indexOf("CJR-CP-CUE") >= 0) rank = 2;
+      else if (checkpoint.indexOf("CJR-CP-") >= 0) rank = 1;
+      if (view.terminal || view.status === "completed") rank += 10;
+      if (rank > bestRank) {
+        bestRank = rank;
+        best = view;
+      }
+    });
+    return best;
+  }
+
+  function ensurePresentationView(view) {
+    var base = view && typeof view === "object" ? view : {};
+    var scenarioId = (base.submission && base.submission.scenario_id) ||
+      (base.scenario_id) ||
+      (options.getScenarioId && options.getScenarioId()) ||
+      "";
+    if (!isCoastalJointScenario(scenarioId)) return base;
+    // The local presentation is only a pre-workflow placeholder.  Once the
+    // operator selects any real history item, preserve that workflow even if
+    // it has no Tactical Intelligence activity; otherwise ORIENT/DECIDE/ACT
+    // are silently replaced by the OBSERVE timeline.
+    if (base.workflow_id && !base._presentation) return base;
+    var live = preferLiveCoastalObserveView();
+    if (live) {
+      activeWorkflowId = live.workflow_id || activeWorkflowId;
+      if (!workflowId || String(workflowId) === "coastal-observe-presentation") {
+        workflowId = live.workflow_id || workflowId;
+      }
+      return live;
+    }
+    var presentation = coastalObservePresentationView();
+    viewCache[String(presentation.workflow_id)] = presentation;
+    if (!activeWorkflowId || String(activeWorkflowId) === "coastal-observe-presentation") {
+      activeWorkflowId = presentation.workflow_id;
+    }
+    if (!workflowId || String(workflowId) === "coastal-observe-presentation") {
+      workflowId = presentation.workflow_id;
+    }
+    return presentation;
+  }
+
+  function refreshPresentation() {
+    var scenarioId = options.getScenarioId && options.getScenarioId() || "";
+    if (!isCoastalJointScenario(scenarioId)) return;
+    var live = preferLiveCoastalObserveView();
+    if (live) {
+      lastView = live;
+      lastViewSignature = "";
+      activeWorkflowId = live.workflow_id;
+      workflowId = live.workflow_id;
+      renderTaskHistory();
+      renderActivities(live);
+      renderActivityDetail(live);
+      return;
+    }
+    if (lastView && viewHasTacticalIntelligence(lastView) && !lastView._presentation) return;
+    var view = coastalObservePresentationView();
+    lastView = view;
+    lastViewSignature = "";
+    viewCache[String(view.workflow_id)] = view;
+    activeWorkflowId = view.workflow_id;
+    workflowId = view.workflow_id;
+    // Seed local manifest so 任务执行检查器 shows OBSERVE slot without Gateway.
+    runManifest = {
+      workflow_ids: [view.workflow_id],
+      submissions: [{
+        workflow_id: view.workflow_id,
+        snapshot: view.submission || {},
+      }],
+      workflow_views: [{
+        workflow_id: view.workflow_id,
+        status: view.status || "completed",
+        terminal: true,
+        result: { cards: (view.orchestration && view.orchestration.activities) || [] },
+      }],
+    };
+    historyRunId = simulationRunId || historyRunId || "coastal-presentation";
+    selectedActivityId = "coastal-tia-observe";
+    activityTab = "input";
+    followCurrentActivity = false;
+    setBadge(document.getElementById("wf-status-badge"), "completed");
+    var stateEl = document.getElementById("wf-state");
+    var idEl = document.getElementById("wf-id");
+    var summary = document.getElementById("wf-summary");
+    var bar = document.getElementById("wf-progress-bar");
+    if (stateEl) stateEl.textContent = statusLabel("completed");
+    if (idEl) idEl.textContent = view.workflow_id;
+    if (summary) summary.textContent = "沿海观察与识别 · 无侦-10 光电 + 97类 RT-DETR";
+    if (bar) bar.style.width = String(view.progress_pct || 100) + "%";
+    selectTab("orchestration", false);
+    renderTaskHistory();
+    renderActivities(view);
+    renderActivityDetail(view);
+  }
+
   function tacticalDetectionPreviewBlock(activity, detail, scope) {
     if (!isTacticalIntelligenceActivity(activity, detail)) return "";
     var isOutput = scope === "output";
     var title = isOutput ? "目标检测输出" : "目标检测输入";
-    var frames = isOutput ? [
-      {
-        image: "/static/ui-previews/attack_boat.png",
-        caption: "T+00:36:00 · 攻击艇检测结果",
-      },
-      {
-        image: "/static/ui-previews/fishing_boat.png",
-        caption: "T+00:48:00 · 渔船检测结果",
-      },
-    ] : [
-      {
-        image: "/static/ui-previews/observe-00-36.png",
-        caption: "T+00:36:00 · 高速海面目标光电帧",
-      },
-      {
-        image: "/static/ui-previews/orient-00-48.png",
-        caption: "T+00:48:00 · 低速海面目标红外帧",
-      },
-    ];
+    var scenarioId = String(currentScenarioId() || "");
+    if (scenarioId === "air-space-sea-carrier-strike") return "";
+    var isCoastal = isCoastalJointScenario(scenarioId);
+    // Coastal presentation uses a fixed before/after pair throughout the run.
+    // Workflow requests and algorithm evidence still contain their real media.
+    var frames = null;
+    if (isCoastal) {
+      frames = isOutput ? [
+        {
+          image: "/static/ui-previews/coastal-eo-missile-site-annotated.png",
+          caption: "无侦-10 光电 · RT-DETR 锚框",
+        },
+      ] : [
+        {
+          image: "/static/ui-previews/coastal-eo-missile-site.png",
+          caption: "无侦-10 光电 · 沿海导弹阵地",
+        },
+      ];
+    } else {
+      frames = isOutput ? [
+        {
+          image: "/static/ui-previews/attack_boat.png",
+          caption: "T+00:36:00 · 攻击艇检测结果",
+        },
+        {
+          image: "/static/ui-previews/fishing_boat.png",
+          caption: "T+00:48:00 · 渔船检测结果",
+        },
+      ] : [
+        {
+          image: "/static/ui-previews/observe-00-36.png",
+          caption: "T+00:36:00 · 高速海面目标光电帧",
+        },
+        {
+          image: "/static/ui-previews/orient-00-48.png",
+          caption: "T+00:48:00 · 低速海面目标红外帧",
+        },
+      ];
+    }
     return '<div class="workflow-detection-preview">' +
       '<header><h4>' + escapeHtml(title) + '</h4><span>' + escapeHtml(isOutput ? "检测后" : "检测前") + '</span></header>' +
       '<div class="workflow-detection-grid">' + frames.map(function (frame) {
@@ -628,6 +1103,9 @@ window.PlatformWorkflow = (function () {
     var title = document.getElementById("wf-detail-title");
     var badge = document.getElementById("wf-detail-status");
     if (!root || !title || !badge) return;
+    view = ensurePresentationView(view);
+    if (view && view._presentation) lastView = view;
+    view = buildTimelineView(view);
     var rows = view && view.orchestration && view.orchestration.activities || [];
     var activity = rows.find(function (row) { return activityKey(row) === selectedActivityId; });
     var details = view && view.activity_details || {};
@@ -700,10 +1178,74 @@ window.PlatformWorkflow = (function () {
       }).join("") + '</div>' : '<div class="workflow-detail-empty">后端未上报该活动的执行事件</div>') + '</div>';
   }
 
+  function buildTimelineView(view) {
+    if (!view || !view.workflow_id || !runManifest) return view;
+    var currentCheckpoint = workflowCheckpoint(view.submission || {});
+    var coastalExecutionCheckpoints = ["CJR-CP-ENGAGE", "CJR-CP-CLOSE"];
+    if (coastalExecutionCheckpoints.indexOf(String(currentCheckpoint || "")) < 0) return view;
+
+    var ids = (runManifest.workflow_ids || []).map(String);
+    if (ids.indexOf(String(view.workflow_id)) < 0) ids.push(String(view.workflow_id));
+    var candidates = ids.map(function (id) { return viewCache[id]; }).filter(function (candidate) {
+      return candidate && coastalExecutionCheckpoints.indexOf(
+        String(workflowCheckpoint(candidate.submission || {}) || "")
+      ) >= 0;
+    });
+    if (candidates.length < 2) return view;
+
+    var combinedActivities = [];
+    var combinedTrace = [];
+    var combinedDetails = {};
+    candidates.forEach(function (candidate) {
+      var candidateId = String(candidate.workflow_id || "");
+      var phaseContext = workflowPhaseContext(candidate);
+      var activities = candidate.orchestration && candidate.orchestration.activities || [];
+      activities.forEach(function (activity) {
+        var sourceKey = String(activity.activity_id || activity.work_item || ("activity-" + activity.index));
+        var timelineKey = candidateId + "::" + sourceKey;
+        combinedActivities.push(Object.assign({}, activity, {
+          index: combinedActivities.length + 1,
+          _timeline_activity_key: timelineKey,
+          _timeline_workflow_id: candidateId,
+          _timeline_phase_context: phaseContext,
+        }));
+        var details = candidate.activity_details || {};
+        var detail = details[sourceKey] || details[String(activity.activity_id || "")] ||
+          details[String(activity.work_item || "")];
+        if (detail) combinedDetails[timelineKey] = detail;
+      });
+      (candidate.orchestration && candidate.orchestration.trace || []).forEach(function (event) {
+        combinedTrace.push(Object.assign({_timeline_workflow_id: candidateId}, event));
+      });
+    });
+
+    return Object.assign({}, view, {
+      orchestration: Object.assign({}, view.orchestration || {}, {
+        activities: combinedActivities,
+        trace: combinedTrace,
+        counts: {
+          total: combinedActivities.length,
+          completed: combinedActivities.filter(function (item) { return item.status === "completed"; }).length,
+          running: combinedActivities.filter(function (item) { return item.status === "running"; }).length,
+          failed: combinedActivities.filter(function (item) { return item.status === "failed" || item.status === "error"; }).length,
+        },
+      }),
+      activity_details: combinedDetails,
+    });
+  }
+
   function renderActivities(view) {
     var root = document.getElementById("wf-activity-list");
     var traceRoot = document.getElementById("wf-trace-list");
     if (!root || !traceRoot) return;
+    view = ensurePresentationView(view);
+    if (view && view._presentation) {
+      lastView = view;
+      activeWorkflowId = view.workflow_id;
+      workflowId = view.workflow_id;
+      viewCache[String(view.workflow_id)] = view;
+    }
+    view = buildTimelineView(view);
     var orchestration = view && view.orchestration || {};
     var rows = orchestration.activities || [];
     var currentActivity = view && view.current_activity;
@@ -763,21 +1305,22 @@ window.PlatformWorkflow = (function () {
     root.innerHTML = rows.length ? rows.map(function (item) {
       var state = item.status || "pending";
       var sequenceContainer = item.type === "sequence" || /activatity-\d+-sequence$/i.test(item.activity_id || "");
-      var title = sequenceContainer ? "顺序流程容器" : (item.role || item.work_item || item.activity_id || "执行项");
+      var itemPhaseContext = item._timeline_phase_context || phaseContext;
+      var title = activityDisplayTitle(item, sequenceContainer, itemPhaseContext);
       var executor = sequenceContainer
         ? "Commander 流程控制 · " + (item.activity_id || item.work_item || "内部节点")
         : (item.agent || "Agent 未分配");
       var dependency = (item.depends_on || []).length ? " · 依赖 " + item.depends_on.join(", ") : "";
       var description = activityDescription(item, sequenceContainer, phaseContext);
-      var phaseLabel = phaseContext.label || "阶段未上报";
       var detail = view && view.activity_details && view.activity_details[activityKey(item)];
       var timing = activityTimingLabel(item, detail);
+      var itemPhaseLabel = itemPhaseContext.label || "阶段未上报";
       return '<button type="button" class="workflow-activity ' + escapeHtml(state) + (activityKey(item) === selectedActivityId ? " selected" : "") +
         '" data-activity-id="' + escapeHtml(activityKey(item)) + '" aria-pressed="' + (activityKey(item) === selectedActivityId) + '">' +
         '<span class="workflow-step-index">' + String(item.index || 0).padStart(2, "0") + '</span>' +
         '<span class="workflow-activity-body"><b>' + escapeHtml(title) + '</b>' +
         '<small class="workflow-activity-agent">' + escapeHtml(executor) + escapeHtml(dependency) + '</small>' +
-        '<small class="workflow-activity-phase">' + escapeHtml(phaseLabel) + '</small>' +
+        '<small class="workflow-activity-phase">' + escapeHtml(itemPhaseLabel) + '</small>' +
         (timing ? '<small class="workflow-activity-timing">' + escapeHtml(timing) + '</small>' : '') +
         '<small class="workflow-activity-desc">' + escapeHtml(description) + '</small>' +
         (item.error ? '<em>' + escapeHtml(item.error) + '</em>' : '') +
@@ -796,19 +1339,20 @@ window.PlatformWorkflow = (function () {
           phaseContext
         ),
         status: selectedActivity.status || "pending",
-        ooda: phaseContext.ooda,
-        f2: phaseContext.f2,
-        label: phaseContext.label,
+        ooda: (selectedActivity._timeline_phase_context || phaseContext).ooda,
+        f2: (selectedActivity._timeline_phase_context || phaseContext).f2,
+        label: (selectedActivity._timeline_phase_context || phaseContext).label,
       } : null,
     }));
 
     var trace = (orchestration || {}).trace || [];
-    traceRoot.innerHTML = trace.length ? trace.slice().reverse().map(function (item) {
+    traceRoot.innerHTML = trace.length ? trace.map(function (item) {
       var traceRole = activityRoleDisplayName(item.role, [], phaseContext) || item.role;
       var traceMeta = [traceRole, item.agent, item.work_item, item.message].filter(Boolean).join(" · ");
       return '<div class="workflow-trace-row"><span>' + escapeHtml(item.timestamp || "—") + '</span><b>' + escapeHtml(item.event) + '</b><small>' +
         escapeHtml(traceMeta) + '</small></div>';
     }).join("") : '<div class="workflow-empty">未返回执行事件</div>';
+    if (view && view._presentation) renderTaskHistory();
     renderActivityDetail(view);
   }
 
@@ -1070,9 +1614,19 @@ window.PlatformWorkflow = (function () {
     if (viewLoadInFlight) return null;
     viewLoadInFlight = true;
     try {
+      var previous = viewCache[String(id)];
+      // Automatic polling checks lifecycle first. Refresh activity details at
+      // a bounded interval and immediately fetch the verified terminal result.
+      if (generation != null && previous && API.getWorkflowBrief) {
+        var brief = await API.getWorkflowBrief(id);
+        if (generation !== viewGeneration || String(id) !== String(activeWorkflowId || "")) return null;
+        if (!brief.error && brief.status === previous.status &&
+            (previous.terminal || Date.now() - (viewFetchedAt[String(id)] || 0) < 6000)) return previous;
+      }
       var view = await API.getWorkflowView(id);
       if (generation != null && (generation !== viewGeneration || String(id) !== String(activeWorkflowId || ""))) return null;
       viewCache[String(id)] = view;
+      viewFetchedAt[String(id)] = Date.now();
       renderTaskHistory();
       if (String(id) === String(workflowId || "")) renderView(view);
       else processActiveView(view);
@@ -1111,6 +1665,7 @@ window.PlatformWorkflow = (function () {
     historyRunId = null;
     historyLoadingRunId = null;
     viewCache = {};
+    viewFetchedAt = {};
     selectedActivityId = null;
     activityTab = "input";
     followCurrentActivity = true;
@@ -1133,11 +1688,16 @@ window.PlatformWorkflow = (function () {
     if (follow) follow.checked = true;
     renderSubmission(null);
     renderActivities({});
-    renderResults({});
-    renderEvidenceViews({});
-    renderTaskHistory();
-    document.dispatchEvent(new CustomEvent("amos:workflow-view", {detail: null}));
-    selectTab("input", false);
+    if (lastView && lastView._presentation) {
+      renderActivityDetail(lastView);
+      selectTab("orchestration", false);
+    } else {
+      renderResults({});
+      renderEvidenceViews({});
+      renderTaskHistory();
+      document.dispatchEvent(new CustomEvent("amos:workflow-view", {detail: null}));
+      selectTab("input", false);
+    }
   }
 
   async function submit() {
@@ -1251,10 +1811,13 @@ window.PlatformWorkflow = (function () {
     }
     if (!lastView || !id) return false;
     if (targetWorkflowId && String(lastView.workflow_id || "") !== String(targetWorkflowId)) return false;
-    var rows = lastView.orchestration && lastView.orchestration.activities || [];
+    var timelineView = buildTimelineView(lastView);
+    var rows = timelineView.orchestration && timelineView.orchestration.activities || [];
     var target = rows.find(function (item) {
-      return activityKey(item) === String(id) || String(item.activity_id || "") === String(id) ||
-        String(item.work_item || "") === String(id);
+      var fromWorkflow = !targetWorkflowId || !item._timeline_workflow_id ||
+        String(item._timeline_workflow_id) === String(targetWorkflowId);
+      return fromWorkflow && (activityKey(item) === String(id) || String(item.activity_id || "") === String(id) ||
+        String(item.work_item || "") === String(id));
     });
     if (!target) return false;
     selectedActivityId = activityKey(target);
@@ -1323,6 +1886,8 @@ window.PlatformWorkflow = (function () {
     checkHealth();
     if (healthTimer) clearInterval(healthTimer);
     healthTimer = setInterval(checkHealth, 10000);
+    if (historyTimer) clearInterval(historyTimer);
+    historyTimer = setInterval(function () { refreshPendingHistoryViews().catch(function () {}); }, 5000);
     renderSubmission(null);
     renderActivities({});
     renderResults({});
@@ -1371,5 +1936,6 @@ window.PlatformWorkflow = (function () {
     syncRun: syncRun,
     track: track,
     reset: resetWorkflowDisplay,
+    refreshPresentation: refreshPresentation,
   };
 })();

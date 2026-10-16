@@ -116,19 +116,45 @@ class CognitionSkill:
                 })
             elif (
                 domain in {"ground", "land"}
-                and phase in {"TRACK", "TARGET", "ENGAGE", "ASSESS"}
+                and phase in {"FIX", "TRACK", "TARGET", "ENGAGE", "ASSESS"}
                 and speed_kts <= 5.0
                 and "sar" in sources
-                and bool(sources.intersection({"eo/ir", "eo-ir"}))
-                and bool(sources.intersection({"elint", "esm"}))
             ):
-                classification.update({
-                    "label": "hostile",
-                    "affiliation": "red",
-                    "object_class": "coastal_missile_site",
-                    "confidence": max(float(classification.get("confidence", 0.5)), 0.88),
-                    "classification_basis": "stationary_multisensor_ground_site_evidence",
-                })
+                detector_class = str(
+                    classification.get("object_class")
+                    or classification.get("class_name")
+                    or classification.get("class")
+                    or ""
+                ).casefold().replace("_", "-")
+                maritime_biased = detector_class in {
+                    "ship", "boat", "vessel", "warship", "harbor",
+                    "large-vehicle", "largevehicle",
+                }
+                full_multisensor = (
+                    phase in {"TRACK", "TARGET", "ENGAGE", "ASSESS"}
+                    and bool(sources.intersection({"eo/ir", "eo-ir"}))
+                    and bool(sources.intersection({"elint", "esm"}))
+                )
+                if full_multisensor:
+                    classification.update({
+                        "label": "hostile",
+                        "affiliation": "red",
+                        "object_class": "coastal_missile_site",
+                        "confidence": max(float(classification.get("confidence", 0.5)), 0.88),
+                        "classification_basis": "stationary_multisensor_ground_site_evidence",
+                    })
+                elif checkpoint_id.startswith("CJR-") and (
+                    maritime_biased or phase in {"FIX", "TRACK", "TARGET", "ENGAGE", "ASSESS"}
+                ):
+                    # Coastal-only: DOTA/RT-DETR taxonomies lack coastal launchers
+                    # and often emit ship/large-vehicle on TEL imagery.
+                    classification.update({
+                        "label": "hostile",
+                        "affiliation": "red",
+                        "object_class": "coastal_missile_site",
+                        "confidence": max(float(classification.get("confidence", 0.5)), 0.82),
+                        "classification_basis": "ground_domain_rejects_maritime_detector_label",
+                    })
             elif domain not in {"maritime", "surface", "sea"}:
                 continue
             elif prior_classification == "fishing_vessel":

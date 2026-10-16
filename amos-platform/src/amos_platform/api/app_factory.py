@@ -11,6 +11,7 @@ from flask import Flask, abort, render_template, request
 from amos_platform.api.algolib_console import register_algolib_console_routes
 from amos_platform.api.blueprint import create_api_blueprint
 from amos_platform.api.dependencies import get_engine
+from amos_platform.api.synapserag_proxy import register_synapserag_proxy_routes
 from amos_platform.config import static_dir, template_dir
 from amos_platform.frontend_state.temporal_story import media_is_released
 
@@ -30,6 +31,7 @@ def create_app() -> Flask:
     )
     app.register_blueprint(create_api_blueprint())
     register_algolib_console_routes(app)
+    register_synapserag_proxy_routes(app)
 
     @app.before_request
     def enforce_scripted_media_release():

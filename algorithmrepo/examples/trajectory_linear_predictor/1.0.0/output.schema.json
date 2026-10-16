@@ -49,6 +49,10 @@
     },
     "track_id": {
       "type": ["string", "null"]
+    },
+    "algorithm_profile": {
+      "type": "string",
+      "enum": ["low", "medium", "high"]
     }
   },
   "additionalProperties": false

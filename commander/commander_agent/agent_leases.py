@@ -63,6 +63,7 @@ class AgentLeaseManager:
         )
         self._lock = threading.RLock()
         self._leases: dict[str, AgentLease] = {}
+        self._workflow_targets: dict[str, dict[str, dict]] = {}
 
     @staticmethod
     def instance_key(target: dict) -> str:
@@ -218,7 +219,7 @@ class AgentLeaseManager:
                 if lease.lock_handle:
                     self.distributed_lock.release(lease.lock_handle)
 
-    def release_workflow(self, workflow_id: str) -> None:
+    def release_workflow(self, workflow_id: str, *, cleanup_agents: bool = False) -> None:
         with self._lock:
             leases = [
                 lease
@@ -227,6 +228,20 @@ class AgentLeaseManager:
             ]
         for lease in leases:
             self.release(lease)
+        with self._lock:
+            targets = list(self._workflow_targets.pop(workflow_id, {}).values())
+        if cleanup_agents:
+            for target in targets:
+                try:
+                    from a2a_protocol.client import A2AClient
+
+                    A2AClient(
+                        target.get("ip"), target.get("port"), timeout=1
+                    ).cleanup_workflow(workflow_id)
+                except Exception:
+                    # Cleanup is best-effort; LRU limits still prevent growth
+                    # if an Agent disappears before the terminal callback.
+                    continue
 
     def is_current(self, lease: AgentLease) -> bool:
         with self._lock:
@@ -678,6 +693,10 @@ class AgentLeaseManager:
                     **circuit_metadata,
                 },
             )
+            self._workflow_targets.setdefault(workflow_id, {})[key] = {
+                "ip": target.get("ip"),
+                "port": target.get("port"),
+            }
         except Exception:
             self._leases.pop(lease.slot_key, None)
             if lock_handle:

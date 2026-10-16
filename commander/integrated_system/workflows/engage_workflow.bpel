@@ -1,0 +1,9 @@
+<process name="EngageWorkflow" targetNamespace="http://a2a.project613/workflow">
+  <variables>
+    <variable name="MissionInput" type="JsonObject"/>
+    <variable name="ExecutionSimulationResult" type="JsonObject"/>
+  </variables>
+  <sequence>
+    <invoke name="ExecutionSimulation" partnerLink="SimulationExecutionAgent" operation="simulateExecutionControl" requiredSkill="execution_control" inputVariable="MissionInput" outputVariable="ExecutionSimulationResult" />
+  </sequence>
+</process>

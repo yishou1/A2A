@@ -252,6 +252,40 @@ def test_activity_detail_prefers_actual_agent_request_input_over_bpel_variable()
     assert "observations" not in detail["input_detail"]
 
 
+def test_large_agent_input_preview_is_used_instead_of_previous_bpel_variable() -> None:
+    preview = {"phase": "strike", "results": {"compliance_authorization": {"decision": "approved"}}}
+    status = {
+        "workflow_id": "wf-preview", "status": "completed",
+        "context": {"mission_input": {"observations": [{"observation_id": "OLD"}]}},
+        "result": {"activity_results": [{
+            "activity_id": "A-SIM", "role": "simulation_execution", "status": "completed",
+            "input_preview": preview,
+            "input_summary": {"type": "dict", "sha256": "a" * 64, "size_bytes": 315267},
+        }]},
+    }
+    work = {"work_list": [{"activity_id": "A-SIM", "role": "simulation_execution", "input_variable": "MissionInput"}]}
+    detail = build_workflow_view(status, work_list=work)["activity_details"]["A-SIM"]
+    assert detail["input_source"] == "agent_request.input_preview"
+    assert detail["input_detail"]["phase"]["value"] == "strike"
+    assert detail["input_detail"]["results"]["value"] == preview["results"]
+    assert "observations" not in detail["input_detail"]
+
+
+def test_legacy_large_agent_input_displays_retained_request_summary() -> None:
+    summary = {"type": "dict", "sha256": "a" * 64, "size_bytes": 315267, "keys": ["phase", "results", "context"]}
+    status = {
+        "workflow_id": "wf-legacy", "status": "completed",
+        "result": {"activity_results": [{
+            "activity_id": "A-SIM", "role": "simulation_execution", "status": "completed",
+            "input_summary": summary,
+        }]},
+    }
+    work = {"work_list": [{"activity_id": "A-SIM", "input_variable": "ComplianceAuthorizationResult"}]}
+    detail = build_workflow_view(status, work_list=work)["activity_details"]["A-SIM"]
+    assert detail["input_source"] == "agent_request.input_summary"
+    assert detail["input_detail"]["input_summary"]["value"] == summary
+
+
 def test_workflow_view_uses_real_work_list_progress_and_structured_results() -> None:
     status = {
         "workflow_id": "wf-1",
@@ -325,6 +359,33 @@ def test_paused_workflow_with_failed_activity_is_terminal_for_director() -> None
     assert view["status"] == "paused"
     assert view["terminal"] is True
     assert view["orchestration"]["counts"]["failed"] == 1
+
+
+def test_light_director_poll_expands_paused_workflow(monkeypatch) -> None:
+    from amos_platform.runtime.platform_runtime import PlatformRuntime
+
+    runtime = PlatformRuntime()
+    runtime._bridge = SimpleNamespace(
+        get_workflow_brief=lambda _workflow_id: {"status": "paused"},
+    )
+    expanded = {
+        "workflow_id": "wf-paused-failed",
+        "status": "paused",
+        "terminal": True,
+        "orchestration": {
+            "counts": {"total": 2, "completed": 1, "running": 0, "failed": 1},
+        },
+    }
+    calls: list[str] = []
+
+    def full_view(workflow_id: str) -> dict:
+        calls.append(workflow_id)
+        return expanded
+
+    monkeypatch.setattr(runtime, "get_workflow_view", full_view)
+
+    assert runtime.get_workflow_status_view("wf-paused-failed", light=True) is expanded
+    assert calls == ["wf-paused-failed"]
 
 
 def test_workflow_view_v2_separates_agent_roles_instances_and_stubs() -> None:
@@ -1552,3 +1613,50 @@ def test_previous_run_result_is_not_applied_to_current_tracks() -> None:
     assert projection["status"] == "stale_run"
     assert projection["applied_count"] == 0
     assert track.agent_assessment["status"] == "pending"
+
+
+def test_director_resumes_only_after_workflow_snapshot_is_frozen(monkeypatch) -> None:
+    from amos_platform.agents.a2a.workflow_submission import submit_current_workflow
+    from amos_platform.runtime.platform_runtime import PlatformRuntime
+
+    runtime = PlatformRuntime()
+    runtime.get_director().configure(
+        scenario_id="maritime-convoy-air-defense",
+        mode="demonstration",
+        branch="standard",
+        seed=33031,
+    )
+    engine = runtime.get_engine()
+    steps: list[str] = []
+    build_snapshot = engine.exchange.build_snapshot
+
+    def capture_snapshot(state):
+        result = build_snapshot(state)
+        steps.append("snapshot")
+        return result
+
+    monkeypatch.setattr(engine.exchange, "build_snapshot", capture_snapshot)
+
+    class FakeBridge:
+        mode = "direct"
+
+        def build_workflow_payload(self, *_args, **_kwargs):
+            return sample_payload()
+
+        def build_backend_submission(self, _mission, *, engine, overrides):
+            return {"run_id": engine.clock["run_id"], "chain_id": "test-chain"}
+
+        def submit_workflow(self, _payload):
+            steps.append("submit")
+            return {"workflow_id": "wf-snapshot-hook"}
+
+    result = submit_current_workflow(
+        {"scenario_id": "maritime-convoy-air-defense", "sim_context": True},
+        engine=engine,
+        bridge=FakeBridge(),
+        scenario_support={},
+        on_snapshot_captured=lambda: steps.append("resume"),
+    )
+
+    assert result["workflow_id"] == "wf-snapshot-hook"
+    assert steps == ["snapshot", "resume", "submit"]

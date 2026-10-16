@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import threading
+import time
 from pathlib import Path
+import threading
+import time
 
 import pytest
 
@@ -339,7 +343,7 @@ def test_failed_checkpoint_cannot_be_advanced_or_restarted() -> None:
     assert runtime.get_engine().clock["running"] is False
 
 
-def test_each_scenario_can_reach_all_unconditional_declared_checkpoints() -> None:
+def test_each_scenario_can_reach_leading_unconditional_declared_checkpoints() -> None:
     for scenario_id in SCENARIO_IDS:
         runtime = PlatformRuntime()
         director = DirectorService(
@@ -361,14 +365,15 @@ def test_each_scenario_can_reach_all_unconditional_declared_checkpoints() -> Non
             branch="standard",
             seed=scenario["default_seed"],
         )
-        expected = [
-            item for item in scenario["demo_checkpoints"]
-            if not item.get("requires_operator_action")
-            and (
+        expected = []
+        for item in scenario["demo_checkpoints"]:
+            if item.get("requires_operator_action"):
+                break
+            if (
                 "*" in set(item.get("branch_ids") or ["*"])
                 or "standard" in set(item.get("branch_ids") or [])
-            )
-        ]
+            ):
+                expected.append(item)
         reached = []
         for _ in expected:
             checkpoint_id = director.action("advance_checkpoint")["current_checkpoint"]["checkpoint_id"]
@@ -471,7 +476,257 @@ def test_authorization_wait_starts_only_at_reached_operator_checkpoint_and_is_wa
     assert director._authorization_stage() == "fire"
 
 
-def test_carrier_wave_two_waits_for_real_bda_and_close_requires_both_target_hits() -> None:
+@pytest.mark.parametrize("checkpoint_id,reached_sec", [("ASC-CP-WAVE1", 3390), ("ASC-CP-WAVE2", 4560)])
+def test_accepted_fire_command_immediately_releases_authorization_pause(checkpoint_id, reached_sec) -> None:
+    runtime = PlatformRuntime()
+    director = DirectorService(runtime)
+    director.configure(
+        scenario_id="air-space-sea-carrier-strike",
+        mode="demonstration",
+        branch="standard",
+        seed=76091,
+    )
+    engine = runtime.get_engine()
+    engine.clock["elapsed_sec"] = reached_sec
+    engine.pause()
+    engine.lock_speed_for_confirmation("awaiting_authorization")
+    director._state.update({
+        "director_status": "awaiting_authorization",
+        "awaiting_authorization": True,
+        "authorization_stage": "fire",
+        "current_checkpoint": {
+            "checkpoint_id": checkpoint_id,
+            "reached_at_sec": reached_sec,
+            "requires_operator_action": True,
+            "operator_action_type": "fire",
+            "analysis_status": "completed",
+        },
+    })
+    engine.clock["director_status"] = "awaiting_authorization"
+    engine.events.append({
+        "type": "authorized_fire_command",
+        "command_source": "operator",
+        "sim_time": reached_sec,
+    })
+
+    class ExistingAutoMonitor:
+        @staticmethod
+        def is_alive() -> bool:
+            return True
+
+    director._auto_thread = ExistingAutoMonitor()
+    state = director.notify_operator_fire_authorized()
+
+    assert state["director_status"] == "auto_running"
+    assert state["awaiting_authorization"] is False
+    assert state["authorization_stage"] is None
+    assert engine.clock["running"] is True
+    assert "speed_locked_reason" not in engine.clock
+
+
+def test_wave_analysis_finishing_after_fire_does_not_repause_simulation() -> None:
+    runtime = PlatformRuntime()
+    director = DirectorService(
+        runtime,
+        workflow_state_callback=lambda workflow_id: {
+            "status": "completed",
+            "terminal": True,
+            "run": {"current": True},
+            "orchestration": {"counts": {"total": 2, "completed": 2, "failed": 0}},
+            "result": {"projection_status": "completed"},
+        },
+    )
+    director.configure(
+        scenario_id="air-space-sea-carrier-strike",
+        mode="demonstration",
+        branch="standard",
+        seed=76091,
+    )
+    engine = runtime.get_engine()
+    engine.clock.update({"elapsed_sec": 3401.17, "running": False, "lifecycle": "paused"})
+    director._state.update({
+        "director_status": "auto_running",
+        "awaiting_authorization": False,
+        "authorization_stage": None,
+        "current_checkpoint": {
+            "checkpoint_id": "ASC-CP-WAVE1",
+            "reached_at_sec": 3401.17,
+            "requires_operator_action": True,
+            "operator_action_type": "fire",
+            "analysis_blocking": False,
+            "analysis_status": "submitted",
+            "submission": {"workflow_id": "wf-wave1"},
+        },
+    })
+    engine.clock["director_status"] = "auto_running"
+    engine.events.append({
+        "type": "authorized_fire_command",
+        "command_source": "operator",
+        "sim_time": 3401.17,
+    })
+
+    class StopAfterOnePoll:
+        polls = 0
+
+        def wait(self, timeout: float) -> bool:
+            self.polls += 1
+            return self.polls > 1
+
+    director._auto_stop = StopAfterOnePoll()
+    director._auto_thread = threading.current_thread()
+    director._auto_monitor()
+
+    state = director.state()
+    assert state["current_checkpoint"]["analysis_status"] == "completed"
+    assert state["director_status"] == "auto_running"
+    assert engine.clock["running"] is True
+
+
+def test_inflight_analysis_poll_honors_fire_event_that_arrives_during_poll() -> None:
+    runtime = PlatformRuntime()
+    director = DirectorService(
+        runtime,
+        workflow_state_callback=lambda workflow_id: {
+            "status": "completed",
+            "terminal": True,
+            "run": {"current": True},
+            "orchestration": {"counts": {"total": 2, "completed": 2, "failed": 0}},
+            "result": {"projection_status": "completed"},
+        },
+    )
+    director.configure(
+        scenario_id="air-space-sea-carrier-strike",
+        mode="demonstration",
+        branch="standard",
+        seed=76091,
+    )
+    engine = runtime.get_engine()
+    engine.clock.update({"elapsed_sec": 3401.17, "running": False, "lifecycle": "paused"})
+    director._state.update({
+        "director_status": "auto_running",
+        "current_checkpoint": {
+            "checkpoint_id": "ASC-CP-WAVE1",
+            "reached_at_sec": 3401.17,
+            "requires_operator_action": True,
+            "operator_action_type": "fire",
+            "analysis_blocking": False,
+            "analysis_status": "submitted",
+            "submission": {"workflow_id": "wf-wave1"},
+        },
+    })
+    engine.clock["director_status"] = "auto_running"
+    engine.events.append({
+        "type": "authorized_fire_command",
+        "command_source": "operator",
+        "sim_time": 3401.17,
+    })
+
+    assert director._poll_current_analysis(resume_on_success=False) == "completed"
+    assert director.state()["director_status"] == "auto_running"
+    assert engine.clock["running"] is True
+
+
+def test_auto_monitor_marks_paused_when_clock_stops_before_director() -> None:
+    runtime = PlatformRuntime()
+    director = DirectorService(runtime)
+    director.configure(
+        scenario_id="air-space-sea-carrier-strike",
+        mode="demonstration",
+        branch="standard",
+        seed=76091,
+    )
+    engine = runtime.get_engine()
+    run_id = str(director.state()["run_id"])
+    engine.clock.update({
+        "run_id": run_id,
+        "running": False,
+        "lifecycle": "paused",
+        "director_status": "auto_running",
+    })
+    director._state["director_status"] = "auto_running"
+
+    class ContinueUntilClockCheck:
+        @staticmethod
+        def wait(timeout: float) -> bool:
+            return False
+
+    director._auto_stop = ContinueUntilClockCheck()
+    director._auto_thread = threading.current_thread()
+    generation = director._auto_generation
+    director._auto_monitor(generation, run_id)
+
+    state = director.state()
+    assert state["director_status"] == "paused"
+    assert state["auto_running"] is False
+    assert engine.clock["director_status"] == "paused"
+
+
+def test_authorized_fire_resumes_while_checkpoint_workflow_is_submitting() -> None:
+    runtime = PlatformRuntime()
+    director = DirectorService(runtime)
+    director.configure(
+        scenario_id="air-space-sea-carrier-strike",
+        mode="demonstration",
+        branch="standard",
+        seed=76091,
+    )
+    engine = runtime.get_engine()
+    run_id = str(director.state()["run_id"])
+    checkpoint = {
+        "checkpoint_id": "ASC-CP-WAVE2",
+        "reached_at_sec": 4560.0,
+        "requires_operator_action": True,
+        "operator_action_type": "fire",
+        "analysis_after_authorization": False,
+        "analysis_blocking": False,
+        "analysis_status": "submitting",
+        "submission": {"workflow_id": "wf-wave2"},
+    }
+    director._state.update({
+        "director_status": "awaiting_authorization",
+        "awaiting_authorization": True,
+        "authorization_stage": "fire",
+        "current_checkpoint": checkpoint,
+    })
+    engine.clock.update({
+        "run_id": run_id,
+        "elapsed_sec": 4560.0,
+        "scenario_elapsed_sec": 4560.0,
+        "running": False,
+        "lifecycle": "paused",
+        "director_status": "awaiting_authorization",
+    })
+    engine.events.append({
+        "type": "authorized_fire_command",
+        "command_source": "operator",
+        "target_track_id": "track-wave2",
+        "sim_time": 4560.0,
+    })
+
+    class StopAfterAuthorizationPoll:
+        polls = 0
+
+        def wait(self, timeout: float) -> bool:
+            self.polls += 1
+            return self.polls > 1
+
+    director._auto_stop = StopAfterAuthorizationPoll()
+    director._auto_thread = threading.current_thread()
+    resume_calls: list[bool] = []
+
+    def mark_running(*, announce: bool = True) -> None:
+        resume_calls.append(announce)
+        engine.clock.update({"running": True, "lifecycle": "running"})
+
+    engine.resume = mark_running
+    director._auto_monitor(director._auto_generation, run_id)
+
+    assert resume_calls == [True]
+    assert director.state()["awaiting_authorization"] is False
+    assert engine.clock["running"] is True
+
+
+def test_carrier_wave_two_and_close_require_target_specific_bda() -> None:
     runtime = PlatformRuntime()
     director = DirectorService(runtime)
     director.configure(
@@ -502,21 +757,35 @@ def test_carrier_wave_two_waits_for_real_bda_and_close_requires_both_target_hits
             "target_threat_id": "COASTAL-AIRFIELD-01",
             "sim_time": 3940,
         },
-        {"type": "damage_assessment_confirmed", "sim_time": 4380},
+        {
+            "type": "damage_assessment_confirmed",
+            "target_threat_id": "CIVILIAN-PORT-01",
+            "sim_time": 4380,
+        },
     ])
+    assert director._checkpoint_satisfied(wave_two) is False
+    engine.events.append({
+        "type": "damage_assessment_confirmed",
+        "target_threat_id": "COASTAL-AIRFIELD-01",
+        "sim_time": 4380,
+    })
     assert director._checkpoint_satisfied(wave_two) is True
-    engine.clock["elapsed_sec"] = 5850
-    engine.media_capture._captures["ASC-MEDIA-09"] = {}
-    assert director._checkpoint_satisfied(close) is False
-    engine.events.append({"type": "weapon_hit", "target_threat_id": "COASTAL-AIRFIELD-01"})
+    engine.clock["elapsed_sec"] = 5760
+    for media_id in ("ASC-MEDIA-08", "ASC-MEDIA-10", "ASC-MEDIA-09"):
+        engine.media_capture._captures[media_id] = {}
     assert director._checkpoint_satisfied(close) is False
     engine.events.append({"type": "weapon_hit", "target_threat_id": "MOBILE-COASTAL-AD-01"})
+    assert director._checkpoint_satisfied(close) is False
+    engine.events.append({
+        "type": "damage_assessment_confirmed",
+        "target_threat_id": "MOBILE-COASTAL-AD-01",
+        "sim_time": 5400,
+    })
     assert director._checkpoint_satisfied(close) is True
     director._state["current_checkpoint"] = {
         "checkpoint_id": close["checkpoint_id"],
-        "reached_at_sec": 5850,
-        "requires_operator_action": True,
-        "operator_action_type": close["operator_action_type"],
+        "reached_at_sec": 5760,
+        "requires_operator_action": False,
     }
     assert director._authorization_stage() is None
 
@@ -598,6 +867,146 @@ def test_maritime_engage_checkpoint_preserves_warning_and_fire_across_assess_bou
     assert public_track["engagement_eligible"] is True
 
 
+def test_authorization_at_gate_instant_counts_despite_rounding() -> None:
+    """授权事件与检查点时刻的舍入精度差（3位 vs 2位）不得让导演永远等下去。"""
+    runtime = PlatformRuntime()
+    director = DirectorService(runtime)
+    director.configure(
+        scenario_id="coastal-joint-recon-strike",
+        mode="demonstration",
+        branch="standard",
+        seed=106,
+    )
+    engine = runtime.get_engine()
+    gate_elapsed = 3333.9909896850586
+    engine.events.append({
+        "type": "authorized_fire_command",
+        "command_source": "operator",
+        "sim_time": round(gate_elapsed, 2),  # 事件侧两位精度：3333.99
+    })
+    assert director._has_authorized_engagement(
+        since_sec=round(gate_elapsed, 3),  # 检查点侧三位精度：3333.991
+    ) is True
+
+
+def test_operator_gate_submission_is_deferred() -> None:
+    """操作员门检查点的分析提交走后台线程：先出弹窗状态，提交结果稍后补齐。"""
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_callback(context: dict) -> dict:
+        started.set()
+        release.wait(timeout=10)
+        return {"workflow_id": "wf-deferred"}
+
+    runtime = PlatformRuntime()
+    director = DirectorService(runtime, checkpoint_callback=slow_callback)
+    director.configure(
+        scenario_id="maritime-convoy-air-defense",
+        mode="demonstration",
+        branch="standard",
+        seed=105,
+    )
+    checkpoint = director._next_checkpoint()
+    reached = director._reach_checkpoint(checkpoint, defer_submission=True)
+    assert reached["analysis_status"] == "submitting"
+    assert director.state()["current_checkpoint"]["analysis_status"] == "submitting"
+
+    assert started.wait(timeout=5)
+    release.set()
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        current = director.state()["current_checkpoint"]
+        if current["analysis_status"] == "submitted":
+            break
+        time.sleep(0.05)
+    current = director.state()["current_checkpoint"]
+    assert current["analysis_status"] == "submitted"
+    assert current["submission"]["workflow_id"] == "wf-deferred"
+
+
+def test_stale_checkpoint_analysis_is_finalized_by_sweep() -> None:
+    """推进到下一检查点后，旧检查点的终态由补漏轮询收尾。"""
+    views = {
+        "wf-old": {
+            "workflow_id": "wf-old", "status": "completed", "terminal": True,
+            "run": {"current": True},
+            "orchestration": {"counts": {"total": 2, "completed": 2, "failed": 0}},
+            "result": {"projection_status": "completed"},
+        },
+        "wf-new": {
+            "workflow_id": "wf-new", "status": "running", "terminal": False,
+        },
+    }
+    runtime = PlatformRuntime()
+    director = DirectorService(
+        runtime,
+        checkpoint_callback=lambda context: {
+            "workflow_id": "wf-old" if context.get("checkpoint_id") == "MAR-CP-PERCEPTION" else "wf-new",
+        },
+        workflow_state_callback=lambda workflow_id, light=True: views[str(workflow_id)],
+    )
+    director.configure(
+        scenario_id="maritime-convoy-air-defense",
+        mode="demonstration",
+        branch="standard",
+        seed=107,
+    )
+    director.action("advance_checkpoint")
+    director.action("advance_checkpoint")
+    assert len(director._reached) == 2
+    director._reached[0]["analysis_status"] = "running"  # 模拟：推进后旧检查点仍显示运行中
+    status_before = director.state()["director_status"]
+    director._poll_stale_checkpoints(str(director.state()["run_id"]))
+    refreshed = director.state()["reached_checkpoints"]
+    assert refreshed[0]["analysis_status"] == "completed"
+    assert refreshed[1]["analysis_status"] != "completed"  # 当前检查点不被补漏碰
+    # 补漏只记账：不得篡改当前导演状态
+    assert director.state()["director_status"] == status_before
+
+
+def test_nonblocking_checkpoint_analysis_is_polled_without_waiting() -> None:
+    """非阻塞检查点的分析仍要被轮询投影，但不得把导演挂进等待态。"""
+    views = [
+        {"workflow_id": "wf-nonblocking", "status": "running", "terminal": False},
+        {
+            "workflow_id": "wf-nonblocking", "status": "completed", "terminal": True,
+            "run": {"current": True},
+            "orchestration": {"counts": {"total": 3, "completed": 3, "failed": 0}},
+            "result": {"projection_status": "completed"},
+        },
+    ]
+
+    def workflow_view(workflow_id: str, light: bool = True) -> dict:
+        return views.pop(0)
+
+    runtime = PlatformRuntime()
+    director = DirectorService(
+        runtime,
+        checkpoint_callback=lambda context: {"workflow_id": "wf-nonblocking"},
+        workflow_state_callback=workflow_view,
+    )
+    director.configure(
+        scenario_id="maritime-convoy-air-defense",
+        mode="demonstration",
+        branch="standard",
+        seed=104,
+    )
+    director._scenario["demo_checkpoints"][0]["block_until_analysis_complete"] = False
+    submitted = director.action("advance_checkpoint")
+    assert submitted["current_checkpoint"]["analysis_blocking"] is False
+
+    assert director._poll_current_analysis(resume_on_success=True) == "pending"
+    pending = director.state()
+    assert pending["awaiting_analysis"] is False
+    assert pending["director_status"] != "awaiting_analysis"
+
+    assert director._poll_current_analysis(resume_on_success=True) == "completed"
+    completed = director.state()
+    assert completed["reached_checkpoints"][0]["analysis_status"] == "completed"
+    assert completed["awaiting_analysis"] is False
+
+
 def test_maritime_close_checkpoint_is_review_only_and_requires_real_effects() -> None:
     scenario = get_scenario("maritime-convoy-air-defense")
     assert scenario is not None
@@ -635,6 +1044,8 @@ def test_checkpoint_callback_is_the_only_source_of_submitted_status() -> None:
     assert calls[0]["checkpoint_id"] == "MAR-CP-PERCEPTION"
     assert state["current_checkpoint"]["analysis_status"] == "submitted"
     assert state["current_checkpoint"]["submission"]["workflow_id"] == "wf-real-boundary"
+    # Analysis stages remain serial while physical animation can continue.
+    assert state["current_checkpoint"]["analysis_blocking"] is True
     assert state["awaiting_analysis"] is True
     assert state["director_status"] == "awaiting_analysis"
 
@@ -670,7 +1081,109 @@ def test_completed_backend_analysis_is_required_before_checkpoint_can_finish() -
     assert completed["awaiting_analysis"] is False
 
 
-def test_analysis_can_advance_within_phase_without_crossing_next_phase() -> None:
+def test_stage_workflows_wait_for_previous_analysis_before_submitting_next() -> None:
+    for scenario_id in ("maritime-convoy-air-defense", "coastal-joint-recon-strike"):
+        scenario = get_scenario(scenario_id)
+        assert scenario is not None
+        assert all(
+            checkpoint.get("block_until_analysis_complete", True)
+            for checkpoint in scenario["demo_checkpoints"]
+            if checkpoint.get("submit_analysis")
+        )
+
+    calls: list[str] = []
+    analysis_complete = False
+
+    def submit(context: dict) -> dict:
+        calls.append(context["checkpoint_id"])
+        return {"workflow_id": f"wf-{len(calls)}"}
+
+    def workflow_state(workflow_id: str) -> dict:
+        if not analysis_complete:
+            return {"status": "running", "terminal": False}
+        return {
+            "status": "completed",
+            "terminal": True,
+            "run": {"current": True},
+            "orchestration": {"counts": {"total": 2, "completed": 2, "failed": 0}},
+            "result": {"projection_status": "completed"},
+        }
+
+    runtime = PlatformRuntime()
+    director = DirectorService(
+        runtime,
+        checkpoint_callback=submit,
+        workflow_state_callback=workflow_state,
+    )
+    director.configure(
+        scenario_id="maritime-convoy-air-defense",
+        mode="demonstration",
+        branch="standard",
+        seed=33031,
+    )
+    director.action("advance_checkpoint")
+    with pytest.raises(DirectorError, match="analysis is not completed"):
+        director.action("advance_checkpoint")
+    with pytest.raises(DirectorError, match="analysis is not completed"):
+        director.action("step_tick", step_sec=1)
+    assert calls == ["MAR-CP-PERCEPTION"]
+
+    analysis_complete = True
+    assert director.action("refresh_analysis")["analysis_poll_result"] == "completed"
+    director.action("advance_checkpoint")
+    assert calls == ["MAR-CP-PERCEPTION", "MAR-CP-ASSESS"]
+
+
+def test_review_checkpoint_requires_completed_analysis_and_records_operator_action() -> None:
+    runtime = PlatformRuntime()
+    director = DirectorService(runtime)
+    director.configure(
+        scenario_id="coastal-joint-recon-strike",
+        mode="demonstration",
+        branch="standard",
+        seed=61023,
+    )
+    director._state["current_checkpoint"] = {
+        "checkpoint_id": "CJR-CP-CLOSE",
+        "requires_operator_action": True,
+        "operator_action_type": "review",
+        "analysis_status": "submitted",
+    }
+    with pytest.raises(DirectorError, match="analysis must complete"):
+        director.action("review_checkpoint")
+    director._state["current_checkpoint"]["analysis_status"] = "completed"
+    with pytest.raises(DirectorError, match="explicit operator review"):
+        director._ensure_checkpoint_can_advance()
+    reviewed = director.action("review_checkpoint")
+    assert reviewed["current_checkpoint"]["reviewed_at"]
+    assert reviewed["action_log"][-1]["action"] == "review_checkpoint"
+    director._ensure_checkpoint_can_advance()
+
+
+def test_review_checkpoint_allows_checkpoint_without_analysis() -> None:
+    runtime = PlatformRuntime()
+    director = DirectorService(runtime)
+    director.configure(
+        scenario_id="coastal-joint-recon-strike",
+        mode="demonstration",
+        branch="standard",
+        seed=61023,
+    )
+    director._state["current_checkpoint"] = {
+        "checkpoint_id": "CJR-CP-CLOSE",
+        "requires_operator_action": True,
+        "operator_action_type": "review",
+        "analysis_status": "not_requested",
+    }
+
+    reviewed = director.action("review_checkpoint")
+
+    assert reviewed["current_checkpoint"]["reviewed_at"]
+    assert reviewed["action_log"][-1]["action"] == "review_checkpoint"
+    director._ensure_checkpoint_can_advance()
+
+
+def test_first_analysis_advances_story_at_16x() -> None:
     runtime = PlatformRuntime()
     director = DirectorService(
         runtime,
@@ -691,18 +1204,546 @@ def test_analysis_can_advance_within_phase_without_crossing_next_phase() -> None
 
     assert submitted["current_checkpoint"]["analysis_status"] == "submitted"
     assert director._analysis_progress_enabled({"submit_analysis": True}) is True
+    story_before = engine.clock["scenario_elapsed_sec"]
+    physical_before = engine.clock["elapsed_sec"]
     director._arm_analysis_motion_limit()
-    assert 2159.9 < float(engine._director_motion_limit_sec or 0) < 2160.0
+    assert engine._director_motion_limit_sec is None
+    assert engine.clock["speed"] == 16
 
     with engine._lock:
         engine._tick(1200.0)
     state = engine.get_operator_state()
 
-    assert state["clock"]["elapsed_sec"] < 2160.0
-    assert state["mission_phases"]["f2t2ea"]["current"] == "FIX"
+    assert state["clock"]["elapsed_sec"] == physical_before + 1200.0
+    assert state["clock"]["scenario_elapsed_sec"] == story_before + 1200.0
+    assert state["mission_phases"]["f2t2ea"]["current"] == "TRACK"
 
     director._clear_analysis_motion_limit()
     assert engine._director_motion_limit_sec is None
+    assert engine.clock["speed"] == 32
+    with engine._lock:
+        engine._tick(30.0)
+    assert engine.clock["scenario_elapsed_sec"] == story_before + 1230.0
+
+
+def test_long_analysis_wait_preserves_later_sensor_capture_windows() -> None:
+    scenario = get_scenario("maritime-convoy-air-defense")
+    assert scenario is not None
+    engine = SimEngine(seed=int(scenario["default_seed"]))
+    engine.load_scenario(scenario)
+    engine._tick(1480.0)
+
+    for next_story_time, expected_media in (
+        (2940.0, "MAR-MEDIA-04"),
+        (3660.0, "MAR-MEDIA-05"),
+    ):
+        story_before = engine.clock["scenario_elapsed_sec"]
+        physical_before = engine.clock["elapsed_sec"]
+        engine.set_director_story_hold(True)
+        engine._tick(2880.0)  # Three wall-clock minutes at 16x.
+        assert engine.clock["elapsed_sec"] == physical_before + 2880.0
+        assert engine.clock["scenario_elapsed_sec"] == story_before
+        assert engine.clock["lifecycle"] != "completed"
+        engine.set_director_story_hold(False)
+        engine._tick(next_story_time - story_before)
+        assert expected_media in engine.media_capture.captured_media_ids
+        released = {
+            item["media_id"]
+            for item in engine.get_operator_state()["scenario_story"]["media_cues"]
+        }
+        assert expected_media in released
+
+    assert engine.clock["elapsed_sec"] > float(scenario["demo_controls"]["duration_sec"])
+    assert engine.clock["scenario_elapsed_sec"] == 3660.0
+
+
+def test_maritime_convoy_moves_together_during_first_three_analysis_waits() -> None:
+    scenario = get_scenario("maritime-convoy-air-defense")
+    assert scenario is not None
+    engine = SimEngine(seed=int(scenario["default_seed"]))
+    engine.load_scenario(scenario)
+    engine._tick(1470.0)
+    ship_ids = ("MERCHANT-01", "MERCHANT-02", "ESCORT-01")
+    before = {
+        asset_id: dict(engine.assets[asset_id]["position"])
+        for asset_id in ship_ids
+    }
+    normal_speeds = {asset_id: engine.assets[asset_id]["speed_kts"] for asset_id in ship_ids}
+    story_before = engine.clock["scenario_elapsed_sec"]
+
+    engine.set_director_story_hold(True)
+    engine._tick(300.0)
+
+    assert engine.clock["scenario_elapsed_sec"] == story_before
+    for asset_id in ship_ids:
+        position = engine.assets[asset_id]["position"]
+        distance_nm = engine.waypoint_nav._haversine(
+            before[asset_id]["lat"], before[asset_id]["lng"],
+            position["lat"], position["lng"],
+        )
+        assert distance_nm > 0.3
+        assert engine.assets[asset_id]["speed_kts"] == 8
+    for first, second in (("MERCHANT-01", "MERCHANT-02"), ("MERCHANT-01", "ESCORT-01")):
+        original_spacing = engine.waypoint_nav._haversine(
+            before[first]["lat"], before[first]["lng"],
+            before[second]["lat"], before[second]["lng"],
+        )
+        current_first = engine.assets[first]["position"]
+        current_second = engine.assets[second]["position"]
+        waiting_spacing = engine.waypoint_nav._haversine(
+            current_first["lat"], current_first["lng"],
+            current_second["lat"], current_second["lng"],
+        )
+        assert abs(waiting_spacing - original_spacing) < 0.01
+
+    engine.set_director_story_hold(False)
+    assert all(engine.assets[asset_id]["speed_kts"] == normal_speeds[asset_id] for asset_id in ship_ids)
+
+    engine.clock["scenario_elapsed_sec"] = 3900.0
+    engine.set_director_story_hold(True)
+    assert engine._director_hold_motion == {}
+
+
+def test_nonoperator_checkpoint_resumes_after_snapshot_capture() -> None:
+    runtime = PlatformRuntime()
+    engine = runtime.get_engine()
+    observations: list[tuple[bool, bool]] = []
+
+    def submit(context: dict) -> dict:
+        paused_before_capture = engine.clock["running"] is False
+        context["on_snapshot_captured"]()
+        observations.append((paused_before_capture, engine.clock["running"] is True))
+        return {"workflow_id": "wf-perception"}
+
+    director = DirectorService(runtime, checkpoint_callback=submit)
+    director.configure(
+        scenario_id="maritime-convoy-air-defense",
+        mode="demonstration",
+        branch="standard",
+        seed=33031,
+    )
+    engine.clock.update({"elapsed_sec": 1470.0, "running": True, "lifecycle": "running"})
+
+    class StopAfterOnePoll:
+        polls = 0
+
+        def wait(self, timeout: float) -> bool:
+            self.polls += 1
+            return self.polls > 1
+
+    director._auto_stop = StopAfterOnePoll()
+    original_satisfied = director._checkpoint_satisfied
+    director._checkpoint_satisfied = lambda checkpoint: True
+    pause_alerts_before = sum(alert.get("msg") == "仿真已暂停" for alert in engine.alerts)
+    try:
+        director._auto_monitor()
+        assert observations == [(False, True)]
+        assert director.state()["current_checkpoint"]["analysis_status"] == "submitted"
+        assert engine.clock["running"] is True
+        assert engine._director_story_hold is False
+        assert engine.clock["speed"] == 16
+        assert sum(alert.get("msg") == "仿真已暂停" for alert in engine.alerts) == pause_alerts_before
+    finally:
+        engine.pause()
+        director._checkpoint_satisfied = original_satisfied
+
+
+def test_auto_submission_keeps_status_responsive_after_snapshot() -> None:
+    runtime = PlatformRuntime()
+    engine = runtime.get_engine()
+    captured = threading.Event()
+    finish_submission = threading.Event()
+
+    def submit(context: dict) -> dict:
+        context["on_snapshot_captured"]()
+        captured.set()
+        assert finish_submission.wait(2.0)
+        return {"workflow_id": "wf-perception", "large_evidence": ["sample"] * 1000}
+
+    director = DirectorService(runtime, checkpoint_callback=submit)
+    director.configure(
+        scenario_id="maritime-convoy-air-defense",
+        mode="demonstration",
+        branch="standard",
+        seed=33031,
+    )
+    engine.clock.update({
+        "elapsed_sec": 1470.0,
+        "scenario_elapsed_sec": 1470.0,
+        "running": True,
+        "lifecycle": "running",
+    })
+
+    class StopAfterOnePoll:
+        polls = 0
+
+        def wait(self, timeout: float) -> bool:
+            self.polls += 1
+            return self.polls > 1
+
+    director._auto_stop = StopAfterOnePoll()
+    director._checkpoint_satisfied = lambda checkpoint: True
+    director._auto_thread = threading.current_thread()
+    try:
+        director._auto_monitor()
+        assert captured.wait(1.0)
+        assert director.state(summary=True)["current_checkpoint"]["analysis_status"] == "submitting"
+        assert engine.clock["running"] is True
+        assert engine.clock["speed"] == 16
+        with engine._lock:
+            engine._tick(10.0)
+        assert engine.clock["scenario_elapsed_sec"] == pytest.approx(1480.0, abs=0.01)
+        finish_submission.set()
+        for _ in range(40):
+            if director.state()["current_checkpoint"]["analysis_status"] == "submitted":
+                break
+            time.sleep(0.025)
+        full = director.state()
+        summary = director.state(summary=True)
+        assert full["current_checkpoint"]["submission"]["large_evidence"]
+        assert summary["current_checkpoint"]["submission"] == {"workflow_id": "wf-perception"}
+        assert summary["reached_checkpoints"][0]["submission"] == {"workflow_id": "wf-perception"}
+    finally:
+        finish_submission.set()
+        engine.pause(announce=False)
+
+
+def test_running_analysis_does_not_pause_at_the_next_phase_boundary() -> None:
+    runtime = PlatformRuntime()
+    director = DirectorService(
+        runtime,
+        checkpoint_callback=lambda context: {"workflow_id": "wf-observe"},
+        workflow_state_callback=lambda workflow_id: {"status": "running", "terminal": False},
+    )
+    director.configure(
+        scenario_id="maritime-convoy-air-defense",
+        mode="demonstration",
+        branch="standard",
+        seed=33031,
+    )
+    director.action("advance_checkpoint")
+    engine = runtime.get_engine()
+    director._arm_analysis_motion_limit()
+    story_before = engine.clock["scenario_elapsed_sec"]
+    engine.clock.update({"elapsed_sec": 2160.0, "running": True, "lifecycle": "running"})
+
+    class StopAfterOnePoll:
+        polls = 0
+
+        def wait(self, timeout: float) -> bool:
+            self.polls += 1
+            return self.polls > 1
+
+    director._auto_stop = StopAfterOnePoll()
+    director._auto_monitor()
+
+    assert engine.clock["elapsed_sec"] == 2160.0
+    assert engine.clock["scenario_elapsed_sec"] == story_before
+    assert engine.clock["running"] is True
+    assert engine._director_motion_limit_sec is None
+    assert director.state()["current_checkpoint"]["checkpoint_id"] == "MAR-CP-PERCEPTION"
+
+
+def test_engagement_analysis_holds_clock_until_warning_gate_opens() -> None:
+    runtime = PlatformRuntime()
+    director = DirectorService(
+        runtime,
+        workflow_state_callback=lambda workflow_id: {
+            "status": "completed",
+            "terminal": True,
+            "run": {"current": True},
+            "orchestration": {"counts": {"total": 2, "completed": 2, "failed": 0}},
+            "result": {"projection_status": "completed"},
+        },
+    )
+    director.configure(
+        scenario_id="maritime-convoy-air-defense",
+        mode="demonstration",
+        branch="standard",
+        seed=33031,
+    )
+    # This clock fixture isolates timing; target eligibility has separate coverage.
+    director._authorization_candidate_exists = lambda: True
+    engine = runtime.get_engine()
+    engine.clock.update({"elapsed_sec": 3900.0, "running": True, "lifecycle": "running"})
+    director._state["current_checkpoint"] = {
+        "checkpoint_id": "MAR-CP-ENGAGE",
+        "analysis_status": "running",
+        "analysis_blocking": True,
+        "requires_operator_action": True,
+        "operator_action_type": "fire",
+        "reached_at_sec": 3900.0,
+        "submission": {"workflow_id": "wf-engage"},
+    }
+
+    class StopAfterOnePoll:
+        polls = 0
+
+        def wait(self, timeout: float) -> bool:
+            self.polls += 1
+            return self.polls > 1
+
+    director._auto_stop = StopAfterOnePoll()
+    director._auto_monitor()
+
+    state = director.state()
+    assert state["current_checkpoint"]["analysis_status"] == "completed"
+    assert state["awaiting_authorization"] is True
+    assert state["authorization_stage"] == "warning"
+    assert abs(engine.clock["elapsed_sec"] - 3900.0) < 0.01
+    assert engine.clock["running"] is False
+    assert 3900 + get_scenario("maritime-convoy-air-defense")["engagement_policy"]["warning_delay_sec"] < 5400
+
+
+def test_engagement_warning_overlaps_analysis_but_fire_waits_for_completion() -> None:
+    workflow = {"terminal": False}
+
+    def workflow_state(workflow_id: str) -> dict:
+        if not workflow["terminal"]:
+            return {"status": "running", "terminal": False}
+        return {
+            "status": "completed",
+            "terminal": True,
+            "run": {"current": True},
+            "orchestration": {"counts": {"total": 2, "completed": 2, "failed": 0}},
+            "result": {"projection_status": "completed"},
+        }
+
+    runtime = PlatformRuntime()
+    director = DirectorService(runtime, workflow_state_callback=workflow_state)
+    director.configure(
+        scenario_id="maritime-convoy-air-defense",
+        mode="demonstration",
+        branch="standard",
+        seed=33031,
+    )
+    # This clock fixture isolates timing; target eligibility has separate coverage.
+    director._authorization_candidate_exists = lambda: True
+    engine = runtime.get_engine()
+    engine.clock.update({"elapsed_sec": 3900.0, "running": True, "lifecycle": "running"})
+    director._state["current_checkpoint"] = {
+        "checkpoint_id": "MAR-CP-ENGAGE",
+        "analysis_status": "running",
+        "analysis_blocking": True,
+        "requires_operator_action": True,
+        "operator_action_type": "fire",
+        "reached_at_sec": 3900.0,
+        "submission": {"workflow_id": "wf-engage"},
+    }
+
+    class StopAfterOnePoll:
+        polls = 0
+
+        def wait(self, timeout: float) -> bool:
+            self.polls += 1
+            return self.polls > 1
+
+    def monitor_once() -> None:
+        director._auto_stop = StopAfterOnePoll()
+        director._auto_monitor()
+
+    monitor_once()
+    state = director.state()
+    assert state["current_checkpoint"]["analysis_status"] == "running"
+    assert state["awaiting_authorization"] is True
+    assert state["authorization_stage"] == "warning"
+    assert abs(engine.clock["elapsed_sec"] - 3900.0) < 0.01
+    assert engine.clock["running"] is False
+
+    engine._engagement_warnings["TRK-TEST"] = {
+        "track_id": "TRK-TEST",
+        "status": "issued",
+        "issued_at_sec": 3900.0,
+        "fire_not_before_sec": 4020.0,
+    }
+    monitor_once()
+    state = director.state()
+    assert state["awaiting_authorization"] is False
+    assert state["authorization_stage"] == "warning_wait"
+    assert state["current_checkpoint"]["analysis_status"] == "running"
+    assert engine.clock["running"] is True
+    assert engine._director_motion_limit_sec is None
+    assert engine._director_story_hold is False
+    assert engine.clock["speed"] == 16
+
+    engine.clock["elapsed_sec"] = 4020.0
+    monitor_once()
+    assert director.state()["awaiting_authorization"] is False
+    assert director._authorization_stage() == "warning_wait"
+
+    workflow["terminal"] = True
+    monitor_once()
+    state = director.state()
+    assert state["current_checkpoint"]["analysis_status"] == "completed"
+    assert state["awaiting_authorization"] is True
+    assert state["authorization_stage"] == "fire"
+    assert engine.clock["running"] is False
+
+
+def test_completed_analysis_keeps_open_warning_confirmation_visible() -> None:
+    runtime = PlatformRuntime()
+    director = DirectorService(
+        runtime,
+        workflow_state_callback=lambda workflow_id: {
+            "status": "completed",
+            "terminal": True,
+            "run": {"current": True},
+            "orchestration": {"counts": {"total": 2, "completed": 2, "failed": 0}},
+            "result": {"projection_status": "completed"},
+        },
+    )
+    director.configure(
+        scenario_id="maritime-convoy-air-defense",
+        mode="demonstration",
+        branch="standard",
+        seed=33031,
+    )
+    director._state["current_checkpoint"] = {
+        "checkpoint_id": "MAR-CP-ENGAGE",
+        "analysis_status": "running",
+        "requires_operator_action": True,
+        "operator_action_type": "fire",
+        "submission": {"workflow_id": "wf-engage"},
+    }
+    director._state["awaiting_authorization"] = True
+    director._state["authorization_stage"] = "warning"
+
+    assert director._poll_current_analysis(resume_on_success=False) == "completed"
+    assert director.state()["director_status"] == "awaiting_authorization"
+    assert runtime.get_engine().clock["director_status"] == "awaiting_authorization"
+
+
+def test_operator_checkpoint_submits_execution_only_after_fire_authorization(monkeypatch) -> None:
+    runtime = PlatformRuntime()
+    engine = runtime.get_engine()
+    submitted_at: list[float] = []
+
+    def submit(context: dict) -> dict:
+        assert engine.clock["running"] is True
+        assert any(event.get("type") == "authorized_fire_command" for event in engine.events)
+        submitted_at.append(float(engine.clock["elapsed_sec"]))
+        context["on_snapshot_captured"]()
+        return {"workflow_id": "wf-engage"}
+
+    director = DirectorService(runtime, checkpoint_callback=submit)
+    director.configure(
+        scenario_id="maritime-convoy-air-defense",
+        mode="demonstration",
+        branch="standard",
+        seed=33031,
+    )
+    director._checkpoint_index = 2  # The next checkpoint is MAR-CP-ENGAGE.
+    engine.clock.update({"elapsed_sec": 3900.0, "running": True, "lifecycle": "running"})
+    monkeypatch.setattr(director, "_checkpoint_satisfied", lambda checkpoint: True)
+
+    class StopAfterOnePoll:
+        polls = 0
+
+        def wait(self, timeout: float) -> bool:
+            self.polls += 1
+            return self.polls > 1
+
+    def monitor_once() -> None:
+        director._auto_stop = StopAfterOnePoll()
+        director._auto_monitor()
+
+    monitor_once()
+    assert submitted_at == []
+    assert engine.clock["elapsed_sec"] == 3900.0
+    assert engine.clock["running"] is False
+    state = director.state()
+    assert state["current_checkpoint"]["checkpoint_id"] == "MAR-CP-ENGAGE"
+    assert state["current_checkpoint"]["analysis_status"] == "awaiting_operator"
+    with pytest.raises(DirectorError, match="analysis is not completed"):
+        director._reach_checkpoint(director._next_checkpoint())
+
+    director._state["awaiting_authorization"] = True
+    director._state["authorization_stage"] = "fire"
+    engine.events.append({
+        "type": "authorized_fire_command",
+        "command_source": "operator",
+        "sim_time": 3900.0,
+    })
+    monitor_once()
+
+    assert submitted_at == pytest.approx([3900.0], abs=0.1)
+    assert director.state()["current_checkpoint"]["analysis_status"] == "submitted"
+    assert director.state()["current_checkpoint"]["submission"]["workflow_id"] == "wf-engage"
+    assert engine.clock["running"] is True
+    with pytest.raises(DirectorError, match="analysis is not completed"):
+        director._reach_checkpoint(director._next_checkpoint())
+
+
+def test_maritime_warning_fire_and_post_fire_analysis_use_real_sim_events() -> None:
+    submitted: list[str] = []
+
+    def submit(context: dict) -> dict:
+        assert context["checkpoint_id"] == "MAR-CP-ENGAGE"
+        assert any(alert.get("type") == "weapon_launched" for alert in engine.alerts)
+        submitted.append(context["checkpoint_id"])
+        context["on_snapshot_captured"]()
+        return {"workflow_id": "wf-post-fire"}
+
+    runtime = PlatformRuntime()
+    director = DirectorService(runtime, checkpoint_callback=submit)
+    director.configure(
+        scenario_id="maritime-convoy-air-defense",
+        mode="demonstration",
+        branch="standard",
+        seed=33031,
+    )
+    engine = runtime.get_engine()
+    engine._tick(3900.0)
+    hostile = next(
+        track for track in engine.sensor_fusion.tracks.values()
+        if engine._truth_target_for_track(track) == "CONTACT-HOSTILE-01"
+    )
+    hostile.classification = "FAST_ATTACK_CRAFT"
+    hostile.threat_level = "HIGH"
+    hostile.kill_chain_phase = "ENGAGE"
+    hostile.agent_assessment = {"status": "confirmed", "label": "高风险", "source": "test"}
+    director._checkpoint_index = 3
+    director._state["current_checkpoint"] = {
+        "checkpoint_id": "MAR-CP-ENGAGE",
+        "reached_at_sec": 3900.0,
+        "analysis_status": "awaiting_operator",
+        "analysis_after_authorization": True,
+        "analysis_blocking": True,
+        "requires_operator_action": True,
+        "operator_action_type": "fire",
+    }
+    director._reached.append(director._state["current_checkpoint"])
+
+    warning = engine.issue_warning_at_track(hostile.id, authorized=True)
+    assert warning["status"] == "issued"
+    assert director._authorization_stage() == "warning_wait"
+    engine._tick(float(warning["delay_sec"]))
+    assert director._authorization_stage() == "fire"
+    fire = engine.fire_weapon_at_track(
+        hostile.id,
+        asset_id="ESCORT-01",
+        weapon_name="舰载反舰导弹",
+        authorized=True,
+    )
+    assert fire["status"] == "launched"
+    assert submitted == []
+
+    class StopAfterOnePoll:
+        polls = 0
+
+        def wait(self, timeout: float) -> bool:
+            self.polls += 1
+            return self.polls > 1
+
+    director._auto_stop = StopAfterOnePoll()
+    director._auto_monitor()
+
+    assert submitted == ["MAR-CP-ENGAGE"]
+    assert director.state()["current_checkpoint"]["analysis_status"] == "submitted"
+    assert any(event.get("type") == "authorized_fire_command" for event in engine.events)
+    with pytest.raises(DirectorError, match="analysis is not completed"):
+        director._reach_checkpoint(director._next_checkpoint())
+    engine.pause()
 
 
 def test_final_analysis_completion_does_not_restart_completed_clock() -> None:
@@ -743,6 +1784,75 @@ def test_final_analysis_completion_does_not_restart_completed_clock() -> None:
     director._auto_stop.clear()
     director._auto_monitor()
     assert director.state()["director_status"] == "completed"
+
+
+def test_slow_analysis_result_cannot_mutate_a_reconfigured_run() -> None:
+    runtime = PlatformRuntime()
+    director = DirectorService(runtime)
+    director.configure(
+        scenario_id="maritime-convoy-air-defense",
+        mode="demonstration",
+        branch="standard",
+        seed=33031,
+    )
+    old_run_id = director.state()["run_id"]
+    director._state["current_checkpoint"] = {
+        "checkpoint_id": "MAR-CP-PERCEPTION",
+        "analysis_status": "running",
+        "submission": {"workflow_id": "wf-old-run"},
+    }
+
+    def reconfigure_while_polling(_workflow_id: str, **_kwargs) -> dict:
+        director.configure(
+            scenario_id="coastal-joint-recon-strike",
+            mode="demonstration",
+            branch="standard",
+            seed=44021,
+        )
+        return {
+            "status": "completed",
+            "terminal": True,
+            "run": {"current": True},
+            "orchestration": {"counts": {"total": 1, "completed": 1, "failed": 0}},
+            "result": {"projection_status": "completed"},
+        }
+
+    director.workflow_state_callback = reconfigure_while_polling
+    assert director._poll_current_analysis(resume_on_success=True) == "stale_run"
+    state = director.state()
+    assert state["run_id"] != old_run_id
+    assert state["scenario_id"] == "coastal-joint-recon-strike"
+    assert state["current_checkpoint"] is None
+    assert state["director_status"] == "configured"
+
+
+def test_authorization_checkpoint_fails_explainably_without_an_eligible_target(
+    monkeypatch,
+) -> None:
+    runtime = PlatformRuntime()
+    director = runtime.get_director()
+    director.configure(
+        scenario_id="air-space-sea-carrier-strike",
+        mode="demonstration",
+        branch="standard",
+        seed=76091,
+    )
+    director._state["current_checkpoint"] = {
+        "checkpoint_id": "ASC-CP-WAVE1",
+        "analysis_status": "completed",
+        "requires_operator_action": True,
+        "operator_action_type": "fire",
+        "engagement_wave": 1,
+    }
+    monkeypatch.setattr(director, "_authorization_stage", lambda: "fire")
+
+    director._auto_stop.clear()
+    director._auto_monitor()
+
+    state = director.state()
+    assert state["director_status"] == "error"
+    assert "没有满足识别、证据与交战规则的目标" in state["last_error"]
+    assert state["awaiting_authorization"] is False
 
 
 def test_failed_activity_keeps_director_paused_at_checkpoint() -> None:
@@ -796,4 +1906,411 @@ def test_director_routes_validate_configuration_and_do_not_expose_future_conditi
     assert configured["branch"] == "communication_degraded"
     assert configured["seed"] == 991
     assert "conditions" not in str(configured)
+    summary = client.get("/api/v1/director/state?summary=1").get_json()["data"]
+    assert summary["scenario_id"] == "maritime-convoy-air-defense"
+    assert summary["current_checkpoint"] is None
     assert client.post("/api/v1/director/action", json={"action": "unknown"}).status_code == 400
+
+
+@pytest.mark.parametrize("checkpoint_index", [0, 1, 2, 4])
+def test_maritime_nonoperator_analyses_keep_motion_during_submission(
+    checkpoint_index: int, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = PlatformRuntime()
+    engine = runtime.get_engine()
+    preparing = threading.Event()
+    capture = threading.Event()
+    submitting = threading.Event()
+    finish = threading.Event()
+
+    def submit(context: dict) -> dict:
+        preparing.set()
+        assert capture.wait(3.0)
+        context["on_snapshot_captured"]()
+        submitting.set()
+        assert finish.wait(3.0)
+        return {"workflow_id": "wf-continuous"}
+
+    director = DirectorService(
+        runtime, checkpoint_callback=submit,
+        workflow_state_callback=lambda workflow_id: {"status": "running", "terminal": False},
+    )
+    director.configure(
+        scenario_id="maritime-convoy-air-defense", mode="demonstration",
+        branch="standard", seed=33031,
+    )
+    checkpoint = director._scenario["demo_checkpoints"][checkpoint_index]
+    director._checkpoint_index = checkpoint_index - 1
+    story_time = float(checkpoint["min_elapsed_sec"])
+    engine.clock.update({
+        "elapsed_sec": story_time, "scenario_elapsed_sec": story_time,
+        "running": True, "lifecycle": "running",
+    })
+    pause_calls: list[bool] = []
+    original_pause = engine.pause
+
+    def record_pause(*, announce: bool = True) -> None:
+        pause_calls.append(announce)
+        original_pause(announce=announce)
+
+    monkeypatch.setattr(engine, "pause", record_pause)
+    monkeypatch.setattr(director, "_checkpoint_satisfied", lambda checkpoint: True)
+
+    class StopAfterOnePoll:
+        polls = 0
+
+        def wait(self, timeout: float) -> bool:
+            self.polls += 1
+            return self.polls > 1
+
+    director._auto_stop = StopAfterOnePoll()
+    director._auto_thread = threading.current_thread()
+    ship_ids = ["MERCHANT-01", "MERCHANT-02", "ESCORT-01"]
+    reference = SimEngine(seed=33031)
+    reference.load_scenario(director._scenario)
+    reference.clock.update({"elapsed_sec": story_time, "scenario_elapsed_sec": story_time})
+
+    def assert_motion_continues() -> None:
+        positions = {asset_id: dict(engine.assets[asset_id]["position"]) for asset_id in ship_ids}
+        elapsed = engine.clock["elapsed_sec"]
+        with engine._lock:
+            engine._tick(16.0)
+            reference._tick(16.0)
+        assert engine.clock["running"] is True
+        assert engine.clock["speed"] == 16
+        assert engine.clock["elapsed_sec"] == elapsed + 16.0
+        assert engine.clock["scenario_elapsed_sec"] == engine.clock["elapsed_sec"]
+        assert engine._director_story_hold is False
+        assert all(engine.assets[asset_id]["position"] == reference.assets[asset_id]["position"] for asset_id in ship_ids)
+        assert [engine.assets[asset_id]["speed_kts"] for asset_id in ship_ids] == [14, 14, 15]
+        assert all(engine.assets[asset_id]["position"] != positions[asset_id] for asset_id in ship_ids)
+        assert director.state()["current_checkpoint"]["checkpoint_id"] == checkpoint["checkpoint_id"]
+        assert len(director.state()["reached_checkpoints"]) == 1
+        assert pause_calls == []
+
+    try:
+        director._auto_monitor()
+        assert preparing.wait(1.0)
+        assert_motion_continues()
+        capture.set()
+        assert submitting.wait(1.0)
+        assert_motion_continues()
+        finish.set()
+        for _ in range(60):
+            if director.state()["current_checkpoint"]["analysis_status"] == "submitted":
+                break
+            time.sleep(0.025)
+        assert director.state()["current_checkpoint"]["analysis_status"] == "submitted"
+        assert director._poll_current_analysis(resume_on_success=True) == "pending"
+        assert_motion_continues()
+        if director._next_checkpoint() is not None:
+            with pytest.raises(DirectorError, match="analysis is not completed"):
+                director._reach_checkpoint(director._next_checkpoint())
+    finally:
+        capture.set()
+        finish.set()
+        original_pause(announce=False)
+
+
+def test_first_analysis_releases_next_scene_and_preserves_warning_window() -> None:
+    runtime = PlatformRuntime()
+    director = DirectorService(
+        runtime, checkpoint_callback=lambda context: {"workflow_id": "wf-observe"},
+        workflow_state_callback=lambda workflow_id: {"status": "running", "terminal": False},
+    )
+    director.configure(
+        scenario_id="maritime-convoy-air-defense", mode="demonstration",
+        branch="standard", seed=33031,
+    )
+    director.action("advance_checkpoint")
+    engine = runtime.get_engine()
+    director._arm_analysis_motion_limit()
+    first_time = engine.clock["scenario_elapsed_sec"]
+    before = dict(engine.assets["ESCORT-01"]["position"])
+    engine._tick(2190.0 - first_time)
+    assert engine.clock["scenario_elapsed_sec"] == 2190.0
+    assert "MAR-CUE-04" in engine._story_emitted
+    assert "MAR-MEDIA-03" in engine.media_capture.captured_media_ids
+    assert engine.assets["ESCORT-01"]["position"] != before
+    assert director.state()["current_checkpoint"]["checkpoint_id"] == "MAR-CP-PERCEPTION"
+    assert director._poll_current_analysis(resume_on_success=True) == "pending"
+    engine._tick(1800.0)
+    assert engine.clock["scenario_elapsed_sec"] == 3899.0
+    assert "MAR-MEDIA-04" in engine.media_capture.captured_media_ids
+    assert "MAR-MEDIA-05" in engine.media_capture.captured_media_ids
+    assert "MAR-CUE-07" not in engine._story_emitted
+    assert "MAR-MEDIA-06" not in engine.media_capture.captured_media_ids
+    before = dict(engine.assets["ESCORT-01"]["position"])
+    engine._tick(30.0)
+    assert engine.clock["scenario_elapsed_sec"] == 3899.0
+    assert engine.assets["ESCORT-01"]["position"] != before
+    engine._tick(1500.0)
+    assert engine.clock["elapsed_sec"] > 5400.0
+    assert engine.clock["scenario_elapsed_sec"] == 3899.0
+    assert engine.clock["lifecycle"] != "completed"
+    with pytest.raises(DirectorError, match="analysis is not completed"):
+        director._reach_checkpoint(director._next_checkpoint())
+    director._clear_analysis_motion_limit()
+    assert engine._director_story_limit_sec is None
+    engine._tick(1.0)
+    assert engine.clock["scenario_elapsed_sec"] == 3900.0
+
+
+@pytest.mark.parametrize("dialog_wait", [True, False])
+def test_post_fire_analysis_keeps_execution_and_return_running(dialog_wait, monkeypatch) -> None:
+    runtime = PlatformRuntime()
+    started = threading.Event()
+    release = threading.Event()
+
+    def submit(context: dict) -> dict:
+        assert context["checkpoint_id"] == "MAR-CP-ENGAGE"
+        assert engine.clock["running"] is True
+        started.set()
+        assert release.wait(20.0)
+        context["on_snapshot_captured"]()
+        return {"workflow_id": "wf-post-fire-moving"}
+
+    director = DirectorService(
+        runtime, checkpoint_callback=submit,
+        workflow_state_callback=lambda workflow_id: {"status": "running", "terminal": False},
+    )
+    director.configure(
+        scenario_id="maritime-convoy-air-defense", mode="demonstration",
+        branch="standard", seed=33031,
+    )
+    engine = runtime.get_engine()
+    # Drive real physics deterministically while keeping resume/pause behavior.
+    monkeypatch.setattr(engine, "_tick_loop", lambda: None)
+    engine._tick(3900.0)
+    hostile = max(
+        (track for track in engine.sensor_fusion.tracks.values()
+         if engine._truth_target_for_track(track) == "CONTACT-HOSTILE-01"),
+        key=lambda track: track.last_sim_time,
+    )
+    hostile.classification = "FAST_ATTACK_CRAFT"
+    hostile.threat_level = "HIGH"
+    hostile.kill_chain_phase = "ENGAGE"
+    hostile.agent_assessment = {"status": "confirmed", "label": "high", "source": "test"}
+    engine._tick(1.0)
+    follow = engine.authorize_follow_asset("UAV-CONFIRM-01", hostile.id, authorized=True)
+    assert follow.get("status") == "authorized", follow
+    warning = engine.issue_warning_at_track(hostile.id, authorized=True)
+    assert warning["status"] == "issued"
+    engine._tick(float(warning["delay_sec"]))
+    director._checkpoint_index = 2
+    director._reach_checkpoint(director._next_checkpoint())
+    engine.pause(announce=False)
+    director._state["awaiting_authorization"] = dialog_wait
+    director._state["authorization_stage"] = "fire" if dialog_wait else None
+    fire = engine.fire_weapon_at_track(
+        hostile.id, asset_id="ESCORT-01", weapon_name="舰载反舰导弹", authorized=True,
+    )
+    assert fire["status"] == "launched"
+    pauses: list[bool] = []
+    original_pause = engine.pause
+
+    def record_pause(*, announce=True):
+        pauses.append(announce)
+        original_pause(announce=announce)
+
+    monkeypatch.setattr(engine, "pause", record_pause)
+
+    class StopAfterOnePoll:
+        polls = 0
+
+        def wait(self, timeout):
+            self.polls += 1
+            return self.polls > 1
+
+    director._auto_stop = StopAfterOnePoll()
+    director._auto_thread = threading.current_thread()
+    try:
+        director._auto_monitor()
+        assert started.wait(1.0)
+        assert engine.clock["running"] is True
+        assert engine._director_story_hold is False
+        assert engine.clock["speed"] == 16
+        assert engine._director_story_limit_sec == 5399.0
+        before = engine.clock["scenario_elapsed_sec"]
+        escort_before = dict(engine.assets["ESCORT-01"]["position"])
+        for _ in range(14):
+            engine._tick(30.0)
+            if engine.weapons[fire["weapon_id"]].get("damage_state") == "destroyed":
+                break
+        assert engine.clock["scenario_elapsed_sec"] > before
+        assert engine.assets["ESCORT-01"]["position"] != escort_before
+        assert engine.weapons[fire["weapon_id"]]["damage_state"] == "destroyed"
+        assert "MAR-MEDIA-07" in engine.media_capture.captured_media_ids
+        assert engine.assets["UAV-CONFIRM-01"].get("_follow_returning_home") is True
+        assert director.state()["current_checkpoint"]["analysis_status"] == "submitting"
+        assert pauses == []
+    finally:
+        release.set()
+        original_pause(announce=False)
+
+
+def test_coastal_authorized_strike_keeps_flying_across_phase_during_slow_analysis(monkeypatch, tmp_path) -> None:
+    from test_coastal_joint_scenario import _advance, _apply_ground_site_assessment
+
+    monkeypatch.setenv("AMOS_RUN_DB", str(tmp_path / "coastal-strike.sqlite3"))
+    runtime = PlatformRuntime()
+    started = threading.Event()
+    release = threading.Event()
+
+    def submit(context):
+        assert context["checkpoint_id"] == "CJR-CP-ENGAGE"
+        assert engine.clock["running"] is True
+        started.set()
+        assert release.wait(30.0)
+        context["on_snapshot_captured"]()
+        return {"workflow_id": "wf-coastal-post-fire"}
+
+    director = DirectorService(runtime, checkpoint_callback=submit,
+        workflow_state_callback=lambda workflow_id: {"status": "running", "terminal": False})
+    director.configure(scenario_id="coastal-joint-recon-strike", mode="demonstration",
+                       branch="standard", seed=61023)
+    engine = runtime.get_engine()
+    monkeypatch.setattr(engine, "_tick_loop", lambda: None)
+    _advance(engine, 3300)
+    track_id = _apply_ground_site_assessment(engine)
+    director._checkpoint_index = 3
+    checkpoint = director._reach_checkpoint(director._next_checkpoint())
+    assert checkpoint["analysis_status"] == "awaiting_operator"
+    # Phase boundaries remain effective until an explicit fire event exists.
+    assert director._analysis_motion_limit() == pytest.approx(4199.999)
+    engine.pause(announce=False)
+    director._state.update({"awaiting_authorization": True, "authorization_stage": "fire"})
+    fire = engine.fire_weapon_at_track(track_id, asset_id="SEA-C2-01",
+                                      weapon_name="舰载对陆巡航导弹", authorized=True)
+    assert fire["status"] == "launched"
+    pauses = []
+    original_pause = engine.pause
+
+    def record_pause(*, announce=True):
+        pauses.append(announce)
+        original_pause(announce=announce)
+
+    monkeypatch.setattr(engine, "pause", record_pause)
+
+    class StopAfterOnePoll:
+        polls = 0
+
+        def wait(self, timeout):
+            self.polls += 1
+            return self.polls > 1
+
+    def monitor_once():
+        director._auto_stop = StopAfterOnePoll()
+        director._auto_thread = threading.current_thread()
+        director._auto_monitor()
+
+    try:
+        monitor_once()
+        assert started.wait(1.0)
+        assert engine._director_motion_limit_sec is None
+        engine._tick(30.0)
+        monitor_once()
+        assert engine.clock["running"] is True
+        assert checkpoint["analysis_status"] == "submitting"
+        release.set()
+        deadline = time.monotonic() + 3.0
+        while checkpoint["analysis_status"] == "submitting" and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert checkpoint["analysis_status"] == "submitted"
+        while engine.clock["elapsed_sec"] < 4600:
+            engine._tick(min(30, 4600 - engine.clock["elapsed_sec"]))
+            monitor_once()
+            assert engine.clock["running"] is True, director.state()["action_log"][-3:]
+        assert not engine._engagement_warnings
+        assert len([event for event in engine.events if event.get("type") == "weapon_hit"]) == 4
+        assert "CJR-MEDIA-07" in engine.media_capture.captured_media_ids
+        assert director.state()["current_checkpoint"]["checkpoint_id"] == "CJR-CP-ENGAGE"
+        assert director.state()["current_checkpoint"]["analysis_status"] == "running"
+        assert pauses == []
+        with pytest.raises(DirectorError, match="analysis is not completed"):
+            director.action("advance_checkpoint")
+    finally:
+        release.set()
+        original_pause(announce=False)
+
+
+def test_final_analysis_keeps_scene_running_until_review_finishes(monkeypatch) -> None:
+    runtime = PlatformRuntime()
+    terminal = {"value": False}
+
+    def view(workflow_id, light=True):
+        if not terminal["value"]:
+            return {"status": "running", "terminal": False}
+        return {
+            "status": "completed", "terminal": True, "run": {"current": True},
+            "orchestration": {"counts": {"total": 2, "completed": 2, "failed": 0}},
+            "result": {"projection_status": "completed"},
+        }
+
+    director = DirectorService(
+        runtime, checkpoint_callback=lambda context: {"workflow_id": "wf-final-review"},
+        workflow_state_callback=view,
+    )
+    director.configure(
+        scenario_id="maritime-convoy-air-defense", mode="demonstration",
+        branch="standard", seed=33031,
+    )
+    engine = runtime.get_engine()
+    monkeypatch.setattr(engine, "_tick_loop", lambda: None)
+    engine.clock.update({"elapsed_sec": 4590.0, "scenario_elapsed_sec": 4590.0, "running": True, "lifecycle": "running"})
+    director._checkpoint_index = 3
+    checkpoint = director._next_checkpoint()
+    director._arm_analysis_motion_limit(checkpoint)
+    director._reach_checkpoint(checkpoint)
+    before = dict(engine.assets["ESCORT-01"]["position"])
+    engine._tick(30.0)
+    assert engine.assets["ESCORT-01"]["position"] != before
+    assert engine.clock["scenario_elapsed_sec"] == 4620.0
+    engine._tick(800.0)
+    assert engine.clock["scenario_elapsed_sec"] == 5399.0
+    assert engine.clock["running"] is True
+    assert director._poll_current_analysis(resume_on_success=True) == "pending"
+    engine._tick(30.0)
+    assert engine.clock["running"] is True
+    assert engine.clock["scenario_elapsed_sec"] == 5399.0
+    terminal["value"] = True
+    assert director._poll_current_analysis(resume_on_success=True) == "completed"
+    assert engine._director_story_limit_sec is None
+    assert engine.clock["speed"] == 32
+    engine._tick(1.0)
+    assert engine.clock["scenario_elapsed_sec"] == 5400.0
+    assert engine.clock["lifecycle"] == "completed"
+    engine.pause(announce=False)
+
+
+def test_analysis_handoff_keeps_warning_guard_while_routes_continue(monkeypatch) -> None:
+    runtime = PlatformRuntime()
+    director = DirectorService(
+        runtime, checkpoint_callback=lambda context: {"workflow_id": "wf-complete"},
+        workflow_state_callback=lambda workflow_id, light=True: {
+            "status": "completed", "terminal": True, "run": {"current": True},
+            "orchestration": {"counts": {"total": 2, "completed": 2, "failed": 0}},
+            "result": {"projection_status": "completed"},
+        },
+    )
+    director.configure(
+        scenario_id="maritime-convoy-air-defense", mode="demonstration",
+        branch="standard", seed=33031,
+    )
+    engine = runtime.get_engine()
+    monkeypatch.setattr(engine, "_tick_loop", lambda: None)
+    engine.clock.update({"elapsed_sec": 3899.0, "scenario_elapsed_sec": 3899.0, "running": True, "lifecycle": "running"})
+    director._reach_checkpoint(director._next_checkpoint())
+    director._arm_analysis_motion_limit()
+    assert director._poll_current_analysis(resume_on_success=True) == "completed"
+    before = dict(engine.assets["ESCORT-01"]["position"])
+    engine._tick(30.0)
+    assert engine.clock["scenario_elapsed_sec"] == 3899.0
+    assert engine.assets["ESCORT-01"]["position"] != before
+    assert engine._director_story_hold is False
+    assert engine._director_story_limit_sec == 3899.0
+    assert "MAR-CUE-07" not in engine._story_emitted
+    director._reach_checkpoint(director._next_checkpoint())
+    director._arm_analysis_motion_limit()
+    assert engine.clock["speed"] == 16
+    engine.pause(announce=False)

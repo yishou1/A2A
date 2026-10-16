@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[2]
 SERVICES = ROOT / "services"
@@ -15,6 +17,29 @@ from agent.inference.registry import (  # noqa: E402
     resolve_detector_weights,
 )
 from a2a_algorithms_common import tia_predictors  # noqa: E402
+from agent.inference import registry  # noqa: E402
+
+
+def test_detector_defaults_to_battlefield_checkpoint(tmp_path, monkeypatch) -> None:
+    checkpoint_dir = tmp_path / "models" / "checkpoints"
+    checkpoint_dir.mkdir(parents=True)
+    checkpoint = checkpoint_dir / "battlefield_rtdetr.pt"
+    checkpoint.write_bytes(b"test battlefield checkpoint")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(registry, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(registry, "CHECKPOINT_DIR", checkpoint_dir)
+
+    assert resolve_detector_weights({}) == checkpoint.resolve()
+
+
+def test_missing_battlefield_checkpoint_does_not_silently_use_generic_model(tmp_path, monkeypatch) -> None:
+    (tmp_path / "rtdetr-l.pt").write_bytes(b"test generic checkpoint")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(registry, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(registry, "CHECKPOINT_DIR", tmp_path / "models" / "checkpoints")
+
+    with pytest.raises(FileNotFoundError, match="Install the battlefield RT-DETR release bundle"):
+        resolve_detector_weights({})
 
 
 def test_detector_falls_back_to_bundled_rtdetr_l() -> None:

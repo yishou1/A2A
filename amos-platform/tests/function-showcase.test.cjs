@@ -63,6 +63,23 @@ function view(overrides = {}) {
   return {...base, ...overrides};
 }
 
+function coverage() {
+  const scenarios = [
+    {id: 'scene-1', name: '剧本一专用链', workflow_chain_label: '剧本一专用工作流链'},
+    {id: 'scene-2', name: '剧本二专用链', workflow_chain_label: '剧本二专用工作流链'},
+    {id: 'scene-3', name: '剧本三专用链', workflow_chain_label: '剧本三专用工作流链'}
+  ];
+  return {
+    schema_version: 'amos.scenario-coverage.v1', total_function_points: 2, scenarios,
+    items: [
+      {function_point_id: 'KC-01', name: '初始探测', chinese_name: '初始探测', english_name: 'Initial Detection', ooda_phase: 'observe', covered_scenario_count: 3,
+        scenarios: scenarios.map((item, index) => ({scenario_id: item.id, coverage_kind: index === 0 ? 'primary' : 'supporting', checkpoints: ['CP-1']}))},
+      {function_point_id: 'KC-26', name: '下达再攻击任务', chinese_name: '下达再攻击任务', english_name: 'Task Re-Attack', ooda_phase: 'act', covered_scenario_count: 3,
+        scenarios: scenarios.map(item => ({scenario_id: item.id, coverage_kind: 'conditional', checkpoints: ['CP-WAVE2']}))}
+    ]
+  };
+}
+
 const active = {runId: 'run-1', scenarioId: 'scene-1', scenarioName: '合成场景'};
 
 test('accepts only a current workflow-view v2 from the active run', () => {
@@ -72,6 +89,22 @@ test('accepts only a current workflow-view v2 from the active run', () => {
   assert.equal(model.runId, 'run-1');
   assert.equal(model.workflowId, 'wf-1');
   assert.equal(model.workflowFile, 'workflows/actual.bpel');
+});
+
+test('shows separate design, verified, conditional and not-executed metrics', () => {
+  const {showcase, root} = loadInteractiveShowcase();
+  showcase.setContext(active);
+  showcase.receiveCoverage(coverage());
+  showcase.receiveView(view({
+    workflow_id: 'wf-verified',
+    submission: {run_id: 'run-1', scenario_id: 'scene-1', checkpoint_id: 'CP-1', workflow_file: 'one.bpel'},
+    orchestration: {activities: [{activity_id: 'A-1', status: 'completed'}]},
+    function_points: {items: [{function_point_id: 'KC-01', activity_ids: ['A-1']}]}
+  }));
+  assert.match(root.innerHTML, /设计覆盖/);
+  assert.match(root.innerHTML, /本轮已验证/);
+  assert.match(root.innerHTML, /条件待触发/);
+  assert.match(root.innerHTML, /尚未执行/);
 });
 
 test('rejects a view explicitly marked as a previous run', () => {
@@ -243,10 +276,13 @@ test('defers rerendering while the function filter has focus and applies queued 
   const filter = {id: 'function-showcase-filter'};
   rootListeners.focusin({target: filter});
   const before = root.innerHTML;
-  showcase.receiveView(view({workflow_id: 'wf-stage-2'}));
+  showcase.receiveView(view({workflow_id: 'wf-stage-2', submission: {
+    run_id: 'run-1', scenario_id: 'scene-1', checkpoint_id: 'CP-2', workflow_file: 'two.bpel'
+  }}));
   assert.equal(root.innerHTML, before);
   rootListeners.focusout({target: filter});
-  assert.match(root.innerHTML, /wf-stage-2/);
+  assert.match(root.innerHTML, /第 2 个分析阶段/);
+  assert.match(root.innerHTML, /two\.bpel/);
 });
 
 test('clears accumulated stages when the active run changes', () => {
@@ -256,4 +292,15 @@ test('clears accumulated stages when the active run changes', () => {
   showcase.setContext({runId: 'run-2', scenarioId: 'scene-1', scenarioName: '合成场景'});
   assert.doesNotMatch(root.innerHTML, /wf-old-stage/);
   assert.match(root.innerHTML, /尚未收到可展示的工作流记录/);
+});
+
+test('renders design coverage matrix independently from runtime workflow evidence', () => {
+  const {showcase, root} = loadInteractiveShowcase();
+  showcase.setContext(active);
+  showcase.receiveCoverage(coverage());
+  assert.match(root.innerHTML, /三剧本功能覆盖矩阵/);
+  assert.doesNotMatch(root.innerHTML, /<th>联合<\/th>/);
+  assert.match(root.innerHTML, /主覆盖/);
+  assert.match(root.innerHTML, /条件覆盖/);
+  assert.match(root.innerHTML, /剧本二专用链/);
 });

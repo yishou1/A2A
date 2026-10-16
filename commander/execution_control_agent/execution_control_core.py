@@ -268,6 +268,10 @@ def synthesize_plan_commands(
             "rule_id": primary.get("rule_id"),
             "coordination_group": consequent.get("coordination_group"),
             "source": "decision_plan" if selected else "scheduled_task",
+            "assigned_resources": list(task.get("assigned_resources") or []),
+            "assignment_slot_ids": list(task.get("assignment_slot_ids") or []),
+            "assignment_source": task.get("assignment_source"),
+            "coordination_id": task.get("coordination_id"),
         }
         commands.append({key: value for key, value in command.items() if value is not None})
     return commands

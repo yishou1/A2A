@@ -10,7 +10,7 @@ import click
 import uvicorn
 
 from decision_agents.common.a2a_service import AGENT_DEFINITIONS, build_app
-from decision_agents.common.config import get_settings
+from decision_support.config import get_settings
 from decision_agents.compliance_authorization.evaluation import evaluate_compliance_jsonl
 
 

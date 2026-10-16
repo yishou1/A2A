@@ -13,6 +13,8 @@ import time
 import uuid
 from typing import Any
 
+from llm.audit import new_call_id, record_llm_call, strict_llm_required
+
 from agent.algorithm_library.client import (
     AlgorithmLibraryClient,
     AlgorithmLibraryError,
@@ -179,11 +181,15 @@ def run_with_algolib(
     try:
         algorithms = client.list_algorithms(active_only=True)
     except AlgorithmLibraryError:
+        if strict_llm_required():
+            raise
         algorithms = []
 
     catalog = _filter_catalog(algorithms)
     catalog_source = "algolib:/algorithms"
     if not catalog:
+        if strict_llm_required():
+            raise AlgorithmLibraryError("Task Scheduling strict LLM planning requires an active AlgoLib catalog.")
         host = str(lib.get("host") or "127.0.0.1")
         catalog = build_local_scheduling_catalog(host=host)
         catalog_source = "local_fallback"
@@ -191,6 +197,16 @@ def run_with_algolib(
     active_by_id = {str(item["algorithm_id"]): item for item in catalog}
     real_inputs = amos_to_algolib_inputs(amos_payload)
 
+    llm_enabled = _llm_enabled(cfg, llm_client)
+    llm_call_id = new_call_id() if llm_enabled else ""
+    audit_fields = {
+        "workflow_id": str(amos_payload.get("mission_id") or amos_payload.get("workflow_id") or ""),
+        "llm_call_id": llm_call_id,
+        "agent": "task_scheduling",
+        "phase": "decide",
+        "provider": ToolLLMSettings.from_config(cfg).provider,
+        "model": ToolLLMSettings.from_config(cfg).name,
+    }
     try:
         call, llm_plan = _select_algorithm_call(
             amos_payload,
@@ -201,8 +217,10 @@ def run_with_algolib(
             llm_client=llm_client,
         )
     except (LLMClientError, AlgorithmLibraryError, ValueError) as exc:
+        if llm_call_id:
+            record_llm_call(**audit_fields, success=False, fallback_reason=f"{type(exc).__name__}: {exc}")
         # 与 TIA 一致：规划失败时若允许降级则用默认算法
-        fallback = bool((cfg.get("algorithm_planner") or {}).get("fallback_to_fixed", True))
+        fallback = bool((cfg.get("algorithm_planner") or {}).get("fallback_to_fixed", True)) and not strict_llm_required()
         if not fallback:
             raise
         meta = active_by_id.get(DEFAULT_ALGORITHM) or catalog[0]
@@ -229,6 +247,22 @@ def run_with_algolib(
             "missing_fields": [],
             "explanation": f"LLM/plan failed, fallback to default: {exc}",
             "fallback_reason": str(exc),
+        }
+
+    if llm_call_id and not llm_plan.get("fallback_reason"):
+        response_model = str(llm_plan.pop("_llm_response_model", "") or "")
+        raw_llm_plan = llm_plan.pop("_raw_llm_plan", None)
+        if not isinstance(raw_llm_plan, dict):
+            raw_llm_plan = dict(llm_plan)
+        llm_plan = {
+            **llm_plan,
+            "raw_llm_plan": raw_llm_plan,
+            "fallback_reason": "",
+            "llm_call": record_llm_call(
+                **audit_fields,
+                response_model=response_model,
+                success=True,
+            ),
         }
 
     request_id = str(amos_payload.get("request_id") or f"sched-{uuid.uuid4().hex[:12]}")
@@ -317,7 +351,7 @@ def run_with_algolib(
         "llm_plan": {
             **llm_plan,
             "catalog_source": catalog_source,
-            "mode": "llm" if _llm_enabled(cfg, llm_client) else "fixed",
+            "mode": "fallback" if llm_plan.get("fallback_reason") else ("llm" if llm_enabled else "fixed"),
         },
         "algolib_result": {
             "algorithm_id": call.algorithm_id,
@@ -333,6 +367,10 @@ def _llm_enabled(config: dict[str, Any], llm_client: Any | None) -> bool:
     settings = ToolLLMSettings.from_config(config)
     planner = str((config.get("algorithm_planner") or {}).get("mode") or "fixed").lower()
     env_planner = os.environ.get("TASK_SCHEDULING_ALGORITHM_PLANNER", "").strip().lower()
+    if strict_llm_required():
+        if not settings.enable or env_planner == "fixed":
+            raise LLMClientError("Task Scheduling strict mode requires ENABLE_LLM=true and LLM planning.")
+        return True
     if env_planner == "llm" or planner == "llm":
         return settings.enable
     # 与 lzh 一致：ENABLE_LLM=true 即启用规划
@@ -424,13 +462,20 @@ def _llm_plan(
                 "summary": agent_card.get("summary") or algorithm.get("summary", ""),
             }
         )
-    return client.chat_json(
+    raw = client.chat_json(
         system_prompt=sched_prompts.ALGOLIB_SYSTEM_PROMPT,
         user_prompt=sched_prompts.algolib_user_prompt(
             algorithms=slim_catalog,
             request_summary=amos_request_summary(amos_payload),
         ),
     )
+    if isinstance(raw, dict):
+        return {
+            **raw,
+            "_raw_llm_plan": dict(raw),
+            "_llm_response_model": str(getattr(client, "last_response_model", "") or ""),
+        }
+    return raw
 
 
 def _normalize_call(raw_call: dict[str, Any]) -> AlgorithmRunCall:

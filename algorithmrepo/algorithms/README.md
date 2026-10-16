@@ -1,6 +1,6 @@
 # 独立算法包（解耦自两个本地智能体）
 
-> 集成分支注意：cms 所述 97 类 RT-DETR 微调 `.pt` 和 MOTR/ODConv 等权重未随 Git 提交。当前设备缺少微调权重时会回退到 `rtdetr-l.pt`；三档配置不等于全部后端已部署真实模型。实际交付状态见 [CMS 整合说明](../docs/CMS_20260916_INTEGRATION.md)。
+> 集成分支注意：cms 所述 97 类 RT-DETR 微调 `.pt` 和 MOTR/ODConv 等权重未随 Git 提交。缺少 97 类权重时默认报错；只有显式设置 `detection_fallback_model` 才会使用通用回退模型。三档配置不等于全部后端已部署真实模型。实际交付状态见 [CMS 整合说明](../docs/CMS_20260916_INTEGRATION.md)。
 
 两个智能体各自**编排**算法，但算法实现已抽到本目录，可单独使用。
 

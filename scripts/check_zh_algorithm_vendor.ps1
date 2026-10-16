@@ -15,6 +15,7 @@ $sharedFiles = @(
     "mission_scorer.py",
     "pickle_compat.py",
     "closed_loop_advisor.py"
+    "distributed_cbba.py"
 )
 
 $different = @()

@@ -12,7 +12,7 @@ from decision_agents.common.algolib_runtime import (
     _llm_request_view,
     _select_algorithm_call,
 )
-from decision_agents.common.schemas import AgentRequest
+from decision_support.schemas import AgentRequest
 from decision_agents.decision_planning.agent import DecisionPlanningAgent
 from llm.client import LLMClientError
 

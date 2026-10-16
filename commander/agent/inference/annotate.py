@@ -18,6 +18,8 @@ _CLASS_COLORS: dict[str, tuple[int, int, int]] = {
     "large-vehicle": (0, 255, 255),
     "small-vehicle": (0, 80, 255),
     "helicopter": (255, 0, 200),
+    "coastal_missile_site": (255, 64, 64),
+    "coastal-missile-site": (255, 64, 64),
 }
 
 

@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <rect width="1600" height="900" fill="#07151f"/>
+  <text x="70" y="82" fill="#eefbff" font-family="sans-serif" font-size="38" font-weight="700">侦察卫星02 · 接力复访航迹更新</text>
+  <text x="70" y="126" fill="#9fcbd8" font-family="sans-serif" font-size="22">短时轨道访问形成第二时相产品，离场后由已下传数据继续参与融合</text>
+  <g transform="translate(80 180)">
+    <rect width="920" height="600" rx="24" fill="#102732" stroke="#4c9db5" stroke-width="3"/>
+    <path d="M80 470C250 390 310 270 470 315S720 390 845 175" fill="none" stroke="#2b7185" stroke-width="38" opacity=".35"/>
+    <path d="M115 535L820 95" fill="none" stroke="#83dfff" stroke-width="6" stroke-dasharray="18 13"/>
+    <path d="M520 560L900 325" fill="none" stroke="#c6a8ff" stroke-width="5" stroke-dasharray="13 12" opacity=".8"/>
+    <g fill="#85dfff" stroke="#d8f7ff" stroke-width="3"><circle cx="240" cy="458" r="13"/><circle cx="475" cy="311" r="13"/><circle cx="720" cy="158" r="13"/></g>
+    <rect x="390" y="250" width="205" height="138" rx="15" fill="#1a3943" stroke="#ffd36d" stroke-width="4"/>
+    <path d="M410 350L575 277M430 280L555 355" stroke="#ffd36d" stroke-width="3" opacity=".75"/>
+    <circle cx="795" cy="110" r="24" fill="#193a48" stroke="#83dfff" stroke-width="4"/>
+    <path d="M779 110h32M795 94v32" stroke="#d8f7ff" stroke-width="4"/>
+    <g fill="#dff7ff" font-family="sans-serif" font-size="22"><text x="130" y="565">访问窗口进入</text><text x="398" y="420">机场与沿海道路变化区</text><text x="690" y="80">卫星02星下点</text></g>
+  </g>
+  <g transform="translate(1060 180)" font-family="sans-serif">
+    <rect width="470" height="600" rx="24" fill="#102732" stroke="#4c9db5" stroke-width="3"/>
+    <text x="42" y="70" fill="#eefbff" font-size="28" font-weight="700">复访产品状态</text>
+    <g font-size="23"><text x="42" y="145" fill="#8ee6ff">来源</text><text x="205" y="145" fill="#dff7ff">SAT-A2S-02 / SAR</text><text x="42" y="205" fill="#8ee6ff">用途</text><text x="205" y="205" fill="#dff7ff">航迹保鲜与变化提示</text><text x="42" y="265" fill="#8ee6ff">链路</text><text x="205" y="265" fill="#dff7ff">星间/中继 → CV-01</text><text x="42" y="325" fill="#8ee6ff">状态</text><text x="205" y="325" fill="#8ce9b8">时标对齐 · 完整性通过</text></g>
+    <path d="M45 390H425" stroke="#345766" stroke-width="2"/>
+    <text x="42" y="445" fill="#ffd36d" font-size="23">约束</text>
+    <text x="42" y="492" fill="#b8d6df" font-size="21">不把卫星长期悬停在任务区</text>
+    <text x="42" y="532" fill="#b8d6df" font-size="21">离场不等于情报产品立即失效</text>
+    <text x="42" y="572" fill="#b8d6df" font-size="21">后续由舰载侦察平台接续观测</text>
+  </g>
+  <text x="800" y="850" fill="#88aebb" font-family="monospace" font-size="20" text-anchor="middle">SIMULATION PRODUCT · FICTIONAL TRAINING AREA · OFFLINE ASSET</text>
+</svg>

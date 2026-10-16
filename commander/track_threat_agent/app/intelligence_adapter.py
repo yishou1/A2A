@@ -75,6 +75,10 @@ CLASS_TO_OBJECT_TYPE: Dict[str, str] = {
     "carrier": "ship",
     "fast_attack_craft": "ship",
     "fishing_vessel": "ship",
+    # 岸基阵地：跟踪器按地面未知目标处理，禁止落到 ship
+    "coastal_missile_site": "unknown",
+    "missile_site": "unknown",
+    "missile_battery": "unknown",
     # 车辆 / 地面目标 → 不属于 air/ship/uav，归为 unknown
     # 但跟踪器仍可追踪其位置，预测模型用默认参数
     "bus": "unknown",

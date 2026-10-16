@@ -13,7 +13,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from agent.algorithm_library.client import AlgorithmRunCall
-from decision_agents.common.schemas import AgentRequest
+from decision_support.schemas import AgentRequest
 from task_scheduling_agent.algolib_runtime import (
     DEFAULT_ALGORITHM,
     amos_to_algolib_inputs,
@@ -22,7 +22,7 @@ from task_scheduling_agent.algolib_runtime import (
 )
 from task_scheduling_agent.agent import TaskSchedulingAgent
 from task_scheduling_agent.main import normalize_task_scheduling_result
-from decision_agents.common.schemas import AgentRequest
+from decision_support.schemas import AgentRequest
 from task_scheduling_agent.main import (
     TaskSchedulingA2AAgent,
     build_scheduler_input,
