@@ -387,9 +387,15 @@ def run_onnx(
             if preprocess_type == "json_to_tensor_map":
                 for mapping in preprocess.get("mappings") or []:
                     dtype = np.int64 if mapping.get("dtype") == "int64" else np.float32
-                    feeds[mapping["tensor_name"]] = np.asarray(
-                        resolve_json_path(request, mapping.get("json_path", "$")), dtype=dtype
-                    )
+                    source = resolve_json_path(request, mapping.get("json_path", "$"))
+                    if mapping.get("broadcast_scalar"):
+                        if not isinstance(source, (int, float, bool)):
+                            raise ValueError("broadcast_scalar requires a numeric scalar")
+                        feeds[mapping["tensor_name"]] = np.full(
+                            mapping["shape"], source, dtype=dtype
+                        )
+                    else:
+                        feeds[mapping["tensor_name"]] = np.asarray(source, dtype=dtype)
             elif preprocess_type == "tensor_from_json":
                 model_input = session.get_inputs()[0]
                 source = request.get("tensor", request) if isinstance(request, dict) else request

@@ -227,6 +227,57 @@ void TestOnnxRunnerSupportsTensorContractAndGenericMappings() {
            "raw_tensor_to_json should place the output tensor at the configured JSON path.");
 }
 
+void TestOnnxRunnerBroadcastsScalarForCompactGoldenInput() {
+    fs::path temp_dir = MakeTempDir("tensor_scalar_broadcast");
+    CopyFixtureFile(SourceRoot() / "tests" / "fixtures" / "onnx_float_mapping_identity.onnx",
+                    temp_dir / "model.onnx");
+    WriteTextFile(temp_dir / "tensor_contract.yaml",
+                  "inputs:\n"
+                  "  - name: features\n"
+                  "    dtype: float32\n"
+                  "    shape: [1, 3]\n"
+                  "outputs:\n"
+                  "  - name: echo\n"
+                  "    dtype: float32\n"
+                  "    shape: [1, 3]\n");
+    WriteTextFile(temp_dir / "preprocess.yaml",
+                  "type: json_to_tensor_map\n"
+                  "mappings:\n"
+                  "  - json_path: $.features\n"
+                  "    tensor_name: features\n"
+                  "    dtype: float32\n"
+                  "    shape: [1, 3]\n"
+                  "    broadcast_scalar: true\n");
+    WriteTextFile(temp_dir / "postprocess.yaml",
+                  "type: raw_tensor_to_json\n"
+                  "outputs:\n"
+                  "  - tensor_name: echo\n"
+                  "    json_path: $.result\n");
+
+    AlgorithmEntry entry = BuildTensorRoundTripEntry(temp_dir);
+    entry.card.machine_spec.tensor_contract_ref = "tensor_contract.yaml";
+
+    OnnxRunner runner;
+    auto load_status = runner.Load(entry);
+    Expect(load_status.ok(), "Scalar broadcast entry should load.");
+
+    AlgorithmRequest request;
+    request.request_id = "req_scalar_broadcast";
+    request.trace_id = "trace_scalar_broadcast";
+    request.algorithm_id = "tensor_round_trip";
+    request.version = "1.0.0";
+    request.backend_type = BackendType::kOnnx;
+    request.inputs = {{"features", 2.5}};
+
+    const auto result = runner.Run(request);
+    Expect(result.ok, "Scalar broadcast run should succeed.");
+    Expect(result.outputs ==
+               nlohmann::json(
+                   {{"result", nlohmann::json::array(
+                                   {nlohmann::json::array({2.5, 2.5, 2.5})})}}),
+           "broadcast_scalar should fill the configured tensor shape.");
+}
+
 }  // namespace
 
 int RunOnnxPhase4Tests() {
@@ -243,6 +294,8 @@ int RunOnnxPhase4Tests() {
          TestOnnxRunnerSupportsTensorFromJsonAndNoOpPostprocess},
         {"TestOnnxRunnerSupportsTensorContractAndGenericMappings",
          TestOnnxRunnerSupportsTensorContractAndGenericMappings},
+        {"TestOnnxRunnerBroadcastsScalarForCompactGoldenInput",
+         TestOnnxRunnerBroadcastsScalarForCompactGoldenInput},
     };
 
     int failed = 0;

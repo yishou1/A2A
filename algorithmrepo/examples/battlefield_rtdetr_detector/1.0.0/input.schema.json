@@ -5,15 +5,48 @@
     "frames": {
       "type": "array",
       "items": {
-        "type": "object"
+        "type": "object",
+        "required": ["sensor_id", "modality", "payload"],
+        "properties": {
+          "sensor_id": {"type": "string", "minLength": 1},
+          "modality": {"type": "string", "enum": ["eo_ir", "sar"]},
+          "payload": {
+            "type": "object",
+            "properties": {
+              "image_uri": {"type": "string", "minLength": 1},
+              "image_base64": {"type": "string", "minLength": 1},
+              "attachment_ref": {
+                "type": "object",
+                "properties": {"uri": {"type": "string", "minLength": 1}},
+                "required": ["uri"]
+              }
+            },
+            "anyOf": [
+              {"required": ["image_uri"]},
+              {"required": ["image_base64"]},
+              {"required": ["attachment_ref"]}
+            ]
+          }
+        }
       }
     },
     "media_refs": {
       "type": "array",
-      "items": {
-        "type": "object"
-      }
+      "items": {"type": "object"}
     }
   },
+  "examples": [
+    {
+      "frames": [
+        {
+          "sensor_id": "AMOS-DEMO-EO-1",
+          "modality": "eo_ir",
+          "payload": {
+            "image_uri": "http://127.0.0.1:5000/static/ui-previews/fishing_boat.png"
+          }
+        }
+      ]
+    }
+  ],
   "additionalProperties": true
 }

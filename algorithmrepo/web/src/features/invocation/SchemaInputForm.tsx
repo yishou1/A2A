@@ -6,8 +6,20 @@ interface PropertySchema {
   title?: string
   description?: string
   enum?: unknown[]
+  const?: unknown
   default?: unknown
   examples?: unknown[]
+  properties?: Record<string, PropertySchema>
+  required?: string[]
+  items?: PropertySchema
+  minItems?: number
+  minimum?: number
+  maximum?: number
+  exclusiveMinimum?: number
+  minLength?: number
+  format?: string
+  oneOf?: PropertySchema[]
+  anyOf?: PropertySchema[]
 }
 
 function primaryType(schema: PropertySchema): string {
@@ -22,17 +34,62 @@ export function createInitialInputs(
   if (example && typeof example === 'object' && !Array.isArray(example)) {
     return structuredClone(example as Record<string, unknown>)
   }
-  const properties = (schema?.properties ?? {}) as Record<string, PropertySchema>
-  return Object.fromEntries(Object.entries(properties).map(([name, definition]) => {
-    if (definition.default !== undefined) return [name, definition.default]
-    if (definition.examples?.length) return [name, definition.examples[0]]
-    const type = primaryType(definition)
-    if (type === 'boolean') return [name, false]
-    if (type === 'number' || type === 'integer') return [name, 0]
-    if (type === 'array') return [name, []]
-    if (type === 'object') return [name, {}]
-    return [name, '']
-  }))
+  const root = schema as PropertySchema | undefined
+  const generated = createSchemaValue(root, true)
+  return generated && typeof generated === 'object' && !Array.isArray(generated)
+    ? generated as Record<string, unknown>
+    : {}
+}
+
+function createSchemaValue(
+  schema: PropertySchema | undefined,
+  required: boolean,
+  sampleIndex = 0,
+  depth = 0,
+): unknown {
+  if (!schema || depth > 10) return null
+  if (schema.default !== undefined) return structuredClone(schema.default)
+  if (schema.examples?.length) return structuredClone(schema.examples[0])
+  if (schema.const !== undefined) return structuredClone(schema.const)
+  if (schema.enum?.length) return structuredClone(schema.enum[0])
+
+  const variant = schema.oneOf?.[0] ?? schema.anyOf?.[0]
+  if (variant) return createSchemaValue(variant, required, sampleIndex, depth + 1)
+
+  const type = primaryType(schema)
+  if (type === 'object') {
+    const properties = schema.properties ?? {}
+    const requiredNames = new Set(schema.required ?? [])
+    return Object.fromEntries(Object.entries(properties).map(([name, definition]) => [
+      name,
+      createSchemaValue(definition, requiredNames.has(name), sampleIndex, depth + 1),
+    ]))
+  }
+  if (type === 'array') {
+    const minimumCount = Number.isFinite(schema.minItems) ? Math.max(0, Math.ceil(schema.minItems!)) : 0
+    const count = Math.max(minimumCount, required ? 1 : 0)
+    return Array.from({ length: count }, (_, index) =>
+      createSchemaValue(schema.items, true, index, depth + 1))
+  }
+  if (type === 'boolean') return false
+  if (type === 'number' || type === 'integer') {
+    const lowerBound = Number.isFinite(schema.minimum)
+      ? schema.minimum!
+      : Number.isFinite(schema.exclusiveMinimum)
+        ? schema.exclusiveMinimum! + (type === 'integer' ? 1 : 0.1)
+        : 0
+    const candidate = lowerBound + sampleIndex
+    const bounded = Number.isFinite(schema.maximum) ? Math.min(candidate, schema.maximum!) : candidate
+    return type === 'integer' ? Math.ceil(bounded) : bounded
+  }
+  if (type === 'null') return null
+  if (schema.format === 'date-time') return '2026-01-01T00:00:00Z'
+  if (schema.format === 'date') return '2026-01-01'
+  if (schema.format === 'email') return 'example@example.com'
+  if (schema.format === 'uri') return 'https://example.com/'
+  const seed = sampleIndex ? `示例值-${sampleIndex + 1}` : '示例值'
+  const minLength = Number.isFinite(schema.minLength) ? Math.max(0, Math.ceil(schema.minLength!)) : 0
+  return seed.length >= minLength ? seed : seed.padEnd(minLength, '0')
 }
 
 function JsonValueField({ value, onChange }: { value: unknown; onChange: (value: unknown) => void }) {

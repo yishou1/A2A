@@ -42,7 +42,8 @@ npm run test:e2e:integrated
 
 在合并后的 Windows 总项目根目录，可以使用
 `scripts/start_integrated_ui.ps1` 和 `scripts/stop_integrated_ui.ps1` 统一启停 AMOS、
-AlgoLib Server 与生产管理页面，无需单独运行 Vite。
+AlgoLib Server、真实 RT-DETR 服务与生产管理页面，无需单独运行 Vite。统一启动器使用
+仓库根目录 `.algolib/registry.json`，避免算法库子目录产生另一份不一致的 Registry。
 
 ## 当前开发范围
 

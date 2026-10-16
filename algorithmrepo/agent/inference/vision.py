@@ -15,6 +15,8 @@ def detect_objects(frames: list[dict[str, Any]], config: dict[str, Any]) -> list
     conf_thr = float(config.get("confidence_threshold", 0.25))
     imgsz = int(config.get("detection_imgsz", 640))
     crop_size = int(config.get("odconv_crop_size", 128))
+    half = bool(config.get("detection_half", False)) and device.startswith("cuda")
+    max_det = max(1, int(config.get("detection_max_det", 300)))
     dev_arg = None if config.get("device", "auto") == "auto" else device
     out: list[dict[str, Any]] = []
 
@@ -26,7 +28,8 @@ def detect_objects(frames: list[dict[str, Any]], config: dict[str, Any]) -> list
             continue
 
         results = model.predict(
-            source=img, conf=conf_thr, verbose=False, device=dev_arg, imgsz=imgsz
+            source=img, conf=conf_thr, verbose=False, device=dev_arg, imgsz=imgsz,
+            half=half, max_det=max_det,
         )
         if not results:
             continue
@@ -48,6 +51,9 @@ def detect_objects(frames: list[dict[str, Any]], config: dict[str, Any]) -> list
                     "bbox": [round(x, 2) for x in xyxy],
                 }
             )
-        dets = odconv.refine_detections(img, dets, device=device, crop_size=crop_size)
+        if odconv is None:
+            dets = [{**det, "odconv_refined": False} for det in dets]
+        else:
+            dets = odconv.refine_detections(img, dets, device=device, crop_size=crop_size)
         out.extend(dets)
     return out

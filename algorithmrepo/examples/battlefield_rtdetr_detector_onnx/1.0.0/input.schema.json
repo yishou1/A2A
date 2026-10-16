@@ -1,0 +1,13 @@
+{
+  "title": "Battlefield RT-DETR Detector ONNX Input",
+  "type": "object",
+  "required": ["images"],
+  "properties": {
+    "images": {
+      "description": "Preprocessed float32 NCHW image tensor [1, 3, 640, 640] in [0,1]. A numeric scalar is broadcast only for compact smoke tests.",
+      "oneOf": [{"type": "array"}, {"type": "number"}]
+    }
+  },
+  "examples": [{"images": 0.0}],
+  "additionalProperties": false
+}

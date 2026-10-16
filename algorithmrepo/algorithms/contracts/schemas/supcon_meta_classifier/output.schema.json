@@ -1,0 +1,16 @@
+{
+  "title": "SupCon Meta Output",
+  "type": "object",
+  "required": [
+    "classifications"
+  ],
+  "properties": {
+    "classifications": {
+      "type": "array"
+    },
+    "count": {
+      "type": "number"
+    }
+  },
+  "additionalProperties": true
+}

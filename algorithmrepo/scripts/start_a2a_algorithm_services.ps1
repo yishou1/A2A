@@ -1,7 +1,8 @@
 param(
     [string]$Python = "python",
     [switch]$TiaOnly,
-    [switch]$LegacyOnly
+    [switch]$LegacyOnly,
+    [switch]$RealRTDETRDemo
 )
 
 $Root = Split-Path -Parent $PSScriptRoot
@@ -39,7 +40,26 @@ $TiaAlgorithms = @(
     @{ Id = "marl_dynamic_router"; Port = 9030 }
 )
 
-if ($TiaOnly) {
+if (@($TiaOnly, $LegacyOnly, $RealRTDETRDemo).Where({ $_ }).Count -gt 1) {
+    throw "-TiaOnly, -LegacyOnly and -RealRTDETRDemo are mutually exclusive."
+}
+
+if ($RealRTDETRDemo) {
+    $primaryCheckpoint = Join-Path $Root "models\checkpoints\battlefield_rtdetr_unit17_coco25_ap_kaggle_best.pt"
+    if (-not (Test-Path -LiteralPath $primaryCheckpoint -PathType Leaf)) {
+        throw @"
+The 97-class RT-DETR checkpoint is not installed: $primaryCheckpoint
+Install the verified release bundle first:
+  .\scripts\install_rtdetr_release_bundle.ps1
+"@
+    }
+    if ([string]::IsNullOrWhiteSpace($env:TIA_COMPUTE_PROFILE)) {
+        $env:TIA_COMPUTE_PROFILE = "medium"
+    }
+    Write-Host "Using RT-DETR checkpoint: $primaryCheckpoint"
+    Write-Host "Compute profile: $env:TIA_COMPUTE_PROFILE"
+    $Algorithms = @($TiaAlgorithms | Where-Object { $_.Id -eq "battlefield_rtdetr_detector" })
+} elseif ($TiaOnly) {
     $Algorithms = $TiaAlgorithms
 } elseif ($LegacyOnly) {
     $Algorithms = $LegacyAlgorithms
@@ -50,13 +70,17 @@ if ($TiaOnly) {
 Write-Host "Installing Python service dependencies..."
 & $Python -m pip install -r (Join-Path $Services "requirements.txt")
 
-$env:TIA_USE_MOCK = "1"
-
 foreach ($item in $Algorithms) {
+    $env:TIA_USE_MOCK = if ($RealRTDETRDemo) { "0" } else { "1" }
     $env:PORT = "$($item.Port)"
     $main = Join-Path $Services "$($item.Id)\app\main.py"
-    Write-Host "Starting $($item.Id) on port $($item.Port)..."
-    Start-Process -FilePath $Python -ArgumentList $main -WorkingDirectory $Root -WindowStyle Minimized
+    $mode = if ($env:TIA_USE_MOCK -eq "0") { "real model" } else { "mock" }
+    Write-Host "Starting $($item.Id) on port $($item.Port) [$mode]..."
+    $process = Start-Process -FilePath $Python -ArgumentList $main -WorkingDirectory $Root `
+        -WindowStyle $(if ($RealRTDETRDemo) { "Hidden" } else { "Minimized" }) -PassThru
+    if ($RealRTDETRDemo) {
+        Write-Host "RT-DETR PID: $($process.Id) (stop with: Stop-Process -Id $($process.Id))"
+    }
 }
 
 Write-Host "Started $($Algorithms.Count) algorithm services."

@@ -22,10 +22,61 @@ def _resolve_weights_path(config: dict[str, Any], key: str, default: str) -> str
     p = Path(weights)
     if p.is_file():
         return str(p.resolve())
-    for candidate in (PROJECT_ROOT / weights, CHECKPOINT_DIR / Path(weights).name):
+    shared_algorithm_root = PROJECT_ROOT.parent / "algorithmrepo"
+    candidates = [PROJECT_ROOT / weights, CHECKPOINT_DIR / Path(weights).name]
+    if shared_algorithm_root != PROJECT_ROOT and shared_algorithm_root.is_dir():
+        candidates.extend(
+            [
+                shared_algorithm_root / weights,
+                shared_algorithm_root / "models" / "checkpoints" / Path(weights).name,
+            ]
+        )
+    for candidate in candidates:
         if candidate.is_file():
             return str(candidate.resolve())
     return weights
+
+
+def resolve_detector_weights(config: dict[str, Any]) -> Path:
+    """Resolve a local detector checkpoint, falling back to the bundled RT-DETR-L."""
+    requested = Path(_resolve_weights_path(config, "detection_model", "rtdetr-l.pt"))
+    if requested.is_file():
+        return requested.resolve()
+
+    fallback_name = str(config.get("detection_fallback_model") or "rtdetr-l.pt")
+    fallback = Path(
+        _resolve_weights_path(
+            {"detection_fallback_model": fallback_name},
+            "detection_fallback_model",
+            "rtdetr-l.pt",
+        )
+    )
+    if fallback.is_file():
+        return fallback.resolve()
+
+    raise FileNotFoundError(
+        "detector checkpoint not found: "
+        f"requested={requested}; fallback={fallback}. "
+        "Provide inference.detection_model or place rtdetr-l.pt in the project root."
+    )
+
+
+def resolve_odconv_weights(config: dict[str, Any]) -> Path | None:
+    """Return the trained ODConv checkpoint, or None when refinement is unavailable."""
+    path = _checkpoint_path(config, "odconv_checkpoint", "odconv_refiner.pt")
+    return path.resolve() if path.is_file() else None
+
+
+def detector_runtime_profile(config: dict[str, Any]) -> dict[str, Any]:
+    """Describe the detector artifacts actually selected for inference."""
+    detector = resolve_detector_weights(config)
+    odconv = resolve_odconv_weights(config) if config.get("odconv_enable", True) else None
+    return {
+        "detector_model": detector.name,
+        "detector_model_path": str(detector),
+        "odconv_enabled": odconv is not None,
+        "odconv_checkpoint": str(odconv) if odconv is not None else None,
+    }
 
 
 def _checkpoint_path(config: dict[str, Any], config_key: str, default_basename: str) -> Path:
@@ -84,7 +135,7 @@ def get_device(config: dict[str, Any]) -> str:
 
 
 def get_detector(config: dict[str, Any]):
-    weights = _resolve_weights_path(config, "detection_model", "rtdetr-l.pt")
+    weights = str(resolve_detector_weights(config))
     key = f"detector:{weights}:{_profile_tag(config)}"
     if key in _CACHE:
         return _CACHE[key]
@@ -108,7 +159,12 @@ def get_detector(config: dict[str, Any]):
 
 
 def get_odconv_refiner(config: dict[str, Any]):
-    ckpt = str(config.get("odconv_checkpoint", "odconv_refiner.pt"))
+    if not config.get("odconv_enable", True):
+        return None
+    path = resolve_odconv_weights(config)
+    if path is None:
+        return None
+    ckpt = str(path)
     key = f"odconv:{ckpt}:{_profile_tag(config)}"
     if key in _CACHE:
         return _CACHE[key]
@@ -116,7 +172,7 @@ def get_odconv_refiner(config: dict[str, Any]):
     from agent.inference.models.odconv import ODConvRefiner
 
     device = get_device(config)
-    model = _load_state(ODConvRefiner(), "odconv_refiner.pt", config=config, config_key="odconv_checkpoint")
+    model = _load_state_dict(ODConvRefiner(), path, strict=True)
     model.eval().to(device)
     _CACHE[key] = model
     return model

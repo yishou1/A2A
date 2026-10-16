@@ -3,20 +3,28 @@ param(
     [string]$RegistryPath,
     [string]$AlgolibPath,
     [switch]$IncludeDraft,
+    [switch]$IncludePythonHttp,
+    [string[]]$OnlyAlgorithmId,
     [switch]$RefreshExisting,
     [switch]$Activate
 )
 
 $ErrorActionPreference = 'Stop'
 
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$algorithmRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$repoRoot = (Resolve-Path (Join-Path $algorithmRoot '..')).Path
 if ([string]::IsNullOrWhiteSpace($RegistryPath)) {
     $RegistryPath = Join-Path $repoRoot '.algolib\registry.json'
 }
 if ([string]::IsNullOrWhiteSpace($AlgolibPath)) {
-    $realOnnxCli = Join-Path $repoRoot 'build-smoke-offline\Debug\algolib.exe'
-    $stubCli = Join-Path $repoRoot 'build\Debug\algolib.exe'
-    $AlgolibPath = if (Test-Path -LiteralPath $realOnnxCli) { $realOnnxCli } else { $stubCli }
+    $candidates = @(
+        (Join-Path $algorithmRoot 'build-runtime\Debug\algolib.exe'),
+        (Join-Path $algorithmRoot 'build-smoke-offline\Debug\algolib.exe'),
+        (Join-Path $repoRoot 'build-smoke-offline\Debug\algolib.exe'),
+        (Join-Path $algorithmRoot 'build\Debug\algolib.exe'),
+        (Join-Path $repoRoot 'build\Debug\algolib.exe')
+    )
+    $AlgolibPath = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
 }
 
 if (-not (Test-Path -LiteralPath $AlgolibPath)) {
@@ -43,7 +51,7 @@ try {
     if (Test-Path -LiteralPath $env:ALGOLIB_REGISTRY_PATH) {
         $registryDocument = Get-Content -LiteralPath $env:ALGOLIB_REGISTRY_PATH -Raw -Encoding UTF8 | ConvertFrom-Json
         foreach ($item in @($registryDocument.entries)) {
-            $existingKeys["$($item.key.algorithm_id)|$($item.key.version)|$($item.key.backend_type)"] = $true
+            $existingKeys["$($item.key.algorithm_id)|$($item.key.version)|$($item.key.backend_type)"] = [string]$item.status
         }
     }
 
@@ -51,30 +59,43 @@ try {
     $refreshed = 0
     $skipped = 0
     $failed = @()
-    $cards = Get-ChildItem -Path (Join-Path $repoRoot 'examples') -Filter 'algorithm_card.yaml' -Recurse
+    $cards = Get-ChildItem -Path (Join-Path $algorithmRoot 'examples') -Filter 'algorithm_card.yaml' -Recurse
 
     foreach ($card in $cards) {
         $content = Get-Content -LiteralPath $card.FullName -Raw -Encoding UTF8
         $backend = Read-CardField -Content $content -Name 'backend_type'
         $cardStatus = Read-CardField -Content $content -Name 'status'
-        $algorithmId = Read-CardField -Content $content -Name 'algorithm_id'
+        $cardAlgorithmId = Read-CardField -Content $content -Name 'algorithm_id'
         $version = Read-CardField -Content $content -Name 'version'
 
-        # Python HTTP packages require their service to be running during validation.
-        # The default console bootstrap therefore imports self-contained ONNX assets only.
-        if ($backend -ne 'onnx' -or (-not $IncludeDraft -and $cardStatus -ne 'validated')) {
+        if ($OnlyAlgorithmId.Count -gt 0 -and $cardAlgorithmId -notin $OnlyAlgorithmId) {
+            continue
+        }
+        # Python HTTP packages require their service to be running during validation,
+        # so they remain opt-in while self-contained ONNX packages are the default.
+        if ($backend -ne 'onnx' -and -not ($IncludePythonHttp -and $backend -eq 'python_http_service')) {
+            continue
+        }
+        if (-not $IncludeDraft -and $cardStatus -ne 'validated') {
             continue
         }
 
-        $key = "$algorithmId|$version|$backend"
+        $key = "$cardAlgorithmId|$version|$backend"
         if ($existingKeys.ContainsKey($key)) {
+            $existingStatus = $existingKeys[$key]
             if ($RefreshExisting) {
-                $refreshOutput = & $AlgolibPath validate $algorithmId $version $backend 2>&1
+                $refreshOutput = & $AlgolibPath validate $cardAlgorithmId $version $backend 2>&1
                 if ($LASTEXITCODE -ne 0) {
-                    $failed += [pscustomobject]@{ Algorithm = $algorithmId; Message = ($refreshOutput -join "`n") }
+                    $failed += [pscustomobject]@{ Algorithm = $cardAlgorithmId; Message = ($refreshOutput -join "`n") }
                 }
                 else {
                     $refreshed++
+                }
+            }
+            if ($Activate -and $existingStatus -ne 'active') {
+                $activateOutput = & $AlgolibPath activate $cardAlgorithmId $version $backend 2>&1
+                if ($LASTEXITCODE -ne 0) {
+                    $failed += [pscustomobject]@{ Algorithm = $cardAlgorithmId; Message = ($activateOutput -join "`n") }
                 }
             }
             $skipped++
@@ -83,16 +104,16 @@ try {
 
         $output = & $AlgolibPath register $card.Directory.FullName 2>&1
         if ($LASTEXITCODE -ne 0) {
-            $failed += [pscustomobject]@{ Algorithm = $algorithmId; Message = ($output -join "`n") }
+            $failed += [pscustomobject]@{ Algorithm = $cardAlgorithmId; Message = ($output -join "`n") }
             continue
         }
 
         $registered++
         $existingKeys[$key] = $true
         if ($Activate) {
-            $activateOutput = & $AlgolibPath activate $algorithmId $version $backend 2>&1
+            $activateOutput = & $AlgolibPath activate $cardAlgorithmId $version $backend 2>&1
             if ($LASTEXITCODE -ne 0) {
-                $failed += [pscustomobject]@{ Algorithm = $algorithmId; Message = ($activateOutput -join "`n") }
+                $failed += [pscustomobject]@{ Algorithm = $cardAlgorithmId; Message = ($activateOutput -join "`n") }
             }
         }
     }

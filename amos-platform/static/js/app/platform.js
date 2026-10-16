@@ -50,6 +50,9 @@ window.Platform = (function () {
   var speedControlLocked = false;
   var speedResumeValue = 1;
   var mediaPreviousFocus = null;
+  var activeDetectionMediaId = null;
+  var detectionRequestGeneration = 0;
+  var detectionResults = {};
 
   function escapeHtml(value) {
     return String(value == null ? "" : value)
@@ -492,6 +495,8 @@ window.Platform = (function () {
     var location = Number.isFinite(Number(pose.lat)) && Number.isFinite(Number(pose.lon))
       ? Number(pose.lat).toFixed(5) + ", " + Number(pose.lon).toFixed(5) : "未提供";
     document.getElementById("media-lightbox-title").textContent = item.title || "观测资料";
+    activeDetectionMediaId = mediaId;
+    resetDetectionView(item);
     document.getElementById("media-lightbox-image").src = mediaUri(item);
     document.getElementById("media-lightbox-meta").innerHTML =
       "<b>来源平台：</b>" + escapeHtml(source.platformId) + "　" +
@@ -524,7 +529,95 @@ window.Platform = (function () {
     document.getElementById("media-lightbox-close").focus();
   }
 
+  function resetDetectionView(item) {
+    detectionRequestGeneration += 1;
+    var mimeType = String(item && (item.mime_type || item.media_type) || "").toLowerCase();
+    var supported = ["image/png", "image/jpeg", "image/jpg", "image/webp"].indexOf(mimeType) >= 0;
+    var button = document.getElementById("media-detect-button");
+    button.hidden = !supported;
+    button.disabled = false;
+    button.textContent = detectionResults[item.media_id] ? "重新检测" : "运行目标检测";
+    document.getElementById("media-detection-status").textContent = supported
+      ? (detectionResults[item.media_id] ? detectionSummary(detectionResults[item.media_id]) : "")
+      : "该资料不支持图像检测";
+    renderDetectionOverlay(detectionResults[item.media_id] || null);
+  }
+
+  function detectionSummary(result) {
+    var runtime = result.runtime || {};
+    var usage = result.usage || {};
+    var model = runtime.detector_model || "RT-DETR";
+    var latency = Number(usage.latency_ms);
+    return "检测到 " + Number(result.count || 0) + " 个目标 · " + model +
+      (Number.isFinite(latency) ? " · " + Math.round(latency) + " ms" : "");
+  }
+
+  function renderDetectionOverlay(result) {
+    var overlay = document.getElementById("media-detection-overlay");
+    var image = document.getElementById("media-lightbox-image");
+    overlay.replaceChildren();
+    if (!result || !image.naturalWidth || !image.naturalHeight) return;
+    var width = image.clientWidth;
+    var height = image.clientHeight;
+    var scale = Math.min(width / image.naturalWidth, height / image.naturalHeight);
+    var renderedWidth = image.naturalWidth * scale;
+    var renderedHeight = image.naturalHeight * scale;
+    var offsetX = (width - renderedWidth) / 2;
+    var offsetY = (height - renderedHeight) / 2;
+    (result.detections || []).forEach(function (detection, index) {
+      var bbox = detection && detection.bbox;
+      if (!Array.isArray(bbox) || bbox.length !== 4) return;
+      var values = bbox.map(Number);
+      if (!values.every(Number.isFinite)) return;
+      var left = Math.max(0, Math.min(image.naturalWidth, values[0]));
+      var top = Math.max(0, Math.min(image.naturalHeight, values[1]));
+      var right = Math.max(left, Math.min(image.naturalWidth, values[2]));
+      var bottom = Math.max(top, Math.min(image.naturalHeight, values[3]));
+      var box = document.createElement("div");
+      box.className = "media-detection-box";
+      box.style.left = (offsetX + left * scale) + "px";
+      box.style.top = (offsetY + top * scale) + "px";
+      box.style.width = Math.max(1, (right - left) * scale) + "px";
+      box.style.height = Math.max(1, (bottom - top) * scale) + "px";
+      var label = document.createElement("span");
+      var confidence = Number(detection.confidence);
+      label.textContent = String(detection.class_name || "target-" + (index + 1)) +
+        (Number.isFinite(confidence) ? " " + Math.round(confidence * 100) + "%" : "");
+      box.appendChild(label);
+      overlay.appendChild(box);
+    });
+  }
+
+  async function detectActiveMedia() {
+    var mediaId = activeDetectionMediaId;
+    if (!mediaId) return;
+    var generation = ++detectionRequestGeneration;
+    var button = document.getElementById("media-detect-button");
+    var status = document.getElementById("media-detection-status");
+    button.disabled = true;
+    button.textContent = "检测中…";
+    status.textContent = "正在调用 RT-DETR";
+    try {
+      var result = await API.detectMedia(mediaId);
+      if (generation !== detectionRequestGeneration || mediaId !== activeDetectionMediaId) return;
+      detectionResults[mediaId] = result;
+      renderDetectionOverlay(result);
+      status.textContent = detectionSummary(result);
+      button.textContent = "重新检测";
+    } catch (error) {
+      if (generation !== detectionRequestGeneration || mediaId !== activeDetectionMediaId) return;
+      status.textContent = "检测失败：" + (error.message || "未知错误");
+      button.textContent = "重试检测";
+    } finally {
+      if (generation === detectionRequestGeneration && mediaId === activeDetectionMediaId) {
+        button.disabled = false;
+      }
+    }
+  }
+
   function closeMedia() {
+    detectionRequestGeneration += 1;
+    activeDetectionMediaId = null;
     var lightbox = document.getElementById("media-lightbox");
     lightbox.classList.remove("open");
     lightbox.setAttribute("aria-hidden", "true");
@@ -1451,6 +1544,15 @@ window.Platform = (function () {
       document.getElementById("btn-toggle-" + name).addEventListener("click", function () { toggleLayer(name); });
     });
     document.getElementById("media-lightbox-close").addEventListener("click", closeMedia);
+    document.getElementById("media-detect-button").addEventListener("click", function () {
+      detectActiveMedia().catch(function () {});
+    });
+    document.getElementById("media-lightbox-image").addEventListener("load", function () {
+      if (activeDetectionMediaId) renderDetectionOverlay(detectionResults[activeDetectionMediaId] || null);
+    });
+    window.addEventListener("resize", function () {
+      if (activeDetectionMediaId) renderDetectionOverlay(detectionResults[activeDetectionMediaId] || null);
+    });
     document.getElementById("media-lightbox").addEventListener("click", function (event) { if (event.target === this) closeMedia(); });
     document.getElementById("btn-open-knowledge-graph").addEventListener("click", openKnowledgeGraph);
     document.getElementById("knowledge-graph-close").addEventListener("click", closeKnowledgeGraph);

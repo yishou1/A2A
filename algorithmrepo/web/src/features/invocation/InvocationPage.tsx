@@ -1,7 +1,7 @@
-import { CopyOutlined, PlayCircleOutlined, ReloadOutlined } from '@ant-design/icons'
+import { CopyOutlined, PlayCircleOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons'
 import { useMutation } from '@tanstack/react-query'
 import { Alert, App, Button, Card, Col, Descriptions, Input, Row, Select, Space, Tabs, Tag, Typography } from 'antd'
-import { useEffect, useMemo, useState } from 'react'
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, type AlgorithmKey } from '../../api/client'
 import type { AlgorithmSummary, RunRequest, RunResponse } from '../../api/contracts'
@@ -12,6 +12,14 @@ import { isRetryableRunFailure, normalizeRunFailure } from '../../lib/runError'
 import { createInitialInputs, SchemaInputForm } from './SchemaInputForm'
 import { validateSchemaInputs } from '../../lib/schemaValidation'
 import { createRequestTemplates } from './requestTemplates'
+import {
+  LOCAL_IMAGE_ACCEPT,
+  formatFileSize,
+  injectLocalImage,
+  readImageAsBase64,
+  schemaSupportsLocalImage,
+  validateLocalImage,
+} from './localImageUpload'
 
 function keyValue(item: AlgorithmSummary) {
   return `${item.algorithm_id}\u0000${item.version}\u0000${item.backend_type}`
@@ -56,11 +64,16 @@ export function InvocationPage() {
   const [requestPreview, setRequestPreview] = useState<RunRequest>()
   const [editorError, setEditorError] = useState<string>()
   const [templateKey, setTemplateKey] = useState('')
+  const [uploadedImage, setUploadedImage] = useState<{ name: string; size: number }>()
+  const [readingImage, setReadingImage] = useState(false)
+  const uploadInputRef = useRef<HTMLInputElement>(null)
 
   const requestTemplates = useMemo(
     () => createRequestTemplates(schemaQuery.data, selected?.agent_card.examples ?? []),
     [schemaQuery.data, selected?.agent_card.examples],
   )
+  const selectedTemplate = requestTemplates.find((template) => template.key === templateKey)
+  const supportsLocalImage = useMemo(() => schemaSupportsLocalImage(schemaQuery.data), [schemaQuery.data])
 
   useEffect(() => {
     if (!activeAlgorithms.length) return
@@ -81,9 +94,10 @@ export function InvocationPage() {
     setRawParams('{}')
     setTemplateKey(initialTemplate?.key ?? '')
     setDeployId(undefined)
-    setFunctionId(undefined)
+    setFunctionId(selected.operational_functions[0]?.function_id)
     setResult(undefined)
     setEditorError(undefined)
+    setUploadedImage(undefined)
   }, [requestTemplates, schemaQuery.data, selected])
 
   const mutation = useMutation({
@@ -175,7 +189,43 @@ export function InvocationPage() {
     setResult(undefined)
     setRequestPreview(undefined)
     setEditorError(undefined)
-    message.success(`已加载${template.label}`)
+    setMode('json')
+    setUploadedImage(undefined)
+    message.success(`已加载${template.label}，已切换到 JSON 模式`)
+  }
+
+  const uploadLocalImage = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    const validationError = validateLocalImage(file)
+    if (validationError) {
+      setEditorError(validationError)
+      message.error(validationError)
+      return
+    }
+    setReadingImage(true)
+    try {
+      const currentInputs = mode === 'json' ? JSON.parse(rawInputs) : inputs
+      if (!currentInputs || typeof currentInputs !== 'object' || Array.isArray(currentInputs)) {
+        throw new Error('请先将 inputs 修改为有效的 JSON 对象。')
+      }
+      const base64 = await readImageAsBase64(file)
+      const nextInputs = injectLocalImage(currentInputs as Record<string, unknown>, base64)
+      setInputs(nextInputs)
+      setRawInputs(JSON.stringify(nextInputs, null, 2))
+      setUploadedImage({ name: file.name, size: file.size })
+      setResult(undefined)
+      setRequestPreview(undefined)
+      setEditorError(undefined)
+      message.success(`已载入本地图片 ${file.name}`)
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : '读取本地图片失败。'
+      setEditorError(detail)
+      message.error(detail)
+    } finally {
+      setReadingImage(false)
+    }
   }
 
   const copyJson = async (value: unknown, label: string) => {
@@ -224,6 +274,34 @@ export function InvocationPage() {
                   </label>
                   <Button disabled={!templateKey} onClick={loadRequestTemplate}>加载模板</Button>
                 </div>
+                {selectedTemplate && (
+                  <Typography.Text type="secondary" className="request-template-hint">
+                    {selectedTemplate.source === 'algorithm_card' && '来自算法卡的完整调用示例，可直接修改后执行。'}
+                    {selectedTemplate.source === 'schema_example' && '来自 JSON Schema 声明的示例，可直接修改后执行。'}
+                    {selectedTemplate.source === 'schema_generated' && '根据 Schema 约束递归生成，请结合实际业务语义检查后执行。'}
+                  </Typography.Text>
+                )}
+                {supportsLocalImage && (
+                  <div className="local-image-upload">
+                    <input
+                      ref={uploadInputRef}
+                      className="local-image-file-input"
+                      type="file"
+                      accept={LOCAL_IMAGE_ACCEPT}
+                      onChange={(event) => void uploadLocalImage(event)}
+                    />
+                    <div className="local-image-upload-copy">
+                      <Typography.Text strong>本地图片</Typography.Text>
+                      <Typography.Text type="secondary">
+                        支持 JPG、PNG、WebP，最大 10 MB；执行时以 Base64 随请求发送，不额外保存。
+                      </Typography.Text>
+                    </div>
+                    {uploadedImage && <Tag color="blue">{uploadedImage.name} · {formatFileSize(uploadedImage.size)}</Tag>}
+                    <Button icon={<UploadOutlined />} loading={readingImage} onClick={() => uploadInputRef.current?.click()}>
+                      选择图片
+                    </Button>
+                  </div>
+                )}
                 <Tabs activeKey={mode} onChange={(key) => {
                   const next = key as 'form' | 'json'
                   if (next === 'json') setRawInputs(JSON.stringify(inputs, null, 2))
@@ -238,7 +316,7 @@ export function InvocationPage() {
                 ]} />
                 <div className="invocation-options">
                   <label className="compact-field"><span>指定部署（可选）</span><Select allowClear value={deployId} onChange={setDeployId} options={selected.deployments.filter((item) => item.deploy_status === 'ready').map((item) => ({ value: item.deploy_id, label: `${item.deploy_id} · ${item.node_id}` }))} placeholder="由服务端选择 / 按需加载" /></label>
-                  <label className="compact-field"><span>业务功能点（可选）</span><Select allowClear value={functionId} onChange={setFunctionId} options={selected.operational_functions.map((item) => ({ value: item.function_id, label: `${item.function_id} · ${item.function_name}` }))} placeholder="使用算法卡默认映射" /></label>
+                  <label className="compact-field"><span>业务功能点（填写工作流上下文时必选）</span><Select allowClear value={functionId} onChange={setFunctionId} options={selected.operational_functions.map((item) => ({ value: item.function_id, label: `${item.function_id} · ${item.function_name}` }))} placeholder="选择功能点" /></label>
                   <Row gutter={12}><Col span={12}><label className="compact-field"><span>Workflow ID</span><Input value={workflowId} onChange={(event) => setWorkflowId(event.target.value)} /></label></Col><Col span={12}><label className="compact-field"><span>Step ID</span><Input value={stepId} onChange={(event) => setStepId(event.target.value)} /></label></Col></Row>
                   <label className="compact-field"><span>Params JSON</span><Input.TextArea className="code-textarea" rows={4} value={rawParams} onChange={(event) => setRawParams(event.target.value)} /></label>
                 </div>

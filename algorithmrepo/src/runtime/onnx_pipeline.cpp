@@ -383,6 +383,19 @@ Result<TensorBlob> BuildMappedTensorFromJsonValue(
 
     const std::size_t expected_count = ElementCountFromShape(tensor.shape);
     const std::size_t inferred_count = ElementCountFromShape(inferred_tensor_result.value().shape);
+    if (mapping.broadcast_scalar && inferred_count == 1 && expected_count > 1) {
+        if (!(source_value.is_number() || source_value.is_boolean())) {
+            return Status::Error(
+                ErrorCode::kPreprocessFailed,
+                "Tensor `" + mapping.tensor_name +
+                    "` can only broadcast a numeric or boolean scalar.");
+        }
+        tensor.values = json::array();
+        for (std::size_t index = 0; index < expected_count; ++index) {
+            tensor.values.push_back(source_value);
+        }
+        return tensor;
+    }
     if (expected_count != inferred_count) {
         return Status::Error(ErrorCode::kPreprocessFailed,
                              "Tensor `" + mapping.tensor_name +
@@ -597,6 +610,9 @@ Result<PreprocessConfig> OnnxPipeline::LoadPreprocessConfig(
                 }
                 mapping.shape = shape_result.value();
                 mapping.has_shape = true;
+            }
+            if (mapping_node["broadcast_scalar"]) {
+                mapping.broadcast_scalar = mapping_node["broadcast_scalar"].as<bool>();
             }
             config.tensor_mappings.push_back(std::move(mapping));
         }

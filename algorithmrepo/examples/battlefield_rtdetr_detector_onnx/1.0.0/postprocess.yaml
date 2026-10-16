@@ -1,0 +1,7 @@
+type: raw_tensor_to_json
+outputs:
+  - tensor_name: output0
+    json_path: $.output0
+notes: >
+  Raw Ultralytics tensor only. Apply conf threshold, optional NMS, and
+  label_map.json class-id mapping in the caller or python_http_service sibling.

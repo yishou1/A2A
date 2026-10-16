@@ -1,0 +1,19 @@
+{
+  "title": "Siamese Mask2Former Input",
+  "type": "object",
+  "required": [
+    "frames"
+  ],
+  "properties": {
+    "frames": {
+      "type": "array"
+    },
+    "reference_frame": {
+      "type": [
+        "object",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

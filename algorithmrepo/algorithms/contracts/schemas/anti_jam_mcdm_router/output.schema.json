@@ -1,0 +1,40 @@
+{
+  "title": "Anti-Jam MCDM Router Output",
+  "type": "object",
+  "required": ["routes"],
+  "properties": {
+    "routes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["destination", "channel"],
+        "properties": {
+          "destination": { "type": "string" },
+          "channel": { "type": "string" },
+          "reliability": { "type": "number" },
+          "priority": { "type": ["string", "number"] },
+          "role_priority": { "type": "number" },
+          "route_policy": { "type": "string" },
+          "decision_rule": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "anti_jam_mode": {
+      "type": "boolean",
+      "description": "干扰超过阈值时为 true"
+    },
+    "broadcast_summary": { "type": "string" },
+    "route_mode": {
+      "type": "string",
+      "enum": ["mcdm_saw", "ppo_channel_policy"],
+      "description": "默认 mcdm_saw；显式 PPO 时为 ppo_channel_policy"
+    },
+    "selected_channel": { "type": "string" },
+    "algorithm_provenance": {
+      "type": "object",
+      "description": "可审计溯源（saw_weights / channel_decision_trace 等）"
+    }
+  },
+  "additionalProperties": true
+}

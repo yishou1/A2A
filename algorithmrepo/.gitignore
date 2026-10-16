@@ -76,3 +76,11 @@ desktop.ini
 
 # Keep the small example .onnx files in this repository.
 # Large production models should use Git LFS or external object storage.
+
+# RT-DETR production artifacts are installed from the separately delivered
+# release bundle by scripts/install_rtdetr_release_bundle.ps1.  Keep the
+# package metadata in Git, but never add the 60-125 MiB model binaries with
+# a broad `git add .`.
+models/checkpoints/battlefield_rtdetr*.pt
+models/battlefield_rtdetr.onnx
+examples/battlefield_rtdetr_detector_onnx/1.0.0/model.onnx

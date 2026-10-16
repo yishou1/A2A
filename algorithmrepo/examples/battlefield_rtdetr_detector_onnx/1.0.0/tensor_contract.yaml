@@ -1,0 +1,8 @@
+inputs:
+  - name: images
+    dtype: float32
+    shape: [1, 3, 640, 640]
+outputs:
+  - name: output0
+    dtype: float32
+    shape: [1, 300, 6]

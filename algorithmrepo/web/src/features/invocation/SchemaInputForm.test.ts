@@ -29,4 +29,50 @@ describe('schema-driven invocation inputs', () => {
       metadata: {},
     })
   })
+
+  it('recursively creates populated values that satisfy nested array structure', () => {
+    expect(createInitialInputs({
+      type: 'object',
+      required: ['track', 'features'],
+      properties: {
+        track: {
+          type: 'object',
+          required: ['history'],
+          properties: {
+            phase: { type: 'string', enum: ['strike', 'assault'] },
+            history: {
+              type: 'array',
+              minItems: 2,
+              items: {
+                type: 'object',
+                required: ['t', 'x'],
+                properties: {
+                  t: { type: 'number', minimum: 0 },
+                  x: { type: 'number' },
+                },
+              },
+            },
+          },
+        },
+        features: {
+          type: 'array',
+          minItems: 1,
+          items: {
+            type: 'array',
+            minItems: 3,
+            items: { type: 'number', minimum: 0, maximum: 1 },
+          },
+        },
+      },
+    })).toEqual({
+      track: {
+        phase: 'strike',
+        history: [
+          { t: 0, x: 0 },
+          { t: 1, x: 1 },
+        ],
+      },
+      features: [[0, 1, 1]],
+    })
+  })
 })

@@ -1,0 +1,16 @@
+{
+  "title": "SupCon Meta Input",
+  "type": "object",
+  "required": [
+    "fused_embeddings"
+  ],
+  "properties": {
+    "fused_embeddings": {
+      "type": "object"
+    },
+    "support_shots": {
+      "type": "array"
+    }
+  },
+  "additionalProperties": false
+}

@@ -40,6 +40,9 @@ Status CompareJson(const json& expected,
     }
 
     if (expected.is_object()) {
+        if (expected.empty()) {
+            return Status::Ok();
+        }
         for (auto it = expected.begin(); it != expected.end(); ++it) {
             if (!actual.contains(it.key())) {
                 return Status::Error(
@@ -63,6 +66,9 @@ Status CompareJson(const json& expected,
     }
 
     if (expected.is_array()) {
+        if (expected.empty()) {
+            return Status::Ok();
+        }
         if (expected.size() != actual.size()) {
             return Status::Error(
                 ErrorCode::kGoldenCaseFailed,

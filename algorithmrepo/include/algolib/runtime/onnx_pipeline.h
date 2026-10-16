@@ -32,6 +32,7 @@ struct JsonToTensorMapping {
     std::optional<TensorDataType> dtype;
     std::vector<std::int64_t> shape;
     bool has_shape = false;
+    bool broadcast_scalar = false;
 };
 
 struct RawTensorOutputMapping {

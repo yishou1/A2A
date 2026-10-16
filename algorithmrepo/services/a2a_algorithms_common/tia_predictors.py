@@ -268,8 +268,17 @@ def tia_model_loaded(algorithm_id: str) -> bool:
         return _edl_artifact_loaded()
     if algorithm_id == "multimodal_mamba_fusion":
         return _mamba_artifact_loaded()
+    if algorithm_id == "battlefield_rtdetr_detector":
+        try:
+            from agent.inference.registry import resolve_detector_weights
+
+            resolve_detector_weights(
+                _backend_config("agent.skills.perception.rt_detr_odconv_detector")
+            )
+            return True
+        except (ImportError, OSError, ValueError):
+            return False
     checks: dict[str, list[str]] = {
-        "battlefield_rtdetr_detector": ["battlefield_rtdetr.pt", "odconv_refiner.pt"],
         "siamese_mask2former_damage": [],
         "motr_neural_kalman_tracker": ["motr_tracker.pt", "motr_tracker_battlefield.pt"],
         "imagebind_multimodal_encoder": [],
@@ -366,7 +375,24 @@ def predict_battlefield_rtdetr_detector(inputs: dict, params: dict) -> dict:
         "RTDETRODConvDetector",
         {"frames": frames},
     )
-    return {"detections": detections, "count": len(detections)}
+    if _use_mock():
+        runtime = {
+            "mode": "mock",
+            "detector_model": "mock",
+            "detector_model_path": None,
+            "odconv_enabled": False,
+            "odconv_checkpoint": None,
+        }
+    else:
+        from agent.inference.registry import detector_runtime_profile
+
+        runtime = {
+            "mode": "real",
+            **detector_runtime_profile(
+                _backend_config("agent.skills.perception.rt_detr_odconv_detector")
+            ),
+        }
+    return {"detections": detections, "count": len(detections), "runtime": runtime}
 
 
 def predict_siamese_mask2former_damage(inputs: dict, params: dict) -> dict:

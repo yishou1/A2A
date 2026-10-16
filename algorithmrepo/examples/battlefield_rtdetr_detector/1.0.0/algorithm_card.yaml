@@ -2,7 +2,7 @@ algorithm_id: battlefield_rtdetr_detector
 version: 1.0.0
 display_name: Battlefield RT-DETR Detector
 backend_type: python_http_service
-status: draft
+status: validated
 
 task_family: detection
 modalities:
@@ -31,6 +31,19 @@ agent_card:
     See input.schema.json for required structured fields.
   output_description: >
     See output.schema.json for structured outputs.
+  examples:
+    - input:
+        frames:
+          - sensor_id: AMOS-DEMO-EO-1
+            modality: eo_ir
+            payload:
+              image_uri: http://127.0.0.1:5000/static/ui-previews/fishing_boat.png
+      output:
+        detections: []
+        count: 0
+        runtime:
+          mode: real
+          detector_model: battlefield_rtdetr_unit17_coco25_ap_kaggle_best.pt
 
 machine_spec:
   input_schema_ref: input.schema.json

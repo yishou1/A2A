@@ -1,0 +1,26 @@
+{
+  "title": "Multimodal Encoder Output",
+  "type": "object",
+  "required": ["embeddings"],
+  "properties": {
+    "embeddings": {
+      "type": "object",
+      "description": "sensor_id → float 向量",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "number" }
+      }
+    },
+    "count": { "type": "integer", "minimum": 0 },
+    "embed_backend": {
+      "type": "string",
+      "description": "lightweight_low | lightweight_mid | imagebind | clip …"
+    },
+    "embed_dim": { "type": "integer", "minimum": 1 },
+    "param_tier": {
+      "type": "string",
+      "enum": ["low", "mid", "high"]
+    }
+  },
+  "additionalProperties": true
+}

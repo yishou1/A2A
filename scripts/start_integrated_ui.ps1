@@ -1,10 +1,12 @@
 [CmdletBinding()]
 param(
     [string]$Python,
+    [string]$AlgorithmPython,
     [string]$AlgolibServer,
     [string]$AlgolibCli,
     [ValidateRange(5, 300)]
     [int]$StartupTimeoutSeconds = 60,
+    [switch]$SkipRTDETR,
     [switch]$SkipWebBuild,
     [switch]$OpenBrowser
 )
@@ -17,7 +19,7 @@ $webRoot = Join-Path $algorithmRoot 'web'
 $amosRoot = Join-Path $repoRoot 'amos-platform'
 $runtimeRoot = Join-Path $repoRoot '.runtime\integrated-ui'
 $logRoot = Join-Path $runtimeRoot 'logs'
-$registryRoot = Join-Path $algorithmRoot '.algolib'
+$registryRoot = Join-Path $repoRoot '.algolib'
 $registryPath = Join-Path $registryRoot 'registry.json'
 $executionLogPath = Join-Path $registryRoot 'executions.jsonl'
 $functionCatalogPath = Join-Path $algorithmRoot 'config\operational_function_catalog.yaml'
@@ -38,6 +40,7 @@ function Resolve-FirstFile {
         throw "$Description not found: $Configured"
     }
     foreach ($candidate in $Candidates) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
         if (Test-Path -LiteralPath $candidate -PathType Leaf) {
             return (Resolve-Path -LiteralPath $candidate).Path
         }
@@ -121,12 +124,22 @@ $pythonCandidates = @(
 $pythonPath = Resolve-FirstFile -Configured $Python -Candidates $pythonCandidates -Description 'AMOS Python'
 
 $serverCandidates = @(
+    (Join-Path $algorithmRoot 'build-runtime\Debug\algolib_server.exe'),
     (Join-Path $algorithmRoot 'build-smoke-offline\Debug\algolib_server.exe'),
     (Join-Path $algorithmRoot 'build\Debug\algolib_server.exe'),
     (Join-Path $repoRoot 'build-smoke-offline\Debug\algolib_server.exe'),
     (Join-Path $repoRoot 'build\Debug\algolib_server.exe')
 )
 $serverPath = Resolve-FirstFile -Configured $AlgolibServer -Candidates $serverCandidates -Description 'AlgoLib Server'
+
+$cliCandidates = @(
+    (Join-Path $algorithmRoot 'build-runtime\Debug\algolib.exe'),
+    (Join-Path $algorithmRoot 'build-smoke-offline\Debug\algolib.exe'),
+    (Join-Path $algorithmRoot 'build\Debug\algolib.exe'),
+    (Join-Path $repoRoot 'build-smoke-offline\Debug\algolib.exe'),
+    (Join-Path $repoRoot 'build\Debug\algolib.exe')
+)
+$cliPath = Resolve-FirstFile -Configured $AlgolibCli -Candidates $cliCandidates -Description 'AlgoLib CLI'
 
 if (-not $SkipWebBuild) {
     if (-not (Test-Path -LiteralPath (Join-Path $webRoot 'node_modules'))) {
@@ -147,19 +160,54 @@ elseif (-not (Test-Path -LiteralPath (Join-Path $webRoot 'dist\index.html'))) {
 }
 
 if (-not (Test-Path -LiteralPath $registryPath)) {
-    $cliCandidates = @(
-        (Join-Path $algorithmRoot 'build-smoke-offline\Debug\algolib.exe'),
-        (Join-Path $algorithmRoot 'build\Debug\algolib.exe'),
-        (Join-Path $repoRoot 'build-smoke-offline\Debug\algolib.exe'),
-        (Join-Path $repoRoot 'build\Debug\algolib.exe')
-    )
-    $cliPath = Resolve-FirstFile -Configured $AlgolibCli -Candidates $cliCandidates -Description 'AlgoLib CLI'
     Write-Host '[registry] registering and activating validated ONNX packages'
     & (Join-Path $algorithmRoot 'scripts\bootstrap_algorithm_console.ps1') `
         -AlgolibPath $cliPath `
         -RegistryPath $registryPath `
         -Activate
-    if ($LASTEXITCODE -ne 0) { throw 'AlgoLib registry bootstrap failed.' }
+    if (-not $?) { throw 'AlgoLib registry bootstrap failed.' }
+}
+
+if (-not $SkipRTDETR) {
+    $checkpointPath = Join-Path $algorithmRoot 'models\checkpoints\battlefield_rtdetr_unit17_coco25_ap_kaggle_best.pt'
+    if (-not (Test-Path -LiteralPath $checkpointPath -PathType Leaf)) {
+        throw "RT-DETR checkpoint is missing. Run .\algorithmrepo\scripts\install_rtdetr_release_bundle.ps1 first, or use -SkipRTDETR."
+    }
+    $algorithmPythonCandidates = @(
+        (Join-Path $algorithmRoot '.venv\Scripts\python.exe'),
+        (Join-Path $repoRoot '.venv\Scripts\python.exe'),
+        $pythonPath,
+        (Get-Command python -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1)
+    )
+    $algorithmPythonPath = Resolve-FirstFile -Configured $AlgorithmPython -Candidates $algorithmPythonCandidates -Description 'RT-DETR Python'
+    $previousUseMock = $env:TIA_USE_MOCK
+    $previousComputeProfile = $env:TIA_COMPUTE_PROFILE
+    $previousPort = $env:PORT
+    try {
+        $env:TIA_USE_MOCK = '0'
+        $env:TIA_COMPUTE_PROFILE = if ([string]::IsNullOrWhiteSpace($previousComputeProfile)) { 'medium' } else { $previousComputeProfile }
+        $env:PORT = '9020'
+        Start-ManagedService `
+            -Name 'rtdetr' `
+            -FilePath $algorithmPythonPath `
+            -ArgumentList @((Join-Path $algorithmRoot 'services\battlefield_rtdetr_detector\app\main.py')) `
+            -WorkingDirectory $algorithmRoot `
+            -HealthUrl 'http://127.0.0.1:9020/health'
+    }
+    finally {
+        $env:TIA_USE_MOCK = $previousUseMock
+        $env:TIA_COMPUTE_PROFILE = $previousComputeProfile
+        $env:PORT = $previousPort
+    }
+
+    Write-Host '[registry] ensuring real RT-DETR Python service is registered and active'
+    & (Join-Path $algorithmRoot 'scripts\bootstrap_algorithm_console.ps1') `
+        -AlgolibPath $cliPath `
+        -RegistryPath $registryPath `
+        -IncludePythonHttp `
+        -OnlyAlgorithmId 'battlefield_rtdetr_detector' `
+        -Activate
+    if (-not $?) { throw 'RT-DETR Python package registration failed.' }
 }
 
 Start-ManagedService `

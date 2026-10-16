@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $runtimeRoot = Join-Path $repoRoot '.runtime\integrated-ui'
 
-foreach ($name in @('amos', 'algolib')) {
+foreach ($name in @('amos', 'algolib', 'rtdetr')) {
     $recordPath = Join-Path $runtimeRoot "$name.json"
     if (-not (Test-Path -LiteralPath $recordPath)) {
         Write-Host "[skip] $name was not started by the integrated launcher"

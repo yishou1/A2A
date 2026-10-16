@@ -311,6 +311,7 @@ select,input{
 .asset-id{white-space:normal;overflow-wrap:anywhere}
 .asset-status,.asset-batt,.asset-comms{font-size:11px}
 .media-lightbox-meta{max-height:32vh;overflow-y:auto;font-size:13px;line-height:1.7}
+.media-lightbox-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}.media-lightbox-actions [role="status"]{max-width:430px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#8fb0bf;font-size:11px}.media-detection-stage{position:relative;display:flex;min-height:0;align-items:stretch;justify-content:center;overflow:hidden;background:#03090d}.media-detection-overlay{position:absolute;inset:0;pointer-events:none}.media-detection-box{position:absolute;border:2px solid #57d7ff;background:rgba(40,173,218,.08);box-shadow:0 0 0 1px rgba(3,12,18,.75),0 0 8px rgba(87,215,255,.5)}.media-detection-box span{position:absolute;top:2px;left:2px;max-width:calc(100% - 4px);padding:3px 6px;overflow:hidden;border:1px solid #57d7ff;border-radius:2px;background:rgba(4,19,27,.94);color:#d8f7ff;font:600 10px/14px Consolas,monospace;text-overflow:ellipsis;white-space:nowrap}
 .media-lightbox-meta .presentation-details{margin:8px 0}
 .media-lightbox-meta .presentation-note{margin:7px 0}
 .media-lightbox-panel img{max-height:62vh;min-height:0}

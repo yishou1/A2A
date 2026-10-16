@@ -27,9 +27,22 @@ describe('invocation request templates', () => {
     const templates = createRequestTemplates(schema, [{ input: { value: 1 } }])
 
     expect(templates.at(-1)).toMatchObject({
-      key: 'schema-defaults',
-      source: 'schema',
+      key: 'schema-generated',
+      source: 'schema_generated',
       inputs: { value: 5, enabled: false },
+    })
+  })
+
+  it('exposes object examples declared by JSON Schema', () => {
+    const templates = createRequestTemplates({
+      ...schema,
+      examples: [{ value: 9, enabled: true }],
+    })
+
+    expect(templates[0]).toMatchObject({
+      key: 'schema-example-1',
+      source: 'schema_example',
+      inputs: { value: 9, enabled: true },
     })
   })
 

@@ -1,0 +1,35 @@
+{
+  "title": "Battlefield RT-DETR Detector Input",
+  "type": "object",
+  "required": ["frames"],
+  "properties": {
+    "frames": {
+      "type": "array",
+      "minItems": 1,
+      "description": "传感器帧；仅 modality=eo_ir|sar 会进入检测",
+      "items": {
+        "type": "object",
+        "required": ["sensor_id", "modality"],
+        "properties": {
+          "sensor_id": { "type": "string" },
+          "modality": {
+            "type": "string",
+            "enum": ["eo_ir", "sar", "radar", "text_report", "telemetry", "other"]
+          },
+          "payload": {
+            "type": "object",
+            "description": "需含 image_uri 或 attachment_ref.uri（真推理）；mock 可省略"
+          },
+          "metadata": { "type": "object" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "media_refs": {
+      "type": "array",
+      "items": { "type": "object" },
+      "description": "无 frames 时可由 media_refs 合成 eo_ir 帧"
+    }
+  },
+  "additionalProperties": true
+}

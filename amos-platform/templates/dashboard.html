@@ -355,8 +355,18 @@
 
 <div id="media-lightbox" class="media-lightbox" aria-hidden="true">
   <div class="media-lightbox-panel" role="dialog" aria-modal="true" aria-labelledby="media-lightbox-title" tabindex="-1">
-    <div class="media-lightbox-header"><span id="media-lightbox-title">观测资料</span><button class="btn btn-sm" id="media-lightbox-close">关闭</button></div>
-    <img id="media-lightbox-image" alt="观测资料预览">
+    <div class="media-lightbox-header">
+      <span id="media-lightbox-title">观测资料</span>
+      <div class="media-lightbox-actions">
+        <span id="media-detection-status" role="status" aria-live="polite"></span>
+        <button class="btn btn-sm" id="media-detect-button" type="button">运行目标检测</button>
+        <button class="btn btn-sm" id="media-lightbox-close" type="button">关闭</button>
+      </div>
+    </div>
+    <div id="media-detection-stage" class="media-detection-stage">
+      <img id="media-lightbox-image" alt="观测资料预览">
+      <div id="media-detection-overlay" class="media-detection-overlay" aria-hidden="true"></div>
+    </div>
     <div id="media-lightbox-meta" class="media-lightbox-meta"></div>
   </div>
 </div>
@@ -371,12 +381,12 @@
   </div>
 </footer>
 
-<script src="/static/js/api/platform-api.js?v=20260817d"></script>
+<script src="/static/js/api/platform-api.js?v=20260915-rtdetr"></script>
 <script src="/static/js/map/tactical-symbols.js?v=20260825b"></script>
 <script src="/static/js/map/platform-map.js?v=20260914-scenario3-swarm-flow"></script>
 <script src="/static/js/panels/platform-panels.js?v=20260911c"></script>
 <script src="/static/js/workflow/commander-workflow.js?v=20260914d"></script>
 <script src="/static/js/panels/function-showcase.js?v=20260914b"></script>
-<script src="/static/js/app/platform.js?v=20260914-scenario3-wave-dialogs"></script>
+<script src="/static/js/app/platform.js?v=20260915-rtdetr-overlay"></script>
 </body>
 </html>

@@ -65,6 +65,13 @@ window.PlatformAPI = (function () {
     },
     getBackendHealth: function () { return data("/api/v1/a2a/backend/health"); },
     loadRuntimeAlgorithms: function () { return data("/api/v1/a2a/algorithms"); },
+    detectMedia: async function (mediaId) {
+      var response = await post(
+        "/api/v1/a2a/media/" + encodeURIComponent(mediaId) + "/detect",
+        {}
+      );
+      return response.data;
+    },
     submitA2AWorkflow: function (options) {
       return post("/api/v1/a2a/workflows/submit", options || {});
     },

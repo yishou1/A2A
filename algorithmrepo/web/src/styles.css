@@ -228,6 +228,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:fo
 .invocation-workspace > .ant-col { display: flex; }
 .invocation-workspace .surface-card { width: 100%; }
 .request-template-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; margin-bottom: 6px; }
+.request-template-hint { display: block; min-height: 18px; margin-bottom: 4px; font-size: 11px; }
+.local-image-upload { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; margin: 10px 0 2px; padding: 11px 12px; background: #0a1720; border: 1px solid var(--line); border-radius: 4px; }
+.local-image-file-input { display: none; }
+.local-image-upload-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.local-image-upload-copy .ant-typography { margin: 0; font-size: 11px; }
+.local-image-upload .ant-tag { max-width: 190px; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 720px) { .local-image-upload { grid-template-columns: 1fr auto; } .local-image-upload-copy { grid-column: 1 / -1; } }
 .schema-form { display: grid; gap: 13px; }
 .schema-field { display: flex; flex-direction: column; gap: 5px; }
 .schema-field-label { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; color: #bdcbd4; font-weight: 600; }

@@ -1,0 +1,11 @@
+type: json_to_tensor_map
+mappings:
+  - json_path: $.images
+    tensor_name: images
+    dtype: float32
+    shape: [1, 3, 640, 640]
+    broadcast_scalar: true
+notes: >
+  Caller must letterbox/decode outside this package. Normal calls provide the
+  complete image tensor. Golden smoke cases may provide one scalar and set
+  broadcast_scalar to fill the configured tensor without committing a huge JSON file.

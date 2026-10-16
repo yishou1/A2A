@@ -7,6 +7,29 @@
     },
     "count": {
       "type": "number"
+    },
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["mock", "real"]
+        },
+        "detector_model": {
+          "type": "string"
+        },
+        "detector_model_path": {
+          "type": ["string", "null"]
+        },
+        "odconv_enabled": {
+          "type": "boolean"
+        },
+        "odconv_checkpoint": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["mode", "detector_model", "odconv_enabled"],
+      "additionalProperties": true
     }
   },
   "additionalProperties": true
