@@ -11,6 +11,8 @@ from typing import Any, Dict, Iterable, List, Sequence
 
 import numpy as np
 
+from .m20_fused_onnx import MAX_NODES, M20FusedOnnxBundle, temporal_history, track_type_name, validate_tracks
+
 try:
     import torch
 except ImportError:  # pragma: no cover
@@ -24,6 +26,7 @@ GRAPH_RELATION_CHECKPOINT = (
     / "models/checkpoints/graph_relation_gnn_s.safetensors"
 )
 GRAPH_RELATION_METADATA = GRAPH_RELATION_CHECKPOINT.with_suffix(".metadata.json")
+M20_FUSED_ONNX_BUNDLE = Path(__file__).resolve().parents[2] / "examples/graph_relation_reasoner/2.0.0/model_bundle"
 
 
 def target_type_classifier(inputs: dict, _params: dict) -> dict:
@@ -174,6 +177,18 @@ def track_state_updater(inputs: dict, _params: dict) -> dict:
 
 
 def graph_relation_reasoner(inputs: dict, params: dict) -> dict:
+    """The deployed M20 contract is temporal GRU-GNN, never the legacy single frame."""
+    tracks = validate_tracks(inputs)
+    threshold = params.get("relation_threshold", 0.5)
+    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not 0.0 < threshold < 1.0:
+        raise ValueError("relation_threshold must be a finite number between 0 and 1")
+    if params.get("model_variant", "m20_fused_onnx_v6") not in {"m20_fused_onnx_v6", "m20_fused_onnx", "2.0.0"}:
+        raise ValueError("M20 2.0.0 supports only the temporal GRU-GNN model variant")
+    return _graph_relation_reasoner_m20_fused(tracks, float(threshold))
+
+
+def graph_relation_reasoner_single_frame(inputs: dict, params: dict) -> dict:
+    """Historical offline implementation; not exposed by the mounted HTTP service."""
     tracks = list(inputs.get("tracks") or [])
     if not tracks:
         raise ValueError("tracks is required")
@@ -231,14 +246,117 @@ def graph_relation_reasoner(inputs: dict, params: dict) -> dict:
     }
 
 
+def _graph_relation_reasoner_m20_fused(tracks: list[dict], threshold: float) -> dict:
+    bundle = _load_m20_fused_onnx_bundle()
+    routed: dict[str, list[dict]] = {domain: [] for domain in ("aircraft", "uav", "ship", "ground_vehicle")}
+    routing = []
+    for track in tracks:
+        type_name = track_type_name(track)
+        decision = bundle.route(type_name)
+        track_id = str(track.get("track_id") or track.get("detection_id") or "track-unknown")
+        routing.append({"track_id": track_id, "type_name": type_name, **decision})
+        domain = decision["domain"]
+        # The temporal model was trained with at least six valid observations.
+        # A caller receives an explicit decline rather than a fabricated score.
+        if domain and len(temporal_history(track)) >= 6:
+            if len(routed[str(domain)]) < MAX_NODES:
+                routed[str(domain)].append(track)
+            else:
+                routing[-1]["domain"] = None
+                routing[-1]["reason"] = "expert_node_capacity_exceeded"
+        elif domain:
+            routing[-1]["domain"] = None
+            routing[-1]["reason"] = "insufficient_history_points"
+
+    relations: list[dict] = []
+    groups: list[dict] = []
+    for domain, domain_tracks in routed.items():
+        if len(domain_tracks) < 2:
+            continue
+        probabilities, selected = bundle.score(domain, domain_tracks)
+        domain_relations: list[dict] = []
+        for left_index, left in enumerate(selected):
+            for right_index, right in enumerate(selected[left_index + 1 :], start=left_index + 1):
+                probability = float(probabilities[0, left_index, right_index])
+                if probability < threshold:
+                    continue
+                domain_relations.append(_relation_row(left, right, probability, domain))
+        relations.extend(domain_relations)
+        domain_groups = _connected_groups(selected, domain_relations)
+        for group in domain_groups:
+            group["group_id"] = f"m20-{domain}-{len(groups) + 1:03d}"
+            group["group_type"] = _group_type_for_domain(domain)
+            member_ids = set(group["member_track_ids"])
+            scores = [row["relation_score"] for row in domain_relations
+                      if row["source_track_id"] in member_ids and row["target_track_id"] in member_ids]
+            group["cohesion_score"] = round(sum(scores) / len(scores), 6)
+            group["evidence"] = [
+                "多帧时空图专家模型判定成员关系边超过阈值，关系连通分量形成群体候选。",
+                f"专家域：{domain}；关系阈值：{threshold:.2f}。",
+            ]
+            groups.append(group)
+    manifest_hash = bundle.manifest_sha256
+    return {
+        "schema_version": "graph_relation_reasoner/v3",
+        "relations": relations,
+        "groups": groups,
+        "routing": routing,
+        "graph_summary": {
+            "node_count": len(tracks),
+            "edge_count": len(relations),
+            "group_count": len(groups),
+            "relation_threshold": threshold,
+            "model_variant": "m20_fused_onnx_v6",
+            "routed_node_count": sum(len(items) for items in routed.values()),
+        },
+        "model": {
+            "model_id": "graph_relation_reasoner",
+            "model_version": "2.0.0",
+            "model_family": "type_name_routed_temporal_gru_gnn_onnx",
+            "compute_profile": "small_cpu_onnx",
+            "artifact_sha256": manifest_hash,
+        },
+        "safety_boundary": "Situation-awareness group relation analysis only; no weapon control or engagement decision.",
+    }
+
+
+def _relation_row(left: dict, right: dict, probability: float, domain: str) -> dict:
+    distance = haversine_m(float(left["lat"]), float(left["lon"]), float(right["lat"]), float(right["lon"]))
+    heading_delta = heading_difference(float(left.get("heading", 0.0)), float(right.get("heading", 0.0)))
+    speed_delta = abs(float(left.get("speed", 0.0) or 0.0) - float(right.get("speed", 0.0) or 0.0))
+    return {
+        "source_track_id": str(left.get("track_id") or left.get("detection_id")),
+        "target_track_id": str(right.get("track_id") or right.get("detection_id")),
+        "distance_m": round(distance, 3),
+        "heading_delta_deg": round(heading_delta, 3),
+        "speed_delta_mps": round(speed_delta, 3),
+        "relation_score": round(probability, 6),
+        "relation_type": "formation_membership",
+        "expert_domain": domain,
+    }
+
+
+def _group_type_for_domain(domain: str) -> str:
+    if domain in {"aircraft", "uav"}:
+        return "air_formation"
+    if domain == "ship":
+        return "surface_group"
+    return "ground_group"
+
+
+@lru_cache(maxsize=1)
+def _load_m20_fused_onnx_bundle() -> M20FusedOnnxBundle:
+    if not M20_FUSED_ONNX_BUNDLE.is_dir():
+        raise FileNotFoundError(f"M20 fused ONNX bundle not found: {M20_FUSED_ONNX_BUNDLE}")
+    return M20FusedOnnxBundle(M20_FUSED_ONNX_BUNDLE)
+
+
 def graph_relation_model_loaded() -> bool:
+    # Readiness must check the model actually served, not the old safetensors file.
     try:
-        metadata = _graph_relation_metadata()
-        return (
-            metadata.get("model_id") == "graph_relation_reasoner"
-            and metadata.get("artifact_sha256") == _sha256(GRAPH_RELATION_CHECKPOINT)
-        )
-    except (OSError, ValueError, KeyError, json.JSONDecodeError):
+        _load_m20_fused_onnx_bundle()
+        return True
+    except Exception:
         return False
 
 

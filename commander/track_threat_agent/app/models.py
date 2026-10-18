@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 ObjectType = Literal["aircraft", "ship", "uav", "unknown"]
 ThreatLevel = Literal["low", "medium", "high"]
-GroupType = Literal["air_formation", "surface_group", "mixed_group", "unknown_group"]
+GroupType = Literal["air_formation", "surface_group", "ground_group", "mixed_group", "unknown_group"]
 ProtectedAssetType = Literal[
     "command_post",
     "radar_site",

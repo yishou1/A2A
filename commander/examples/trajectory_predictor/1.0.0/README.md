@@ -1,6 +1,6 @@
 # Trajectory Predictor
 
-Python HTTP Service algorithm package for **M06 时间序列预测**.
+Python HTTP Service algorithm package for **M16 时间序列预测模型**.
 
 The package includes frozen local model bundles under `models/track_threat/`:
 

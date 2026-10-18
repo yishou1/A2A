@@ -24,7 +24,7 @@ TRACK_THREAT_CLASS_MAP = {
     "multimodal_feature_fuser": ("M03", "多模态融合"),
     "target_type_classifier": ("M04", "特征编码与分类"),
     "track_state_updater": ("M05", "多目标跟踪与定位"),
-    "trajectory_predictor": ("M06", "时间序列预测"),
+    "trajectory_predictor": ("M16", "时间序列预测模型"),
     "graph_relation_reasoner": ("M20", "图神经网络"),
 }
 
@@ -75,7 +75,7 @@ def test_trajectory_predictor_returns_predicted_path() -> None:
 
 def test_algorithm_cards_use_track_threat_port_9038() -> None:
     for algorithm_id in TRACK_THREAT_CLASS_MAP:
-        card_path = ROOT / "examples" / algorithm_id / "1.0.0" / "algorithm_card.yaml"
+        card_path = ROOT / "examples" / algorithm_id / ("2.0.0" if algorithm_id == "graph_relation_reasoner" else "1.0.0") / "algorithm_card.yaml"
         card = card_path.read_text(encoding="utf-8")
         assert "127.0.0.1:9038" in card
         assert "127.0.0.1:9020" not in card
@@ -112,7 +112,7 @@ def test_graph_relation_reasoner_groups_close_tracks() -> None:
     track_b["lon"] = track_a["lon"] + 0.01
     track_b["heading"] = track_a["heading"] + 2
 
-    outputs = predict_graph_relation_reasoner({"tracks": [track_a, track_b]}, {})
+    outputs = predict_graph_relation_reasoner({"tracks": [track_a, track_b]}, {"relation_threshold": 0.1})
 
     assert outputs["relations"]
     assert outputs["groups"]
@@ -132,7 +132,7 @@ def test_mounted_http_apps_match_algorithm_identity() -> None:
         assert metadata["algorithm_class_name"] == algorithm_class_name
         assert metadata["owner_scope"] == "track_threat_agent"
 
-        request_path = ROOT / "examples" / algorithm_id / "1.0.0" / "golden_cases" / "case_001_request.json"
+        request_path = ROOT / "examples" / algorithm_id / ("2.0.0" if algorithm_id == "graph_relation_reasoner" else "1.0.0") / "golden_cases" / "case_001_request.json"
         payload = json.loads(request_path.read_text(encoding="utf-8"))
         result = client.post(f"/{algorithm_id}/predict", json=payload).json()
         assert result["ok"] is True

@@ -6,7 +6,7 @@
 
 Port: `9038`
 
-Algorithm class: `M06 时间序列预测`
+Algorithm class: `M16 时间序列预测模型`
 
 Input: structured tracks with history paths.
 

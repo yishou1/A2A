@@ -1,0 +1,254 @@
+{
+  "title": "M20 Temporal GRU-GNN Output",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "relations",
+    "groups",
+    "routing",
+    "graph_summary",
+    "model",
+    "safety_boundary"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "graph_relation_reasoner/v3"
+    },
+    "relations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "source_track_id",
+          "target_track_id",
+          "distance_m",
+          "heading_delta_deg",
+          "speed_delta_mps",
+          "relation_score",
+          "relation_type",
+          "expert_domain"
+        ],
+        "properties": {
+          "source_track_id": {
+            "type": "string"
+          },
+          "target_track_id": {
+            "type": "string"
+          },
+          "distance_m": {
+            "type": "number",
+            "minimum": 0
+          },
+          "heading_delta_deg": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 180
+          },
+          "speed_delta_mps": {
+            "type": "number",
+            "minimum": 0
+          },
+          "relation_score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "relation_type": {
+            "const": "formation_membership"
+          },
+          "expert_domain": {
+            "enum": [
+              "aircraft",
+              "uav",
+              "ship",
+              "ground_vehicle"
+            ]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "group_id",
+          "group_type",
+          "member_track_ids",
+          "centroid",
+          "cohesion_score",
+          "evidence"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "string"
+          },
+          "group_type": {
+            "enum": [
+              "air_formation",
+              "surface_group",
+              "ground_group"
+            ]
+          },
+          "member_track_ids": {
+            "type": "array",
+            "minItems": 2,
+            "uniqueItems": true,
+            "items": {
+              "type": "string"
+            }
+          },
+          "centroid": {
+            "type": "object",
+            "required": [
+              "lat",
+              "lon"
+            ],
+            "properties": {
+              "lat": {
+                "type": "number",
+                "minimum": -90,
+                "maximum": 90
+              },
+              "lon": {
+                "type": "number",
+                "minimum": -180,
+                "maximum": 180
+              }
+            },
+            "additionalProperties": true
+          },
+          "cohesion_score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "routing": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "track_id",
+          "type_name",
+          "domain",
+          "confidence",
+          "reason"
+        ],
+        "properties": {
+          "track_id": {
+            "type": "string"
+          },
+          "type_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "domain": {
+            "enum": [
+              "aircraft",
+              "uav",
+              "ship",
+              "ground_vehicle",
+              null
+            ]
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "graph_summary": {
+      "type": "object",
+      "required": [
+        "node_count",
+        "edge_count",
+        "group_count",
+        "relation_threshold",
+        "model_variant",
+        "routed_node_count"
+      ],
+      "properties": {
+        "node_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "edge_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "group_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "relation_threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "model_variant": {
+          "const": "m20_fused_onnx_v6"
+        },
+        "routed_node_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "model": {
+      "type": "object",
+      "required": [
+        "model_id",
+        "model_version",
+        "model_family",
+        "compute_profile",
+        "artifact_sha256"
+      ],
+      "properties": {
+        "model_id": {
+          "const": "graph_relation_reasoner"
+        },
+        "model_version": {
+          "const": "2.0.0"
+        },
+        "model_family": {
+          "const": "type_name_routed_temporal_gru_gnn_onnx"
+        },
+        "compute_profile": {
+          "const": "small_cpu_onnx"
+        },
+        "artifact_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": true
+    },
+    "safety_boundary": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

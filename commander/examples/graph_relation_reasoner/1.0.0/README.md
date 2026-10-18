@@ -1,5 +1,9 @@
 # Graph Relation Reasoner
 
+Historical single-frame package, retained for provenance/offline regression only.
+The current deployment uses `../2.0.0` (temporal GRU-GNN). The mounted HTTP service
+does not serve version 1.0.0; `scripts/start.sh` selects 2.0.0 instead.
+
 Graph reasoning algorithm package for **M20 图神经网络**. It uses a trained
 dense message-passing GNN to classify pairwise formation-membership edges from
 structured track position, motion, altitude, confidence and object-type features.
