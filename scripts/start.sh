@@ -194,37 +194,7 @@ export GATEWAY_PUBLIC_BASE_URL="${GATEWAY_PUBLIC_BASE_URL:-http://127.0.0.1:8030
 PUBLIC_BIND_HOST="${PUBLIC_BIND_HOST:-127.0.0.1}"
 
 algorithm_card_rows() {
-  "$A2A_PYTHON" - "$COMMANDER_DIR/examples" <<'PY'
-from __future__ import annotations
-
-import re
-import sys
-from pathlib import Path
-
-root = Path(sys.argv[1])
-
-
-def field(text: str, name: str, default: str = "") -> str:
-    match = re.search(rf"^{re.escape(name)}:\s*([^\s#]+)", text, re.MULTILINE)
-    return match.group(1).strip() if match else default
-
-
-def runtime_field(text: str, name: str, default: str = "") -> str:
-    match = re.search(rf"^\s*{re.escape(name)}:\s*([^\s#]+)", text, re.MULTILINE)
-    return match.group(1).strip() if match else default
-
-
-for card in sorted(root.glob("*/1.0.0/algorithm_card.yaml")):
-    text = card.read_text(encoding="utf-8")
-    package_dir = card.parents[1].name
-    algorithm_id = field(text, "algorithm_id", package_dir)
-    version = field(text, "version", "1.0.0")
-    backend_type = field(text, "backend_type", runtime_field(text, "backend_type", ""))
-    health_endpoint = runtime_field(text, "health_endpoint", "")
-    if not backend_type:
-        continue
-    print("\t".join([package_dir, algorithm_id, version, backend_type, health_endpoint]))
-PY
+  "$A2A_PYTHON" "$SCRIPT_DIR/algorithm_packages.py" "$COMMANDER_DIR/examples"
 }
 
 url_port() {
@@ -447,6 +417,13 @@ for row in "${ALGORITHM_CARD_ROWS[@]}"; do
   if ! "$COMMANDER_DIR/build/algolib" activate "$algorithm_id" "$version" "$backend_type" >/dev/null; then
     echo "[warn] failed to activate $algorithm_id; continuing startup." >&2
     continue
+  fi
+  if [[ "$algorithm_id" == "graph_relation_reasoner" && "$version" == "2.0.0" ]]; then
+    # Migrate an existing registry only after the new temporal package passed validation.
+    # The legacy package remains on disk for provenance, but must not be selected.
+    if "$COMMANDER_DIR/build/algolib" show-card graph_relation_reasoner 1.0.0 python_http_service >/dev/null 2>&1; then
+      "$COMMANDER_DIR/build/algolib" disable graph_relation_reasoner 1.0.0 python_http_service >/dev/null || true
+    fi
   fi
 done
 

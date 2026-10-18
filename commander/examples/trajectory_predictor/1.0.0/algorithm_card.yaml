@@ -3,8 +3,8 @@ version: 1.0.0
 display_name: Trajectory Predictor
 backend_type: python_http_service
 status: draft
-algorithm_class: M06
-algorithm_class_name: 时间序列预测
+algorithm_class: M16
+algorithm_class_name: 时间序列预测模型
 owner_scope: track_threat_agent
 
 task_family: forecasting
@@ -28,7 +28,7 @@ operational_functions:
 
 agent_card:
   summary: >
-    M06 package for the Track Threat Agent. Predicts future trajectory points from track history using frozen ST-GNN model bundles when available and physics baselines as fallback.
+    M16 package for the Track Threat Agent. Predicts future trajectory points from track history using frozen ST-GNN model bundles when available and physics baselines as fallback. This is distinct from the M16 LSTM target_trend_predictor_onnx package.
   when_to_use:
     - Structured track states with history_path are available.
   when_not_to_use:

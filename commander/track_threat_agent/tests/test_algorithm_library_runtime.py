@@ -17,7 +17,7 @@ from app.tool_llm import AzureToolLLM, ToolLLMError
 ACTIVE_ALGORITHMS = [
     {
         "algorithm_id": algorithm_id,
-        "version": "1.0.0",
+        "version": "2.0.0" if algorithm_id == "graph_relation_reasoner" else "1.0.0",
         "backend_type": "python_http_service",
         "owner_scope": "track_threat_agent",
     }
@@ -133,7 +133,7 @@ def test_composite_skill_plan_is_completed_with_mandatory_algorithms():
                     },
                     {
                         "algorithm_id": "graph_relation_reasoner",
-                        "version": "1.0.0",
+                        "version": "2.0.0",
                         "backend_type": "python_http_service",
                     },
                 ],

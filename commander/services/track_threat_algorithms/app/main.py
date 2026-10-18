@@ -37,7 +37,7 @@ TRACK_THREAT_ALGORITHMS = (
     ("multimodal_feature_fuser", "feature_engineering", "M03", "多模态融合", predict_multimodal_feature_fuser),
     ("target_type_classifier", "classification", "M04", "特征编码与分类", predict_target_type_classifier),
     ("track_state_updater", "tracking", "M05", "多目标跟踪与定位", predict_track_state_updater),
-    ("trajectory_predictor", "forecasting", "M06", "时间序列预测", predict_trajectory_predictor),
+    ("trajectory_predictor", "forecasting", "M16", "时间序列预测模型", predict_trajectory_predictor),
     ("graph_relation_reasoner", "graph_reasoning", "M20", "图神经网络", predict_graph_relation_reasoner),
 )
 
@@ -50,7 +50,7 @@ for algorithm_id, task_family, algorithm_class, algorithm_class_name, predict_fn
         f"/{algorithm_id}",
         create_algorithm_app(
             algorithm_id,
-            VERSION,
+            "2.0.0" if algorithm_id == "graph_relation_reasoner" else VERSION,
             task_family,
             predict_fn,
             model_loaded_callable=model_loaded_callable,

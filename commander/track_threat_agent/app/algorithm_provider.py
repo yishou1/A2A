@@ -209,13 +209,24 @@ class PlanAlgorithmProvider(LocalBuiltInAlgorithmProvider):
         relation_output = self._run_remote(
             "graph_relation_reasoner",
             inputs={"tracks": [self._track_for_algolib(track) for track in tracks]},
-            params={},
+            params={"model_variant": "m20_fused_onnx_v6"},
         )
-        groups = super().detect_groups(tracks, threats, scene)
-        for group in groups:
-            group.evidence.append(
-                "Group relation graph executed inside Track Threat Agent process."
+        if relation_output is not None and relation_output.get("model", {}).get("model_version") == "2.0.0":
+            declined = [row for row in relation_output.get("routing", []) if row.get("domain") is None]
+            fallback_ids = {row["track_id"] for row in declined}
+            if declined and self.algorithm_library_runtime is not None:
+                reasons = sorted({str(row.get("reason")) for row in declined})
+                self.algorithm_library_runtime.record_local_fallback(
+                    "graph_relation_reasoner", "M20 routing declined tracks: " + ", ".join(reasons)
+                )
+            groups = self.group_detector.detect(
+                tracks, threats, scene,
+                relation_groups=relation_output.get("groups", []),
+                fallback_track_ids=fallback_ids,
             )
+        else:
+            groups = super().detect_groups(tracks, threats, scene)
+        for group in groups:
             if relation_output is not None:
                 remote_groups = relation_output.get("groups") or []
                 matched = [
@@ -224,15 +235,18 @@ class PlanAlgorithmProvider(LocalBuiltInAlgorithmProvider):
                     if set(item.get("member_track_ids") or item.get("members") or [])
                     == set(group.member_track_ids)
                 ]
+                coasting = group.metadata.get("lifecycle_state") == "coasting"
                 group.metadata.setdefault("algorithm_library", {})[
                     "graph_relation_reasoner"
                 ] = {
-                    "used": True,
+                    "used": bool(matched),
                     "matched_remote_groups": len(matched),
                     "graph_summary": relation_output.get("graph_summary", {}),
+                    "model": relation_output.get("model", {}),
+                    "membership_source": "temporal_gru_gnn" if matched else "previous_group_coasting" if coasting else "local_physical_fallback",
                 }
                 group.evidence.append(
-                    "The zsl algorithm-library graph relation reasoner was executed and cross-checked."
+                    "群体成员由 M20 时序 GRU-GNN 判定。" if matched else "本帧短时保持之前群体。" if coasting else "群体成员由本地物理规则回退判定。"
                 )
         return groups
 

@@ -36,13 +36,31 @@ class GroupDetector:
         tracks: Iterable[TrackState],
         threats: Iterable[ThreatAssessment] | None = None,
         scene_context: Dict[str, float] | None = None,
+        *,
+        relation_groups: List[Dict[str, Any]] | None = None,
+        fallback_track_ids: Set[str] | None = None,
     ) -> List[TrackGroup]:
         track_list = [t for t in tracks if t.metadata.get("status", "active") != "lost"]
         for track in track_list:
             track.metadata.pop("physical_group_context", None)
         threat_by_track = {threat.track_id: threat for threat in threats or []}
         by_id = {track.track_id: track for track in track_list}
-        components = self._complete_link_components(track_list)
+        if relation_groups is None:
+            components = self._complete_link_components(track_list)
+        else:
+            # The remote model owns membership for eligible tracks. Local rules
+            # apply only to explicitly declined tracks, never to a negative GNN result.
+            components = []
+            assigned: Set[str] = set()
+            for candidate in relation_groups:
+                component = set(candidate.get("member_track_ids", []))
+                if len(component) < 2 or not component <= by_id.keys() or component & assigned:
+                    continue
+                components.append(component)
+                assigned.update(component)
+            fallback = [track for track in track_list
+                        if track.track_id in (fallback_track_ids or set()) and track.track_id not in assigned]
+            components.extend(self._complete_link_components(fallback))
         previous_groups = dict(self.groups)
         groups: List[TrackGroup] = []
         reused_group_ids: Set[str] = set()
@@ -51,9 +69,20 @@ class GroupDetector:
                 continue
             members = [by_id[track_id] for track_id in sorted(component)]
             group_type = self._group_type(members)
+            remote_candidate = next((item for item in relation_groups or []
+                                     if set(item.get("member_track_ids", [])) == component), None)
+            if remote_candidate is not None and remote_candidate.get("group_type") in {
+                "air_formation", "surface_group", "ground_group", "mixed_group", "unknown_group"
+            }:
+                group_type = remote_candidate["group_type"]
             group_id = self._reuse_group_id(component, group_type, reused_group_ids)
-            group = self._build_group(members, threat_by_track, scene_context or {}, group_id, group_type)
+            relation_cohesion = remote_candidate.get("cohesion_score") if remote_candidate else None
+            group = self._build_group(members, threat_by_track, scene_context or {}, group_id, group_type,
+                                      relation_cohesion_score=relation_cohesion)
             self._mark_observed_group(group, previous_groups.get(group_id))
+            if remote_candidate is not None:
+                group.evidence = [item for item in group.evidence if not item.endswith("similarity")]
+                group.evidence.append("群体成员关系来自 M20 多帧 GRU-GNN，位置与包络由 Agent 补齐。")
             reused_group_ids.add(group_id)
             groups.append(group)
 
@@ -129,6 +158,7 @@ class GroupDetector:
         scene_context: Dict[str, float],
         group_id: str,
         group_type: str,
+        relation_cohesion_score: float | None = None,
     ) -> TrackGroup:
         current_points = [{"lat": m.lat, "lon": m.lon, "alt": m.alt} for m in members]
         centroid = average_point(current_points)
@@ -139,7 +169,7 @@ class GroupDetector:
             predicted_points.extend(member.predicted_path or [{"lat": member.lat, "lon": member.lon, "alt": member.alt}])
         predicted_envelope = self._uncertainty_expanded_envelope(predicted_points)
         motion_cohesion = self._motion_cohesion_score(members)
-        cohesion_score = motion_cohesion
+        cohesion_score = clamp(float(relation_cohesion_score)) if relation_cohesion_score is not None else motion_cohesion
         group_score, factor_details = self._group_score(
             members, threat_by_track, scene_context, cohesion_score, group_type
         )

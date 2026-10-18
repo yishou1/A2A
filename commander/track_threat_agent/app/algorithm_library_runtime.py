@@ -360,6 +360,18 @@ class TrackThreatAlgorithmRuntime:
             if backend_type != "python_http_service":
                 continue
             version = str(item.get("version") or "1.0.0")
+            version_parts = version.split(".")
+            if len(version_parts) != 3 or not all(part.isdigit() for part in version_parts):
+                continue
+            version_key = tuple(map(int, version_parts))
+            if algorithm_id == "graph_relation_reasoner" and version_key < (2, 0, 0):
+                # Do not silently use the historical single-frame GNN.
+                continue
+            previous = active.get(algorithm_id)
+            if previous is not None:
+                previous_key = tuple(int(part) for part in previous["version"].split("."))
+                if version_key <= previous_key:
+                    continue
             active[algorithm_id] = {
                 **item,
                 "algorithm_id": algorithm_id,

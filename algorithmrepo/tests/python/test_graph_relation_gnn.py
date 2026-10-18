@@ -63,8 +63,8 @@ def test_checkpoint_reproduces_holdout_metrics_and_beats_rule_baseline() -> None
     ]["f1"]
 
 
-def test_runtime_uses_checkpoint_and_rejects_close_motion_mismatch() -> None:
-    outputs = track_threat_algorithms.graph_relation_reasoner(
+def test_legacy_runtime_uses_checkpoint_and_rejects_close_motion_mismatch() -> None:
+    outputs = track_threat_algorithms.graph_relation_reasoner_single_frame(
         {
             "tracks": [
                 {
@@ -97,13 +97,13 @@ def test_runtime_uses_checkpoint_and_rejects_close_motion_mismatch() -> None:
     assert outputs["model"]["model_family"] == "dense_message_passing_graph_neural_network"
 
 
-def test_runtime_does_not_fall_back_when_model_load_fails(monkeypatch) -> None:
+def test_legacy_runtime_does_not_fall_back_when_model_load_fails(monkeypatch) -> None:
     def fail_load():
         raise FileNotFoundError("checkpoint unavailable")
 
     monkeypatch.setattr(track_threat_algorithms, "_load_graph_relation_model", fail_load)
     try:
-        track_threat_algorithms.graph_relation_reasoner(
+        track_threat_algorithms.graph_relation_reasoner_single_frame(
             {
                 "tracks": [
                     {"track_id": "A", "lat": 31.0, "lon": 121.0, "speed": 100, "heading": 0},

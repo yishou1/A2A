@@ -1,0 +1,52 @@
+{
+  "release_status": "temporal_candidate_not_deployed",
+  "domain": "uav",
+  "model_id": "temporal_graph_relation_reasoner",
+  "model_version": "m20-uav-gru-gnn-candidate-20260915",
+  "architecture": {
+    "history_points": 8,
+    "node_features": 7,
+    "edge_features": 12,
+    "hidden_size": 32,
+    "gru_layers": 1,
+    "gnn_message_layers": 2,
+    "parameter_count": 19873
+  },
+  "dataset": {
+    "metadata": "processed/m20_uav_real_mixed_v7/metadata.json",
+    "metadata_sha256": "6bdd4683005096949b1d2b62478b1c52fb93bb46834ffdb842d7d493844abee0"
+  },
+  "training": {
+    "epochs_requested": 100,
+    "epochs_completed": 100,
+    "best_epoch": 88,
+    "device": "mps",
+    "seed": 20260916,
+    "elapsed_seconds": 19.688,
+    "hard_negative_weight": 1.5,
+    "hard_negative_pair_count": 1169
+  },
+  "evaluation": {
+    "validation_best_balanced_accuracy": 0.817711,
+    "test_at_0_5": {
+      "threshold": 0.5,
+      "accuracy": 0.648501,
+      "precision": 0.231788,
+      "recall": 0.729167,
+      "specificity": 0.636364,
+      "balanced_accuracy": 0.682765,
+      "f1": 0.351759,
+      "roc_auc": 0.731714,
+      "pr_auc": 0.382543,
+      "true_positive": 35,
+      "true_negative": 203,
+      "false_positive": 116,
+      "false_negative": 13,
+      "verified_pair_count": 367
+    }
+  },
+  "checkpoint": {
+    "best": "artifacts/m20_uav_real_mixed_v7_candidate_20260915/uav/best.safetensors",
+    "sha256": "b69846b87a9fded4d53f6dd4eafd44a7ac3480a4bf2f6a985ad33ede613082bc"
+  }
+}
