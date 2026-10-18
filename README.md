@@ -7,10 +7,12 @@
 
 源仓库、分支和提交版本见 [config/SOURCES.md](config/SOURCES.md)。
 
+Windows 通用完整启动入口：先双击 `检查部署环境.bat`，再双击 `启动项目.bat`；停止使用 `停止项目.bat`，查看健康状态使用 `查看项目状态.bat`。入口自动定位当前仓库，使用 Docker 构建完整运行环境，不需要宿主 Conda、Python 或 C++ 环境。迁移条件、运行模式和参数见 [通用部署与启动](docs/通用部署与启动.md)。
+
 ## Docker Desktop 一键启动（独立入口）
 
-Docker 是可选的独立运行方式，只使用 `docker-tools`、`scripts/docker-*.ps1` 和
-`compose*.yaml`。根目录原有的 `启动项目.bat`、`停止项目.bat` 及其本机运行逻辑保持不变。
+根目录 `启动项目.bat`、`停止项目.bat` 已统一使用 Docker 完整链路；`docker-tools` 中的入口仍然兼容。
+原生 `启动融合界面.bat` 用于只调试 AMOS、AlgoLib 和本机检测服务。
 同一时间只选择一种启动方式，避免占用相同端口。
 
 准备 Windows x64、Docker Desktop（Linux 容器）和首次下载所需网络。建议宿主机至少

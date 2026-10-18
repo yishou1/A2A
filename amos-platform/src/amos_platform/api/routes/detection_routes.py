@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+import os
 from urllib.parse import urljoin
 
 from flask import request
@@ -41,11 +42,14 @@ def register_detection_routes(bp: Any) -> None:
         if not uri.startswith("/"):
             return err(422, "观测资料缺少 AMOS 本地资源地址"), 422
 
-        image_url = urljoin(request.host_url, uri.lstrip("/"))
+        media_base_url = os.environ.get("AMOS_PUBLIC_BASE_URL") or request.host_url
+        image_url = urljoin(media_base_url.rstrip("/") + "/", uri.lstrip("/"))
         try:
             result = get_rtdetr_client().detect(media, image_url)
         except RTDETRServiceError as exc:
             return err(exc.status_code, str(exc), exc.details), exc.status_code
+        if (result.get("runtime") or {}).get("mode") != "real":
+            return err(503, "检测服务处于演示模式，未执行真实图片识别；请启用真实 RT-DETR 模型"), 503
         result.update({
             "media_id": media_id,
             "source_uri": uri,

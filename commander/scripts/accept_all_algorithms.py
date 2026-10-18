@@ -472,18 +472,25 @@ def run_http(
                 "real-mode health must explicitly report model_loaded=true"
             )
         metadata = http_json(runtime["metadata_endpoint"], timeout)
+        if forbid_fallback:
+            markers = find_non_real_markers(metadata)
+            if markers:
+                raise ValueError(f"non-real metadata: {markers[0]}")
         if metadata.get("algorithm_id") not in (None, algorithm_id):
             raise ValueError(f"metadata algorithm_id={metadata.get('algorithm_id')}")
         pairs = golden_pairs(package, "python_http_service")
         for request_path, expected_path in pairs:
-            body = http_json(runtime["endpoint"], timeout, read_json(request_path))
+            request_body = read_json(request_path)
+            if forbid_fallback:
+                request_body["params"] = {**request_body.get("params", {}), "require_real": True}
+            body = http_json(runtime["endpoint"], timeout, request_body)
             if not body.get("ok"):
                 raise ValueError(f"predict ok=false: {body.get('error', body)}")
             outputs = body.get("outputs")
             if outputs in (None, {}, []):
                 raise ValueError("predict outputs are empty")
             if forbid_fallback:
-                markers = find_non_real_markers(outputs)
+                markers = find_non_real_markers({"outputs": outputs, "usage": body.get("usage") or {}})
                 if markers:
                     raise ValueError(f"non-real runtime marker: {markers[0]}")
             expected_payload = read_json(expected_path)
@@ -533,6 +540,8 @@ def run_algolib(
             "inputs": source_request.get("inputs", source_request),
             "params": source_request.get("params", {}),
         }
+        if forbid_fallback:
+            request_payload["params"]["require_real"] = True
         request_path.write_text(
             json.dumps(request_payload, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",

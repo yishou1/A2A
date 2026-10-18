@@ -24,6 +24,11 @@ def main() -> None:
     missing = [str(path.relative_to(ROOT)) for path in REQUIRED_REPOSITORY_ASSETS if not path.is_file()]
     if missing:
         raise RuntimeError("Required checked-in algorithm assets are missing: " + ", ".join(missing))
+    if os.environ.get("RTDETR_USE_MOCK", "1").lower() in {"0", "false", "no"}:
+        detector = ROOT / "algorithmrepo/models/checkpoints/battlefield_rtdetr.pt"
+        if not detector.is_file():
+            raise RuntimeError("Real RT-DETR needs algorithmrepo/models/checkpoints/battlefield_rtdetr.pt. Install the verified release bundle first.")
+        print("[models] RT-DETR image detection uses the real 97-class checkpoint", flush=True)
     use_mock = os.environ.get("TIA_USE_MOCK", "1").lower() in {"1", "true", "yes"}
     if not use_mock:
         missing_real = [str(path.relative_to(ROOT)) for path in UNPUBLISHED_TIA_WEIGHTS if not path.is_file()]

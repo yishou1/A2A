@@ -12,6 +12,7 @@ dependencies = [
     "fastapi",
     "uvicorn",
     "pydantic",
+    "jsonschema>=4.26,<5",
     "requests",
     "httpx2",
     "redis>=5.0,<7.0",

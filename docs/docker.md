@@ -2,10 +2,10 @@
 
 ## 与原启动方式的关系
 
-Docker 是可选的独立入口，不替换原有启动方式：
+完整部署可使用根目录的通用入口，详见 [通用部署与启动](通用部署与启动.md)：
 
-- 根目录 `启动项目.bat` 和 `停止项目.bat` 继续执行原有本机启动逻辑；
-- Docker 只通过 `docker-tools` 目录中的批处理入口，或 `scripts/docker-*.ps1` 脚本管理；
+- 根目录 `启动项目.bat` 和 `停止项目.bat` 通过 `scripts/project.ps1` 管理当前目录对应的 Docker 完整链路；
+- `docker-tools` 目录中的入口及 `scripts/docker-*.ps1` 仍可使用；`启动融合界面.bat` 是独立的原生开发入口；
 - Docker 的服务、模型、索引和运行记录保存在 Compose 容器及命名卷中；
 - 不要同时启动 Docker 环境和原生环境，因为两者默认使用相同的 `5000`、`8030` 等端口。
 
@@ -83,7 +83,7 @@ Qwen 在 Compose 栈运行期间保持加载。CPU 冷加载在本机约需 28 �
 
 一键入口明确设置 `local-qwen`、Ollama 兼容 API、`qwen3:1.7b`、`qwen3-embedding:0.6b` 和严格 LLM 模式，因此本机已有的 Azure `.env` 不会覆盖它。SynapseRAG 通过容器名访问 Ollama；Docker 环境默认开启详细检索轨迹，并把规划与合规任务提供给“证据与图谱”界面。CUE 的 Tactical Intelligence 与 PLAN 的 Task Scheduling 必须产生真实 Qwen 调用和可关联的 `llm_call_id`；Track Threat 及启用模型的 Act 阶段也要求模型请求成功。Decision Planning 与 Compliance 目前不启用 LLM 算法选择。模型不可用或响应不合法时，业务工作流失败，不标为模型规划成功。审计日志保存在核心容器的 `/app/.runtime/llm_audit.jsonl`，只记录模型、Agent、工作流、调用标识和结果，不记录提示词、密钥或完整响应。
 
-本镜像默认 `TIA_USE_MOCK=1`，因为仓库没有提交 `commander/models/checkpoints/*.pt` 等专用感知权重。它让剧本所需的部分感知算法按现有模拟实现运行；**Qwen 规划请求仍是真实推理**。这套环境适合调试 A2A 链路与剧本逻辑，不能用来声称未提供权重的感知模型达到真实精度。`paraphrase-MiniLM-L6-v2` 在 A2A 启动前预取到缓存卷；断网重启需先完成一次在线启动。
+本镜像对部分 TIA 感知算法保留 `TIA_USE_MOCK=1`；**Qwen 规划和图片 RT-DETR 检测默认使用真实推理**。检测服务通过独立的 `RTDETR_USE_MOCK=0` 加载 97 类权重，启动时校验类别数量。RT-DETR 权重未提交到 Git，构建前需使用 `algorithmrepo/scripts/install_rtdetr_release_bundle.ps1 -BundlePath <发布包目录>` 安装独立发布包，或保留完整项目中的 `algorithmrepo/models/checkpoints/battlefield_rtdetr.pt`。缺少权重时启动失败，图片检测接口也不会将 Mock 框冒充真实识别。真实模型仍可能错分或漏检，不能据此声称已达到特定精度。`paraphrase-MiniLM-L6-v2` 在 A2A 启动前预取到缓存卷；断网重启需先完成一次在线启动。
 
 ## 验收剧本二
 

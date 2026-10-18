@@ -1,0 +1,14 @@
+{
+  "version": "1.0.0",
+  "scope": "General clustering and weighted averaging only. These are provisional software benchmark criteria, not operational accuracy certification.",
+  "seed": 20261018,
+  "datasets": {
+    "iris": {"rows": 150, "features": 4, "dbscan_eps": 0.6},
+    "wine": {"rows": 178, "features": 13, "dbscan_eps": 2.5}
+  },
+  "kmeans": {"k": 3, "max_iterations": 300, "tolerance": 0.00000001, "max_inertia_ratio_to_reference": 1.1, "minimum_external_ari": 0.5},
+  "dbscan": {"min_samples": 5, "minimum_reference_ari": 0.999999999, "maximum_noise_fraction": 0.8},
+  "fedavg": {"maximum_absolute_error": 0.0000000001, "maximum_relative_error": 0.0000000001},
+  "transport": {"require_real": true, "request_timeout_seconds": 20, "maximum_case_seconds": 5},
+  "limitations": ["No model tuning or acceptance-threshold fitting to these results.", "Public small datasets do not establish production-scale behavior.", "Weighted parameter averaging does not certify training convergence or privacy guarantees."]
+}

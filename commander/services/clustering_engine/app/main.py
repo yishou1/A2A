@@ -22,7 +22,9 @@ app = create_algorithm_app(
     "clustering",
     predict_clustering_engine,
     model_loaded_callable=lambda: True,
+    input_schema_path=str(ROOT / "examples" / ALGORITHM_ID / VERSION / "input.schema.json"),
     extra_metadata={
+        "inference_mode": "deterministic",
         "algorithm_class": "M01",
         "algorithm_class_name": "clustering",
         "implementations": ["kmeans", "dbscan"],

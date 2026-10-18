@@ -81,6 +81,14 @@ Status OnnxRunner::Load(const AlgorithmEntry& entry) {
 }
 
 AlgorithmResult OnnxRunner::Run(const AlgorithmRequest& request) {
+#if !ALGOLIB_WITH_ONNXRUNTIME
+    if (request.params.contains("require_real") && request.params["require_real"] == true) {
+        return BuildErrorResult(
+            request,
+            Status::Error(ErrorCode::kOnnxRuntimeError,
+                          "Real ONNX inference is required, but this build only has the stub backend."));
+    }
+#endif
     if (!loaded_ || !preprocess_config_.has_value() || !postprocess_config_.has_value()) {
         return BuildErrorResult(
             request,
@@ -130,6 +138,9 @@ AlgorithmResult OnnxRunner::Run(const AlgorithmRequest& request) {
 
 HealthStatus OnnxRunner::HealthCheck() const {
     if (loaded_ && session_.loaded()) {
+#if !ALGOLIB_WITH_ONNXRUNTIME
+        return HealthStatus{true, "stub", "Demo stub is available; no real ONNX model inference is performed."};
+#endif
         return HealthStatus{true, "ready", "ONNX runner is loaded."};
     }
     return HealthStatus{false, "error", "ONNX runner is not loaded."};

@@ -1,6 +1,7 @@
 param(
     [switch]$NoBrowser,
     [switch]$Gpu,
+    [switch]$CheckOnly,
     [ValidateRange(60, 7200)]
     [int]$StartupTimeoutSeconds = 3600
 )
@@ -39,9 +40,8 @@ function Get-DockerServerOS {
 }
 
 try {
-    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-        throw 'Docker CLI was not found. Install Docker Desktop first.'
-    }
+    Initialize-A2ADocker
+    Assert-A2ADeploymentFiles -ProjectRoot $projectRoot
     if (-not (Test-Path -LiteralPath $composeFile)) {
         throw "Compose file not found: $composeFile"
     }
@@ -53,11 +53,9 @@ try {
 
     $serverOS = Get-DockerServerOS
     if (-not $serverOS) {
+        if ($CheckOnly) { throw 'Docker daemon is unavailable. Start Docker Desktop (Linux containers), then run the check again.' }
         Write-Host '[docker] Starting Docker Desktop...'
-        & docker desktop start --timeout 180
-        if ($LASTEXITCODE -ne 0) {
-            throw 'Docker Desktop could not be started. Start it manually and select Linux containers.'
-        }
+        Start-A2ADockerDesktop
         $deadline = (Get-Date).AddSeconds(180)
         do {
             Start-Sleep -Seconds 3
@@ -68,7 +66,10 @@ try {
         throw "Docker is using '$serverOS' containers. Switch Docker Desktop to Linux containers."
     }
     $memoryText = (& docker info --format '{{.MemTotal}}' 2>$null | Out-String).Trim()
-    if ($LASTEXITCODE -eq 0 -and $memoryText -match '^\d+$') {
+    if ($LASTEXITCODE -ne 0 -or $memoryText -notmatch '^\d+$') {
+        throw 'Could not determine Docker available memory. Check Docker Desktop before starting.'
+    }
+    if ($memoryText -match '^\d+$') {
         $memoryGiB = [math]::Round(([double]$memoryText / 1GB), 1)
         # A2A's agent and algorithm processes use about 5 GiB before Ollama
         # loads Qwen.  An 8 GB Docker allocation leaves too little headroom
@@ -82,7 +83,23 @@ try {
 
     Set-Location -LiteralPath $projectRoot
     Write-Host '[1/4] Validating Compose configuration...'
-    Invoke-Compose -CommandArgs @('config', '--quiet')
+    $configJson = & docker @composePrefix config --format json
+    if ($LASTEXITCODE -ne 0) { throw 'Compose configuration validation failed; use Docker Compose v2 with JSON config support.' }
+    $config = ($configJson | Out-String) | ConvertFrom-Json
+    $detectorMock = [string]$config.services.'a2a-core'.environment.RTDETR_USE_MOCK
+    if ($detectorMock -in @('0', 'false', 'False')) {
+        $checkpoint = Join-Path $projectRoot 'algorithmrepo/models/checkpoints/battlefield_rtdetr.pt'
+        if (-not (Test-Path -LiteralPath $checkpoint -PathType Leaf)) {
+            throw 'The real RT-DETR checkpoint is missing. Obtain the release bundle and run algorithmrepo/scripts/install_rtdetr_release_bundle.ps1 before starting.'
+        }
+    }
+    Assert-A2AHostPorts -Config $config -ComposePrefix $composePrefix
+    Write-Host '[mode] Full A2A stack: Commander, Gateway, seven agents, AlgoLib, AMOS, SynapseRAG, Qwen, Nacos and auth-mock.'
+    Write-Host "[models] Qwen planning is real; RT-DETR mock=$detectorMock (0 means real). Other TIA perception algorithms retain their configured demo mode."
+    if ($CheckOnly) {
+        Write-Host 'Preflight passed. No containers were built, started or stopped. GPU availability, network downloads and runtime health are checked during startup.'
+        exit 0
+    }
 
     Write-Host '[2/4] Building application images (first run requires network access)...'
     $buildContext = New-A2AComposeBuildContext -ProjectRoot $projectRoot
@@ -117,8 +134,10 @@ try {
     if ($LASTEXITCODE -ne 0 -or -not $amosEndpoint) {
         throw 'AMOS is healthy, but its published Windows port could not be resolved.'
     }
-    $amosUrl = "http://$amosEndpoint/"
+    $amosPort = ($amosEndpoint -split ':')[-1]
+    $amosUrl = "http://127.0.0.1:$amosPort/"
     Write-Host "Ready: $amosUrl"
+    Write-Host "Algorithm console: ${amosUrl}algolib/algorithms"
     if (-not $NoBrowser) {
         Start-Process $amosUrl
     }

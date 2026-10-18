@@ -108,6 +108,9 @@ services:
       A2A_CONTAINER_MODE: "1"
       A2A_LLM_STRICT: "true"
       TIA_USE_MOCK: "1"
+      RTDETR_USE_MOCK: "${RTDETR_USE_MOCK:-0}"
+      RTDETR_COMPUTE_PROFILE: medium
+      RTDETR_EXPECTED_CLASSES: "97"
       LLM_PROFILE: local-qwen
       LLM_PROVIDER: openai_compatible
       LOCAL_QWEN_BASE_URL: http://ollama:11434/v1
@@ -153,6 +156,7 @@ services:
       GATEWAY_PUBLIC_BASE_URL: http://127.0.0.1:8030
       ALGOLIB_BASE_URL: http://127.0.0.1:8088
       PUBLIC_BIND_HOST: 0.0.0.0
+      RTDETR_BIND_HOST: 0.0.0.0
       COMMANDER_MANAGER_BIND_HOST: 0.0.0.0
       ALGOLIB_BIND_HOST: 0.0.0.0
       HF_HOME: /root/.cache/huggingface
@@ -193,6 +197,8 @@ services:
       A2A_COMMANDER_URL: http://a2a-core:8021
       ALGOLIB_BASE_URL: http://a2a-core:8088
       ALGOLIB_API_URL: http://a2a-core:8088
+      AMOS_RTDETR_ENDPOINT: http://a2a-core:9020
+      RTDETR_USE_MOCK: "${RTDETR_USE_MOCK:-0}"
       AMOS_PUBLIC_BASE_URL: http://amos:5000/
       AMOS_BROWSER_BASE_URL: http://127.0.0.1:${AMOS_HOST_PORT:-5000}/
       SYNAPSERAG_BASE_URL: http://synapserag:8000

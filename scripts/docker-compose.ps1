@@ -5,10 +5,8 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'docker-common.ps1')
 $composeFile = Join-Path $projectRoot 'compose.yaml'
 $composeProject = Get-A2AComposeProjectName -ProjectRoot $projectRoot
-if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-    [Console]::Error.WriteLine('Docker CLI was not found.')
-    exit 1
-}
+try { Initialize-A2ADocker }
+catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }
 Set-Location -LiteralPath $projectRoot
 $composeCommandArgs = @($args)
 $buildRequested = ($composeCommandArgs.Count -gt 0 -and $composeCommandArgs[0] -ieq 'build') -or

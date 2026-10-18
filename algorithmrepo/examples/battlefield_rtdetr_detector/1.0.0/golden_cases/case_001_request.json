@@ -10,7 +10,7 @@
         "sensor_id": "EO-FWD-1",
         "modality": "eo_ir",
         "payload": {
-          "scene_tag": "recon_corridor"
+          "image_base64": "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAN0lEQVR4nO3RwQ0AMAjDwJT9d05HMB9+vgGCZF7bXJrT9XhgwR8gEyETIRMhEyETIRMhEyEThXzH8QM9OMM6fAAAAABJRU5ErkJggg=="
         }
       }
     ]

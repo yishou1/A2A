@@ -5,6 +5,7 @@ from __future__ import annotations
 import socket
 import sys
 import json
+import os
 from urllib.request import urlopen
 
 
@@ -41,25 +42,49 @@ def probe_synapserag(host: str = "amos") -> None:
             raise RuntimeError(f"SynapseRAG is not ready: {payload}")
 
 
+def probe_core() -> None:
+    for port in (8088, 8021, 8030, 8102, 10200, 10201, 10202, 10203, 10204, 10205):
+        probe_port(port)
+    probe_http("http://127.0.0.1:8088/health")
+    probe_http("http://127.0.0.1:8021/health")
+    probe_http("http://127.0.0.1:8030/gateway/v1/ready")
+    for port in (8102, 10200, 10201, 10202, 10203, 10204, 10205):
+        probe_http(f"http://127.0.0.1:{port}/health")
+
+
+def probe_rtdetr() -> None:
+    endpoint = os.environ.get("AMOS_RTDETR_ENDPOINT", "http://a2a-core:9020").rstrip("/")
+    with urlopen(endpoint + "/health", timeout=10) as response:
+        payload = json.load(response)
+        if (response.status != 200 or payload.get("ok") is not True
+                or payload.get("model_loaded") is not True
+                or payload.get("algorithm_id") != "battlefield_rtdetr_detector"):
+            raise RuntimeError(f"RT-DETR is not ready at {endpoint}: {payload}")
+    if os.environ.get("RTDETR_USE_MOCK") in {"0", "false", "False"}:
+        with urlopen(endpoint + "/metadata", timeout=10) as response:
+            metadata = json.load(response)
+            if metadata.get("inference_mode") != "real" or metadata.get("num_classes") != 97:
+                raise RuntimeError("RT-DETR is not running the required real 97-class model")
+
+
 def main() -> None:
     target = sys.argv[1]
     if target == "core":
-        for port in (8088, 8021, 8030, 8102, 10200, 10201, 10202, 10203, 10204, 10205):
-            probe_port(port)
-        probe_http("http://127.0.0.1:8088/health")
-        probe_http("http://127.0.0.1:8021/health")
-        probe_http("http://127.0.0.1:8030/gateway/v1/ready")
+        probe_core()
     elif target == "amos":
         probe_http("http://127.0.0.1:5000/api/v1/scenarios")
         probe_amos_backend()
         probe_http("http://127.0.0.1:5000/algolib-api/health")
+        probe_rtdetr()
     elif target == "full":
+        probe_core()
         probe_gateway_ready()
         probe_http("http://amos:5000/")
         probe_amos_backend("amos")
         probe_http("http://amos:5000/algolib/")
         probe_http("http://amos:5000/algolib-api/health")
         probe_synapserag()
+        probe_rtdetr()
     else:
         raise ValueError(f"unknown healthcheck target: {target}")
 

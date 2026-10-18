@@ -2,3 +2,7 @@
 amos-platform/static/assets/scenarios/**/*.svg text eol=lf
 *.sh text eol=lf
 *.bat text eol=crlf
+# Model provenance checks hash reference CSV bytes across Windows/Linux deployments.
+*.csv text eol=lf
+acceptance/public_data/**/*.data -text
+acceptance/public_data/**/*.names -text

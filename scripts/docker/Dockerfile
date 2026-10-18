@@ -40,6 +40,7 @@ COPY algorithmrepo/services/synapserag/requirements.docker.txt /app/algorithmrep
 RUN python -m pip install -r algorithmrepo/services/synapserag/requirements.docker.txt \
     && python -m pip check
 COPY . /app
+RUN python -m pip install 'jsonschema>=4.26,<5'
 COPY --from=web-build /web/dist /app/algorithmrepo/web/dist
 COPY --from=algolib-build /app/commander/build/algolib /app/commander/build/algolib
 COPY --from=algolib-build /app/commander/build/algolib_server /app/commander/build/algolib_server

@@ -24,7 +24,9 @@ app = create_algorithm_app(
     "federated_learning",
     federated_average,
     model_loaded_callable=implementation_loaded,
+    input_schema_path=str(ROOT / "examples" / ALGORITHM_ID / VERSION / "input.schema.json"),
     extra_metadata={
+        "inference_mode": "deterministic",
         "algorithm_class": "M12",
         "algorithm_class_name": "federated_learning",
         "aggregation_protocol": "fedavg_weighted_by_sample_count",

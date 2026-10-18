@@ -19,6 +19,11 @@ def _use_mock() -> bool:
     return os.environ.get("TIA_USE_MOCK", "1") not in ("0", "false", "False")
 
 
+def tia_execution_mode() -> str:
+    """Configured execution path, independent of demo-service availability."""
+    return "mock" if _use_mock() else "real"
+
+
 def _load_config() -> dict[str, Any]:
     """与 TIA Agent 共用 load_config + compute profile，保证 HTTP 服务与 Agent 配置一致。"""
     try:
@@ -257,7 +262,7 @@ def _run_backend(module_path: str, class_name: str, inputs: dict[str, Any]) -> A
 
 
 def tia_model_loaded(algorithm_id: str) -> bool:
-    """Health check: mock mode always ready; real mode checks key weights."""
+    """Execution readiness; the HTTP factory separately discloses Mock mode."""
     if _use_mock():
         return True
     if algorithm_id == "supcon_meta_classifier":

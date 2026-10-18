@@ -408,8 +408,9 @@ echo "[algorithms] registering and activating packages"
 for row in "${ALGORITHM_CARD_ROWS[@]}"; do
   IFS=$'\t' read -r package_dir algorithm_id version backend_type health_endpoint <<< "$row"
   if [[ "$backend_type" == "onnx" && "$ALGOLIB_REAL_ONNX" != 1 \
-    && "${ALGOLIB_REGISTER_STUB_ONNX:-false}" != "true" \
-    && "$algorithm_id" != "onnx_text_classifier" ]]; then
+    && "${ALGOLIB_REGISTER_STUB_ONNX:-false}" != "true" ]]; then
+    # A persisted registry must not keep a previously activated demo stub usable.
+    "$COMMANDER_DIR/build/algolib" disable "$algorithm_id" "$version" "$backend_type" >/dev/null 2>&1 || true
     echo "[skip] $algorithm_id requires real ONNX Runtime; current algolib build uses stub."
     continue
   fi
@@ -508,9 +509,7 @@ if [[ "${A2A_CONTAINER_MODE:-0}" == 1 ]]; then
   trap 'bash "$SCRIPT_DIR/stop.sh" --keep-nacos; exit 0' TERM INT
   while true; do
     for pid_path in "$PID_DIR"/*.pid; do
-      [[ -e "$pid_path" ]] || continue
-      pid="$(tr -d '[:space:]' < "$pid_path")"
-      if [[ ! "$pid" =~ ^[0-9]+$ ]] || ! kill -0 "$pid" 2>/dev/null; then
+      if managed_service_failed "$pid_path"; then
         echo "[fatal] managed process stopped: $pid_path" >&2
         bash "$SCRIPT_DIR/stop.sh" --keep-nacos
         exit 1

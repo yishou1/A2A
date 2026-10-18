@@ -1,8 +1,7 @@
 @echo off
-title A2A Project Stopper
-echo Stopping A2A business processes...
-powershell -NoProfile -ExecutionPolicy Bypass -File "D:\A2A-jzz-integrated-clean\.runtime\stop-windows-current.ps1"
-echo.
-echo Done. Note: Nacos and auth-mock keep running so the next
-echo start is faster; they are reused automatically.
-pause
+setlocal
+cd /d "%~dp0"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\project.ps1" -Action Stop
+set "launch_result=%ERRORLEVEL%"
+if not "%launch_result%"=="0" pause
+exit /b %launch_result%

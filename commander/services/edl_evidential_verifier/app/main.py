@@ -10,7 +10,7 @@ sys.path.insert(0, str(ROOT / "services"))
 sys.path.insert(0, str(ROOT))
 
 from a2a_algorithms_common.http_service import create_algorithm_app
-from a2a_algorithms_common.tia_predictors import predict_edl_evidential_verifier, tia_model_loaded
+from a2a_algorithms_common.tia_predictors import predict_edl_evidential_verifier, tia_model_loaded, tia_execution_mode
 
 ALGORITHM_ID = "edl_evidential_verifier"
 VERSION = "1.0.0"
@@ -27,6 +27,7 @@ app = create_algorithm_app(
     "scoring",
     _predict,
     model_loaded_callable=lambda: tia_model_loaded(ALGORITHM_ID),
+    inference_mode_callable=tia_execution_mode,
 )
 
 if __name__ == "__main__":

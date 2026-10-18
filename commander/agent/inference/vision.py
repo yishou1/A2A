@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from agent.inference.registry import get_detector, get_device, get_odconv_refiner
-from agent.inference.utils import decode_image_from_frame
+from agent.inference.utils import bbox_iou, decode_image_from_frame
 
 
 def detect_objects(frames: list[dict[str, Any]], config: dict[str, Any]) -> list[dict[str, Any]]:
@@ -25,10 +25,10 @@ def detect_objects(frames: list[dict[str, Any]], config: dict[str, Any]) -> list
             continue
         img = decode_image_from_frame(frame)
         if img is None:
-            continue
+            raise ValueError("Unable to decode the input image; check its data or reachable URL")
 
         results = model.predict(
-            source=img, conf=conf_thr, verbose=False, device=dev_arg, imgsz=imgsz,
+            source=img[..., ::-1].copy(), conf=conf_thr, verbose=False, device=dev_arg, imgsz=imgsz,
             half=half, max_det=max_det,
         )
         if not results:
@@ -55,5 +55,11 @@ def detect_objects(frames: list[dict[str, Any]], config: dict[str, Any]) -> list
             dets = [{**det, "odconv_refined": False} for det in dets]
         else:
             dets = odconv.refine_detections(img, dets, device=device, crop_size=crop_size)
-        out.extend(dets)
+        # RT-DETR queries can assign different labels to the same physical box.
+        kept: list[dict[str, Any]] = []
+        iou_threshold = float(config.get("detection_nms_iou", 0.7))
+        for detection in sorted(dets, key=lambda item: item["confidence"], reverse=True):
+            if not any(bbox_iou(detection["bbox"], prior["bbox"]) > iou_threshold for prior in kept):
+                kept.append(detection)
+        out.extend(kept[:max_det])
     return out

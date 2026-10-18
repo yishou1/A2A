@@ -69,6 +69,20 @@ service_running() {
   [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null
 }
 
+# A PID file removed/replaced during intentional maintenance is not a crash.
+managed_service_failed() {
+  local path="$1"
+  local pid current
+  [[ -e "$path" ]] || return 1
+  pid="$(tr -d '[:space:]' < "$path" 2>/dev/null)" || return 1
+  if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+    return 1
+  fi
+  [[ -e "$path" ]] || return 1
+  current="$(tr -d '[:space:]' < "$path" 2>/dev/null)" || return 1
+  [[ "$current" == "$pid" ]]
+}
+
 wait_http() {
   local name="$1"
   local url="$2"
@@ -100,7 +114,9 @@ start_service() {
     exec setsid "$@" >"$LOG_DIR/$name.log" 2>&1 < /dev/null
   ) &
   local pid=$!
-  printf '%s\n' "$pid" > "$(pid_file "$name")"
+  local path="$(pid_file "$name")"
+  printf '%s\n' "$pid" > "${path}.tmp.$BASHPID"
+  mv -f "${path}.tmp.$BASHPID" "$path"
   if ! wait_http "$name" "$health_url" "${STARTUP_TIMEOUT:-90}"; then
     echo "Last log lines from $LOG_DIR/$name.log:" >&2
     tail -n 30 "$LOG_DIR/$name.log" >&2 || true
@@ -117,11 +133,14 @@ stop_service() {
     rm -f "$(pid_file "$name")"
     return 0
   fi
-  if ! kill -0 "$pid" 2>/dev/null; then
+    if ! kill -0 "$pid" 2>/dev/null; then
+      rm -f "$(pid_file "$name")"
+      return 0
+    fi
+    # Remove the managed PID before deliberately stopping it. The container
+    # supervisor must not treat this maintenance stop as an unexpected crash.
     rm -f "$(pid_file "$name")"
-    return 0
-  fi
-  kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+    kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
   local deadline=$((SECONDS + 10))
   while kill -0 "$pid" 2>/dev/null && (( SECONDS < deadline )); do
     sleep 0.2

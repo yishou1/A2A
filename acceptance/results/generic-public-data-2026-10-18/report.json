@@ -1,0 +1,1192 @@
+{
+  "timestamp_utc": "2026-10-18T08:37:01.138915+00:00",
+  "summary": {
+    "pass": 53,
+    "fail": 0,
+    "calls": 52,
+    "request_attempts": 52
+  },
+  "accepted_scope": "Provisional, public non-operational data validation of two generic mathematical modules only.",
+  "entire_algorithm_library_accepted": false,
+  "operational_accuracy_validated": false,
+  "criteria_sha256": "6c3414db69693e3f12526fae3a6e2a70212e78abd1fe2254c4d5d69e64189eff",
+  "criteria": {
+    "version": "1.0.0",
+    "scope": "General clustering and weighted averaging only. These are provisional software benchmark criteria, not operational accuracy certification.",
+    "seed": 20261018,
+    "datasets": {
+      "iris": {
+        "rows": 150,
+        "features": 4,
+        "dbscan_eps": 0.6
+      },
+      "wine": {
+        "rows": 178,
+        "features": 13,
+        "dbscan_eps": 2.5
+      }
+    },
+    "kmeans": {
+      "k": 3,
+      "max_iterations": 300,
+      "tolerance": 1e-08,
+      "max_inertia_ratio_to_reference": 1.1,
+      "minimum_external_ari": 0.5
+    },
+    "dbscan": {
+      "min_samples": 5,
+      "minimum_reference_ari": 0.999999999,
+      "maximum_noise_fraction": 0.8
+    },
+    "fedavg": {
+      "maximum_absolute_error": 1e-10,
+      "maximum_relative_error": 1e-10
+    },
+    "transport": {
+      "require_real": true,
+      "request_timeout_seconds": 20,
+      "maximum_case_seconds": 5
+    },
+    "limitations": [
+      "No model tuning or acceptance-threshold fitting to these results.",
+      "Public small datasets do not establish production-scale behavior.",
+      "Weighted parameter averaging does not certify training convergence or privacy guarantees."
+    ]
+  },
+  "data_manifest": {
+    "retrieved_at_utc": "2026-10-18T08:23:22.904856+00:00",
+    "purpose": "General mathematical software validation only; no operational domain evaluation.",
+    "datasets": {
+      "iris": {
+        "url": "https://archive.ics.uci.edu/static/public/53/iris.zip",
+        "page": "https://archive.ics.uci.edu/dataset/53/iris",
+        "doi": "https://doi.org/10.24432/C56C76",
+        "citation": "Fisher, R. (1936). Iris [Dataset]. UCI Machine Learning Repository.",
+        "rows": 150,
+        "features": 4,
+        "license": "CC-BY-4.0",
+        "license_url": "https://creativecommons.org/licenses/by/4.0/",
+        "archive_sha256": "d11fe30213d36434a0879aab7cb00ce3c812eb7ba2495874438abff7b7b762e9",
+        "files": {
+          "iris.data": {
+            "bytes": 4551,
+            "sha256": "6f608b71a7317216319b4d27b4d9bc84e6abd734eda7872b71a458569e2656c0"
+          },
+          "iris.names": {
+            "bytes": 2998,
+            "sha256": "71a09fb3ee237614cdb9c09d06e8ae1f610ce2a274c0d77272fea8a233e5eea3"
+          }
+        }
+      },
+      "wine": {
+        "url": "https://archive.ics.uci.edu/static/public/109/wine.zip",
+        "page": "https://archive.ics.uci.edu/dataset/109/wine",
+        "doi": "https://doi.org/10.24432/C5PC7J",
+        "citation": "Aeberhard, S. & Forina, M. (1992). Wine [Dataset]. UCI Machine Learning Repository.",
+        "rows": 178,
+        "features": 13,
+        "license": "CC-BY-4.0",
+        "license_url": "https://creativecommons.org/licenses/by/4.0/",
+        "archive_sha256": "2bae62c4481220623579d4c4fb36b55652b6b75e06e49fa1981b8198362dfdab",
+        "files": {
+          "wine.data": {
+            "bytes": 10782,
+            "sha256": "6be6b1203f3d51df0b553a70e57b8a723cd405683958204f96d23d7cd6aea659"
+          },
+          "wine.names": {
+            "bytes": 3036,
+            "sha256": "f1b84f2ef845e0bdebf13e14fa7a213e56de4f1baa40c5974dbd1ee51c5ae710"
+          }
+        }
+      }
+    }
+  },
+  "environment": {
+    "python": "3.11.16",
+    "numpy": "2.4.6",
+    "sklearn": "1.7.2"
+  },
+  "implementation_source_sha256": {
+    "commander/services/a2a_algorithms_common/clustering.py": "21af4b24f8b3fbbd91fec604a8b76e5af24cfa1b724eda59fa9482b1cd7e7ad6",
+    "commander/services/a2a_algorithms_common/federated_fedavg.py": "6cd202c203625e2a13ce73fe804a9990850464c4277649bb0b1b99b27c79f091",
+    "commander/services/a2a_algorithms_common/http_service.py": "e433a5d529cda0e3a9abb42b3a662971bd985563a308674b6dde67ade24a57ff"
+  },
+  "cases": [
+    {
+      "name": "data/iris/integrity",
+      "status": "PASS",
+      "metrics": {
+        "rows": 150,
+        "original_source_hashes_verified": true
+      },
+      "elapsed_ms": 1.235
+    },
+    {
+      "name": "data/wine/integrity",
+      "status": "PASS",
+      "metrics": {
+        "rows": 178,
+        "original_source_hashes_verified": true
+      },
+      "elapsed_ms": 0.757
+    },
+    {
+      "name": "isolated_library_setup",
+      "status": "PASS",
+      "metrics": {
+        "registry_isolated": true,
+        "algorithms": [
+          "clustering_engine",
+          "federated_fedavg_aggregator"
+        ]
+      },
+      "elapsed_ms": 36.378
+    },
+    {
+      "name": "http/iris/kmeans",
+      "status": "PASS",
+      "metrics": {
+        "dataset_rows": 150,
+        "external_label_ari": 0.645147003482001,
+        "clusters": 3,
+        "inertia_ratio_to_sklearn": 1.0081212632087522
+      },
+      "elapsed_ms": 55.021
+    },
+    {
+      "name": "http/iris/dbscan",
+      "status": "PASS",
+      "metrics": {
+        "dataset_rows": 150,
+        "external_label_ari": 0.4706267335681117,
+        "clusters": 2,
+        "reference_ari": 1.0,
+        "noise_fraction": 0.17333333333333334,
+        "label_recovery_acceptance": "NOT_CERTIFIED: reference agreement does not establish class-label recovery"
+      },
+      "elapsed_ms": 41.64
+    },
+    {
+      "name": "http/iris/fedavg",
+      "status": "PASS",
+      "metrics": {
+        "clients": 3,
+        "train_rows": 120,
+        "heldout_rows": 30,
+        "maximum_coefficient_error": 3.0742075551870585e-13,
+        "heldout_regression_mae_descriptive_only": 0.2432388338666847
+      },
+      "elapsed_ms": 4.621
+    },
+    {
+      "name": "http/wine/kmeans",
+      "status": "PASS",
+      "metrics": {
+        "dataset_rows": 178,
+        "external_label_ari": 0.8635987920128989,
+        "clusters": 3,
+        "inertia_ratio_to_sklearn": 1.0014105908708733
+      },
+      "elapsed_ms": 44.584
+    },
+    {
+      "name": "http/wine/dbscan",
+      "status": "PASS",
+      "metrics": {
+        "dataset_rows": 178,
+        "external_label_ari": 0.005010674016359392,
+        "clusters": 1,
+        "reference_ari": 1.0,
+        "noise_fraction": 0.1348314606741573,
+        "label_recovery_acceptance": "NOT_CERTIFIED: reference agreement does not establish class-label recovery"
+      },
+      "elapsed_ms": 104.006
+    },
+    {
+      "name": "http/wine/fedavg",
+      "status": "PASS",
+      "metrics": {
+        "clients": 3,
+        "train_rows": 142,
+        "heldout_rows": 36,
+        "maximum_coefficient_error": 4.547473508864641e-13,
+        "heldout_regression_mae_descriptive_only": 214.99212428028983
+      },
+      "elapsed_ms": 4.235
+    },
+    {
+      "name": "http/reject/empty_points",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 1.912
+    },
+    {
+      "name": "http/reject/ragged_points",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 3.124
+    },
+    {
+      "name": "http/reject/boolean_point",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 2.073
+    },
+    {
+      "name": "http/reject/excessive_k",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 1.828
+    },
+    {
+      "name": "http/reject/duplicate_k",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 1.839
+    },
+    {
+      "name": "http/reject/bad_eps",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 2.165
+    },
+    {
+      "name": "http/reject/missing_clients",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 3.257
+    },
+    {
+      "name": "http/reject/missing_round_id",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 27.015
+    },
+    {
+      "name": "http/reject/duplicate_client",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 2.528
+    },
+    {
+      "name": "http/reject/zero_count",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 1.419
+    },
+    {
+      "name": "http/reject/shape_mismatch",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 2.625
+    },
+    {
+      "name": "http/reject/tensor_key_mismatch",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 2.226
+    },
+    {
+      "name": "http/reject/ragged_tensor",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 1.834
+    },
+    {
+      "name": "http/reject/boolean_tensor",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 1.698
+    },
+    {
+      "name": "http/boundary/nested_tensor_average",
+      "status": "PASS",
+      "metrics": {
+        "sample_weighted_average_matches_oracle": true
+      },
+      "elapsed_ms": 2.099
+    },
+    {
+      "name": "http/boundary/single_client_identity",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 1.68
+    },
+    {
+      "name": "algolib/iris/kmeans",
+      "status": "PASS",
+      "metrics": {
+        "dataset_rows": 150,
+        "external_label_ari": 0.645147003482001,
+        "clusters": 3,
+        "inertia_ratio_to_sklearn": 1.0081212632087522
+      },
+      "elapsed_ms": 53.55
+    },
+    {
+      "name": "algolib/iris/dbscan",
+      "status": "PASS",
+      "metrics": {
+        "dataset_rows": 150,
+        "external_label_ari": 0.4706267335681117,
+        "clusters": 2,
+        "reference_ari": 1.0,
+        "noise_fraction": 0.17333333333333334,
+        "label_recovery_acceptance": "NOT_CERTIFIED: reference agreement does not establish class-label recovery"
+      },
+      "elapsed_ms": 74.095
+    },
+    {
+      "name": "algolib/iris/fedavg",
+      "status": "PASS",
+      "metrics": {
+        "clients": 3,
+        "train_rows": 120,
+        "heldout_rows": 30,
+        "maximum_coefficient_error": 3.0742075551870585e-13,
+        "heldout_regression_mae_descriptive_only": 0.2432388338666847
+      },
+      "elapsed_ms": 11.59
+    },
+    {
+      "name": "algolib/wine/kmeans",
+      "status": "PASS",
+      "metrics": {
+        "dataset_rows": 178,
+        "external_label_ari": 0.8635987920128989,
+        "clusters": 3,
+        "inertia_ratio_to_sklearn": 1.0014105908708733
+      },
+      "elapsed_ms": 109.093
+    },
+    {
+      "name": "algolib/wine/dbscan",
+      "status": "PASS",
+      "metrics": {
+        "dataset_rows": 178,
+        "external_label_ari": 0.005010674016359392,
+        "clusters": 1,
+        "reference_ari": 1.0,
+        "noise_fraction": 0.1348314606741573,
+        "label_recovery_acceptance": "NOT_CERTIFIED: reference agreement does not establish class-label recovery"
+      },
+      "elapsed_ms": 160.656
+    },
+    {
+      "name": "algolib/wine/fedavg",
+      "status": "PASS",
+      "metrics": {
+        "clients": 3,
+        "train_rows": 142,
+        "heldout_rows": 36,
+        "maximum_coefficient_error": 4.547473508864641e-13,
+        "heldout_regression_mae_descriptive_only": 214.99212428028983
+      },
+      "elapsed_ms": 11.447
+    },
+    {
+      "name": "algolib/reject/empty_points",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 4.489
+    },
+    {
+      "name": "algolib/reject/ragged_points",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 9.964
+    },
+    {
+      "name": "algolib/reject/boolean_point",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 5.152
+    },
+    {
+      "name": "algolib/reject/excessive_k",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 8.684
+    },
+    {
+      "name": "algolib/reject/duplicate_k",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 8.95
+    },
+    {
+      "name": "algolib/reject/bad_eps",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 8.395
+    },
+    {
+      "name": "algolib/reject/missing_clients",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 4.707
+    },
+    {
+      "name": "algolib/reject/missing_round_id",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 4.286
+    },
+    {
+      "name": "algolib/reject/duplicate_client",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 8.353
+    },
+    {
+      "name": "algolib/reject/zero_count",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 4.647
+    },
+    {
+      "name": "algolib/reject/shape_mismatch",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 9.926
+    },
+    {
+      "name": "algolib/reject/tensor_key_mismatch",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 9.766
+    },
+    {
+      "name": "algolib/reject/ragged_tensor",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 10.198
+    },
+    {
+      "name": "algolib/reject/boolean_tensor",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 9.601
+    },
+    {
+      "name": "algolib/boundary/nested_tensor_average",
+      "status": "PASS",
+      "metrics": {
+        "sample_weighted_average_matches_oracle": true
+      },
+      "elapsed_ms": 10.142
+    },
+    {
+      "name": "algolib/boundary/single_client_identity",
+      "status": "PASS",
+      "metrics": {},
+      "elapsed_ms": 9.385
+    },
+    {
+      "name": "path_parity/iris/kmeans",
+      "status": "PASS",
+      "metrics": {
+        "output_sha256": "5f3a7b2f5aa86b219f587f3324ac926785b954f6ec57d60512c033b19c4ebeb2"
+      },
+      "elapsed_ms": 0.003
+    },
+    {
+      "name": "path_parity/iris/dbscan",
+      "status": "PASS",
+      "metrics": {
+        "output_sha256": "d31eaa5ed261ac3e5be6b0cb20252f885b5b3c9e44821543d2bdfb08d0a1a858"
+      },
+      "elapsed_ms": 0.001
+    },
+    {
+      "name": "path_parity/iris/fedavg",
+      "status": "PASS",
+      "metrics": {
+        "output_sha256": "7bc522b10cb98723cd52bb8ea0b04f0e781bacab8c2b551494816d12c516e718"
+      },
+      "elapsed_ms": 0.001
+    },
+    {
+      "name": "path_parity/wine/kmeans",
+      "status": "PASS",
+      "metrics": {
+        "output_sha256": "2368562cb688cde96dfacf40d337f4f5f308af43dea0af4da7f55d245579f586"
+      },
+      "elapsed_ms": 0.001
+    },
+    {
+      "name": "path_parity/wine/dbscan",
+      "status": "PASS",
+      "metrics": {
+        "output_sha256": "204ea4bfcd5c7f3b0c8f18b9aef05766b0eb96049091466ac15d223276f48f28"
+      },
+      "elapsed_ms": 0.001
+    },
+    {
+      "name": "path_parity/wine/fedavg",
+      "status": "PASS",
+      "metrics": {
+        "output_sha256": "3396ae630740acea5acab7c9bd398c95dd3bc54451acc4c555d8894873855e73"
+      },
+      "elapsed_ms": 0.001
+    }
+  ],
+  "calls": [
+    {
+      "route": "http",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0000",
+      "request_sha256": "18e7455dfd1243e5c66ae7e993304f7b4965b30d3d3a5516b18325881d1ee8f1",
+      "response_sha256": "75bdb01a18e26f20019e1b74b5174a2e64abe6de37981930b80cb5ecf6c8c075",
+      "ok": true,
+      "elapsed_ms": 10.076,
+      "inference_mode": "deterministic",
+      "error": null
+    },
+    {
+      "route": "http",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0001",
+      "request_sha256": "53751563a78947a654d7a0e39f8cdb87e5703bf403d3770221713fab78eab85f",
+      "response_sha256": "03b4c7710cfda80df3ddc6bbbd7f78c6fd482161eee3d001450e4c0b2d8bc5df",
+      "ok": true,
+      "elapsed_ms": 7.642,
+      "inference_mode": "deterministic",
+      "error": null
+    },
+    {
+      "route": "http",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0002",
+      "request_sha256": "ef76f96aaf177a280b139652dd6836a5ca4708b71375551d13aa3f27866a4c6f",
+      "response_sha256": "b575427cd8b70cb17e71b73c7cd9028b452260281c9ebf52ea0a107ab6e0eaed",
+      "ok": true,
+      "elapsed_ms": 16.256,
+      "inference_mode": "deterministic",
+      "error": null
+    },
+    {
+      "route": "http",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0003",
+      "request_sha256": "ac6393ca6505b6444a646af801e6f8673ce8369f590d9beebe94468f98319506",
+      "response_sha256": "f659def80ae1a9694a3dc9b0c886f79b77e90c5735679b0986b73352eb6fd3b7",
+      "ok": true,
+      "elapsed_ms": 18.979,
+      "inference_mode": "deterministic",
+      "error": null
+    },
+    {
+      "route": "http",
+      "algorithm": "federated_fedavg_aggregator",
+      "request_id": "public-accept-0004",
+      "request_sha256": "f65e740be8a351c7b91a0708bd4e977893ee7f7612c1e85ef04ad0fc20966662",
+      "response_sha256": "8a29eb46976206c626e053a955cfa3f4c1ff9ee8f54ee4ad73043bcdeb0377cc",
+      "ok": true,
+      "elapsed_ms": 2.702,
+      "inference_mode": "deterministic",
+      "error": null
+    },
+    {
+      "route": "http",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0005",
+      "request_sha256": "a117231cb61b555a186a8f22bc4b92df0dc6e6b5caa799c93e1ade6870ce2678",
+      "response_sha256": "9b084a26513de0ebad71d186ba96ae7260229ce6bc4111c3bb1e3587a565dbce",
+      "ok": true,
+      "elapsed_ms": 17.737,
+      "inference_mode": "deterministic",
+      "error": null
+    },
+    {
+      "route": "http",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0006",
+      "request_sha256": "84b28ae9b7f7867fb04649f15aa1cd64082236294fd0143b6d716e54f48314e0",
+      "response_sha256": "f8fe585a1b07652111b45c8c1b117b08ca45980d13816a7b38ebf64946d6a61d",
+      "ok": true,
+      "elapsed_ms": 18.594,
+      "inference_mode": "deterministic",
+      "error": null
+    },
+    {
+      "route": "http",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0007",
+      "request_sha256": "9048f921bb609ce779afdafdba74aee7d6fefc9e5bc9948f06cb536ca4a6d470",
+      "response_sha256": "8a39a38a09baf820bfc9d5ab800d84a4b33101f3145b1f8b346ec69eeba78409",
+      "ok": true,
+      "elapsed_ms": 46.917,
+      "inference_mode": "deterministic",
+      "error": null
+    },
+    {
+      "route": "http",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0008",
+      "request_sha256": "22c39318b618aab6041f1282ef943708c008d75da068277d5c3a5530af8dbea3",
+      "response_sha256": "ea695b7c37e59f475da83d3a95c7ec2a13e2001b9e9d5f2017bffe3998f5ef2a",
+      "ok": true,
+      "elapsed_ms": 51.945,
+      "inference_mode": "deterministic",
+      "error": null
+    },
+    {
+      "route": "http",
+      "algorithm": "federated_fedavg_aggregator",
+      "request_id": "public-accept-0009",
+      "request_sha256": "a7e3d05fad88431e52aa9174377ca250aa72d0b31b6d86213d1c7e7ccfbddc36",
+      "response_sha256": "e8d4303d3b7b0e42863f272a4ce1f5b3c2055980c3b72c0d27420f8b185c385d",
+      "ok": true,
+      "elapsed_ms": 3.29,
+      "inference_mode": "deterministic",
+      "error": null
+    },
+    {
+      "route": "http",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0010",
+      "request_sha256": "7d0032e34cb8e03c5848fe3f5bd9f03fa41d18b4627c19c16870413911b43d40",
+      "response_sha256": "8e7e5088e3676d7611453e3891538c331579ab43b9de2bb43e45b36f20717461",
+      "ok": false,
+      "elapsed_ms": 1.828,
+      "inference_mode": null,
+      "error": {
+        "code": "HTTP_422",
+        "message": "input schema invalid at inputs.points: [] is too short"
+      }
+    },
+    {
+      "route": "http",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0011",
+      "request_sha256": "b5c543403b3fdf3d33a551e0dbe6c29e6592f8f7b3753f23f3564bb37fb932de",
+      "response_sha256": "1c388c948b41a5bbcb60f637abc3dfd244922e0995c2adb923791347befb99c1",
+      "ok": false,
+      "elapsed_ms": 3.047,
+      "inference_mode": "deterministic",
+      "error": {
+        "code": "ValueError",
+        "message": "all points must have the same dimension"
+      }
+    },
+    {
+      "route": "http",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0012",
+      "request_sha256": "780856aee4da68653cb5ae613ff9008f91ca30570f969f1da09639f919131d35",
+      "response_sha256": "8cdf55daf926a697001a915c525474f572e6dc86e32dcdb5ffacb800573f92d2",
+      "ok": false,
+      "elapsed_ms": 2.004,
+      "inference_mode": null,
+      "error": {
+        "code": "HTTP_422",
+        "message": "input schema invalid at inputs.points.0.0: True is not of type 'number'"
+      }
+    },
+    {
+      "route": "http",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0013",
+      "request_sha256": "631f3e4520197154037e7e4d204763efb0c97951128913527017034d34aa293f",
+      "response_sha256": "a7dd31cc05b5f0e2f477cc976663b0c6735cdfaf7972dc7c80ef4880b0d5401b",
+      "ok": false,
+      "elapsed_ms": 1.762,
+      "inference_mode": "deterministic",
+      "error": {
+        "code": "ValueError",
+        "message": "k must be between 1 and the number of points"
+      }
+    },
+    {
+      "route": "http",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0014",
+      "request_sha256": "4b1dbdc907c4f17d7e35396facccb7f5cd04a5cd10f36943be78aa11db156261",
+      "response_sha256": "a4be50301d60320ca9d0e6b9fae4e40e2075cd8869552cfd36c89005ec1d202f",
+      "ok": false,
+      "elapsed_ms": 1.745,
+      "inference_mode": "deterministic",
+      "error": {
+        "code": "ValueError",
+        "message": "k cannot exceed the number of distinct points"
+      }
+    },
+    {
+      "route": "http",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0015",
+      "request_sha256": "4509497b0adddabc0df13ff6516cf548d31986e6f33df4ce193c41cc8a616b03",
+      "response_sha256": "95dacb75319a4a0de9f8b92cec059f02487bc81319d46ffea468bf8e4f944c1f",
+      "ok": false,
+      "elapsed_ms": 2.091,
+      "inference_mode": "deterministic",
+      "error": {
+        "code": "ValueError",
+        "message": "eps must be a finite positive number"
+      }
+    },
+    {
+      "route": "http",
+      "algorithm": "federated_fedavg_aggregator",
+      "request_id": "public-accept-0016",
+      "request_sha256": "4c3b215d85951dc9658fcaf46df256aeb1e15fe8ee27aec615665dbbe31b7245",
+      "response_sha256": "12ddde2480baf4bcd20b172e882ffaebf1b4eac71183fdf2f94962bc2cac1c61",
+      "ok": false,
+      "elapsed_ms": 2.91,
+      "inference_mode": null,
+      "error": {
+        "code": "HTTP_422",
+        "message": "input schema invalid at inputs.client_updates: [] should be non-empty"
+      }
+    },
+    {
+      "route": "http",
+      "algorithm": "federated_fedavg_aggregator",
+      "request_id": "public-accept-0017",
+      "request_sha256": "9e42a8d478fc7d310d6429a994291f7b1132f10bb6705d69b369e49fce64f9ef",
+      "response_sha256": "d03521ca98c4f011ee67ab592fc4edc92a2929a0d9679f0512be3d59c0d7d27a",
+      "ok": false,
+      "elapsed_ms": 26.907,
+      "inference_mode": null,
+      "error": {
+        "code": "HTTP_422",
+        "message": "input schema invalid at inputs.: 'round_id' is a required property"
+      }
+    },
+    {
+      "route": "http",
+      "algorithm": "federated_fedavg_aggregator",
+      "request_id": "public-accept-0018",
+      "request_sha256": "ddafec1ad6853010e3cc5fd64466fab1d4d744220eff5d5e122a81e90a9f9c63",
+      "response_sha256": "ef50482b72a6f7d4a8af46f8b1550b07e00833784baddfb80880efe4f78bcd3c",
+      "ok": false,
+      "elapsed_ms": 2.46,
+      "inference_mode": "deterministic",
+      "error": {
+        "code": "ValueError",
+        "message": "duplicate client_id: a"
+      }
+    },
+    {
+      "route": "http",
+      "algorithm": "federated_fedavg_aggregator",
+      "request_id": "public-accept-0019",
+      "request_sha256": "75115a983b17288b3a86912d0a87758515fb1db08808207688ee75daeb40515c",
+      "response_sha256": "8d54cc82d69fa6ddfba9ad5ec7982121d35250044b15474303349f90db76ca5d",
+      "ok": false,
+      "elapsed_ms": 1.365,
+      "inference_mode": null,
+      "error": {
+        "code": "HTTP_422",
+        "message": "input schema invalid at inputs.client_updates.1.sample_count: 0 is less than the minimum of 1"
+      }
+    },
+    {
+      "route": "http",
+      "algorithm": "federated_fedavg_aggregator",
+      "request_id": "public-accept-0020",
+      "request_sha256": "1254dbf42df40650e58dc619fba73c6d940dd584da990ea2222bea10d4b3b77a",
+      "response_sha256": "57748f5bfe15d6199034f422772776088333dc859dba548def8c39acaaf20d7f",
+      "ok": false,
+      "elapsed_ms": 2.553,
+      "inference_mode": "deterministic",
+      "error": {
+        "code": "ValueError",
+        "message": "all clients must use shape (2, 2) for tensor"
+      }
+    },
+    {
+      "route": "http",
+      "algorithm": "federated_fedavg_aggregator",
+      "request_id": "public-accept-0021",
+      "request_sha256": "c60a8a0576d94df0eb5763e70b5542b094516686a980bd27984f052b8ee10d61",
+      "response_sha256": "ea8e4356bbecc6fbf4c6937f1c4dc3ba694bf785fab109e28e60a6b147dfe83b",
+      "ok": false,
+      "elapsed_ms": 2.162,
+      "inference_mode": "deterministic",
+      "error": {
+        "code": "ValueError",
+        "message": "all clients must submit the same weight tensor names"
+      }
+    },
+    {
+      "route": "http",
+      "algorithm": "federated_fedavg_aggregator",
+      "request_id": "public-accept-0022",
+      "request_sha256": "0f7e664c8ea585311d39f13dd61bf0205679c15bed119cfa855e7ef927160a30",
+      "response_sha256": "5c77cc1e53e272c9244028a6e5bf12c2bb9da161e1eb6fc5f6ed946eed41aac7",
+      "ok": false,
+      "elapsed_ms": 1.778,
+      "inference_mode": "deterministic",
+      "error": {
+        "code": "ValueError",
+        "message": "b.weights.tensor must not be a ragged array"
+      }
+    },
+    {
+      "route": "http",
+      "algorithm": "federated_fedavg_aggregator",
+      "request_id": "public-accept-0023",
+      "request_sha256": "75f2512f3100a0807b4d0d6efe557421044964c20061e3c9479a32ee2ed6c369",
+      "response_sha256": "f3ab2728875c2c542ed85a6634ffcb38eae1583cbc3e4d2abed750a719397308",
+      "ok": false,
+      "elapsed_ms": 1.644,
+      "inference_mode": "deterministic",
+      "error": {
+        "code": "ValueError",
+        "message": "b.weights.tensor[0][0] must contain finite numbers"
+      }
+    },
+    {
+      "route": "http",
+      "algorithm": "federated_fedavg_aggregator",
+      "request_id": "public-accept-0024",
+      "request_sha256": "6749e453fdc1faf2876d0e671da0bfde1d634d07d9957ac4f0453c28a1e18a0a",
+      "response_sha256": "24711cce658e8407c8080f3e58d5f22194eaded20d835dc7ad57551567895cc2",
+      "ok": true,
+      "elapsed_ms": 1.865,
+      "inference_mode": "deterministic",
+      "error": null
+    },
+    {
+      "route": "http",
+      "algorithm": "federated_fedavg_aggregator",
+      "request_id": "public-accept-0025",
+      "request_sha256": "a2b3ee09900f78521775fe6e8b2ade215db311a91d4141e001b945e967cb5a14",
+      "response_sha256": "e6e161f21481a20b6e32ea902a1dda78cc09b174a9d446ae7be5bee4760064f8",
+      "ok": true,
+      "elapsed_ms": 1.618,
+      "inference_mode": "deterministic",
+      "error": null
+    },
+    {
+      "route": "algolib",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0026",
+      "request_sha256": "d194ef3d1f25f5dba4afcb89c518c435f5499f4cbd759590d367406a5798c49a",
+      "response_sha256": "f23ed8c40a2cc89dca47c6ff49602d7af582a565b0d25fffcc932f122fc0fd49",
+      "ok": true,
+      "elapsed_ms": 22.952,
+      "inference_mode": "deterministic",
+      "error": null
+    },
+    {
+      "route": "algolib",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0027",
+      "request_sha256": "505c39f5d61037eeef8f3a590734046b8780c10dd5d66029f285025718f985eb",
+      "response_sha256": "3efa3d5ea23c7a251d188e7fbe667cf2a799c5b4865b4ae1efc58655dba32f19",
+      "ok": true,
+      "elapsed_ms": 24.217,
+      "inference_mode": "deterministic",
+      "error": null
+    },
+    {
+      "route": "algolib",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0028",
+      "request_sha256": "838682da73cffa8ae01da1651e28e8a9004b3b1da38aed651ee33b767204c53d",
+      "response_sha256": "0e1999782f439ffb975ce997dab179c84fcf59d95d34a10015238d8737e4c7e1",
+      "ok": true,
+      "elapsed_ms": 34.001,
+      "inference_mode": "deterministic",
+      "error": null
+    },
+    {
+      "route": "algolib",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0029",
+      "request_sha256": "ce70adafdd4b44619562d956bb3cc0298cf4a77c0a11b2691a75f160ba6a592b",
+      "response_sha256": "83ce17db84f96bd72c11c49a8a2e86bf96477ef8c46cdcaa31a5b92f9fdd95e4",
+      "ok": true,
+      "elapsed_ms": 35.23,
+      "inference_mode": "deterministic",
+      "error": null
+    },
+    {
+      "route": "algolib",
+      "algorithm": "federated_fedavg_aggregator",
+      "request_id": "public-accept-0030",
+      "request_sha256": "166a675343c53cad7f841f1a95b274d0843cf36b7b69b47f108111cfec0235a8",
+      "response_sha256": "993c5675a31fe43b7d89be41bd194a28c7304b484ea7c238f0f640d097d2268d",
+      "ok": true,
+      "elapsed_ms": 10.659,
+      "inference_mode": "deterministic",
+      "error": null
+    },
+    {
+      "route": "algolib",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0031",
+      "request_sha256": "e30f02403197d9f9860903ea8e61f3942196d41c6e16745699eba5fdabf88e48",
+      "response_sha256": "7b6967e4bee602f82638cfb16cdd3894cf4c0888cb1f3ea3698d9f40b83a22db",
+      "ok": true,
+      "elapsed_ms": 50.394,
+      "inference_mode": "deterministic",
+      "error": null
+    },
+    {
+      "route": "algolib",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0032",
+      "request_sha256": "6a6d64f7603ee966f32345b926cfb3ce01468cda62cea1d2dc4f8d27a402fd38",
+      "response_sha256": "4a8ab5b702d9afe88a80cd8fde8850d628c98eb73280affa3c734aa7b3c9625e",
+      "ok": true,
+      "elapsed_ms": 50.614,
+      "inference_mode": "deterministic",
+      "error": null
+    },
+    {
+      "route": "algolib",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0033",
+      "request_sha256": "7da99d8ec6ca4160aa8f5b11534b79126d41931b4eda28a3e0d308c4cb5610cb",
+      "response_sha256": "fb5a2fb8ee27ec32f8269e80e80bc31dc86e6ecef2d4306d071979ea581078a0",
+      "ok": true,
+      "elapsed_ms": 78.674,
+      "inference_mode": "deterministic",
+      "error": null
+    },
+    {
+      "route": "algolib",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0034",
+      "request_sha256": "aa7750b287c3e4d0f11fb246342df72fb1e667787f040d16ae5cc0ca73a0e7b7",
+      "response_sha256": "1a77129254c0e780a70994b85adfe0aaba8c17451bd99f42872eceb743e235a8",
+      "ok": true,
+      "elapsed_ms": 76.665,
+      "inference_mode": "deterministic",
+      "error": null
+    },
+    {
+      "route": "algolib",
+      "algorithm": "federated_fedavg_aggregator",
+      "request_id": "public-accept-0035",
+      "request_sha256": "9a631e3a02775da36ed5b0d52b2400fbb900890af87d62c4e0ad0e42da141cf7",
+      "response_sha256": "fd2ca316b2472701a59ee3aee48b4e4d158e4a212f710ce599484e7b21413193",
+      "ok": true,
+      "elapsed_ms": 10.457,
+      "inference_mode": "deterministic",
+      "error": null
+    },
+    {
+      "route": "algolib",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0036",
+      "request_sha256": "cb07adbeb0514fc5ef5f9783bbee8b729f9f9af717b7fd021ae3cc82b53fcd11",
+      "response_sha256": "eb9f0e2b98a304e586e1d4aee8443c4dd8bbbcbd1ef53ce5c1534238e4c3cc07",
+      "ok": false,
+      "elapsed_ms": 4.392,
+      "inference_mode": null,
+      "error": {
+        "code": "INPUT_SCHEMA_INVALID",
+        "message": "$.inputs.points: Array length is smaller than minItems."
+      }
+    },
+    {
+      "route": "algolib",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0037",
+      "request_sha256": "af20db256063aeddf7722a7247e5095be7ed25a3e4edd0e4f322841627da1f7c",
+      "response_sha256": "7e58f6be28f7fea28a34ba233c49b34fc8655f9ecff30693a937ae08c86afbdb",
+      "ok": false,
+      "elapsed_ms": 9.876,
+      "inference_mode": "deterministic",
+      "error": {
+        "code": "ValueError",
+        "message": "all points must have the same dimension"
+      }
+    },
+    {
+      "route": "algolib",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0038",
+      "request_sha256": "f514bf9d5498a2acaf609a495c2d55723a5d80ee98c8cee55fbf9ee9ec9ebee4",
+      "response_sha256": "18d6c4f5c7cc6c8b1e91f7c0ca50be96a30d888ab0a2fcb8828e0f6ec16b05e0",
+      "ok": false,
+      "elapsed_ms": 5.06,
+      "inference_mode": null,
+      "error": {
+        "code": "INPUT_SCHEMA_INVALID",
+        "message": "$.inputs.points[0][0]: Value does not match schema type number."
+      }
+    },
+    {
+      "route": "algolib",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0039",
+      "request_sha256": "d86e72e60d06839cfcff8563bf54fa8015bcc6298aa625dcc5a5f551a9b1ef7c",
+      "response_sha256": "232fe8bdd57da790ed67b8033102654a572f0db688e8af69b67f5cf0e2470e21",
+      "ok": false,
+      "elapsed_ms": 8.576,
+      "inference_mode": "deterministic",
+      "error": {
+        "code": "ValueError",
+        "message": "k must be between 1 and the number of points"
+      }
+    },
+    {
+      "route": "algolib",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0040",
+      "request_sha256": "3e1d87e524c18dec7f670ebd870465251df293c5576a5686b21e0dfe79578451",
+      "response_sha256": "8c3f12b026802742519e4cf8e6940023a72ec122693a0f62164f609fd1d730bd",
+      "ok": false,
+      "elapsed_ms": 8.842,
+      "inference_mode": "deterministic",
+      "error": {
+        "code": "ValueError",
+        "message": "k cannot exceed the number of distinct points"
+      }
+    },
+    {
+      "route": "algolib",
+      "algorithm": "clustering_engine",
+      "request_id": "public-accept-0041",
+      "request_sha256": "d5dc4d54f4b5873e32c233d746ec6d5cb69049e1f9b64e4daca76b0954929040",
+      "response_sha256": "3b5170e669e24d9d682638849d2348f2549db2a073f66615455b5769cc74afc0",
+      "ok": false,
+      "elapsed_ms": 8.287,
+      "inference_mode": "deterministic",
+      "error": {
+        "code": "ValueError",
+        "message": "eps must be a finite positive number"
+      }
+    },
+    {
+      "route": "algolib",
+      "algorithm": "federated_fedavg_aggregator",
+      "request_id": "public-accept-0042",
+      "request_sha256": "daadea6cfeea5a8f7ea3471ed17890f0d765add5e9a9ee1a6b5ddc2acf21973b",
+      "response_sha256": "a58f02701b003d7006ed35fee466ecc17725b389bfcbe4f3808e5d2e21df07d1",
+      "ok": false,
+      "elapsed_ms": 4.618,
+      "inference_mode": null,
+      "error": {
+        "code": "INPUT_SCHEMA_INVALID",
+        "message": "$.inputs.client_updates: Array length is smaller than minItems."
+      }
+    },
+    {
+      "route": "algolib",
+      "algorithm": "federated_fedavg_aggregator",
+      "request_id": "public-accept-0043",
+      "request_sha256": "fbb3771b2687c121d51db318ae87c3492fe14e3bdcb11dcf58f0af4e5e909aa9",
+      "response_sha256": "aeaa3f1e7b55130f488b87b3de05cc05d2ffd6b89b94204c9293328196f880cb",
+      "ok": false,
+      "elapsed_ms": 4.188,
+      "inference_mode": null,
+      "error": {
+        "code": "INPUT_SCHEMA_INVALID",
+        "message": "$.inputs: Missing required property: round_id."
+      }
+    },
+    {
+      "route": "algolib",
+      "algorithm": "federated_fedavg_aggregator",
+      "request_id": "public-accept-0044",
+      "request_sha256": "3013575142084b5646a94995d308878ccf1c6b8828e91ad1194d47a139be935d",
+      "response_sha256": "b5e891f42409e64fa3a19717ecb3110980f9cc675b4963f213e018fc5fd3534d",
+      "ok": false,
+      "elapsed_ms": 8.248,
+      "inference_mode": "deterministic",
+      "error": {
+        "code": "ValueError",
+        "message": "duplicate client_id: a"
+      }
+    },
+    {
+      "route": "algolib",
+      "algorithm": "federated_fedavg_aggregator",
+      "request_id": "public-accept-0045",
+      "request_sha256": "65417ae9230aa2e5d515bededa57aa317febf59bfe7affabdcca81feb687217a",
+      "response_sha256": "7a2ad8f987303b70b4db89810b1e18183bf16c72549e7bc2396d0fd3567e5fed",
+      "ok": false,
+      "elapsed_ms": 4.539,
+      "inference_mode": null,
+      "error": {
+        "code": "INPUT_SCHEMA_INVALID",
+        "message": "$.inputs.client_updates[1].sample_count: Numeric value is smaller than minimum."
+      }
+    },
+    {
+      "route": "algolib",
+      "algorithm": "federated_fedavg_aggregator",
+      "request_id": "public-accept-0046",
+      "request_sha256": "c5b99269d60c9757e5eeaf299c16f807dc44180f64658831530af951524f642e",
+      "response_sha256": "79be3e2daf98ef9a6c8f807b618d3a276770b75518f5095774c136cda516d332",
+      "ok": false,
+      "elapsed_ms": 9.849,
+      "inference_mode": "deterministic",
+      "error": {
+        "code": "ValueError",
+        "message": "all clients must use shape (2, 2) for tensor"
+      }
+    },
+    {
+      "route": "algolib",
+      "algorithm": "federated_fedavg_aggregator",
+      "request_id": "public-accept-0047",
+      "request_sha256": "1c4d34a91570e60a1e5814f0f716d63163e8d7954c05d9875af8df5219c97b56",
+      "response_sha256": "20d7c251a804f0196390dd1d691ddf715b5988a13ff17555b322f5566b345a1e",
+      "ok": false,
+      "elapsed_ms": 9.667,
+      "inference_mode": "deterministic",
+      "error": {
+        "code": "ValueError",
+        "message": "all clients must submit the same weight tensor names"
+      }
+    },
+    {
+      "route": "algolib",
+      "algorithm": "federated_fedavg_aggregator",
+      "request_id": "public-accept-0048",
+      "request_sha256": "f706f80befd84a8536d4e93e357374f6fb92b04671e03effe91234acc757cc8c",
+      "response_sha256": "87e91030f82a6b69ab7ac8276f2cdc2c34099c34665b753283c46eeaf80b8673",
+      "ok": false,
+      "elapsed_ms": 10.098,
+      "inference_mode": "deterministic",
+      "error": {
+        "code": "ValueError",
+        "message": "b.weights.tensor must not be a ragged array"
+      }
+    },
+    {
+      "route": "algolib",
+      "algorithm": "federated_fedavg_aggregator",
+      "request_id": "public-accept-0049",
+      "request_sha256": "7e16b7a3c3c7f6401b17d77cf98599c1eb50745f7e5894ce64a4b91184dd205f",
+      "response_sha256": "5f247252e6c0f4a366f9a5444d2a95560f13b322ee6b7e59a16e991bf240177f",
+      "ok": false,
+      "elapsed_ms": 9.505,
+      "inference_mode": "deterministic",
+      "error": {
+        "code": "ValueError",
+        "message": "b.weights.tensor[0][0] must contain finite numbers"
+      }
+    },
+    {
+      "route": "algolib",
+      "algorithm": "federated_fedavg_aggregator",
+      "request_id": "public-accept-0050",
+      "request_sha256": "53f93dff7cf095c162c0d84710b0650ba23081574ddd46b4a76d2537ab6e0496",
+      "response_sha256": "ebc442f7dab26b0ee1bd0fe5a33db64debd80328ef4ff56363900dc3ed565c43",
+      "ok": true,
+      "elapsed_ms": 9.763,
+      "inference_mode": "deterministic",
+      "error": null
+    },
+    {
+      "route": "algolib",
+      "algorithm": "federated_fedavg_aggregator",
+      "request_id": "public-accept-0051",
+      "request_sha256": "6e5e9f7f5cd99b7303411e22a026a555ed346e7d9e36b1d9e62912d8adab4e15",
+      "response_sha256": "af95207a8f09a0f318f002f5ba45ba02fdd1f9649b59e5614b0bebdd57bea9b6",
+      "ok": true,
+      "elapsed_ms": 9.288,
+      "inference_mode": "deterministic",
+      "error": null
+    }
+  ]
+}

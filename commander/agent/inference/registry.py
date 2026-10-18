@@ -91,8 +91,10 @@ def _load_state_dict(
     module: torch.nn.Module,
     path: Path,
     *,
-    strict: bool = False,
+    strict: bool = True,
 ) -> torch.nn.Module:
+    if not path.is_file():
+        raise FileNotFoundError(f"Trained checkpoint is required; refusing random initialization: {path}")
     if path.is_file():
         if path.suffix == ".safetensors":
             from safetensors.torch import load_file

@@ -387,15 +387,9 @@ def run_onnx(
             if preprocess_type == "json_to_tensor_map":
                 for mapping in preprocess.get("mappings") or []:
                     dtype = np.int64 if mapping.get("dtype") == "int64" else np.float32
-                    source = resolve_json_path(request, mapping.get("json_path", "$"))
-                    if mapping.get("broadcast_scalar"):
-                        if not isinstance(source, (int, float, bool)):
-                            raise ValueError("broadcast_scalar requires a numeric scalar")
-                        feeds[mapping["tensor_name"]] = np.full(
-                            mapping["shape"], source, dtype=dtype
-                        )
-                    else:
-                        feeds[mapping["tensor_name"]] = np.asarray(source, dtype=dtype)
+                    feeds[mapping["tensor_name"]] = np.asarray(
+                        resolve_json_path(request, mapping.get("json_path", "$")), dtype=dtype
+                    )
             elif preprocess_type == "tensor_from_json":
                 model_input = session.get_inputs()[0]
                 source = request.get("tensor", request) if isinstance(request, dict) else request
@@ -478,18 +472,25 @@ def run_http(
                 "real-mode health must explicitly report model_loaded=true"
             )
         metadata = http_json(runtime["metadata_endpoint"], timeout)
+        if forbid_fallback:
+            markers = find_non_real_markers(metadata)
+            if markers:
+                raise ValueError(f"non-real metadata: {markers[0]}")
         if metadata.get("algorithm_id") not in (None, algorithm_id):
             raise ValueError(f"metadata algorithm_id={metadata.get('algorithm_id')}")
         pairs = golden_pairs(package, "python_http_service")
         for request_path, expected_path in pairs:
-            body = http_json(runtime["endpoint"], timeout, read_json(request_path))
+            request_body = read_json(request_path)
+            if forbid_fallback:
+                request_body["params"] = {**request_body.get("params", {}), "require_real": True}
+            body = http_json(runtime["endpoint"], timeout, request_body)
             if not body.get("ok"):
                 raise ValueError(f"predict ok=false: {body.get('error', body)}")
             outputs = body.get("outputs")
             if outputs in (None, {}, []):
                 raise ValueError("predict outputs are empty")
             if forbid_fallback:
-                markers = find_non_real_markers(outputs)
+                markers = find_non_real_markers({"outputs": outputs, "usage": body.get("usage") or {}})
                 if markers:
                     raise ValueError(f"non-real runtime marker: {markers[0]}")
             expected_payload = read_json(expected_path)
@@ -539,6 +540,8 @@ def run_algolib(
             "inputs": source_request.get("inputs", source_request),
             "params": source_request.get("params", {}),
         }
+        if forbid_fallback:
+            request_payload["params"]["require_real"] = True
         request_path.write_text(
             json.dumps(request_payload, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",

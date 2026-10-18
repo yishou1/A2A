@@ -80,7 +80,7 @@ class RTDETRClient:
             ) from exc
         except (URLError, ConnectionError, OSError) as exc:
             raise RTDETRServiceError(
-                "无法连接 RT-DETR 服务，请先启动 9020 端口的算法服务",
+                "无法连接 RT-DETR 服务，请检查检测服务及容器网络",
                 status_code=503,
                 details={"endpoint": self.endpoint, "reason": str(exc)},
             ) from exc

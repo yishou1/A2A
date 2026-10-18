@@ -177,6 +177,12 @@ void TestOnnxRunnerSupportsTensorFromJsonAndNoOpPostprocess() {
     Expect(result.ok, "Tensor round-trip run should succeed.");
     Expect(result.outputs == nlohmann::json::array({1, 2, 3}),
            "no_op postprocess should return the session output unchanged.");
+#if !ALGOLIB_WITH_ONNXRUNTIME
+    Expect(runner.HealthCheck().status == "stub", "Stub health must disclose the demo backend.");
+    request.params = {{"require_real", true}};
+    const auto strict_result = runner.Run(request);
+    Expect(!strict_result.ok, "A require_real request must not execute the stub backend.");
+#endif
 }
 
 void TestOnnxRunnerSupportsTensorContractAndGenericMappings() {

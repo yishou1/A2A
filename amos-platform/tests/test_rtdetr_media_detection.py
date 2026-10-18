@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import pytest
 
 from amos_platform.algorithms.rtdetr_client import RTDETRClient
 from amos_platform.api.app_factory import create_app
@@ -31,8 +32,13 @@ def released_png() -> dict:
     }
 
 
-def test_detection_route_only_forwards_server_released_media(monkeypatch) -> None:
+@pytest.mark.parametrize("media_base", [None, "http://amos:5000/"])
+def test_detection_route_only_forwards_server_released_media(monkeypatch, media_base) -> None:
     calls = []
+    if media_base:
+        monkeypatch.setenv("AMOS_PUBLIC_BASE_URL", media_base)
+    else:
+        monkeypatch.delenv("AMOS_PUBLIC_BASE_URL", raising=False)
 
     class FakeClient:
         def detect(self, media, image_url):
@@ -61,7 +67,7 @@ def test_detection_route_only_forwards_server_released_media(monkeypatch) -> Non
     assert data["runtime"]["mode"] == "real"
     assert data["source_uri"] == released_png()["uri"]
     assert calls[0][0]["media_id"] == "ASC-MEDIA-02"
-    assert calls[0][1] == "http://localhost" + released_png()["uri"]
+    assert calls[0][1] == (media_base or "http://localhost/").rstrip("/") + released_png()["uri"]
 
 
 def test_detection_route_rejects_unreleased_and_non_raster_media(monkeypatch) -> None:
@@ -73,6 +79,17 @@ def test_detection_route_rejects_unreleased_and_non_raster_media(monkeypatch) ->
 
     assert client.post("/api/v1/a2a/media/FUTURE-MEDIA/detect", json={}).status_code == 404
     assert client.post("/api/v1/a2a/media/VISIBLE-SVG/detect", json={}).status_code == 415
+
+
+def test_detection_route_never_draws_mock_results_as_image_recognition(monkeypatch) -> None:
+    class MockClient:
+        def detect(self, media, image_url):
+            return {"runtime": {"mode": "mock"}, "detections": [{"class_name": "vehicle"}], "count": 1}
+    monkeypatch.setattr(detection_routes, "get_engine", lambda: FakeEngine([released_png()]))
+    monkeypatch.setattr(detection_routes, "get_rtdetr_client", lambda: MockClient())
+    response = create_app().test_client().post('/api/v1/a2a/media/ASC-MEDIA-02/detect', json={})
+    assert response.status_code == 503
+    assert 'vehicle' not in response.get_data(as_text=True)
 
 
 def test_rtdetr_client_builds_image_uri_contract(monkeypatch) -> None:
