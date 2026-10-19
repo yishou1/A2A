@@ -77,13 +77,13 @@ resource_requirements:
   disk_mb: 2048
 
 model_profile:
-  parameter_count: 7000000000
-  parameter_count_text: 7B
-  flops: 14000000000
-  flops_text: 14 GFLOPs/token
+  parameter_count: 0
+  parameter_count_text: "unavailable: external LLM service is not identified by a locally auditable model artifact"
+  flops: 0
+  flops_text: "unavailable: provider model, token lengths, and inference configuration are not pinned in this repository"
   flops_input_shape: [1, 2048]
-  model_size_mb: 14336
-  precision: fp16
+  model_size_mb: 0
+  precision: provider_managed
 
 safety:
   risk_level: medium

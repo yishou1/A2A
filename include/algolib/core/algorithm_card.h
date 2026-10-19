@@ -12,7 +12,7 @@
 namespace algolib {
 
 // 中文注释: 保留示例输入输出 便于后续文档展示或 Agent 视图扩展
-struct AgentCardExample {
+struct AgentViewExample {
     nlohmann::json input;
     nlohmann::json output;
 };
@@ -22,13 +22,13 @@ struct Modalities {
     std::vector<std::string> output;
 };
 
-struct AgentCard {
+struct AgentView {
     std::string summary;
     std::vector<std::string> when_to_use;
     std::vector<std::string> when_not_to_use;
     std::string input_description;
     std::string output_description;
-    std::vector<AgentCardExample> examples;
+    std::vector<AgentViewExample> examples;
 };
 
 struct RuntimeSpec {
@@ -109,6 +109,16 @@ struct SafetySpec {
     std::optional<bool> requires_human_review;
 };
 
+// A business/operational function implemented by this algorithm. This metadata is
+// optional so existing cards and callers remain compatible.
+struct OperationalFunctionSpec {
+    std::string function_id;
+    std::string function_code;
+    std::string function_name;
+    std::string role = "primary";
+    std::string coverage_level = "full";
+};
+
 // 中文注释: AlgorithmCard 与 SPEC 顶层字段一一对应
 struct AlgorithmCard {
     std::string algorithm_id;
@@ -119,7 +129,8 @@ struct AlgorithmCard {
     std::string task_family;
     Modalities modalities;
     std::vector<std::string> capabilities;
-    AgentCard agent_card;
+    std::vector<OperationalFunctionSpec> operational_functions;
+    AgentView agent_view;
     MachineSpec machine_spec;
     std::optional<ConstraintsSpec> constraints;
     std::optional<PerformanceSpec> performance;

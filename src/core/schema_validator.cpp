@@ -28,6 +28,24 @@ bool IsSupportedTypeName(const std::string& type_name) {
            kSupportedTypes.end();
 }
 
+bool SchemaDeclaresType(const json& schema_json, const std::string& type_name) {
+    if (!schema_json.contains("type")) {
+        return false;
+    }
+    const auto& type_json = schema_json.at("type");
+    if (type_json.is_string()) {
+        return type_json.get<std::string>() == type_name;
+    }
+    if (type_json.is_array()) {
+        return std::any_of(type_json.begin(), type_json.end(),
+                           [&type_name](const json& item) {
+                               return item.is_string() &&
+                                      item.get<std::string>() == type_name;
+                           });
+    }
+    return false;
+}
+
 bool SchemaHasObjectKeywords(const json& schema_json) {
     return schema_json.contains("properties") || schema_json.contains("required") ||
            schema_json.contains("additionalProperties");
@@ -90,14 +108,33 @@ Status ValidateSchemaNode(const json& schema_json,
     }
 
     if (schema_json.contains("type")) {
-        if (!schema_json.at("type").is_string()) {
+        const auto& type_json = schema_json.at("type");
+        if (!type_json.is_string() && !type_json.is_array()) {
             return MakeSchemaError(invalid_schema_code, schema_name,
-                                   "type must be a string in the supported subset.");
+                                   "type must be a string or a non-empty array of unique strings.");
         }
-        const std::string type_name = schema_json.at("type").get<std::string>();
-        if (!IsSupportedTypeName(type_name)) {
+        const json type_names = type_json.is_string() ? json::array({type_json}) : type_json;
+        if (type_names.empty()) {
             return MakeSchemaError(invalid_schema_code, schema_name,
-                                   "Unsupported type: " + type_name + ".");
+                                   "type array must not be empty.");
+        }
+        std::vector<std::string> seen_type_names;
+        for (const auto& type_item : type_names) {
+            if (!type_item.is_string()) {
+                return MakeSchemaError(invalid_schema_code, schema_name,
+                                       "type array items must be strings.");
+            }
+            const std::string type_name = type_item.get<std::string>();
+            if (!IsSupportedTypeName(type_name)) {
+                return MakeSchemaError(invalid_schema_code, schema_name,
+                                       "Unsupported type: " + type_name + ".");
+            }
+            if (std::find(seen_type_names.begin(), seen_type_names.end(), type_name) !=
+                seen_type_names.end()) {
+                return MakeSchemaError(invalid_schema_code, schema_name,
+                                       "type array items must be unique.");
+            }
+            seen_type_names.push_back(type_name);
         }
     }
 
@@ -193,11 +230,8 @@ Status ValidateSchemaNode(const json& schema_json,
     return Status::Ok();
 }
 
-Status ValidateTypeConstraint(const json& instance_json,
-                              const std::string& type_name,
-                              ErrorCode invalid_schema_code,
-                              const std::string& instance_name) {
-    const bool type_matches =
+bool MatchesType(const json& instance_json, const std::string& type_name) {
+    return
         (type_name == "object" && instance_json.is_object()) ||
         (type_name == "array" && instance_json.is_array()) ||
         (type_name == "string" && instance_json.is_string()) ||
@@ -205,11 +239,30 @@ Status ValidateTypeConstraint(const json& instance_json,
         (type_name == "integer" && instance_json.is_number_integer()) ||
         (type_name == "boolean" && instance_json.is_boolean()) ||
         (type_name == "null" && instance_json.is_null());
-    if (!type_matches) {
-        return MakeSchemaError(invalid_schema_code, instance_name,
-                               "Value does not match schema type " + type_name + ".");
+}
+
+Status ValidateTypeConstraint(const json& instance_json,
+                              const json& type_json,
+                              ErrorCode invalid_schema_code,
+                              const std::string& instance_name) {
+    if (type_json.is_string() &&
+        MatchesType(instance_json, type_json.get<std::string>())) {
+        return Status::Ok();
     }
-    return Status::Ok();
+    if (type_json.is_array()) {
+        for (const auto& type_item : type_json) {
+            if (MatchesType(instance_json, type_item.get<std::string>())) {
+                return Status::Ok();
+            }
+        }
+    }
+    if (type_json.is_string()) {
+        return MakeSchemaError(invalid_schema_code, instance_name,
+                               "Value does not match schema type " +
+                                   type_json.get<std::string>() + ".");
+    }
+    return MakeSchemaError(invalid_schema_code, instance_name,
+                           "Value does not match any allowed schema type.");
 }
 
 Status ValidateInstanceNode(const json& instance_json,
@@ -238,14 +291,14 @@ Status ValidateInstanceNode(const json& instance_json,
 
     if (schema_json.contains("type")) {
         const auto type_status = ValidateTypeConstraint(
-            instance_json, schema_json.at("type").get<std::string>(),
+            instance_json, schema_json.at("type"),
             invalid_schema_code, instance_name);
         if (!type_status.ok()) {
             return type_status;
         }
     }
 
-    if ((schema_json.value("type", std::string()) == "object" || SchemaHasObjectKeywords(schema_json)) &&
+    if ((SchemaDeclaresType(schema_json, "object") || SchemaHasObjectKeywords(schema_json)) &&
         instance_json.is_object()) {
         if (schema_json.contains("required")) {
             for (const auto& required_name_json : schema_json.at("required")) {
@@ -284,7 +337,7 @@ Status ValidateInstanceNode(const json& instance_json,
         }
     }
 
-    if ((schema_json.value("type", std::string()) == "array" || SchemaHasArrayKeywords(schema_json)) &&
+    if ((SchemaDeclaresType(schema_json, "array") || SchemaHasArrayKeywords(schema_json)) &&
         instance_json.is_array()) {
         if (schema_json.contains("minItems") &&
             instance_json.size() < schema_json.at("minItems").get<std::size_t>()) {
@@ -308,7 +361,7 @@ Status ValidateInstanceNode(const json& instance_json,
         }
     }
 
-    if ((schema_json.value("type", std::string()) == "string" || SchemaHasStringKeywords(schema_json)) &&
+    if ((SchemaDeclaresType(schema_json, "string") || SchemaHasStringKeywords(schema_json)) &&
         instance_json.is_string()) {
         const auto& string_value = instance_json.get_ref<const std::string&>();
         if (schema_json.contains("minLength") &&
@@ -323,8 +376,8 @@ Status ValidateInstanceNode(const json& instance_json,
         }
     }
 
-    if ((schema_json.value("type", std::string()) == "number" ||
-         schema_json.value("type", std::string()) == "integer" ||
+    if ((SchemaDeclaresType(schema_json, "number") ||
+         SchemaDeclaresType(schema_json, "integer") ||
          SchemaHasNumericKeywords(schema_json)) &&
         instance_json.is_number()) {
         const double numeric_value = instance_json.get<double>();

@@ -1,6 +1,7 @@
 """xBD handcrafted ROI features and model vector assembly."""
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 from typing import Any, List, Optional, Sequence, Tuple
@@ -194,8 +195,10 @@ def disaster_name(sample_id: Any) -> str:
 
 
 def disaster_bucket_features(sample_id: Any, buckets: int = 10) -> List[float]:
-    slot = abs(hash(disaster_name(sample_id))) % max(1, buckets)
-    return [1.0 if idx == slot else 0.0 for idx in range(buckets)]
+    bucket_count = max(1, buckets)
+    digest = hashlib.sha256(disaster_name(sample_id).encode("utf-8")).digest()
+    slot = int.from_bytes(digest[:8], byteorder="big") % bucket_count
+    return [1.0 if idx == slot else 0.0 for idx in range(bucket_count)]
 
 
 HANDCRAFTED_FEATURE_NAMES = [

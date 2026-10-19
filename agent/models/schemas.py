@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, Dict, List, Optional, Union
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -48,29 +48,29 @@ class TargetGeo(BaseModel):
     lat: float
     lon: float
     alt_m: float
-    slant_range_m: float | None = None
-    domain: str | None = None
-    alt_source: str | None = None
-    alt_confidence: float | None = None
-    geo_method: str | None = None
-    vertical_offset_m: float | None = None
-    class_name: str | None = None
+    slant_range_m: Optional[float] = None
+    domain: Optional[str] = None
+    alt_source: Optional[str] = None
+    alt_confidence: Optional[float] = None
+    geo_method: Optional[str] = None
+    vertical_offset_m: Optional[float] = None
+    class_name: Optional[str] = None
 
 
 class Detection(BaseModel):
-    track_id: str | None = None
-    sensor_id: str | None = None
+    track_id: Optional[str] = None
+    sensor_id: Optional[str] = None
     class_name: str
     confidence: float
-    bbox: list[float] | None = None
-    geo: TargetGeo | dict[str, Any] | None = None
-    damage_score: float | None = None
-    epistemic_uncertainty: float | None = None
+    bbox: Optional[List[float]] = None
+    geo: Optional[Union[TargetGeo, Dict[str, Any]]] = None
+    damage_score: Optional[float] = None
+    epistemic_uncertainty: Optional[float] = None
 
 
 class SensorAssignment(BaseModel):
     sensor_id: str
-    target_id: str | None = None
+    target_id: Optional[str] = None
     task: str = "surveillance"
     priority: str = "normal"
     rationale: str = ""
@@ -81,7 +81,7 @@ class ReattackAssignment(BaseModel):
     target_id: str
     task: str = "reattack"
     priority: str = "critical"
-    expected_damage: float | None = None
+    expected_damage: Optional[float] = None
     rationale: str = ""
 
 
@@ -99,7 +99,7 @@ class PerceptionOutput(BaseModel):
     detections: list[Detection] = Field(default_factory=list)
     tracks: list[dict[str, Any]] = Field(default_factory=list)
     verified_ids: list[str] = Field(default_factory=list)
-    task_schedule: TaskSchedulePlan | None = None
+    task_schedule: Optional[TaskSchedulePlan] = None
     algorithm_trace: dict[str, str] = Field(default_factory=dict)
 
 
@@ -132,7 +132,7 @@ class SemanticIntelligencePacket(BaseModel):
     routing: dict[str, Any] = Field(default_factory=dict)
     provenance: dict[str, Any] = Field(default_factory=dict)
     raw_compression_ratio: float = 1.0
-    task_schedule: TaskSchedulePlan | None = None
+    task_schedule: Optional[TaskSchedulePlan] = None
     output_attachments: list[dict[str, Any]] = Field(
         default_factory=list,
         description="处理后产物（如标注图）的对象存储引用，供下游 Agent 通过 URI 读取",

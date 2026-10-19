@@ -5,13 +5,12 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import threading
 from typing import Any, AsyncIterator
 
 from a2a_protocol.server import A2ABaseAgent
 
 from agent.models.schemas import SemanticIntelligencePacket
-from agent.orchestrator import TacticalIntelligenceAgent
+from agent.orchestrator import SingleFlightCache, TacticalIntelligenceAgent
 from agent.skills.perception.schedule_adapter import task_schedule_to_resource_allocation
 from tactical_intelligence_agent.bootstrap import create_engine, default_role, warmup_inference
 from tactical_intelligence_agent.payload_adapter import commander_payload_to_batch
@@ -25,8 +24,10 @@ DEFAULT_OUTPUT_HINT = "intelligence_packet"
 
 class TacticalIntelligenceCommanderAgent(A2ABaseAgent):
     """
-    战术情报 Agent：继承 A2ABaseAgent，自动获得
-    /health /ready /metrics /lifecycle/ready、统一任务响应信封、work_item 幂等。
+    战术情报 Agent：继承 A2ABaseAgent，自动获得统一任务响应与 work_item 幂等。
+
+    同一 work_item 的并发请求会合并到一个 in-flight Future；不同 work_item 可并发，
+    并由 TacticalIntelligenceAgent 保证同 mission 的跟踪状态按到达顺序串行。
     """
 
     def __init__(
@@ -37,8 +38,7 @@ class TacticalIntelligenceCommanderAgent(A2ABaseAgent):
         role: str | None = None,
     ):
         self._engine = engine or create_engine()
-        self._result_cache: dict[str, SemanticIntelligencePacket] = {}
-        self._result_lock = threading.RLock()
+        self._result_cache: SingleFlightCache[SemanticIntelligencePacket] = SingleFlightCache()
         if engine is None and os.environ.get("TIA_SKIP_WARMUP", "0") != "1":
             warmup_inference()
         super().__init__(
@@ -61,16 +61,12 @@ class TacticalIntelligenceCommanderAgent(A2ABaseAgent):
 
     def _get_or_process(self, payload: dict) -> SemanticIntelligencePacket:
         work_item = self._work_item_from_payload(payload)
-        with self._result_lock:
-            cached = self._result_cache.get(work_item)
-        if cached is not None:
-            return cached
 
-        batch = commander_payload_to_batch(payload)
-        packet = self._engine.process(batch)
-        with self._result_lock:
-            self._result_cache[work_item] = packet
-        return packet
+        def process() -> SemanticIntelligencePacket:
+            batch = commander_payload_to_batch(payload)
+            return self._engine.process(batch)
+
+        return self._result_cache.get_or_compute(work_item, process)
 
     def _build_output(self, payload: dict, packet: SemanticIntelligencePacket) -> dict[str, Any]:
         output_hint = payload.get("output_hint") or DEFAULT_OUTPUT_HINT

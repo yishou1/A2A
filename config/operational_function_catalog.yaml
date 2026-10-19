@@ -1,0 +1,32 @@
+schema_version: 1.0
+
+# Canonical IDs used by Algorithm Cards, /run telemetry, audit logs and the UI.
+functions:
+  - {function_id: KC-01, function_code: initial_detection, function_name: Initial Detection, ooda_phase: observe, f2t2ea_stage: find}
+  - {function_id: KC-02, function_code: battle_damage_assessment_detection, function_name: Battle Damage Assessment (BDA) Detection, ooda_phase: observe, f2t2ea_stage: find}
+  - {function_id: KC-03, function_code: re_task_detection, function_name: Re-Task Detection, ooda_phase: observe, f2t2ea_stage: find}
+  - {function_id: KC-04, function_code: define_target_threat, function_name: Define Target/Threat, ooda_phase: observe, f2t2ea_stage: fix}
+  - {function_id: KC-05, function_code: characterize, function_name: Characterize, ooda_phase: observe, f2t2ea_stage: fix}
+  - {function_id: KC-06, function_code: classify, function_name: Classify, ooda_phase: observe, f2t2ea_stage: fix}
+  - {function_id: KC-07, function_code: identify, function_name: Identify, ooda_phase: observe, f2t2ea_stage: fix}
+  - {function_id: KC-08, function_code: locate, function_name: Locate, ooda_phase: observe, f2t2ea_stage: fix}
+  - {function_id: KC-09, function_code: validate_detection, function_name: Validate Detection, ooda_phase: observe, f2t2ea_stage: fix}
+  - {function_id: KC-10, function_code: disseminate_target_threat_information, function_name: Disseminate Target/Threat Information, ooda_phase: observe, f2t2ea_stage: fix}
+  - {function_id: KC-11, function_code: generate_update_track, function_name: Generate / Update Track, ooda_phase: orient, f2t2ea_stage: track}
+  - {function_id: KC-12, function_code: sort, function_name: Sort, ooda_phase: orient, f2t2ea_stage: track}
+  - {function_id: KC-13, function_code: determine_target_threat_urgency, function_name: Determine Target / Threat Urgency, ooda_phase: orient, f2t2ea_stage: track}
+  - {function_id: KC-14, function_code: assess_blue_force_proximity, function_name: Assess Blue Force Proximity, ooda_phase: orient, f2t2ea_stage: track}
+  - {function_id: KC-15, function_code: validate_target_threat, function_name: Validate Target / Threat, ooda_phase: orient, f2t2ea_stage: track}
+  - {function_id: KC-16, function_code: nominate_engagement_option, function_name: Nominate Engagement Option, ooda_phase: decide, f2t2ea_stage: target}
+  - {function_id: KC-17, function_code: prioritize_target_threat, function_name: Prioritize Target / Threat, ooda_phase: decide, f2t2ea_stage: target}
+  - {function_id: KC-18, function_code: determine_time_available, function_name: Determine Time Available, ooda_phase: decide, f2t2ea_stage: target}
+  - {function_id: KC-19, function_code: maintain_track, function_name: Maintain Track, ooda_phase: decide, f2t2ea_stage: target}
+  - {function_id: KC-20, function_code: select_attack_option, function_name: Select Attack Option, ooda_phase: decide, f2t2ea_stage: target}
+  - {function_id: KC-21, function_code: verify_rules_of_engagement, function_name: Verify Rules of Engagement (ROE), ooda_phase: decide, f2t2ea_stage: target}
+  - {function_id: KC-22, function_code: issue_order, function_name: Issue Order, ooda_phase: act, f2t2ea_stage: engage}
+  - {function_id: KC-23, function_code: attack_target_threat, function_name: Attack Target / Threat, ooda_phase: act, f2t2ea_stage: engage, execution_boundary: external_system}
+  - {function_id: KC-24, function_code: track_weapon, function_name: Track Weapon, ooda_phase: act, f2t2ea_stage: engage}
+  - {function_id: KC-25, function_code: confirm_impact, function_name: Confirm Impact, ooda_phase: act, f2t2ea_stage: engage}
+  - {function_id: KC-26, function_code: task_re_attack, function_name: Task Re-Attack, ooda_phase: act, f2t2ea_stage: engage}
+  - {function_id: KC-27, function_code: conduct_dynamic_assessment, function_name: Conduct Dynamic Assessment, ooda_phase: act, f2t2ea_stage: assess}
+  - {function_id: KC-28, function_code: evaluate, function_name: Evaluate, ooda_phase: act, f2t2ea_stage: assess}

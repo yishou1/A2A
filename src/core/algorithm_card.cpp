@@ -49,7 +49,7 @@ std::string ReadRequiredString(const json& node, const char* field_name) {
     return node.at(field_name).get<std::string>();
 }
 
-json BuildAgentCardExampleJson(const AgentCardExample& example) {
+json BuildAgentViewExampleJson(const AgentViewExample& example) {
     return json{
         {"input", example.input},
         {"output", example.output},
@@ -104,18 +104,29 @@ json ToJson(const AlgorithmCard& card) {
         {"output", card.modalities.output},
     };
     card_json["capabilities"] = card.capabilities;
-
-    json agent_card_json;
-    agent_card_json["summary"] = card.agent_card.summary;
-    agent_card_json["when_to_use"] = card.agent_card.when_to_use;
-    agent_card_json["when_not_to_use"] = card.agent_card.when_not_to_use;
-    agent_card_json["input_description"] = card.agent_card.input_description;
-    agent_card_json["output_description"] = card.agent_card.output_description;
-    agent_card_json["examples"] = json::array();
-    for (const auto& example : card.agent_card.examples) {
-        agent_card_json["examples"].push_back(BuildAgentCardExampleJson(example));
+    card_json["operational_functions"] = json::array();
+    for (const auto& function : card.operational_functions) {
+        card_json["operational_functions"].push_back({
+            {"function_id", function.function_id},
+            {"function_code", function.function_code},
+            {"function_name", function.function_name},
+            {"role", function.role},
+            {"coverage_level", function.coverage_level},
+        });
     }
-    card_json["agent_card"] = std::move(agent_card_json);
+
+    json agent_view_json;
+    agent_view_json["summary"] = card.agent_view.summary;
+    agent_view_json["when_to_use"] = card.agent_view.when_to_use;
+    agent_view_json["when_not_to_use"] = card.agent_view.when_not_to_use;
+    agent_view_json["input_description"] = card.agent_view.input_description;
+    agent_view_json["output_description"] = card.agent_view.output_description;
+    agent_view_json["examples"] = json::array();
+    for (const auto& example : card.agent_view.examples) {
+        agent_view_json["examples"].push_back(BuildAgentViewExampleJson(example));
+    }
+    card_json["agent_view"] = agent_view_json;
+    card_json["agent_card"] = std::move(agent_view_json);
 
     json machine_spec_json;
     machine_spec_json["input_schema_ref"] = card.machine_spec.input_schema_ref;
@@ -255,33 +266,59 @@ Result<AlgorithmCard> AlgorithmCardFromJson(const json& json_value) {
         card.modalities.input = ReadStringArray(json_value.at("modalities"), "input");
         card.modalities.output = ReadStringArray(json_value.at("modalities"), "output");
         card.capabilities = ReadStringArray(json_value, "capabilities");
-
-        if (!json_value.contains("agent_card") || !json_value.at("agent_card").is_object()) {
-            return Status::Error(ErrorCode::kInvalidAlgorithmCard,
-                                 "agent_card must be an object.");
-        }
-        const json& agent_card_json = json_value.at("agent_card");
-        card.agent_card.summary = ReadRequiredString(agent_card_json, "summary");
-        card.agent_card.when_to_use = ReadStringArray(agent_card_json, "when_to_use");
-        card.agent_card.when_not_to_use = ReadStringArray(agent_card_json, "when_not_to_use");
-        card.agent_card.input_description =
-            ReadRequiredString(agent_card_json, "input_description");
-        card.agent_card.output_description =
-            ReadRequiredString(agent_card_json, "output_description");
-        if (agent_card_json.contains("examples")) {
-            if (!agent_card_json.at("examples").is_array()) {
+        if (json_value.contains("operational_functions")) {
+            if (!json_value.at("operational_functions").is_array()) {
                 return Status::Error(ErrorCode::kInvalidAlgorithmCard,
-                                     "agent_card.examples must be an array.");
+                                     "operational_functions must be an array.");
             }
-            for (const auto& example_json : agent_card_json.at("examples")) {
+            for (const auto& function_json : json_value.at("operational_functions")) {
+                if (!function_json.is_object()) {
+                    return Status::Error(
+                        ErrorCode::kInvalidAlgorithmCard,
+                        "operational_functions items must be objects.");
+                }
+                OperationalFunctionSpec function;
+                function.function_id = ReadRequiredString(function_json, "function_id");
+                function.function_code = ReadRequiredString(function_json, "function_code");
+                function.function_name = ReadRequiredString(function_json, "function_name");
+                function.role = function_json.value("role", std::string("primary"));
+                function.coverage_level =
+                    function_json.value("coverage_level", std::string("full"));
+                card.operational_functions.push_back(std::move(function));
+            }
+        }
+
+        const bool has_agent_view =
+            json_value.contains("agent_view") && json_value.at("agent_view").is_object();
+        const bool has_agent_card =
+            json_value.contains("agent_card") && json_value.at("agent_card").is_object();
+        if (!has_agent_view && !has_agent_card) {
+            return Status::Error(ErrorCode::kInvalidAlgorithmCard,
+                                 "agent_view must be an object.");
+        }
+        const json& agent_view_json =
+            has_agent_view ? json_value.at("agent_view") : json_value.at("agent_card");
+        card.agent_view.summary = ReadRequiredString(agent_view_json, "summary");
+        card.agent_view.when_to_use = ReadStringArray(agent_view_json, "when_to_use");
+        card.agent_view.when_not_to_use = ReadStringArray(agent_view_json, "when_not_to_use");
+        card.agent_view.input_description =
+            ReadRequiredString(agent_view_json, "input_description");
+        card.agent_view.output_description =
+            ReadRequiredString(agent_view_json, "output_description");
+        if (agent_view_json.contains("examples")) {
+            if (!agent_view_json.at("examples").is_array()) {
+                return Status::Error(ErrorCode::kInvalidAlgorithmCard,
+                                     "agent_view.examples must be an array.");
+            }
+            for (const auto& example_json : agent_view_json.at("examples")) {
                 if (!example_json.is_object()) {
                     return Status::Error(ErrorCode::kInvalidAlgorithmCard,
-                                         "agent_card.examples items must be objects.");
+                                         "agent_view.examples items must be objects.");
                 }
-                AgentCardExample example;
+                AgentViewExample example;
                 example.input = example_json.value("input", json::object());
                 example.output = example_json.value("output", json::object());
-                card.agent_card.examples.push_back(std::move(example));
+                card.agent_view.examples.push_back(std::move(example));
             }
         }
 

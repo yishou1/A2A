@@ -115,7 +115,7 @@ class MOTRTracker(nn.Module):
             if pt.get("track_id") and pt.get("geo")
         }
 
-        self.to(device)
+        # 设备迁移仅在 registry 初始化阶段完成；推理时保持共享模型不可变。
         img = Image.fromarray(image_rgb) if image_rgb is not None else None
         crop_size = 96
 

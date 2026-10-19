@@ -15,8 +15,8 @@ namespace algolib {
 // 对于 onnx 后端，pool_size 参数被忽略（每个 (entry, deploy_id) 仅一个 OnnxRunner）。
 class RuntimeFactory {
 public:
-    // 中文注释：python_pool_size — Python HTTP Service 连接池容量（默认 4）。
-    static constexpr std::size_t kDefaultPythonPoolSize = 4;
+    // 中文注释：python_pool_size — Python HTTP Service 连接池容量（默认 8）。
+    static constexpr std::size_t kDefaultPythonPoolSize = 8;
 
     explicit RuntimeFactory(std::size_t python_pool_size = kDefaultPythonPoolSize,
                             int python_checkout_timeout_ms = 5000)

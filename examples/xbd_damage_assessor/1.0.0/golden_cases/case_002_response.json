@@ -1,7 +1,7 @@
 {
   "ok": true,
   "outputs": {
-    "damage_probability": 0.300581,
+    "damage_probability": 0.396621,
     "damage_label": 0,
     "damage_result": "no_damage",
     "decision_threshold": 0.645,

@@ -28,9 +28,10 @@ do not use HTTP ports.
 | `target_trend_predictor_onnx` | `sequence` `[1, 12, 4]` | `trend_score` `[1, 1]` | Fixed-window target trend score |
 | `compliance_risk_scorer_onnx` | `features` `[1, 6]` | `risk_probability` `[1, 1]` | Compliance risk score |
 
-These packages copy, rather than move, the model assets used by
-`decision_planning_core` and `compliance_authorization_core`. The existing
-Python services therefore keep their current behavior and fallback paths.
+All three package models are independently trained reference artifacts and do
+not replace the bootstrap assets used by `decision_planning_core` or
+`compliance_authorization_core`. The target-trend package uses a trained
+fixed-window LSTM to forecast normalized risk four steps ahead.
 
 Register and run them with a build linked to the real ONNX Runtime SDK:
 
@@ -48,9 +49,12 @@ Register and run them with a build linked to the real ONNX Runtime SDK:
 ./build/algolib.exe run ./examples/compliance_risk_scorer_onnx/1.0.0/golden_cases/case_001_input.json
 ```
 
-The current files are bootstrap models. Their package contracts are stable, but
-the model weights must still be replaced or re-evaluated before a production
-accuracy claim is made.
+The packages record deterministic synthetic reference datasets, holdout metrics,
+training-script hashes, and ONNX artifact hashes. Rebuild the M16 model with
+`python scripts/train_target_trend_predictor.py`. Its 800-sequence holdout RMSE
+is 0.051080 versus 0.095422 for the last-observation baseline. These metrics
+validate reproducibility and integration only; real labeled time-ordered data
+are still required before a production accuracy claim is made.
 
 ## Start services
 

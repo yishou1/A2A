@@ -67,9 +67,11 @@ resource_requirements:
 
 model_profile:
   parameter_count: 0
-  parameter_count_text: rule-based
+  parameter_count_text: "not_applicable: deterministic rule-based structured-field scorer with no learned weights"
+  flops: 0
+  flops_text: "not_applicable: conditional scoring and normalization depend on supplied track fields"
   model_size_mb: 0
-  precision: fp32
+  precision: deterministic_rules
 
 safety:
   risk_level: low

@@ -1,0 +1,76 @@
+{
+  "architecture": {
+    "complexity": "O(N^2) dense pairwise message passing",
+    "edge_feature_count": 6,
+    "hidden_size": 32,
+    "message_passing_layers": 2,
+    "node_feature_count": 7,
+    "parameter_count": 16673
+  },
+  "artifact_path": "models/checkpoints/graph_relation_gnn_s.safetensors",
+  "artifact_sha256": "0569e21a27020df636b51a64bb32c381ffb314c38fb3fdff39ba36c78c8177b9",
+  "compute_profile": "small",
+  "dataset": {
+    "artifacts": {
+      "holdout_edges": {
+        "path": "data/graph_relation_gnn/reference_holdout_edges.npy",
+        "sha256": "e5e90b3ab50901996f15ef2b49a1d6591d25787a6be2b9ad935eaccecb24e145"
+      },
+      "holdout_labels": {
+        "path": "data/graph_relation_gnn/reference_holdout_labels.npy",
+        "sha256": "07bcc78f3bcb5c3eb3d7a7472242d3759097abadd4ea65ce51cc33f7152e67f1"
+      },
+      "holdout_masks": {
+        "path": "data/graph_relation_gnn/reference_holdout_masks.npy",
+        "sha256": "800cf95caa3e2f093a1e4af71cb76b86061e8751c5bb8fdbed89b959ec16566a"
+      },
+      "holdout_nodes": {
+        "path": "data/graph_relation_gnn/reference_holdout_nodes.npy",
+        "sha256": "14baf7fa40c677366b7981b5aeb4124da56cdcae400e85917d4fe0117ca95fc3"
+      }
+    },
+    "holdout_count": 600,
+    "holdout_seed": 20260901,
+    "limitation": "Synthetic formation membership only; not an operational group-intelligence benchmark.",
+    "maximum_nodes": 10,
+    "source": "deterministic_synthetic_multi_formation_graph_generator",
+    "train_count": 2400,
+    "training_seed": 20260831
+  },
+  "evaluation": {
+    "distance_motion_rule_baseline": {
+      "accuracy": 0.982481,
+      "f1": 0.912402,
+      "precision": 0.947815,
+      "recall": 0.87954,
+      "roc_auc": 0.936968
+    },
+    "method": "independent_deterministic_graph_holdout",
+    "trained_gnn": {
+      "accuracy": 0.992088,
+      "f1": 0.962788,
+      "precision": 0.940023,
+      "recall": 0.986683,
+      "roc_auc": 0.999212
+    }
+  },
+  "model_family": "dense_message_passing_graph_neural_network",
+  "model_id": "graph_relation_reasoner",
+  "model_version": "1.0.0",
+  "runtime_versions": {
+    "numpy": "2.2.6",
+    "scikit_learn": "1.7.2",
+    "torch": "2.12.0+cpu"
+  },
+  "training": {
+    "batch_size": 64,
+    "epochs": 100,
+    "learning_rate": 0.0015,
+    "objective": "class_weighted_binary_cross_entropy",
+    "optimizer": "AdamW",
+    "random_state": 20260902,
+    "weight_decay": 0.0001
+  },
+  "training_script": "scripts/train_graph_relation_gnn.py",
+  "training_script_sha256": "6ec0fb215c38728619ebb4a7f1ceea9a23a8b7c6d8ed9c59e48fcc83b40a5d50"
+}

@@ -16,7 +16,10 @@ capabilities:
   - rule_explanation
   - structured_summary
 
-agent_card:
+operational_functions:
+  - {function_id: KC-21, function_code: verify_rules_of_engagement, function_name: Verify Rules of Engagement (ROE), role: supporting, coverage_level: advisory}
+
+agent_view:
   summary: >
     Generate a readable explanation from rules and structured entities.
   when_to_use:
@@ -42,9 +45,9 @@ machine_spec:
   output_schema_ref: output.schema.json
   runtime:
     backend_type: python_http_service
-    endpoint: http://127.0.0.1:59098/predict
-    health_endpoint: http://127.0.0.1:59098/health
-    metadata_endpoint: http://127.0.0.1:59098/metadata
+    endpoint: http://127.0.0.1:54076/predict
+    health_endpoint: http://127.0.0.1:54076/health
+    metadata_endpoint: http://127.0.0.1:54076/metadata
     timeout_ms: 10000
 
 constraints:

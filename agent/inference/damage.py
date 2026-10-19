@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent.inference.registry import get_siamese_mask2former
+from agent.inference.registry import inference_guard, get_siamese_mask2former
 from agent.inference.utils import decode_image_from_frame
 
 
@@ -30,12 +30,13 @@ def assess_damage(
         cur = decode_image_from_frame(frame)
         if cur is None:
             continue
-        reports.append(
-            model.assess_pair(
-                ref_img,
-                cur,
-                sensor_id=frame.get("sensor_id", "unknown"),
-                gain=gain,
+        with inference_guard("mask2former", config):
+            reports.append(
+                model.assess_pair(
+                    ref_img,
+                    cur,
+                    sensor_id=frame.get("sensor_id", "unknown"),
+                    gain=gain,
+                )
             )
-        )
     return reports

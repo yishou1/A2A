@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent.inference.registry import get_device, get_supcon_meta
+from agent.inference.registry import inference_guard, get_device, get_supcon_meta
 
 
 def classify_targets(
@@ -14,9 +14,10 @@ def classify_targets(
     model = get_supcon_meta(config)
     device = get_device(config)
     temperature = float(config.get("supcon_temperature", 0.07))
-    return model.classify(
-        fused,
-        device=device,
-        support_shots=config.get("support_shots") or [],
-        temperature=temperature,
-    )
+    with inference_guard("supcon", config):
+        return model.classify(
+            fused,
+            device=device,
+            support_shots=config.get("support_shots") or [],
+            temperature=temperature,
+        )

@@ -2,7 +2,9 @@
 
 #include <filesystem>
 #include <map>
+#include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <string>
 #include <vector>
 
@@ -31,6 +33,8 @@ struct AlgorithmQueryFilter {
     std::optional<std::string>       task_family;
     std::optional<BackendType>       backend_type;
     std::optional<std::string>       capability;
+    std::optional<std::string>       function_id;
+    std::optional<std::string>       function_code;
     std::optional<std::string>       node_id;
     std::optional<AlgorithmStatus>   status;
     bool                             active_only  = true;
@@ -39,11 +43,18 @@ struct AlgorithmQueryFilter {
     std::optional<int>               max_cpu_cores;
 };
 
-// 中文注释: AlgorithmRegistry 提供注册、校验、启停、查询和部署管理能力
+// 中文注释: AlgorithmRegistry 提供注册、校验、启停、查询和部署管理能力。
+//
+// 并发语义：
+//   - 读操作以 shared_lock 保护，并返回 AlgorithmEntry 的值副本；执行中的请求因此
+//     持有稳定快照，不会被 /reload 或生命周期变更破坏。
+//   - 写操作以 unique_lock 串行，并先持久化候选副本，成功后再原子替换内存 entries_；
+//     持久化失败不会污染正在提供服务的内存快照。
 class AlgorithmRegistry {
 public:
     explicit AlgorithmRegistry(std::filesystem::path registry_path);
 
+    // 从磁盘构造新快照后一次性替换当前 entries_。加载失败时保留旧快照。
     Status Reload();
 
     Result<AlgorithmEntry> Register(const std::filesystem::path& package_or_card_path);
@@ -52,9 +63,16 @@ public:
     Result<AlgorithmEntry> Disable(const AlgorithmKey& key);
     Result<AlgorithmEntry> Delete(const AlgorithmKey& key);
     Result<AlgorithmEntry> Get(const AlgorithmKey& key) const;
+
     Status ValidateInputPayload(const AlgorithmKey& key,
                                 const nlohmann::json& input_json) const;
     Status ValidateOutputPayload(const AlgorithmKey& key,
+                                 const nlohmann::json& output_json) const;
+
+    // 对已经取得的 AlgorithmEntry 快照做校验，避免一次执行请求跨越 registry 更新。
+    Status ValidateInputPayload(const AlgorithmEntry& entry,
+                                const nlohmann::json& input_json) const;
+    Status ValidateOutputPayload(const AlgorithmEntry& entry,
                                  const nlohmann::json& output_json) const;
 
     // 原有接口（保持兼容）
@@ -88,16 +106,20 @@ public:
     const std::filesystem::path& registry_path() const;
 
 private:
-    Status Persist() const;
-    Result<AlgorithmEntry*> FindMutable(const AlgorithmKey& key);
-    Result<const AlgorithmEntry*> Find(const AlgorithmKey& key) const;
+    using EntryMap = std::map<AlgorithmKey, AlgorithmEntry>;
+
+    // 调用方必须已持有 mutex_ 的 unique_lock。
+    Status PersistLocked(const EntryMap& entries) const;
     AlgorithmEntry BuildEntry(const ValidatedAlgorithmPackage& validated_package,
                               AlgorithmStatus effective_status) const;
 
     RegistryStore store_;
     AlgorithmCardValidator validator_;
     SchemaValidator schema_validator_;
-    std::map<AlgorithmKey, AlgorithmEntry> entries_;
+    // 序列化 registry.json 的读写及“读盘→提交快照”过程，避免 reload 覆盖并发持久化更新。
+    mutable std::mutex persistence_mutex_;
+    mutable std::shared_mutex mutex_;
+    EntryMap entries_;
 };
 
 }  // namespace algolib

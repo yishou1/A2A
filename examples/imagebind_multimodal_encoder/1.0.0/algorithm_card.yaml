@@ -61,16 +61,12 @@ resource_requirements:
   disk_mb: 4096
 
 model_profile:
-  # ImageBind-Huge: ViT-H backbone, ~632M params
-  # CLIP fallback (openai/clip-vit-base-patch32): ~151M params
-  # Production default uses ImageBind-Huge
-  parameter_count: 632000000
-  parameter_count_text: 632M (ImageBind-Huge ViT-H)
-  flops: 1000000000000
-  flops_text: ~1.0 TFLOPs @ 224×224 per modality (ViT-H)
+  parameter_count: 1200781057
+  parameter_count_text: "1,200,781,057 total parameters for Meta ImageBind imagebind_huge reference architecture; the visual path actively uses 632,829,440 parameters. If the imagebind package is unavailable, this service falls back to external openai/clip-vit-base-patch32 (151,277,313 total; 87,849,216 vision-plus-projection parameters)"
+  flops: 323404842240
+  flops_text: "323,404,842,240 architecture-profiler lower-bound FLOPs for ImageBind Huge visual embedding at [1,3,224,224]; external source weights are not pinned locally. CLIP ViT-B/32 fallback visual embedding is 8,730,109,440 FLOPs at the same input; text and other modality paths use different token-dependent costs"
   flops_input_shape: [1, 3, 224, 224]
-  model_size_mb: 2413
-  precision: fp32
+  precision: fp32_reference_external_weights
 
 safety:
   risk_level: low

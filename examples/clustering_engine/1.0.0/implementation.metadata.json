@@ -1,0 +1,17 @@
+{
+  "artifact_type": "source_code",
+  "artifact_version": "1.0.0",
+  "source_path": "services/a2a_algorithms_common/clustering.py",
+  "sha256": "11094c318b53f63b4434e39921e1f0a9b437eaef89bdae9e47fab79b52339a02",
+  "implementations": [
+    "kmeans_farthest_first",
+    "dbscan_density_expansion"
+  ],
+  "training_required": false,
+  "runtime": "CPython CPU",
+  "verification": {
+    "golden_case_count": 2,
+    "golden_case_correctness": 1.0,
+    "test_module": "tests/python/test_clustering_engine.py"
+  }
+}

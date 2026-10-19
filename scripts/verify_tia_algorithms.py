@@ -2,6 +2,7 @@
 """验证 TIA 11 个算法包在 mock / real 模式下的可用性。"""
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -19,6 +20,7 @@ from a2a_algorithms_common.tia_predictors import (  # noqa: E402
     PREDICTOR_REGISTRY,
     tia_model_loaded,
 )
+from scripts.accept_all_algorithms import find_non_real_markers  # noqa: E402
 
 CHECKPOINT_DIR = ROOT / "models" / "checkpoints"
 
@@ -32,27 +34,32 @@ ALGORITHM_META = {
         "real_deps": ["transformers", "torch"],
     },
     "edl_evidential_verifier": {
-        "weights": ["edl_head.pt"],
-        "real_deps": ["torch"],
+        "weights": ["edl_head_s.safetensors", "edl_head.pt"],
+        "real_deps": ["torch", "safetensors"],
     },
     "motr_neural_kalman_tracker": {
         "weights": ["motr_tracker.pt", "motr_tracker_battlefield.pt"],
         "real_deps": ["torch"],
     },
     "marl_ppo_task_scheduler": {
-        "weights": ["marl_ppo_scheduler.pt"],
-        "real_deps": ["torch", "numpy"],
+        "weights": ["marl_ppo_scheduler_s.safetensors", "marl_ppo_scheduler.pt"],
+        "real_deps": ["torch", "numpy", "safetensors"],
     },
     "imagebind_multimodal_encoder": {
         "weights": [],
         "real_deps": ["torch"],
     },
     "multimodal_mamba_fusion": {
-        "weights": ["mamba_fusion.pt", "mamba_fusion_s.pt", "mamba_fusion_l.pt"],
-        "real_deps": ["torch"],
+        "weights": [
+            "mamba_fusion_s.safetensors",
+            "mamba_fusion.pt",
+            "mamba_fusion_s.pt",
+            "mamba_fusion_l.pt",
+        ],
+        "real_deps": ["torch", "safetensors"],
     },
     "supcon_meta_classifier": {
-        "weights": ["supcon_meta.pt", "supcon_meta_s.pt", "supcon_meta_l.pt"],
+        "weights": ["supcon_meta_s.safetensors", "supcon_meta.pt", "supcon_meta_l.pt"],
         "real_deps": ["torch"],
     },
     "synapse_rag_retriever": {
@@ -196,7 +203,15 @@ def verify_all() -> list[AlgoReport]:
         tp._backend.cache_clear()
         report.model_loaded_real = tia_model_loaded(algorithm_id)
 
-        ok, err, latency, _ = _run_predict(algorithm_id, use_mock=False)
+        ok, err, latency, outputs = _run_predict(algorithm_id, use_mock=False)
+        if ok and not report.model_loaded_real:
+            ok = False
+            err = "model_loaded=false; required trained checkpoint is unavailable"
+        if ok and outputs is not None:
+            markers = find_non_real_markers(outputs)
+            if markers:
+                ok = False
+                err = f"non-real runtime marker: {markers[0]}"
         report.real_ok = ok
         report.real_error = err
         report.real_latency_ms = round(latency, 2)
@@ -205,7 +220,7 @@ def verify_all() -> list[AlgoReport]:
     return reports
 
 
-def print_report(reports: list[AlgoReport]) -> int:
+def print_report(reports: list[AlgoReport], mode: str = "all") -> int:
     print("=" * 88)
     print("TIA 算法可用性验证报告")
     print(f"项目根目录: {ROOT}")
@@ -229,6 +244,9 @@ def print_report(reports: list[AlgoReport]) -> int:
         print("  " + " | ".join(status))
         if r.weights_found:
             print(f"  weights found: {r.weights_found}")
+        if r.weights_missing:
+            print(f"  weights missing: {r.weights_missing}")
+        print(f"  model_loaded(real): {r.model_loaded_real}")
 
     print("\n" + "=" * 88)
     print(f"算法包完整: {pkg_pass}/{len(reports)}")
@@ -243,12 +261,27 @@ def print_report(reports: list[AlgoReport]) -> int:
         print("- 运行 scripts/download_models.py --heads-only 可初始化辅助头权重。")
         print("- 检测器还需 rtdetr-l.pt 或 battlefield_rtdetr.pt；语义/RAG 需联网下载预训练模型。")
 
-    return 0 if mock_pass == len(reports) else 1
+    package_pass = pkg_pass == len(reports)
+    mock_complete = mock_pass == len(reports)
+    real_complete = real_pass == len(reports)
+    if mode == "mock":
+        return 0 if package_pass and mock_complete else 1
+    if mode == "real":
+        return 0 if package_pass and real_complete else 1
+    return 0 if package_pass and mock_complete and real_complete else 1
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Verify TIA package, mock, and real runtimes.")
+    parser.add_argument(
+        "--mode",
+        choices=("mock", "real", "all"),
+        default="all",
+        help="Select which acceptance result controls the process exit code.",
+    )
+    args = parser.parse_args()
     reports = verify_all()
-    return print_report(reports)
+    return print_report(reports, args.mode)
 
 
 if __name__ == "__main__":

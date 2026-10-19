@@ -3,6 +3,7 @@
 #include <chrono>
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "algolib/core/algorithm_entry.h"
 #include "algolib/core/error_code.h"
@@ -12,29 +13,47 @@
 
 namespace algolib {
 
-// ---------------------------------------------------------------------------
-// 构造 / 析构
-// ---------------------------------------------------------------------------
+struct PythonHttpRunnerPool::PoolState {
+    mutable std::mutex mutex;
+    std::condition_variable cv;
+    std::vector<std::shared_ptr<IAlgorithmRunner>> all_runners;
+    std::deque<std::shared_ptr<IAlgorithmRunner>> idle_runners;
+    std::size_t borrowed_count = 0;
+    bool ready = false;
+    bool draining = false;
+    bool owner_alive = true;
+};
 
 PythonHttpRunnerPool::PythonHttpRunnerPool(std::size_t pool_size, int checkout_timeout_ms)
     : pool_size_(pool_size > 0 ? pool_size : kDefaultPoolSize),
       checkout_timeout_ms_(checkout_timeout_ms > 0 ? checkout_timeout_ms
-                                                    : kDefaultCheckoutTimeoutMs) {}
+                                                    : kDefaultCheckoutTimeoutMs),
+      state_(std::make_shared<PoolState>()) {}
 
 PythonHttpRunnerPool::~PythonHttpRunnerPool() {
-    // 中文注释：析构时先置 draining_，唤醒所有等待线程，然后清理 runner。
-    draining_.store(true, std::memory_order_release);
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        cv_.notify_all();
-        DrainLocked();
+    // 析构不等待网络 I/O；已借出的 lease 自带 state/runner 所有权，归还后安全释放。
+    const auto state = state_;
+    if (!state) {
+        return;
     }
-    // 中文注释：all_runners_ 中的 unique_ptr 在此被销毁，各 runner 的析构函数清理连接。
+    {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        state->owner_alive = false;
+        state->draining = true;
+        state->ready = false;
+        state->idle_runners.clear();
+        FinalizeDrainLocked(state.get());
+    }
+    ready_.store(false, std::memory_order_release);
+    draining_.store(true, std::memory_order_release);
+    state->cv.notify_all();
 }
 
-// ---------------------------------------------------------------------------
-// IAlgorithmRunner — Load
-// ---------------------------------------------------------------------------
+PythonHttpRunnerPool::PooledRunnerGuard::~PooledRunnerGuard() {
+    if (state && runner) {
+        PythonHttpRunnerPool::ReturnRunner(state, runner);
+    }
+}
 
 Status PythonHttpRunnerPool::Load(const AlgorithmEntry& entry) {
     if (entry.key.backend_type != BackendType::kPythonHttpService) {
@@ -43,121 +62,109 @@ Status PythonHttpRunnerPool::Load(const AlgorithmEntry& entry) {
             "PythonHttpRunnerPool can only load python_http_service entries.");
     }
 
-    std::lock_guard<std::mutex> lock(mutex_);
-
-    // 中文注释：若已经 ready，先做幂等检查（仅在 entry 相同时直接返回成功）。
-    if (ready_.load(std::memory_order_relaxed)) {
-        return Status::Ok();
+    const auto state = state_;
+    if (!state) {
+        return Status::Error(ErrorCode::kServiceUnavailable,
+                             "PythonHttpRunnerPool state is unavailable.");
     }
 
-    entry_ = entry;
-    draining_.store(false, std::memory_order_release);
+    std::lock_guard<std::mutex> lock(state->mutex);
+    if (!state->owner_alive) {
+        return Status::Error(ErrorCode::kServiceUnavailable,
+                             "PythonHttpRunnerPool has been destroyed.");
+    }
+    if (state->ready) {
+        return Status::Ok();
+    }
+    if (state->borrowed_count != 0) {
+        return Status::Error(ErrorCode::kServiceUnavailable,
+                             "PythonHttpRunnerPool is still draining previous runners.");
+    }
 
-    // 中文注释：创建 pool_size_ 个 PythonHttpRunner 并逐一调用 Load。
-    // 若任何一个失败则整体回滚（清空 all_runners_ 和 idle_runners_）。
-    all_runners_.reserve(pool_size_);
+    state->all_runners.clear();
+    state->idle_runners.clear();
+    state->all_runners.reserve(pool_size_);
+    state->draining = false;
+
+    std::vector<std::shared_ptr<IAlgorithmRunner>> new_runners;
+    new_runners.reserve(pool_size_);
     for (std::size_t i = 0; i < pool_size_; ++i) {
-        auto runner = std::make_unique<PythonHttpRunner>();
-        Status load_status = runner->Load(entry);
+        auto runner = std::make_shared<PythonHttpRunner>();
+        const Status load_status = runner->Load(entry);
         if (!load_status.ok()) {
-            all_runners_.clear();
-            idle_runners_.clear();
             return Status::Error(
                 load_status.code(),
                 "PythonHttpRunnerPool: runner[" + std::to_string(i) +
                     "] Load failed: " + load_status.message());
         }
-        idle_runners_.push_back(runner.get());
-        all_runners_.push_back(std::move(runner));
+        new_runners.push_back(std::move(runner));
     }
 
+    state->all_runners = new_runners;
+    for (const auto& runner : new_runners) {
+        state->idle_runners.push_back(runner);
+    }
+    state->ready = true;
+    state->draining = false;
+    entry_ = entry;
     ready_.store(true, std::memory_order_release);
+    draining_.store(false, std::memory_order_release);
+    state->cv.notify_all();
     return Status::Ok();
 }
-
-// ---------------------------------------------------------------------------
-// IAlgorithmRunner — Unload
-// ---------------------------------------------------------------------------
 
 Status PythonHttpRunnerPool::Unload() {
-    // 中文注释：设置 draining_，让所有阻塞在 Checkout 的线程立即收到通知并退出。
-    draining_.store(true, std::memory_order_release);
+    const auto state = state_;
+    if (!state) {
+        return Status::Ok();
+    }
+
     {
-        std::lock_guard<std::mutex> lock(mutex_);
-        cv_.notify_all();
-        DrainLocked();
+        std::lock_guard<std::mutex> lock(state->mutex);
+        // 先拒绝新租约；all_runners 仅在最后一个已借租约归还后释放。
+        state->ready = false;
+        state->draining = true;
+        state->idle_runners.clear();
+        FinalizeDrainLocked(state.get());
     }
     ready_.store(false, std::memory_order_release);
-    draining_.store(false, std::memory_order_release);
+    draining_.store(true, std::memory_order_release);
+    state->cv.notify_all();
     return Status::Ok();
 }
-
-// ---------------------------------------------------------------------------
-// IAlgorithmRunner — Run
-// ---------------------------------------------------------------------------
 
 AlgorithmResult PythonHttpRunnerPool::Run(const AlgorithmRequest& request) {
     if (!ready_.load(std::memory_order_acquire)) {
-        AlgorithmResult result;
-        result.ok           = false;
-        result.request_id   = request.request_id;
-        result.trace_id     = request.trace_id;
-        result.algorithm_id = request.algorithm_id;
-        result.version      = request.version;
-        result.backend_type = request.backend_type;
-        result.outputs      = nlohmann::json::object();
-        result.usage        = nlohmann::json::object();
-        result.error = AlgorithmError{
-            ToString(ErrorCode::kServiceUnavailable),
-            "PythonHttpRunnerPool is not ready (not loaded)."
-        };
-        return result;
+        return BuildUnavailableResult(
+            request,
+            Status::Error(ErrorCode::kServiceUnavailable,
+                          "PythonHttpRunnerPool is not ready (not loaded)."));
     }
 
     auto checkout_result = CheckoutRunner();
     if (!checkout_result.ok()) {
-        AlgorithmResult result;
-        result.ok           = false;
-        result.request_id   = request.request_id;
-        result.trace_id     = request.trace_id;
-        result.algorithm_id = request.algorithm_id;
-        result.version      = request.version;
-        result.backend_type = request.backend_type;
-        result.outputs      = nlohmann::json::object();
-        result.usage        = nlohmann::json::object();
-        result.error = AlgorithmError{
-            ToString(checkout_result.status().code()),
-            checkout_result.status().message()
-        };
-        return result;
+        return BuildUnavailableResult(request, checkout_result.status());
     }
 
-    // 中文注释：PooledRunnerGuard 析构时自动归还 runner，无论 Run 成功与否。
     auto guard = std::move(checkout_result.value());
     return guard.runner->Run(request);
 }
-
-// ---------------------------------------------------------------------------
-// IAlgorithmRunner — HealthCheck
-// ---------------------------------------------------------------------------
 
 HealthStatus PythonHttpRunnerPool::HealthCheck() const {
     if (!ready_.load(std::memory_order_acquire)) {
         return HealthStatus{false, "unloaded", "PythonHttpRunnerPool has not been loaded."};
     }
     if (draining_.load(std::memory_order_acquire)) {
-        return HealthStatus{false, "draining", "PythonHttpRunnerPool is draining (Unload in progress)."};
+        return HealthStatus{false, "draining", "PythonHttpRunnerPool is draining."};
     }
 
-    // 中文注释：从池中借出一个 runner 做健康检查后归还。
-    // 若池全部繁忙且超时，返回 degraded（服务仍可能在处理请求，只是无空闲 runner 可检查）。
     auto checkout_result = const_cast<PythonHttpRunnerPool*>(this)->CheckoutRunner();
     if (!checkout_result.ok()) {
         return HealthStatus{
             false,
             "degraded",
             "All runners are busy during health check: " +
-                checkout_result.status().message()
+                checkout_result.status().message(),
         };
     }
 
@@ -165,37 +172,35 @@ HealthStatus PythonHttpRunnerPool::HealthCheck() const {
     return guard.runner->HealthCheck();
 }
 
-// ---------------------------------------------------------------------------
-// 池状态查询
-// ---------------------------------------------------------------------------
-
 std::size_t PythonHttpRunnerPool::idle_count() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return idle_runners_.size();
+    const auto state = state_;
+    if (!state) {
+        return 0;
+    }
+    std::lock_guard<std::mutex> lock(state->mutex);
+    return state->idle_runners.size();
 }
 
-// ---------------------------------------------------------------------------
-// 内部实现
-// ---------------------------------------------------------------------------
-
 Result<PythonHttpRunnerPool::PooledRunnerGuard> PythonHttpRunnerPool::CheckoutRunner() {
-    std::unique_lock<std::mutex> lock(mutex_);
-
-    const auto deadline = std::chrono::steady_clock::now() +
-                          std::chrono::milliseconds(checkout_timeout_ms_);
-
-    // 中文注释：等待直到有空闲 runner、池正在析构，或超时。
-    const bool acquired = cv_.wait_until(lock, deadline, [this]() {
-        return !idle_runners_.empty() || draining_.load(std::memory_order_relaxed);
-    });
-
-    if (draining_.load(std::memory_order_relaxed)) {
-        return Status::Error(
-            ErrorCode::kServiceUnavailable,
-            "PythonHttpRunnerPool is draining; checkout rejected.");
+    const auto state = state_;
+    if (!state) {
+        return Status::Error(ErrorCode::kServiceUnavailable,
+                             "PythonHttpRunnerPool state is unavailable.");
     }
 
-    if (!acquired || idle_runners_.empty()) {
+    std::unique_lock<std::mutex> lock(state->mutex);
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(checkout_timeout_ms_);
+    const bool acquired = state->cv.wait_until(lock, deadline, [&state]() {
+        return !state->idle_runners.empty() || !state->ready || state->draining ||
+               !state->owner_alive;
+    });
+
+    if (!state->owner_alive || state->draining || !state->ready) {
+        return Status::Error(ErrorCode::kServiceUnavailable,
+                             "PythonHttpRunnerPool is draining; checkout rejected.");
+    }
+    if (!acquired || state->idle_runners.empty()) {
         return Status::Error(
             ErrorCode::kServiceUnavailable,
             "PythonHttpRunnerPool: all " + std::to_string(pool_size_) +
@@ -203,29 +208,53 @@ Result<PythonHttpRunnerPool::PooledRunnerGuard> PythonHttpRunnerPool::CheckoutRu
                 std::to_string(checkout_timeout_ms_) + " ms.");
     }
 
-    // 中文注释：LIFO — 从队首取出（最近归还的 runner，连接热度最高）。
-    IAlgorithmRunner* runner = idle_runners_.front();
-    idle_runners_.pop_front();
-
-    return PooledRunnerGuard{this, runner};
+    auto runner = state->idle_runners.front();
+    state->idle_runners.pop_front();
+    ++state->borrowed_count;
+    return PooledRunnerGuard{state, std::move(runner)};
 }
 
-void PythonHttpRunnerPool::ReturnRunner(IAlgorithmRunner* runner) {
-    if (!runner) return;
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        // 中文注释：归还时推回队首（LIFO）。
-        idle_runners_.push_front(runner);
+void PythonHttpRunnerPool::ReturnRunner(const std::shared_ptr<PoolState>& state,
+                                        const std::shared_ptr<IAlgorithmRunner>& runner) {
+    if (!state || !runner) {
+        return;
     }
-    // 中文注释：通知一个等待线程，有 runner 可用了。
-    cv_.notify_one();
+
+    {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        if (state->borrowed_count > 0) {
+            --state->borrowed_count;
+        }
+        if (state->owner_alive && state->ready && !state->draining) {
+            // LIFO：优先复用最近使用的 runner。
+            state->idle_runners.push_front(runner);
+        }
+        FinalizeDrainLocked(state.get());
+    }
+    state->cv.notify_all();
 }
 
-void PythonHttpRunnerPool::DrainLocked() {
-    // 中文注释：此函数在持有 mutex_ 的情况下调用。
-    // 清空空闲队列，然后清空 all_runners_（unique_ptr 析构 → runner 析构 → 连接关闭）。
-    idle_runners_.clear();
-    all_runners_.clear();
+void PythonHttpRunnerPool::FinalizeDrainLocked(PoolState* state) {
+    if (!state || !state->draining || state->borrowed_count != 0) {
+        return;
+    }
+    state->idle_runners.clear();
+    state->all_runners.clear();
+}
+
+AlgorithmResult PythonHttpRunnerPool::BuildUnavailableResult(
+    const AlgorithmRequest& request, const Status& status) const {
+    AlgorithmResult result;
+    result.ok = false;
+    result.request_id = request.request_id;
+    result.trace_id = request.trace_id;
+    result.algorithm_id = request.algorithm_id;
+    result.version = request.version;
+    result.backend_type = request.backend_type;
+    result.outputs = nlohmann::json::object();
+    result.usage = nlohmann::json::object();
+    result.error = AlgorithmError{ToString(status.code()), status.message()};
+    return result;
 }
 
 }  // namespace algolib

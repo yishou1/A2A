@@ -62,18 +62,13 @@ resource_requirements:
   disk_mb: 4096
 
 model_profile:
-  # RT-DETR-L (official): ResNet-50 backbone 25.6M + transformer decoder 6.4M = 32M
-  # ODConv Refiner (from odconv.py, embed_dim=64):
-  #   Conv2d(3->32)+BN + ODConvd(32->64)+BN + Linear(65->64)+Linear(64->1) = ~24K
-  # Dominant cost: RT-DETR-L 32M params / 91.9 GFLOPs (official paper table)
-  parameter_count: 32024000
-  parameter_count_text: 32.0M (RT-DETR-L 32M + ODConv refiner 24K)
-  flops: 91900000000
-  flops_text: 91.9 GFLOPs @ 640x640 (RT-DETR-L official); ODConv adds ~5 MFLOPs per crop
+  parameter_count: 32970476
+  parameter_count_text: "32,970,476 FP32 parameters measured from local Ultralytics RT-DETR-L checkpoint rtdetr-l.pt (SHA256 6de60b10d4bc566f00cda0f5b4d64afe4b66d48dc9695d2171effb7859d8e73f); a future trained ODConv refiner would add 24,361 parameters, for 32,994,837 total pipeline parameters"
+  flops: 109567162064
+  flops_text: "PyTorch-profiler lower-bound RT-DETR-L base FLOPs at batch=1: 49,105,653,803 for [1,3,416,416], 109,567,162,064 for [1,3,640,640] (this field), and 425,411,332,064 for [1,3,1280,1280]. With a trained ODConv refiner, total pipeline FLOPs are base plus valid_detection_count times 25,298,179 / 44,967,171 / 70,255,875 for crop sizes 96 / 128 / 160. Values exclude preprocessing and NMS; the 416 RT-DETR-L value is a size reference only because small profile selects rtdetr-n, while current medium/large trained checkpoints are absent"
   flops_input_shape: [1, 3, 640, 640]
-  model_size_mb: 122
+  model_size_mb: 64
   precision: fp32
-
 safety:
   risk_level: medium
   requires_human_review: true

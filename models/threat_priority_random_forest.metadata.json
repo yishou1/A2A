@@ -1,0 +1,83 @@
+{
+  "model_id": "threat_priority_random_forest",
+  "model_version": "1.0.0",
+  "model_family": "sklearn_random_forest_classifier",
+  "artifact_path": "models/threat_priority_random_forest.joblib",
+  "artifact_sha256": "2c9219eec2fd48cbd9cd95258069280f60723d9595fb09f423789fee73ec4ea1",
+  "training_script": "scripts/train_threat_priority_random_forest.py",
+  "training_script_sha256": "a7c081b8bb422b259ba34ad85ebb935f8f36597ca8999b007ee82e0ad8b9b2e4",
+  "dataset": {
+    "path": "data/threat_priority/reference_training_data.csv",
+    "sha256": "36dcf71db007b43ff34a64c84d44413a6df5909cc3dc4e1c9700fc75d87af4ce",
+    "source": "deterministic_repository_reference_generator",
+    "seed": 20260816,
+    "row_count": 360,
+    "class_counts": {
+      "low": 85,
+      "medium": 205,
+      "high": 70
+    },
+    "limitation": "Reference-policy scenarios only; not an operational battlefield benchmark."
+  },
+  "features": [
+    "threat_score",
+    "distance_km",
+    "speed_mps",
+    "asset_value",
+    "intel_confidence"
+  ],
+  "classes": [
+    "low",
+    "medium",
+    "high"
+  ],
+  "hyperparameters": {
+    "n_estimators": 160,
+    "max_depth": 8,
+    "min_samples_leaf": 2,
+    "class_weight": "balanced",
+    "random_state": 20260817,
+    "n_jobs": 1
+  },
+  "evaluation": {
+    "method": "stratified_holdout",
+    "test_ratio": 0.25,
+    "train_count": 270,
+    "test_count": 90,
+    "accuracy": 0.888889,
+    "macro_f1": 0.873302,
+    "confusion_matrix_labels": [
+      "low",
+      "medium",
+      "high"
+    ],
+    "confusion_matrix": [
+      [
+        18,
+        3,
+        0
+      ],
+      [
+        1,
+        49,
+        1
+      ],
+      [
+        0,
+        5,
+        13
+      ]
+    ]
+  },
+  "feature_importances": {
+    "threat_score": 0.54977791,
+    "distance_km": 0.20093483,
+    "speed_mps": 0.07974524,
+    "asset_value": 0.12002499,
+    "intel_confidence": 0.04951703
+  },
+  "runtime_versions": {
+    "scikit_learn": "1.7.2",
+    "joblib": "1.5.3"
+  }
+}

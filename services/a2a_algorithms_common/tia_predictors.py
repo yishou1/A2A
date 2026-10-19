@@ -1,6 +1,9 @@
 """TIA 战术情报 Agent 子算法 — 算法库 python_http_service 推理入口。"""
 from __future__ import annotations
 
+import hashlib
+import json
+import math
 import os
 import sys
 from functools import lru_cache
@@ -30,8 +33,11 @@ def _load_config() -> dict[str, Any]:
         try:
             import yaml
 
+            from agent.config_profiles import apply_compute_profile
+
             with open(cfg_path, encoding="utf-8") as handle:
                 raw = yaml.safe_load(handle) or {}
+            raw = apply_compute_profile(raw)
         except Exception:
             return {"use_mock": _use_mock()}
         agent_cfg = {
@@ -85,6 +91,158 @@ def _checkpoint_exists(name: str) -> bool:
     return path.is_file()
 
 
+def _configured_checkpoint(config_key: str, default_name: str) -> Path:
+    configured = str(_config().get(config_key) or default_name)
+    path = Path(configured)
+    candidates = [path, ROOT / path, ROOT / "models" / "checkpoints" / path.name]
+    return next((candidate.resolve() for candidate in candidates if candidate.is_file()), candidates[-1].resolve())
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _supcon_artifact_metadata() -> dict:
+    checkpoint = _configured_checkpoint("supcon_checkpoint", "supcon_meta_s.safetensors")
+    metadata_path = checkpoint.with_suffix(".metadata.json")
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    if _sha256(checkpoint) != metadata.get("artifact_sha256"):
+        raise ValueError("SupCon checkpoint SHA256 mismatch")
+    expected_dim = int(_config().get("embed_dim", 1024))
+    if int(metadata.get("architecture", {}).get("input_dim", -1)) != expected_dim:
+        raise ValueError("SupCon checkpoint input dimension does not match compute profile")
+    return metadata
+
+
+def _supcon_artifact_loaded() -> bool:
+    try:
+        _supcon_artifact_metadata()
+        return True
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return False
+
+
+def _supcon_artifact_identity() -> dict:
+    metadata = _supcon_artifact_metadata()
+    return {
+        "model_id": metadata["model_id"],
+        "model_version": metadata["model_version"],
+        "model_family": metadata["model_family"],
+        "compute_profile": metadata["compute_profile"],
+        "artifact_sha256": metadata["artifact_sha256"],
+    }
+
+
+def _marl_ppo_artifact_metadata() -> dict:
+    checkpoint = _configured_checkpoint(
+        "marl_ppo_checkpoint", "marl_ppo_scheduler_s.safetensors"
+    )
+    metadata_path = checkpoint.with_suffix(".metadata.json")
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    if _sha256(checkpoint) != metadata.get("artifact_sha256"):
+        raise ValueError("MARL-PPO checkpoint SHA256 mismatch")
+    from agent.training.battlefield_scheduling_env import BattlefieldSchedulingEnv
+
+    env = BattlefieldSchedulingEnv()
+    architecture = metadata.get("architecture", {})
+    expected = (env.obs_dim, env.n_actions, env.n_agents)
+    actual = (
+        int(architecture.get("observation_dimension", -1)),
+        int(architecture.get("action_count", -1)),
+        int(architecture.get("maximum_agent_count", -1)),
+    )
+    if actual != expected:
+        raise ValueError("MARL-PPO checkpoint architecture does not match scheduling environment")
+    return metadata
+
+
+def _marl_ppo_artifact_loaded() -> bool:
+    try:
+        _marl_ppo_artifact_metadata()
+        return True
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return False
+
+
+def _marl_ppo_artifact_identity() -> dict:
+    metadata = _marl_ppo_artifact_metadata()
+    return {
+        "model_id": metadata["model_id"],
+        "model_version": metadata["model_version"],
+        "model_family": metadata["model_family"],
+        "compute_profile": metadata["compute_profile"],
+        "artifact_sha256": metadata["artifact_sha256"],
+    }
+
+
+def _edl_artifact_metadata() -> dict:
+    checkpoint = _configured_checkpoint("edl_checkpoint", "edl_head_s.safetensors")
+    metadata_path = checkpoint.with_suffix(".metadata.json")
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    if _sha256(checkpoint) != metadata.get("artifact_sha256"):
+        raise ValueError("EDL checkpoint SHA256 mismatch")
+    architecture = metadata.get("architecture", {})
+    if (
+        int(architecture.get("input_dimension", -1)),
+        int(architecture.get("class_count", -1)),
+    ) != (6, 2):
+        raise ValueError("EDL checkpoint architecture does not match verifier")
+    return metadata
+
+
+def _edl_artifact_loaded() -> bool:
+    try:
+        _edl_artifact_metadata()
+        return True
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return False
+
+
+def _edl_artifact_identity() -> dict:
+    metadata = _edl_artifact_metadata()
+    return {
+        "model_id": metadata["model_id"],
+        "model_version": metadata["model_version"],
+        "model_family": metadata["model_family"],
+        "compute_profile": metadata["compute_profile"],
+        "artifact_sha256": metadata["artifact_sha256"],
+    }
+
+
+def _mamba_artifact_metadata() -> dict:
+    checkpoint = _configured_checkpoint(
+        "mamba_checkpoint", "mamba_fusion_s.safetensors"
+    )
+    metadata_path = checkpoint.with_suffix(".metadata.json")
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    if _sha256(checkpoint) != metadata.get("artifact_sha256"):
+        raise ValueError("multimodal fusion checkpoint SHA256 mismatch")
+    expected_dimension = int(_config().get("embed_dim", 1024))
+    architecture = metadata.get("architecture", {})
+    if int(architecture.get("embedding_dimension", -1)) != expected_dimension:
+        raise ValueError("multimodal fusion checkpoint dimension does not match compute profile")
+    return metadata
+
+
+def _mamba_artifact_loaded() -> bool:
+    try:
+        _mamba_artifact_metadata()
+        return True
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return False
+
+
+def _mamba_artifact_identity() -> dict:
+    metadata = _mamba_artifact_metadata()
+    return {
+        "model_id": metadata["model_id"],
+        "model_version": metadata["model_version"],
+        "model_family": metadata["model_family"],
+        "compute_profile": metadata["compute_profile"],
+        "artifact_sha256": metadata["artifact_sha256"],
+    }
+
+
 @lru_cache(maxsize=32)
 def _backend(module_path: str, class_name: str):
     import importlib
@@ -102,14 +260,19 @@ def tia_model_loaded(algorithm_id: str) -> bool:
     """Health check: mock mode always ready; real mode checks key weights."""
     if _use_mock():
         return True
+    if algorithm_id == "supcon_meta_classifier":
+        return _supcon_artifact_loaded()
+    if algorithm_id == "marl_ppo_task_scheduler":
+        return _marl_ppo_artifact_loaded()
+    if algorithm_id == "edl_evidential_verifier":
+        return _edl_artifact_loaded()
+    if algorithm_id == "multimodal_mamba_fusion":
+        return _mamba_artifact_loaded()
     checks: dict[str, list[str]] = {
         "battlefield_rtdetr_detector": ["battlefield_rtdetr.pt", "odconv_refiner.pt"],
         "siamese_mask2former_damage": [],
-        "edl_evidential_verifier": ["edl_head.pt"],
         "motr_neural_kalman_tracker": ["motr_tracker.pt", "motr_tracker_battlefield.pt"],
-        "marl_ppo_task_scheduler": ["marl_ppo_scheduler.pt"],
         "imagebind_multimodal_encoder": [],
-        "multimodal_mamba_fusion": ["mamba_fusion.pt"],
         "supcon_meta_classifier": ["supcon_meta.pt"],
         "synapse_rag_retriever": [],
         "knowledge_semantic_comm": [],
@@ -122,7 +285,7 @@ def tia_model_loaded(algorithm_id: str) -> bool:
 
 
 def predict_marl_ppo_task_scheduler(inputs: dict, params: dict) -> dict:
-    return _run_backend(
+    output = _run_backend(
         "agent.skills.perception.marl_ppo_scheduler",
         "MARLPPOScheduler",
         {
@@ -132,15 +295,39 @@ def predict_marl_ppo_task_scheduler(inputs: dict, params: dict) -> dict:
             "frames": inputs.get("frames") or [],
         },
     )
+    if not _use_mock():
+        output["model"] = _marl_ppo_artifact_identity()
+    return output
 
 
 def predict_edl_evidential_verifier(inputs: dict, params: dict) -> dict:
-    verified = _run_backend(
+    assessments = _run_backend(
         "agent.skills.perception.edl",
         "EDLEvidentialVerifier",
-        {"detections": inputs.get("detections") or []},
+        {
+            "detections": inputs.get("detections") or [],
+            "return_all_assessments": True,
+        },
     )
-    return {"verified_detections": verified, "count": len(verified)}
+    verified = [item for item in assessments if item.get("decision") == "verified"]
+    rejected = [item for item in assessments if item.get("decision") == "rejected"]
+    review_queue = [item for item in assessments if item.get("review_required") is True]
+    output = {
+        "assessments": assessments,
+        "verified_detections": verified,
+        "rejected_detections": rejected,
+        "review_queue": review_queue,
+        "count": len(verified),
+        "summary": {
+            "total": len(assessments),
+            "verified": len(verified),
+            "rejected": len(rejected),
+            "manual_review": len(review_queue),
+        },
+    }
+    if not _use_mock():
+        output["model"] = _edl_artifact_identity()
+    return output
 
 
 def predict_marl_dynamic_router(inputs: dict, params: dict) -> dict:
@@ -164,7 +351,10 @@ def predict_supcon_meta_classifier(inputs: dict, params: dict) -> dict:
             "support_shots": inputs.get("support_shots") or [],
         },
     )
-    return {"classifications": classifications, "count": len(classifications)}
+    output = {"classifications": classifications, "count": len(classifications)}
+    if not _use_mock():
+        output["model"] = _supcon_artifact_identity()
+    return output
 
 
 def predict_battlefield_rtdetr_detector(inputs: dict, params: dict) -> dict:
@@ -214,14 +404,36 @@ def predict_imagebind_multimodal_encoder(inputs: dict, params: dict) -> dict:
 
 
 def predict_multimodal_mamba_fusion(inputs: dict, params: dict) -> dict:
-    return _run_backend(
+    embeddings = inputs.get("embeddings") or {}
+    if not isinstance(embeddings, dict) or not embeddings:
+        raise ValueError("embeddings must be a non-empty object")
+    for key, value in embeddings.items():
+        if not isinstance(key, str) or not key:
+            raise ValueError("embedding keys must be non-empty strings")
+        if not isinstance(value, list) or not value:
+            raise ValueError(f"embedding '{key}' must be a non-empty numeric array")
+        if any(
+            isinstance(item, bool)
+            or not isinstance(item, (int, float))
+            or not math.isfinite(float(item))
+            for item in value
+        ):
+            raise ValueError(f"embedding '{key}' must contain only finite numbers")
+    output = _run_backend(
         "agent.skills.cognition.multimodal_mamba",
         "MultimodalMambaFusion",
         {
-            "embeddings": inputs.get("embeddings") or {},
+            "embeddings": embeddings,
             "tracks": inputs.get("tracks") or [],
         },
     )
+    output["modality_count"] = len(embeddings)
+    output["input_embedding_dimensions"] = {
+        key: len(value) for key, value in embeddings.items()
+    }
+    if not _use_mock():
+        output["model"] = _mamba_artifact_identity()
+    return output
 
 
 def predict_synapse_rag_retriever(inputs: dict, params: dict) -> dict:

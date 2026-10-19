@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -19,10 +21,12 @@
 #include "algolib/core/error_code.h"
 #include "algolib/core/status.h"
 #include "algolib/io/json_utils.h"
+#include "algolib/io/yaml_utils.h"
 #include "algolib/registry/algorithm_registry.h"
 #include "algolib/runtime/algorithm_request.h"
 #include "algolib/runtime/algorithm_result.h"
 #include "algolib/runtime/execution_coordinator.h"
+#include "algolib/runtime/execution_logger.h"
 #include "algolib/runtime/model_loader.h"
 #include "algolib/runtime/runtime_factory.h"
 #include "algolib/runtime/runtime_runner_cache.h"
@@ -38,6 +42,31 @@ HttpServerConfig NormalizeConfig(HttpServerConfig config) {
     }
     if (config.host.empty()) {
         config.host = "127.0.0.1";
+    }
+    if (config.execution_log_path.empty()) {
+        if (const char* env_value = std::getenv("ALGOLIB_EXECUTION_LOG_PATH");
+            env_value != nullptr && *env_value != '\0') {
+            config.execution_log_path = std::filesystem::path(env_value);
+        } else {
+            std::filesystem::path parent = config.registry_path.parent_path();
+            if (parent.empty()) {
+                parent = std::filesystem::current_path();
+            }
+            config.execution_log_path = parent / "execution_audit.jsonl";
+        }
+    }
+    if (config.operational_function_catalog_path.empty()) {
+        if (const char* env_value = std::getenv("ALGOLIB_FUNCTION_CATALOG_PATH");
+            env_value != nullptr && *env_value != '\0') {
+            config.operational_function_catalog_path = std::filesystem::path(env_value);
+        } else {
+            const auto local_path = std::filesystem::current_path() / "config" /
+                                    "operational_function_catalog.yaml";
+            const auto parent_path = std::filesystem::current_path().parent_path() /
+                                     "config" / "operational_function_catalog.yaml";
+            config.operational_function_catalog_path =
+                std::filesystem::exists(local_path) ? local_path : parent_path;
+        }
     }
     if (config.port <= 0) {
         config.port = 8088;
@@ -240,6 +269,19 @@ AlgorithmQueryFilter ParseQueryFilter(const httplib::Request& request) {
         }
     }
 
+    if (request.has_param("function_id")) {
+        const std::string v = request.get_param_value("function_id");
+        if (!v.empty()) {
+            f.function_id = v;
+        }
+    }
+    if (request.has_param("function_code")) {
+        const std::string v = request.get_param_value("function_code");
+        if (!v.empty()) {
+            f.function_code = v;
+        }
+    }
+
     // node (node_id)
     if (request.has_param("node")) {
         const std::string v = request.get_param_value("node");
@@ -301,6 +343,7 @@ class AlgolibHttpServer::Impl {
 public:
     explicit Impl(HttpServerConfig config)
         : config_(NormalizeConfig(std::move(config))), registry_(config_.registry_path) {
+        ConfigureServerConcurrency();
         RegisterRoutes();
     }
 
@@ -346,8 +389,19 @@ public:
     }
 
 private:
+    void ConfigureServerConcurrency() {
+        if (config_.worker_threads == 0) {
+            return;
+        }
+        const std::size_t worker_threads = config_.worker_threads;
+        const std::size_t max_queued_requests = config_.max_queued_requests;
+        server_.new_task_queue = [worker_threads, max_queued_requests]() {
+            return new httplib::ThreadPool(worker_threads, max_queued_requests);
+        };
+    }
+
     Status ReloadRegistry() {
-        std::lock_guard<std::mutex> lock(mutex_);
+        // Registry 内部以短暂写锁替换快照；启动/显式重载无需阻塞在线推理。
         return registry_.Reload();
     }
 
@@ -362,13 +416,18 @@ private:
                 {"status", "ready"},
                 {"registry_path", config_.registry_path.generic_string()},
                 {"execution_log_path", config_.execution_log_path.generic_string()},
+                {"operational_function_catalog_path",
+                 config_.operational_function_catalog_path.generic_string()},
                 {"runner_cache_size", runner_cache_.Size()},
+                {"worker_threads", config_.worker_threads},
+                {"max_queued_requests", config_.max_queued_requests},
             };
             WriteJson(&response, 200, payload);
         });
 
         server_.Post("/reload", [this](const httplib::Request&, httplib::Response& response) {
-            std::lock_guard<std::mutex> lock(mutex_);
+            // 仅管理写操作彼此串行；/run 使用 Registry/Runner 的独立并发控制。
+            std::lock_guard<std::mutex> lock(admin_mutex_);
             const Status status = ReloadRegistryLocked();
             if (!status.ok()) {
                 WriteJson(&response, HttpStatusForStatus(status), ErrorPayload(status));
@@ -391,14 +450,7 @@ private:
         //   max_cpu_cores (int)    筛选 min_cpu_cores <= max_cpu_cores 的模型
         server_.Get("/algorithms", [this](const httplib::Request& request,
                                            httplib::Response& response) {
-            std::lock_guard<std::mutex> lock(mutex_);
-            const Status reload_status = ReloadRegistryLocked();
-            if (!reload_status.ok()) {
-                WriteJson(&response, HttpStatusForStatus(reload_status),
-                          ErrorPayload(reload_status));
-                return;
-            }
-
+            // 查询直接读取 Registry 的共享快照，不再为每个请求读取 registry.json。
             const AlgorithmQueryFilter filter = ParseQueryFilter(request);
 
             json algorithms = json::array();
@@ -420,6 +472,12 @@ private:
             }
             if (filter.capability.has_value()) {
                 applied_filter["capability"] = filter.capability.value();
+            }
+            if (filter.function_id.has_value()) {
+                applied_filter["function_id"] = filter.function_id.value();
+            }
+            if (filter.function_code.has_value()) {
+                applied_filter["function_code"] = filter.function_code.value();
             }
             if (filter.node_id.has_value()) {
                 applied_filter["node"] = filter.node_id.value();
@@ -474,14 +532,6 @@ private:
                     return;
                 }
 
-                std::lock_guard<std::mutex> lock(mutex_);
-                const Status reload_status = ReloadRegistryLocked();
-                if (!reload_status.ok()) {
-                    WriteJson(&response, HttpStatusForStatus(reload_status),
-                              ErrorPayload(reload_status));
-                    return;
-                }
-
                 auto entry_result = registry_.Get(key_result.value());
                 if (!entry_result.ok()) {
                     WriteJson(&response, HttpStatusForStatus(entry_result.status()),
@@ -514,27 +564,13 @@ private:
                     return;
                 }
 
-                // 中文注释：以二进制流形式发送文件内容。
-                std::ifstream file_stream(target_file,
-                                          std::ios::in | std::ios::binary);
-                if (!file_stream.is_open()) {
-                    const Status status = Status::Error(
-                        ErrorCode::kIoError,
-                        "Cannot open file for reading: " + relative_path_str);
-                    WriteJson(&response, 500, ErrorPayload(status));
-                    return;
-                }
-                std::string file_content(
-                    (std::istreambuf_iterator<char>(file_stream)),
-                    std::istreambuf_iterator<char>());
-
+                // 让 httplib 延迟以文件 Provider 发送，避免模型全量读入内存。
                 response.status = 200;
                 response.set_header("Cache-Control", "no-store");
                 response.set_header("Content-Disposition",
                                     "attachment; filename=\"" +
                                         target_file.filename().string() + "\"");
-                response.set_content(file_content,
-                                     "application/octet-stream");
+                response.set_file_content(target_file.string(), "application/octet-stream");
             });
 
         server_.Get(R"(/algorithms/([^/]+)/([^/]+)/([^/]+))",
@@ -543,14 +579,6 @@ private:
                         if (!key_result.ok()) {
                             WriteJson(&response, HttpStatusForStatus(key_result.status()),
                                       ErrorPayload(key_result.status()));
-                            return;
-                        }
-
-                        std::lock_guard<std::mutex> lock(mutex_);
-                        const Status reload_status = ReloadRegistryLocked();
-                        if (!reload_status.ok()) {
-                            WriteJson(&response, HttpStatusForStatus(reload_status),
-                                      ErrorPayload(reload_status));
                             return;
                         }
 
@@ -584,7 +612,7 @@ private:
                              return;
                          }
 
-                         std::lock_guard<std::mutex> lock(mutex_);
+                         std::lock_guard<std::mutex> lock(admin_mutex_);
                          const Status reload_status = ReloadRegistryLocked();
                          if (!reload_status.ok()) {
                              WriteJson(&response, HttpStatusForStatus(reload_status),
@@ -622,7 +650,7 @@ private:
                                return;
                            }
 
-                           std::lock_guard<std::mutex> lock(mutex_);
+                           std::lock_guard<std::mutex> lock(admin_mutex_);
                            const Status reload_status = ReloadRegistryLocked();
                            if (!reload_status.ok()) {
                                WriteJson(&response, HttpStatusForStatus(reload_status),
@@ -666,7 +694,7 @@ private:
                              return;
                          }
 
-                         std::lock_guard<std::mutex> lock(mutex_);
+                         std::lock_guard<std::mutex> lock(admin_mutex_);
                          const Status reload_status = ReloadRegistryLocked();
                          if (!reload_status.ok()) {
                              WriteJson(&response, HttpStatusForStatus(reload_status),
@@ -704,7 +732,7 @@ private:
                 }
                 const std::string deploy_id = request.matches[4].str();
 
-                std::lock_guard<std::mutex> lock(mutex_);
+                std::lock_guard<std::mutex> lock(admin_mutex_);
                 const Status reload_status = ReloadRegistryLocked();
                 if (!reload_status.ok()) {
                     WriteJson(&response, HttpStatusForStatus(reload_status),
@@ -768,7 +796,7 @@ private:
                 const std::string status_message = body.value("status_message", std::string());
                 const std::string updated_at = body.value("updated_at", std::string());
 
-                std::lock_guard<std::mutex> lock(mutex_);
+                std::lock_guard<std::mutex> lock(admin_mutex_);
                 const Status reload_status = ReloadRegistryLocked();
                 if (!reload_status.ok()) {
                     WriteJson(&response, HttpStatusForStatus(reload_status),
@@ -803,18 +831,8 @@ private:
                 return;
             }
 
-            // 中文注释：registry 访问和 runner 分派均在 mutex 保护下进行，保证线程安全。
-            // PythonHttpRunnerPool 内部的 Checkout/Return 使用自己的独立锁，不会与此 mutex 嵌套。
-            // 注意：持锁期间 coordinator.Run() 可能阻塞（Python 网络 I/O），属于预期行为；
-            // 真正的并发推理扩展点在 Runner 层（连接池），而非 Server 层的 mutex 粒度。
-            std::lock_guard<std::mutex> lock(mutex_);
-            const Status reload_status = ReloadRegistryLocked();
-            if (!reload_status.ok()) {
-                WriteJson(&response, HttpStatusForStatus(reload_status),
-                          ErrorPayload(reload_status));
-                return;
-            }
-
+            // 在线请求不获取管理锁：Registry 返回值快照，Runner Cache 对同 key 使用
+            // single-flight，Python RunnerPool 在 Run 内以容量上限并发执行。
             ExecutionCoordinator coordinator(registry_, config_.execution_log_path, &runner_cache_);
             const AlgorithmResult run_result = coordinator.Run(request_result.value());
             const json payload = ToJson(run_result);
@@ -826,6 +844,51 @@ private:
                                                   : "UNKNOWN_ERROR");
             WriteJson(&response, status_code, payload);
         });
+
+        server_.Get("/operational-functions",
+                    [this](const httplib::Request&, httplib::Response& response) {
+            auto catalog_result =
+                YamlUtils::LoadYamlFile(config_.operational_function_catalog_path);
+            if (!catalog_result.ok()) {
+                WriteJson(&response, HttpStatusForStatus(catalog_result.status()),
+                          ErrorPayload(catalog_result.status()));
+                return;
+            }
+            const json catalog = YamlUtils::YamlNodeToJson(catalog_result.value());
+            const json functions = catalog.value("functions", json::array());
+            WriteJson(&response, 200,
+                      json{{"ok", true},
+                           {"schema_version",
+                            catalog.value("schema_version", json("1.0"))},
+                           {"count", functions.size()},
+                           {"functions", functions}});
+        });
+
+        server_.Get(
+            R"(/traces/([^/]+)/function-executions)",
+            [this](const httplib::Request& request, httplib::Response& response) {
+                if (request.matches.size() < 2 || request.matches[1].str().empty()) {
+                    const Status status = InvalidArgument("URL must contain trace_id.");
+                    WriteJson(&response, 400, ErrorPayload(status));
+                    return;
+                }
+
+                const std::string trace_id = request.matches[1].str();
+                ExecutionLogger logger(config_.execution_log_path);
+                auto events_result = logger.ReadFunctionExecutions(trace_id);
+                if (!events_result.ok()) {
+                    WriteJson(&response, HttpStatusForStatus(events_result.status()),
+                              ErrorPayload(events_result.status()));
+                    return;
+                }
+
+                const auto& events = events_result.value();
+                WriteJson(&response, 200,
+                          json{{"ok", true},
+                               {"trace_id", trace_id},
+                               {"count", events.size()},
+                               {"function_executions", events}});
+            });
 
         // 中文注释：POST /load — 显式预加载模型到内存/显存（预热 runner 缓存）。
         // Body 字段（必填）：algorithm_id, version, backend_type
@@ -882,13 +945,8 @@ private:
                 }
             }
 
-            std::lock_guard<std::mutex> lock(mutex_);
-            const Status reload_status = ReloadRegistryLocked();
-            if (!reload_status.ok()) {
-                WriteJson(&response, HttpStatusForStatus(reload_status),
-                          ErrorPayload(reload_status));
-                return;
-            }
+            // /load 可能下载模型包或初始化大模型，不能占用管理锁；Registry / Cache
+            // 自身保证并发安全，同 key 初始化由 RunnerCache 合并。
 
             // 中文注释：默认 factory 使用全局默认 pool_size；
             // 若请求中指定了 pool_size，ModelLoader 内部会临时覆盖 factory 参数。
@@ -942,14 +1000,7 @@ private:
                 return;
             }
 
-            std::lock_guard<std::mutex> lock(mutex_);
-            const Status reload_status = ReloadRegistryLocked();
-            if (!reload_status.ok()) {
-                WriteJson(&response, HttpStatusForStatus(reload_status),
-                          ErrorPayload(reload_status));
-                return;
-            }
-
+            // Unload 自身进入 runner 的 draining 状态；不阻塞其他算法的在线推理。
             const RuntimeFactory factory;
             ModelLoader loader(registry_, runner_cache_, factory);
             const ModelLoadRequest unload_req{
@@ -994,7 +1045,7 @@ private:
                 return;
             }
 
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::lock_guard<std::mutex> lock(admin_mutex_);
             const Status reload_status = ReloadRegistryLocked();
             if (!reload_status.ok()) {
                 WriteJson(&response, HttpStatusForStatus(reload_status),
@@ -1017,7 +1068,8 @@ private:
     AlgorithmRegistry registry_;
     RuntimeRunnerCache runner_cache_;
     httplib::Server server_;
-    mutable std::mutex mutex_;
+    // 只保护写型管理操作；在线推理依赖 Registry/Cache/Runner 各自的并发协议。
+    mutable std::mutex admin_mutex_;
     Status startup_error_ = Status::Ok();
 };
 

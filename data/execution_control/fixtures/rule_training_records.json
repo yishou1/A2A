@@ -88,5 +88,23 @@
       "priority": 0.4,
       "coordination_group": "GROUP-C"
     }
+  },
+  {
+    "items": ["phase=assault", "threat=medium", "intel=fair", "decision=replan"],
+    "consequent": {
+      "action": "hold_and_recon",
+      "executor_role": "assault",
+      "priority": 0.42,
+      "coordination_group": "GROUP-C"
+    }
+  },
+  {
+    "items": ["phase=assault", "threat=low", "intel=good", "decision=replan"],
+    "consequent": {
+      "action": "hold_and_recon",
+      "executor_role": "assault",
+      "priority": 0.38,
+      "coordination_group": "GROUP-C"
+    }
   }
 ]

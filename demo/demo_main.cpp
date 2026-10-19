@@ -959,7 +959,7 @@ void DemoPythonPool(const fs::path& src_root, const fs::path& demo_dir, json& se
     PrintOk("Mock Python Service 启动，port=" + std::to_string(mock.port()));
 
     // 复制 fixture 到临时目录，并 patch endpoint
-    const fs::path fixture_src = src_root / "examples" / "python_http_service_llm_explainer" / "1.0.0";
+    const fs::path fixture_src = src_root / "examples" / "llm_rule_explainer" / "1.0.0";
     const fs::path fixture_dst = demo_dir / "pool_fixture" / "llm_rule_explainer" / "1.0.0";
     CopyDir(fixture_src, fixture_dst);
     PatchEndpointInCard(fixture_dst, mock.base_url());

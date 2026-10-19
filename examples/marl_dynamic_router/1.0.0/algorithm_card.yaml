@@ -61,11 +61,12 @@ resource_requirements:
   disk_mb: 4096
 
 model_profile:
-  parameter_count: 0
-  parameter_count_text: varies_by_submodel
-  flops: 0
-  flops_text: varies_by_submodel
-  precision: fp32
+  parameter_count: 4996
+  parameter_count_text: "4,996 architecture parameters for the local MARLPolicyNetwork reference topology; the configured trained marl_policy.pt checkpoint is absent, so this does not certify deployed learned weights"
+  flops: 9728
+  flops_text: "9,728 architecture-profiler lower-bound FLOPs for one state=[1,8] policy pass; route fan-out work scales with destination-agent count and the missing checkpoint prevents trained-model validation"
+  flops_input_shape: [1, 8]
+  precision: fp32_architecture_reference
 
 safety:
   risk_level: medium

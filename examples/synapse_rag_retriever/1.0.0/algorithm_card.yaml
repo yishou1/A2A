@@ -61,11 +61,12 @@ resource_requirements:
   disk_mb: 4096
 
 model_profile:
-  parameter_count: 0
-  parameter_count_text: varies_by_submodel
-  flops: 0
-  flops_text: varies_by_submodel
-  precision: fp32
+  parameter_count: 22713216
+  parameter_count_text: "22,713,216 parameters for the default external sentence-transformers/paraphrase-MiniLM-L6-v2 retrieval encoder (snapshot c9a2bfebc254878aee8c3aca9e6844d5bbb102d1); large profile selects all-MiniLM-L12-v2 with 33,360,000 parameters. Optional remote gpt-4o-mini summary is provider managed and excluded"
+  flops: 2718842880
+  flops_text: "2,718,842,880 architecture-profiler lower-bound FLOPs per MiniLM-L6 encoder pass at [1,128], its configured maximum sentence length; each request encodes one query plus every context document. Large-profile MiniLM-L12 is 5,437,341,696 FLOPs per [1,128]; optional remote LLM cost is not included"
+  flops_input_shape: [1, 128]
+  precision: fp32_reference_external_weights
 
 safety:
   risk_level: medium

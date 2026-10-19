@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Clustering Engine Output",
+  "type": "object",
+  "required": [
+    "algorithm",
+    "labels",
+    "clusters",
+    "cluster_count",
+    "noise_indices",
+    "inertia",
+    "iterations",
+    "converged",
+    "point_count",
+    "dimension",
+    "model_runtime"
+  ],
+  "properties": {
+    "algorithm": {
+      "type": "string",
+      "enum": ["kmeans", "dbscan"]
+    },
+    "labels": {
+      "type": "array",
+      "items": {"type": "integer"}
+    },
+    "clusters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["cluster_id", "size", "centroid", "member_indices"],
+        "properties": {
+          "cluster_id": {"type": "integer"},
+          "size": {"type": "integer", "minimum": 1},
+          "centroid": {
+            "type": "array",
+            "items": {"type": "number"}
+          },
+          "member_indices": {
+            "type": "array",
+            "items": {"type": "integer"}
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "cluster_count": {"type": "integer", "minimum": 0},
+    "noise_indices": {
+      "type": "array",
+      "items": {"type": "integer"}
+    },
+    "inertia": {"type": ["number", "null"]},
+    "iterations": {"type": "integer", "minimum": 1},
+    "converged": {"type": "boolean"},
+    "point_count": {"type": "integer", "minimum": 2},
+    "dimension": {"type": "integer", "minimum": 1},
+    "model_runtime": {
+      "type": "object",
+      "required": ["backend", "used", "implementation_version"],
+      "properties": {
+        "backend": {"type": "string"},
+        "used": {"type": "boolean"},
+        "implementation_version": {"type": "string"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

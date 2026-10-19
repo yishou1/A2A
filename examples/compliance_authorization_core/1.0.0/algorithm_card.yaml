@@ -51,6 +51,14 @@ performance:
   primary_metric: compliance_decision_success
   primary_score: 0.9
 
+model_profile:
+  parameter_count: 7
+  parameter_count_text: "local ONNX logistic calibration only; rule matching and external evidence components are excluded"
+  flops: 13
+  flops_text: "lower bound per [1, 6] calibration pass; end-to-end composite-service FLOPs are input dependent"
+  flops_input_shape: [1, 6]
+  precision: fp32
+
 safety:
   risk_level: high
   requires_human_review: true

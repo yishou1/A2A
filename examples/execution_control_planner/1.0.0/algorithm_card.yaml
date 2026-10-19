@@ -48,6 +48,13 @@ performance:
   primary_metric: command_generation_success
   primary_score: 0.88
 
+model_profile:
+  parameter_count: 0
+  parameter_count_text: "not_applicable: composite rule matching and per-request linear trajectory fitting have no persisted learned model"
+  flops: 0
+  flops_text: "not_applicable: request-composition-dependent rule and trajectory operations"
+  precision: deterministic_rules
+
 safety:
   risk_level: medium
   requires_human_review: true

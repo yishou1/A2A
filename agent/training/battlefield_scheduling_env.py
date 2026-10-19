@@ -22,6 +22,7 @@ TARGET_FEAT_DIM = 7
 SENSOR_FEAT_DIM = 6
 STRIKE_FEAT_DIM = 4
 CONTEXT_FEAT_DIM = 4
+AGENT_CONTEXT_DIM = 4
 
 MODALITY_INDEX = {"eo_ir": 0, "sar": 1, "radar": 2, "acoustic": 3}
 
@@ -114,7 +115,7 @@ class BattlefieldSchedulingEnv:
             + self.max_sensors * SENSOR_FEAT_DIM
             + MAX_STRIKE_ASSETS * STRIKE_FEAT_DIM
             + CONTEXT_FEAT_DIM
-            + 2  # agent role one-hot (sensor vs strike)
+            + AGENT_CONTEXT_DIM  # role one-hot, role index, availability
         )
 
     def reset(self, situation: BattlefieldSchedulingState) -> np.ndarray:
@@ -130,35 +131,35 @@ class BattlefieldSchedulingEnv:
         strikes = self.state.strike_assets[: self.max_strike]
         targets = self.state.targets[: self.max_targets]
 
-        covered: set[str] = set()
+        covered_ids: list[str] = []
         for i, sensor in enumerate(sensors):
             act = actions[i] if i < len(actions) else 0
             target_id = None
             if 0 < act <= len(targets):
                 target_id = targets[act - 1].target_id
-                covered.add(target_id)
+                covered_ids.append(target_id)
             self._sensor_assignments[sensor.sensor_id] = target_id
             rewards.append(self._sensor_reward(sensor, target_id, targets, act))
 
-        reattacked: set[str] = set()
+        reattacked_ids: list[str] = []
         for j, asset in enumerate(strikes):
             idx = self.max_sensors + j
             act = actions[idx] if idx < len(actions) else 0
             target_id = None
             if 0 < act <= len(targets):
                 target_id = targets[act - 1].target_id
-                reattacked.add(target_id)
+                reattacked_ids.append(target_id)
             self._strike_assignments[asset.asset_id] = target_id
             rewards.append(self._strike_reward(asset, target_id, targets, act))
 
-        global_reward = self._global_reward(covered, reattacked, targets)
+        global_reward = self._global_reward(covered_ids, reattacked_ids, targets)
         rewards = [r + global_reward / max(self.n_agents, 1) for r in rewards]
 
         info = {
             "sensor_assignments": dict(self._sensor_assignments),
             "strike_assignments": dict(self._strike_assignments),
-            "covered_targets": list(covered),
-            "reattack_targets": list(reattacked),
+            "covered_targets": [t.target_id for t in targets if t.target_id in set(covered_ids)],
+            "reattack_targets": [t.target_id for t in targets if t.target_id in set(reattacked_ids)],
         }
         return self._build_global_obs(), rewards, True, info
 
@@ -171,6 +172,8 @@ class BattlefieldSchedulingEnv:
     ) -> float:
         if not sensor.available:
             return -0.1 if action > 0 else 0.0
+        if action > len(targets):
+            return -0.5
         if target_id is None:
             high_threat_uncovered = any(t.threat_score > 0.7 for t in targets)
             return -0.3 if high_threat_uncovered else 0.05
@@ -193,6 +196,8 @@ class BattlefieldSchedulingEnv:
     ) -> float:
         if not asset.available or asset.remaining_ammo <= 0:
             return -0.2 if action > 0 else 0.0
+        if action > len(targets):
+            return -0.5
         if target_id is None:
             needs = [t for t in targets if t.needs_reattack]
             return -0.4 if needs else 0.1
@@ -207,17 +212,22 @@ class BattlefieldSchedulingEnv:
 
     def _global_reward(
         self,
-        covered: set[str],
-        reattacked: set[str],
+        covered_ids: list[str],
+        reattacked_ids: list[str],
         targets: list[SchedulingTarget],
     ) -> float:
         if not targets:
             return 0.0
         high_threat = [t for t in targets if t.threat_score >= 0.6]
+        covered = set(covered_ids)
+        reattacked = set(reattacked_ids)
         coverage = sum(1 for t in high_threat if t.target_id in covered) / max(len(high_threat), 1)
         reattack_need = [t for t in targets if t.needs_reattack]
         reattack_rate = sum(1 for t in reattack_need if t.target_id in reattacked) / max(len(reattack_need), 1)
-        duplicate_penalty = max(0, len(covered) - len(set(covered))) * 0.1
+        duplicate_penalty = (
+            max(0, len(covered_ids) - len(covered))
+            + max(0, len(reattacked_ids) - len(reattacked))
+        ) * 0.1
         return coverage * 0.6 + reattack_rate * 0.8 - duplicate_penalty
 
     def _build_global_obs(self) -> np.ndarray:
@@ -281,13 +291,30 @@ class BattlefieldSchedulingEnv:
                 len([t for t in targets if t.needs_reattack]) / max(len(targets), 1),
             ]
         )
-        feats.extend([1.0, 0.0])  # placeholder agent role; per-agent obs built in training
+        feats.extend([0.0] * AGENT_CONTEXT_DIM)  # populated by build_agent_obs
         return np.array(feats, dtype=np.float32)
 
     def build_agent_obs(self, agent_idx: int) -> np.ndarray:
         """为指定智能体构建观测（全局态势 + 智能体角色标识）。"""
         obs = self._build_global_obs()
-        obs[-2:] = [1.0, 0.0] if agent_idx < self.max_sensors else [0.0, 1.0]
+        assert self.state is not None
+        if agent_idx < self.max_sensors:
+            role_index = agent_idx
+            available = (
+                role_index < len(self.state.sensors)
+                and self.state.sensors[role_index].available
+            )
+            normalized_index = role_index / max(self.max_sensors - 1, 1)
+            obs[-AGENT_CONTEXT_DIM:] = [1.0, 0.0, normalized_index, float(available)]
+        else:
+            role_index = agent_idx - self.max_sensors
+            available = (
+                role_index < len(self.state.strike_assets)
+                and self.state.strike_assets[role_index].available
+                and self.state.strike_assets[role_index].remaining_ammo > 0
+            )
+            normalized_index = role_index / max(self.max_strike - 1, 1)
+            obs[-AGENT_CONTEXT_DIM:] = [0.0, 1.0, normalized_index, float(available)]
         return obs
 
 

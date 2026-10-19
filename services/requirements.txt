@@ -4,8 +4,10 @@ numpy
 onnxruntime
 pillow
 scikit-learn
+joblib
 torch
 torchvision
+safetensors
 pyyaml
 pydantic
 sentence-transformers

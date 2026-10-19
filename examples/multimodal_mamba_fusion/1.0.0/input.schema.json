@@ -6,12 +6,20 @@
   ],
   "properties": {
     "embeddings": {
-      "type": "object"
+      "type": "object",
+      "minProperties": 1,
+      "description": "Map from sensor or modality id to a non-empty numeric embedding vector; vector validation is enforced by the service.",
+      "additionalProperties": true
     },
     "tracks": {
       "type": "array",
       "items": {
-        "type": "object"
+        "type": "object",
+        "properties": {
+          "track_id": { "type": "string" },
+          "sensor_id": { "type": "string" }
+        },
+        "additionalProperties": true
       }
     }
   },

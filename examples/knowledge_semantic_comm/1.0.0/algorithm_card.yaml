@@ -61,11 +61,12 @@ resource_requirements:
   disk_mb: 4096
 
 model_profile:
-  parameter_count: 0
-  parameter_count_text: varies_by_submodel
-  flops: 0
-  flops_text: varies_by_submodel
-  precision: fp32
+  parameter_count: 76961152
+  parameter_count_text: "76,961,152 parameters for default external google/flan-t5-small reference config (snapshot 0fc9ddf78a1e988dac52e2dac162b0ede4fd74ab); large profile selects google/flan-t5-base with 247,577,856 parameters. External weights and revisions are not pinned locally"
+  flops: 7912478479
+  flops_text: "7,912,478,479 architecture-profiler lower-bound FLOPs for FLAN-T5 Small reference generation with batch=1, 128 input tokens, 8 generated tokens, and 2 beams; actual service cost varies up to 512 input tokens and 64 generated tokens and includes a second encoder pass. FLAN-T5 Base is 33,665,160,647 FLOPs under the same reference generation"
+  flops_input_shape: [1, 128]
+  precision: fp32_reference_external_weights
 
 safety:
   risk_level: medium

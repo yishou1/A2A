@@ -16,6 +16,25 @@
     "execute_at": 2.4,
     "future_t": 6.4,
     "model": "linear_regression",
+    "fit": {
+      "x": {
+        "slope": 4.5,
+        "intercept": 9.98,
+        "r_squared": 0.99852071
+      },
+      "y": {
+        "slope": 5.5,
+        "intercept": 18.02,
+        "r_squared": 0.99900925
+      }
+    },
+    "history_points": 5,
+    "model_identity": {
+      "model_id": "trajectory_linear_predictor",
+      "model_version": "1.0.0",
+      "model_family": "per_request_ordinary_least_squares_2d",
+      "implementation_sha256": "a26a756eeb3f5abe2718ccdcd3ab166c3ac6e31191fcec82f44cbbf7be2b0d33"
+    },
     "track_id": "T-001"
   },
   "usage": {

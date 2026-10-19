@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <chrono>
 #include <ctime>
+#include <mutex>
+#include <shared_mutex>
 #include <utility>
 
 namespace algolib {
@@ -38,10 +40,22 @@ Status EnsureValidatable(AlgorithmStatus status) {
 }
 
 Status EnsureDeletable(AlgorithmStatus status) {
-    if (status == AlgorithmStatus::kDeleted) {
-        return Status::Ok();
-    }
+    (void)status;
     return Status::Ok();
+}
+
+std::string CurrentUtcTimestamp() {
+    const auto now = std::chrono::system_clock::now();
+    const auto now_t = std::chrono::system_clock::to_time_t(now);
+    std::tm utc{};
+#ifdef _WIN32
+    gmtime_s(&utc, &now_t);
+#else
+    gmtime_r(&now_t, &utc);
+#endif
+    char buf[32] = {};
+    std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &utc);
+    return buf;
 }
 
 }  // namespace
@@ -50,11 +64,22 @@ AlgorithmRegistry::AlgorithmRegistry(std::filesystem::path registry_path)
     : store_(std::move(registry_path)) {}
 
 Status AlgorithmRegistry::Reload() {
-    return store_.Load(&entries_);
+    // 与持久化更新串行，避免“旧磁盘快照读完后覆盖新写入”的 lost update。
+    std::lock_guard<std::mutex> persistence_lock(persistence_mutex_);
+    EntryMap loaded_entries;
+    const Status load_status = store_.Load(&loaded_entries);
+    if (!load_status.ok()) {
+        return load_status;
+    }
+
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    entries_.swap(loaded_entries);
+    return Status::Ok();
 }
 
 Result<AlgorithmEntry> AlgorithmRegistry::Register(
     const std::filesystem::path& package_or_card_path) {
+    // 包校验可能涉及磁盘与远端服务，不能阻塞所有读请求。
     auto validated_result = validator_.ValidateFromPath(package_or_card_path);
     if (!validated_result.ok()) {
         return validated_result.status();
@@ -62,6 +87,9 @@ Result<AlgorithmEntry> AlgorithmRegistry::Register(
 
     AlgorithmEntry new_entry =
         BuildEntry(validated_result.value(), AlgorithmStatus::kValidated);
+
+    std::lock_guard<std::mutex> persistence_lock(persistence_mutex_);
+    std::unique_lock<std::shared_mutex> lock(mutex_);
     if (entries_.find(new_entry.key) != entries_.end()) {
         return Status::Error(
             ErrorCode::kRegistryConflict,
@@ -69,135 +97,187 @@ Result<AlgorithmEntry> AlgorithmRegistry::Register(
                 new_entry.key.ToUniqueString());
     }
 
-    entries_.insert_or_assign(new_entry.key, new_entry);
-    auto persist_status = Persist();
+    EntryMap candidate = entries_;
+    candidate.insert_or_assign(new_entry.key, new_entry);
+    const Status persist_status = PersistLocked(candidate);
     if (!persist_status.ok()) {
         return persist_status;
     }
-
+    entries_.swap(candidate);
     return new_entry;
 }
 
 Result<AlgorithmEntry> AlgorithmRegistry::Validate(const AlgorithmKey& key) {
-    auto find_result = FindMutable(key);
-    if (!find_result.ok()) {
-        return find_result.status();
+    AlgorithmEntry current_entry;
+    {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        const auto it = entries_.find(key);
+        if (it == entries_.end()) {
+            return Status::Error(ErrorCode::kAlgorithmNotFound,
+                                 "Algorithm not found: " + key.ToUniqueString());
+        }
+        current_entry = it->second;
     }
 
-    AlgorithmEntry* entry = find_result.value();
-    auto validate_status = EnsureValidatable(entry->status);
-    if (!validate_status.ok()) {
-        return validate_status;
+    const Status validatable_status = EnsureValidatable(current_entry.status);
+    if (!validatable_status.ok()) {
+        return validatable_status;
     }
 
-    auto validated_result = validator_.ValidateFromPath(entry->card_path);
+    // 校验 package 时释放 registry 锁，避免阻塞在线推理。
+    auto validated_result = validator_.ValidateFromPath(current_entry.card_path);
     if (!validated_result.ok()) {
         return validated_result.status();
     }
 
-    const AlgorithmStatus effective_status =
-        entry->status == AlgorithmStatus::kDraft ? AlgorithmStatus::kValidated : entry->status;
-    *entry = BuildEntry(validated_result.value(), effective_status);
+    std::lock_guard<std::mutex> persistence_lock(persistence_mutex_);
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    const auto it = entries_.find(key);
+    if (it == entries_.end()) {
+        return Status::Error(ErrorCode::kAlgorithmNotFound,
+                             "Algorithm not found: " + key.ToUniqueString());
+    }
 
-    auto persist_status = Persist();
+    // 管理操作期间条目可能变化，基于最新快照重新确认状态和部署信息。
+    const Status recheck_status = EnsureValidatable(it->second.status);
+    if (!recheck_status.ok()) {
+        return recheck_status;
+    }
+
+    const AlgorithmStatus effective_status =
+        it->second.status == AlgorithmStatus::kDraft ? AlgorithmStatus::kValidated
+                                                       : it->second.status;
+    auto deployments = it->second.deployments;
+    AlgorithmEntry refreshed = BuildEntry(validated_result.value(), effective_status);
+    refreshed.deployments = std::move(deployments);
+
+    EntryMap candidate = entries_;
+    candidate.insert_or_assign(key, refreshed);
+    const Status persist_status = PersistLocked(candidate);
     if (!persist_status.ok()) {
         return persist_status;
     }
-
-    return *entry;
+    entries_.swap(candidate);
+    return refreshed;
 }
 
 Result<AlgorithmEntry> AlgorithmRegistry::Activate(const AlgorithmKey& key) {
-    auto find_result = FindMutable(key);
-    if (!find_result.ok()) {
-        return find_result.status();
+    std::lock_guard<std::mutex> persistence_lock(persistence_mutex_);
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    const auto it = entries_.find(key);
+    if (it == entries_.end()) {
+        return Status::Error(ErrorCode::kAlgorithmNotFound,
+                             "Algorithm not found: " + key.ToUniqueString());
     }
-
-    AlgorithmEntry* entry = find_result.value();
-    auto activatable_status = EnsureActivatable(entry->status);
+    const Status activatable_status = EnsureActivatable(it->second.status);
     if (!activatable_status.ok()) {
         return activatable_status;
     }
 
-    entry->status = AlgorithmStatus::kActive;
-    auto persist_status = Persist();
+    EntryMap candidate = entries_;
+    auto candidate_it = candidate.find(key);
+    candidate_it->second.status = AlgorithmStatus::kActive;
+    const Status persist_status = PersistLocked(candidate);
     if (!persist_status.ok()) {
         return persist_status;
     }
-
-    return *entry;
+    const AlgorithmEntry result = candidate_it->second;
+    entries_.swap(candidate);
+    return result;
 }
 
 Result<AlgorithmEntry> AlgorithmRegistry::Disable(const AlgorithmKey& key) {
-    auto find_result = FindMutable(key);
-    if (!find_result.ok()) {
-        return find_result.status();
+    std::lock_guard<std::mutex> persistence_lock(persistence_mutex_);
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    const auto it = entries_.find(key);
+    if (it == entries_.end()) {
+        return Status::Error(ErrorCode::kAlgorithmNotFound,
+                             "Algorithm not found: " + key.ToUniqueString());
     }
-
-    AlgorithmEntry* entry = find_result.value();
-    auto disableable_status = EnsureDisableable(entry->status);
+    const Status disableable_status = EnsureDisableable(it->second.status);
     if (!disableable_status.ok()) {
         return disableable_status;
     }
 
-    entry->status = AlgorithmStatus::kDisabled;
-    auto persist_status = Persist();
+    EntryMap candidate = entries_;
+    auto candidate_it = candidate.find(key);
+    candidate_it->second.status = AlgorithmStatus::kDisabled;
+    const Status persist_status = PersistLocked(candidate);
     if (!persist_status.ok()) {
         return persist_status;
     }
-
-    return *entry;
+    const AlgorithmEntry result = candidate_it->second;
+    entries_.swap(candidate);
+    return result;
 }
 
 Result<AlgorithmEntry> AlgorithmRegistry::Delete(const AlgorithmKey& key) {
-    auto find_result = FindMutable(key);
-    if (!find_result.ok()) {
-        return find_result.status();
+    std::lock_guard<std::mutex> persistence_lock(persistence_mutex_);
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    const auto it = entries_.find(key);
+    if (it == entries_.end()) {
+        return Status::Error(ErrorCode::kAlgorithmNotFound,
+                             "Algorithm not found: " + key.ToUniqueString());
     }
-
-    AlgorithmEntry* entry = find_result.value();
-    auto deletable_status = EnsureDeletable(entry->status);
+    const Status deletable_status = EnsureDeletable(it->second.status);
     if (!deletable_status.ok()) {
         return deletable_status;
     }
 
-    entry->status = AlgorithmStatus::kDeleted;
-    auto persist_status = Persist();
+    EntryMap candidate = entries_;
+    auto candidate_it = candidate.find(key);
+    candidate_it->second.status = AlgorithmStatus::kDeleted;
+    const Status persist_status = PersistLocked(candidate);
     if (!persist_status.ok()) {
         return persist_status;
     }
-
-    return *entry;
+    const AlgorithmEntry result = candidate_it->second;
+    entries_.swap(candidate);
+    return result;
 }
 
 Result<AlgorithmEntry> AlgorithmRegistry::Get(const AlgorithmKey& key) const {
-    auto find_result = Find(key);
-    if (!find_result.ok()) {
-        return find_result.status();
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    const auto it = entries_.find(key);
+    if (it == entries_.end()) {
+        return Status::Error(ErrorCode::kAlgorithmNotFound,
+                             "Algorithm not found: " + key.ToUniqueString());
     }
-    return *find_result.value();
+    return it->second;
 }
 
 Status AlgorithmRegistry::ValidateInputPayload(const AlgorithmKey& key,
                                                const nlohmann::json& input_json) const {
-    auto find_result = Find(key);
-    if (!find_result.ok()) {
-        return find_result.status();
+    auto entry_result = Get(key);
+    if (!entry_result.ok()) {
+        return entry_result.status();
     }
-    return schema_validator_.ValidateInputForEntry(*find_result.value(), input_json);
+    return ValidateInputPayload(entry_result.value(), input_json);
 }
 
 Status AlgorithmRegistry::ValidateOutputPayload(const AlgorithmKey& key,
                                                 const nlohmann::json& output_json) const {
-    auto find_result = Find(key);
-    if (!find_result.ok()) {
-        return find_result.status();
+    auto entry_result = Get(key);
+    if (!entry_result.ok()) {
+        return entry_result.status();
     }
-    return schema_validator_.ValidateOutputForEntry(*find_result.value(), output_json);
+    return ValidateOutputPayload(entry_result.value(), output_json);
+}
+
+Status AlgorithmRegistry::ValidateInputPayload(const AlgorithmEntry& entry,
+                                               const nlohmann::json& input_json) const {
+    return schema_validator_.ValidateInputForEntry(entry, input_json);
+}
+
+Status AlgorithmRegistry::ValidateOutputPayload(const AlgorithmEntry& entry,
+                                                const nlohmann::json& output_json) const {
+    return schema_validator_.ValidateOutputForEntry(entry, output_json);
 }
 
 std::vector<AlgorithmEntry> AlgorithmRegistry::List(bool include_deleted) const {
+    std::shared_lock<std::shared_mutex> lock(mutex_);
     std::vector<AlgorithmEntry> result;
+    result.reserve(entries_.size());
     for (const auto& [key, entry] : entries_) {
         (void)key;
         if (!include_deleted && entry.status == AlgorithmStatus::kDeleted) {
@@ -209,7 +289,9 @@ std::vector<AlgorithmEntry> AlgorithmRegistry::List(bool include_deleted) const 
 }
 
 std::vector<nlohmann::json> AlgorithmRegistry::ListAgentViews(bool active_only) const {
+    std::shared_lock<std::shared_mutex> lock(mutex_);
     std::vector<nlohmann::json> result;
+    result.reserve(entries_.size());
     for (const auto& [key, entry] : entries_) {
         (void)key;
         if (entry.status == AlgorithmStatus::kDeleted) {
@@ -266,6 +348,22 @@ bool FilterMatches(const AlgorithmEntry& entry, const AlgorithmQueryFilter& f) {
         }
     }
 
+    if (f.function_id.has_value() || f.function_code.has_value()) {
+        const bool found = std::find_if(
+            entry.card.operational_functions.begin(),
+            entry.card.operational_functions.end(),
+            [&](const OperationalFunctionSpec& function) {
+                const bool id_matches = !f.function_id.has_value() ||
+                                        function.function_id == f.function_id.value();
+                const bool code_matches = !f.function_code.has_value() ||
+                                          function.function_code == f.function_code.value();
+                return id_matches && code_matches;
+            }) != entry.card.operational_functions.end();
+        if (!found) {
+            return false;
+        }
+    }
+
     // 5. node_id 匹配：deployments 中至少有一条记录的 node_id 相等
     if (f.node_id.has_value()) {
         const auto& deps = entry.deployments;
@@ -303,6 +401,7 @@ bool FilterMatches(const AlgorithmEntry& entry, const AlgorithmQueryFilter& f) {
 }  // namespace (anonymous)
 
 std::vector<AlgorithmEntry> AlgorithmRegistry::Query(const AlgorithmQueryFilter& filter) const {
+    std::shared_lock<std::shared_mutex> lock(mutex_);
     std::vector<AlgorithmEntry> result;
     for (const auto& [key, entry] : entries_) {
         (void)key;
@@ -315,6 +414,7 @@ std::vector<AlgorithmEntry> AlgorithmRegistry::Query(const AlgorithmQueryFilter&
 
 std::vector<nlohmann::json> AlgorithmRegistry::QueryAgentViews(
     const AlgorithmQueryFilter& filter) const {
+    std::shared_lock<std::shared_mutex> lock(mutex_);
     std::vector<nlohmann::json> result;
     for (const auto& [key, entry] : entries_) {
         (void)key;
@@ -327,18 +427,19 @@ std::vector<nlohmann::json> AlgorithmRegistry::QueryAgentViews(
 
 Result<AlgorithmEntry> AlgorithmRegistry::AddDeployment(const AlgorithmKey& key,
                                                          const DeploymentSpec& spec) {
-    auto find_result = FindMutable(key);
-    if (!find_result.ok()) {
-        return find_result.status();
-    }
-    AlgorithmEntry* entry = find_result.value();
-
-    // 中文注释：deploy_id 在同一 AlgorithmKey 下必须唯一。
     if (spec.deploy_id.empty()) {
         return Status::Error(ErrorCode::kInvalidArgument,
                              "DeploymentSpec.deploy_id must not be empty.");
     }
-    for (const auto& existing : entry->deployments) {
+
+    std::lock_guard<std::mutex> persistence_lock(persistence_mutex_);
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    const auto it = entries_.find(key);
+    if (it == entries_.end()) {
+        return Status::Error(ErrorCode::kAlgorithmNotFound,
+                             "Algorithm not found: " + key.ToUniqueString());
+    }
+    for (const auto& existing : it->second.deployments) {
         if (existing.deploy_id == spec.deploy_id) {
             return Status::Error(
                 ErrorCode::kRegistryConflict,
@@ -347,49 +448,55 @@ Result<AlgorithmEntry> AlgorithmRegistry::AddDeployment(const AlgorithmKey& key,
         }
     }
 
-    // 中文注释：若调用方未提供 deployed_at，自动填入当前 UTC 时间戳。
     DeploymentSpec effective_spec = spec;
     if (effective_spec.deployed_at.empty()) {
-        const auto now = std::chrono::system_clock::now();
-        const auto now_t = std::chrono::system_clock::to_time_t(now);
-        char buf[32] = {};
-        std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&now_t));
-        effective_spec.deployed_at = buf;
+        effective_spec.deployed_at = CurrentUtcTimestamp();
     }
 
-    entry->deployments.push_back(effective_spec);
-    auto persist_status = Persist();
+    EntryMap candidate = entries_;
+    auto candidate_it = candidate.find(key);
+    candidate_it->second.deployments.push_back(std::move(effective_spec));
+    const Status persist_status = PersistLocked(candidate);
     if (!persist_status.ok()) {
         return persist_status;
     }
-    return *entry;
+    const AlgorithmEntry result = candidate_it->second;
+    entries_.swap(candidate);
+    return result;
 }
 
 Result<AlgorithmEntry> AlgorithmRegistry::RemoveDeployment(const AlgorithmKey& key,
                                                              const std::string& deploy_id) {
-    auto find_result = FindMutable(key);
-    if (!find_result.ok()) {
-        return find_result.status();
+    std::lock_guard<std::mutex> persistence_lock(persistence_mutex_);
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    const auto it = entries_.find(key);
+    if (it == entries_.end()) {
+        return Status::Error(ErrorCode::kAlgorithmNotFound,
+                             "Algorithm not found: " + key.ToUniqueString());
     }
-    AlgorithmEntry* entry = find_result.value();
 
-    auto it = std::find_if(entry->deployments.begin(), entry->deployments.end(),
-                           [&deploy_id](const DeploymentSpec& s) {
-                               return s.deploy_id == deploy_id;
-                           });
-    if (it == entry->deployments.end()) {
+    EntryMap candidate = entries_;
+    auto candidate_it = candidate.find(key);
+    auto deployment_it = std::find_if(candidate_it->second.deployments.begin(),
+                                      candidate_it->second.deployments.end(),
+                                      [&deploy_id](const DeploymentSpec& s) {
+                                          return s.deploy_id == deploy_id;
+                                      });
+    if (deployment_it == candidate_it->second.deployments.end()) {
         return Status::Error(
             ErrorCode::kAlgorithmNotFound,
             "Deployment deploy_id=" + deploy_id +
                 " not found for algorithm " + key.ToUniqueString() + ".");
     }
 
-    entry->deployments.erase(it);
-    auto persist_status = Persist();
+    candidate_it->second.deployments.erase(deployment_it);
+    const Status persist_status = PersistLocked(candidate);
     if (!persist_status.ok()) {
         return persist_status;
     }
-    return *entry;
+    const AlgorithmEntry result = candidate_it->second;
+    entries_.swap(candidate);
+    return result;
 }
 
 Result<AlgorithmEntry> AlgorithmRegistry::UpdateDeploymentStatus(
@@ -399,71 +506,50 @@ Result<AlgorithmEntry> AlgorithmRegistry::UpdateDeploymentStatus(
     const std::string& status_message,
     const std::string& updated_at,
     const std::string& local_model_path) {
-    auto find_result = FindMutable(key);
-    if (!find_result.ok()) {
-        return find_result.status();
+    std::lock_guard<std::mutex> persistence_lock(persistence_mutex_);
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    const auto it = entries_.find(key);
+    if (it == entries_.end()) {
+        return Status::Error(ErrorCode::kAlgorithmNotFound,
+                             "Algorithm not found: " + key.ToUniqueString());
     }
-    AlgorithmEntry* entry = find_result.value();
 
-    auto it = std::find_if(entry->deployments.begin(), entry->deployments.end(),
-                           [&deploy_id](const DeploymentSpec& s) {
-                               return s.deploy_id == deploy_id;
-                           });
-    if (it == entry->deployments.end()) {
+    EntryMap candidate = entries_;
+    auto candidate_it = candidate.find(key);
+    auto deployment_it = std::find_if(candidate_it->second.deployments.begin(),
+                                      candidate_it->second.deployments.end(),
+                                      [&deploy_id](const DeploymentSpec& s) {
+                                          return s.deploy_id == deploy_id;
+                                      });
+    if (deployment_it == candidate_it->second.deployments.end()) {
         return Status::Error(
             ErrorCode::kAlgorithmNotFound,
             "Deployment deploy_id=" + deploy_id +
                 " not found for algorithm " + key.ToUniqueString() + ".");
     }
 
-    it->deploy_status = new_status;
-    it->status_message = status_message;
-    // 中文注释：updated_at 为空时自动填入当前 UTC 时间戳。
-    if (!updated_at.empty()) {
-        it->updated_at = updated_at;
-    } else {
-        const auto now = std::chrono::system_clock::now();
-        const auto now_t = std::chrono::system_clock::to_time_t(now);
-        char buf[32] = {};
-        std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&now_t));
-        it->updated_at = buf;
-    }
-    // 中文注释：local_model_path 非空时同步更新（http_pull 拉取文件后记录本地路径）。
+    deployment_it->deploy_status = new_status;
+    deployment_it->status_message = status_message;
+    deployment_it->updated_at = updated_at.empty() ? CurrentUtcTimestamp() : updated_at;
     if (!local_model_path.empty()) {
-        it->local_model_path = local_model_path;
+        deployment_it->local_model_path = local_model_path;
     }
 
-    auto persist_status = Persist();
+    const Status persist_status = PersistLocked(candidate);
     if (!persist_status.ok()) {
         return persist_status;
     }
-    return *entry;
+    const AlgorithmEntry result = candidate_it->second;
+    entries_.swap(candidate);
+    return result;
 }
 
 const std::filesystem::path& AlgorithmRegistry::registry_path() const {
     return store_.registry_path();
 }
 
-Status AlgorithmRegistry::Persist() const {
-    return store_.Save(entries_);
-}
-
-Result<AlgorithmEntry*> AlgorithmRegistry::FindMutable(const AlgorithmKey& key) {
-    auto it = entries_.find(key);
-    if (it == entries_.end()) {
-        return Status::Error(ErrorCode::kAlgorithmNotFound,
-                             "Algorithm not found: " + key.ToUniqueString());
-    }
-    return &it->second;
-}
-
-Result<const AlgorithmEntry*> AlgorithmRegistry::Find(const AlgorithmKey& key) const {
-    auto it = entries_.find(key);
-    if (it == entries_.end()) {
-        return Status::Error(ErrorCode::kAlgorithmNotFound,
-                             "Algorithm not found: " + key.ToUniqueString());
-    }
-    return &it->second;
+Status AlgorithmRegistry::PersistLocked(const EntryMap& entries) const {
+    return store_.Save(entries);
 }
 
 AlgorithmEntry AlgorithmRegistry::BuildEntry(

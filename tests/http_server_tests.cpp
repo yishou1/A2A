@@ -134,6 +134,11 @@ void TestHttpServerListsShowsAndRunsActiveOnnxAlgorithm() {
     Expect(health.value("runner_cache_size", -1) == 0,
            "Runner cache should be empty before the first /run request.");
 
+    const auto function_catalog =
+        GetJson(server.port(), "/operational-functions", 200);
+    Expect(function_catalog.value("count", 0) == 28,
+           "Operational function catalog endpoint should expose all 28 functions.");
+
     const auto algorithms = GetJson(server.port(), "/algorithms", 200);
     Expect(algorithms.value("count", 0) == 1, "Active algorithm list should contain one entry.");
     Expect(algorithms.at("algorithms").at(0).value("algorithm_id", std::string()) ==
@@ -147,6 +152,13 @@ void TestHttpServerListsShowsAndRunsActiveOnnxAlgorithm() {
            "show-card endpoint should include active status.");
     Expect(card.at("agent_view").contains("performance"),
            "Agent view should include performance metadata.");
+    Expect(card.at("agent_view").at("operational_functions").size() == 1,
+           "Agent view should expose operational function mappings.");
+
+    const auto by_function =
+        GetJson(server.port(), "/algorithms?function_code=classify", 200);
+    Expect(by_function.value("count", 0) == 1,
+           "Algorithm discovery should support function_code filtering.");
 
     const nlohmann::json request{
         {"request_id", "req_http_onnx_001"},
@@ -154,12 +166,30 @@ void TestHttpServerListsShowsAndRunsActiveOnnxAlgorithm() {
         {"algorithm_id", "onnx_text_classifier"},
         {"version", "1.0.0"},
         {"backend_type", "onnx"},
+        {"function_context",
+         {{"function_id", "KC-06"},
+          {"function_code", "classify"},
+          {"workflow_instance_id", "workflow-http-001"},
+          {"step_instance_id", "step-http-006"}}},
         {"inputs", {{"text", "Classify this task text."}}},
     };
     const auto run = PostJson(server.port(), "/run", request, 200);
     Expect(run.value("ok", false), "HTTP /run should succeed for active ONNX algorithm.");
     Expect(run.at("outputs").value("label", std::string()) == "task",
            "HTTP /run should return ONNX output payload.");
+    Expect(run.at("function_execution").value("function_id", std::string()) == "KC-06",
+           "HTTP /run should return executed function telemetry.");
+
+    const auto trace = GetJson(
+        server.port(), "/traces/trace_http_onnx_001/function-executions", 200);
+    Expect(trace.value("count", 0) == 1,
+           "Trace endpoint should return the first function execution.");
+    Expect(trace.at("function_executions").at(0).value("algorithm_id", std::string()) ==
+               "onnx_text_classifier",
+           "Trace endpoint should identify the executed algorithm.");
+    Expect(trace.at("function_executions").at(0).at("function_execution")
+               .value("function_code", std::string()) == "classify",
+           "Trace endpoint should expose the executed function code.");
 
     const auto health_after_first_run = GetJson(server.port(), "/health", 200);
     Expect(health_after_first_run.value("runner_cache_size", 0) == 1,

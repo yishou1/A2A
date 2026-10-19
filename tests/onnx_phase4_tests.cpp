@@ -181,7 +181,7 @@ void TestOnnxRunnerSupportsTensorFromJsonAndNoOpPostprocess() {
 
 void TestOnnxRunnerSupportsTensorContractAndGenericMappings() {
     fs::path temp_dir = MakeTempDir("tensor_contract_mapping");
-    CopyFixtureFile(SourceRoot() / "tests" / "fixtures" / "onnx_identity_vector.onnx",
+    CopyFixtureFile(SourceRoot() / "tests" / "fixtures" / "onnx_float_mapping_identity.onnx",
                     temp_dir / "model.onnx");
     WriteTextFile(temp_dir / "tensor_contract.yaml",
                   "inputs:\n"
@@ -220,7 +220,10 @@ void TestOnnxRunnerSupportsTensorContractAndGenericMappings() {
 
     const auto result = runner.Run(request);
     Expect(result.ok, "Generic tensor mapping run should succeed.");
-    Expect(result.outputs == nlohmann::json({{"result", nlohmann::json::array({1.0, 2.0, 3.0})}}),
+    Expect(result.outputs ==
+               nlohmann::json(
+                   {{"result", nlohmann::json::array(
+                                   {nlohmann::json::array({1.0, 2.0, 3.0})})}}),
            "raw_tensor_to_json should place the output tensor at the configured JSON path.");
 }
 

@@ -2,14 +2,23 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from collections import Counter
 from itertools import combinations
 from pathlib import Path
 from typing import Dict, List, Sequence, Set, Tuple
 
 
+DEFAULT_RULES_RELATIVE_PATH = Path("data/execution_control/processed/mined_rules.json")
+DEFAULT_METADATA_RELATIVE_PATH = Path("models/execution_rule_matcher.metadata.json")
+
+
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def load_training_records(path: Path | None = None) -> List[dict]:
@@ -84,8 +93,7 @@ def mine_association_rules(
         if not matching:
             continue
         support = _support(antecedent, transactions)
-        confidence = len(matching) / max(1, sum(1 for txn in transactions if antecedent.issubset(txn)))
-        if support < min_support or confidence < min_confidence:
+        if support < min_support:
             continue
         vote = Counter(
             (
@@ -95,7 +103,14 @@ def mine_association_rules(
             )
             for item in matching
         )
-        action, executor_role, coordination_group = vote.most_common(1)[0][0]
+        (action, executor_role, coordination_group), winning_count = vote.most_common(1)[0]
+        # Association-rule confidence is the proportion of antecedent matches
+        # that produce the selected consequent. The previous implementation
+        # divided the same antecedent-match count by itself, making every rule
+        # appear to have confidence 1.0.
+        confidence = winning_count / len(matching)
+        if confidence < min_confidence:
+            continue
         priority_values = [
             float(item.get("priority") or 0.5)
             for item in matching
@@ -119,7 +134,14 @@ def mine_association_rules(
                 },
             }
         )
-    rules.sort(key=lambda item: (-float(item["confidence"]), -float(item["support"]), item["rule_id"]))
+    rules.sort(
+        key=lambda item: (
+            -float(item["confidence"]),
+            -len(item["antecedent"]),
+            -float(item["support"]),
+            item["rule_id"],
+        )
+    )
     return rules
 
 
@@ -134,13 +156,49 @@ def load_or_mine_rules(
     rules_path: Path | None = None,
     refresh: bool = False,
 ) -> List[dict]:
-    rules_path = rules_path or (_repo_root() / "data" / "execution_control" / "processed" / "mined_rules.json")
+    using_default_artifact = rules_path is None
+    rules_path = rules_path or (_repo_root() / DEFAULT_RULES_RELATIVE_PATH)
     if rules_path.exists() and not refresh:
+        if using_default_artifact:
+            validate_rule_artifact(rules_path)
         return json.loads(rules_path.read_text(encoding="utf-8"))
     records = load_training_records(records_path)
     rules = mine_association_rules(records)
     save_rules(rules, rules_path)
     return rules
+
+
+def validate_rule_artifact(rules_path: Path | None = None) -> dict:
+    """Verify the persisted rules against their reproducibility metadata."""
+    root = _repo_root()
+    resolved_rules = rules_path or (root / DEFAULT_RULES_RELATIVE_PATH)
+    metadata_path = root / DEFAULT_METADATA_RELATIVE_PATH
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    expected_hash = str(metadata.get("artifact_sha256") or "")
+    actual_hash = _sha256(resolved_rules)
+    if not expected_hash or actual_hash != expected_hash:
+        raise ValueError(
+            f"execution rule artifact SHA256 mismatch: expected={expected_hash}, actual={actual_hash}"
+        )
+    return metadata
+
+
+def rule_artifact_loaded() -> bool:
+    try:
+        validate_rule_artifact()
+        return True
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+
+
+def rule_artifact_identity() -> dict:
+    metadata = validate_rule_artifact()
+    return {
+        "model_id": metadata["model_id"],
+        "model_version": metadata["model_version"],
+        "model_family": metadata["model_family"],
+        "artifact_sha256": metadata["artifact_sha256"],
+    }
 
 
 def discretize_situation(situation: dict, phase: str) -> Set[str]:
@@ -197,7 +255,14 @@ def match_rules(current_items: Set[str], rules: Sequence[dict], *, phase: str) -
                 "consequent": consequent,
             }
         )
-    matched.sort(key=lambda item: (-float(item.get("confidence") or 0.0), item.get("rule_id") or ""))
+    matched.sort(
+        key=lambda item: (
+            -float(item.get("confidence") or 0.0),
+            -len(item.get("antecedent") or []),
+            -float(item.get("support") or 0.0),
+            item.get("rule_id") or "",
+        )
+    )
     return matched
 
 

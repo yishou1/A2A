@@ -141,46 +141,78 @@ Result<AlgorithmCard> ParseAlgorithmCard(const YAML::Node& root) {
         card.capabilities = capabilities_result.value();
     }
 
-    if (root["agent_card"] && root["agent_card"].IsMap()) {
-        const YAML::Node& agent_card_node = root["agent_card"];
-        if (agent_card_node["summary"]) {
-            card.agent_card.summary = agent_card_node["summary"].as<std::string>();
+    if (root["operational_functions"]) {
+        if (!root["operational_functions"].IsSequence()) {
+            return Status::Error(ErrorCode::kInvalidAlgorithmCard,
+                                 "operational_functions must be an array.");
         }
-        if (agent_card_node["when_to_use"]) {
-            auto use_result = ReadStringList(agent_card_node["when_to_use"],
-                                             "agent_card.when_to_use");
+        for (const auto& function_node : root["operational_functions"]) {
+            if (!function_node.IsMap() || !function_node["function_id"] ||
+                !function_node["function_code"] || !function_node["function_name"]) {
+                return Status::Error(
+                    ErrorCode::kInvalidAlgorithmCard,
+                    "Each operational_functions item must contain function_id, "
+                    "function_code, and function_name.");
+            }
+            OperationalFunctionSpec function;
+            function.function_id = function_node["function_id"].as<std::string>();
+            function.function_code = function_node["function_code"].as<std::string>();
+            function.function_name = function_node["function_name"].as<std::string>();
+            if (function_node["role"]) {
+                function.role = function_node["role"].as<std::string>();
+            }
+            if (function_node["coverage_level"]) {
+                function.coverage_level =
+                    function_node["coverage_level"].as<std::string>();
+            }
+            card.operational_functions.push_back(std::move(function));
+        }
+    }
+
+    const YAML::Node agent_view_node =
+        (root["agent_view"] && root["agent_view"].IsMap())
+            ? root["agent_view"]
+            : ((root["agent_card"] && root["agent_card"].IsMap()) ? root["agent_card"]
+                                                                  : YAML::Node());
+    if (agent_view_node && agent_view_node.IsMap()) {
+        if (agent_view_node["summary"]) {
+            card.agent_view.summary = agent_view_node["summary"].as<std::string>();
+        }
+        if (agent_view_node["when_to_use"]) {
+            auto use_result = ReadStringList(agent_view_node["when_to_use"],
+                                             "agent_view.when_to_use");
             if (!use_result.ok()) {
                 return use_result.status();
             }
-            card.agent_card.when_to_use = use_result.value();
+            card.agent_view.when_to_use = use_result.value();
         }
-        if (agent_card_node["when_not_to_use"]) {
+        if (agent_view_node["when_not_to_use"]) {
             auto not_use_result =
-                ReadStringList(agent_card_node["when_not_to_use"],
-                               "agent_card.when_not_to_use");
+                ReadStringList(agent_view_node["when_not_to_use"],
+                               "agent_view.when_not_to_use");
             if (!not_use_result.ok()) {
                 return not_use_result.status();
             }
-            card.agent_card.when_not_to_use = not_use_result.value();
+            card.agent_view.when_not_to_use = not_use_result.value();
         }
-        if (agent_card_node["input_description"]) {
-            card.agent_card.input_description =
-                agent_card_node["input_description"].as<std::string>();
+        if (agent_view_node["input_description"]) {
+            card.agent_view.input_description =
+                agent_view_node["input_description"].as<std::string>();
         }
-        if (agent_card_node["output_description"]) {
-            card.agent_card.output_description =
-                agent_card_node["output_description"].as<std::string>();
+        if (agent_view_node["output_description"]) {
+            card.agent_view.output_description =
+                agent_view_node["output_description"].as<std::string>();
         }
-        if (agent_card_node["examples"] && agent_card_node["examples"].IsSequence()) {
-            for (const auto& example_node : agent_card_node["examples"]) {
-                AgentCardExample example;
+        if (agent_view_node["examples"] && agent_view_node["examples"].IsSequence()) {
+            for (const auto& example_node : agent_view_node["examples"]) {
+                AgentViewExample example;
                 if (example_node["input"]) {
                     example.input = YamlUtils::YamlNodeToJson(example_node["input"]);
                 }
                 if (example_node["output"]) {
                     example.output = YamlUtils::YamlNodeToJson(example_node["output"]);
                 }
-                card.agent_card.examples.push_back(std::move(example));
+                card.agent_view.examples.push_back(std::move(example));
             }
         }
     }
@@ -437,19 +469,19 @@ Status ValidateCommonFields(const AlgorithmCard& card) {
     status = AppendStatus(std::move(status), RequireNotEmpty(card.modalities.input, "modalities.input"));
     status = AppendStatus(std::move(status), RequireNotEmpty(card.modalities.output, "modalities.output"));
     status = AppendStatus(std::move(status), RequireNotEmpty(card.capabilities, "capabilities"));
-    status = AppendStatus(std::move(status), RequireNonEmpty(card.agent_card.summary, "agent_card.summary"));
+    status = AppendStatus(std::move(status), RequireNonEmpty(card.agent_view.summary, "agent_view.summary"));
     status = AppendStatus(std::move(status),
-                          RequireNotEmpty(card.agent_card.when_to_use,
-                                          "agent_card.when_to_use"));
+                          RequireNotEmpty(card.agent_view.when_to_use,
+                                          "agent_view.when_to_use"));
     status = AppendStatus(std::move(status),
-                          RequireNotEmpty(card.agent_card.when_not_to_use,
-                                          "agent_card.when_not_to_use"));
+                          RequireNotEmpty(card.agent_view.when_not_to_use,
+                                          "agent_view.when_not_to_use"));
     status = AppendStatus(std::move(status),
-                          RequireNonEmpty(card.agent_card.input_description,
-                                          "agent_card.input_description"));
+                          RequireNonEmpty(card.agent_view.input_description,
+                                          "agent_view.input_description"));
     status = AppendStatus(std::move(status),
-                          RequireNonEmpty(card.agent_card.output_description,
-                                          "agent_card.output_description"));
+                          RequireNonEmpty(card.agent_view.output_description,
+                                          "agent_view.output_description"));
     status = AppendStatus(std::move(status),
                           RequireNonEmpty(card.machine_spec.input_schema_ref,
                                           "machine_spec.input_schema_ref"));

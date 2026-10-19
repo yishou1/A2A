@@ -9,6 +9,7 @@ from fastapi import FastAPI
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "services"))
+sys.path.insert(0, str(ROOT))
 
 from a2a_algorithms_common.http_service import create_algorithm_app  # noqa: E402
 from a2a_algorithms_common.service_predictors import (  # noqa: E402
@@ -17,6 +18,9 @@ from a2a_algorithms_common.service_predictors import (  # noqa: E402
     predict_target_type_classifier,
     predict_track_state_updater,
     predict_trajectory_predictor,
+)
+from a2a_algorithms_common.track_threat_algorithms import (  # noqa: E402
+    graph_relation_model_loaded,
 )
 
 VERSION = "1.0.0"
@@ -34,11 +38,14 @@ TRACK_THREAT_ALGORITHMS = (
     ("target_type_classifier", "classification", "M04", "特征编码与分类", predict_target_type_classifier),
     ("track_state_updater", "tracking", "M05", "多目标跟踪与定位", predict_track_state_updater),
     ("trajectory_predictor", "forecasting", "M06", "时间序列预测", predict_trajectory_predictor),
-    ("graph_relation_reasoner", "graph_reasoning", "M07", "图神经网络", predict_graph_relation_reasoner),
+    ("graph_relation_reasoner", "graph_reasoning", "M20", "图神经网络", predict_graph_relation_reasoner),
 )
 
 
 for algorithm_id, task_family, algorithm_class, algorithm_class_name, predict_fn in TRACK_THREAT_ALGORITHMS:
+    model_loaded_callable = (
+        graph_relation_model_loaded if algorithm_id == "graph_relation_reasoner" else _model_loaded
+    )
     app.mount(
         f"/{algorithm_id}",
         create_algorithm_app(
@@ -46,7 +53,7 @@ for algorithm_id, task_family, algorithm_class, algorithm_class_name, predict_fn
             VERSION,
             task_family,
             predict_fn,
-            model_loaded_callable=_model_loaded,
+            model_loaded_callable=model_loaded_callable,
             extra_metadata={
                 "algorithm_class": algorithm_class,
                 "algorithm_class_name": algorithm_class_name,

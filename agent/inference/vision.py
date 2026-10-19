@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent.inference.registry import get_detector, get_device, get_odconv_refiner
+from agent.inference.registry import inference_guard, get_detector, get_device, get_odconv_refiner
 from agent.inference.utils import decode_image_from_frame
 
 
@@ -25,9 +25,10 @@ def detect_objects(frames: list[dict[str, Any]], config: dict[str, Any]) -> list
         if img is None:
             continue
 
-        results = model.predict(
-            source=img, conf=conf_thr, verbose=False, device=dev_arg, imgsz=imgsz
-        )
+        with inference_guard("detector", config):
+            results = model.predict(
+                source=img, conf=conf_thr, verbose=False, device=dev_arg, imgsz=imgsz
+            )
         if not results:
             continue
         r0 = results[0]
@@ -48,6 +49,7 @@ def detect_objects(frames: list[dict[str, Any]], config: dict[str, Any]) -> list
                     "bbox": [round(x, 2) for x in xyxy],
                 }
             )
-        dets = odconv.refine_detections(img, dets, device=device, crop_size=crop_size)
+        with inference_guard("odconv", config):
+            dets = odconv.refine_detections(img, dets, device=device, crop_size=crop_size)
         out.extend(dets)
     return out

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <string>
 
 #include <nlohmann/json.hpp>
@@ -8,6 +9,13 @@
 #include "algolib/core/status.h"
 
 namespace algolib {
+
+struct FunctionContext {
+    std::string function_id;
+    std::string function_code;
+    std::string workflow_instance_id;
+    std::string step_instance_id;
+};
 
 // 中文注释：AlgorithmRequest 对齐 SPEC 的统一执行请求结构，CLI run 和后续 HTTP 接口共用它。
 struct AlgorithmRequest {
@@ -18,6 +26,7 @@ struct AlgorithmRequest {
     BackendType backend_type = BackendType::kOnnx;
     nlohmann::json inputs = nlohmann::json::object();
     nlohmann::json params = nlohmann::json::object();
+    std::optional<FunctionContext> function_context;
 
     // 中文注释：deploy_id 可选。当字段非空时，ExecutionCoordinator 会直接从缓存中
     // 获取该节点对应的 ONNX runner，实现分布式推理路由。

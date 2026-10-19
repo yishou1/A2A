@@ -1,0 +1,21 @@
+{
+  "request_id": "cluster-dbscan-001",
+  "trace_id": "trace-m01-dbscan",
+  "algorithm_id": "clustering_engine",
+  "version": "1.0.0",
+  "backend_type": "python_http_service",
+  "inputs": {
+    "points": [
+      [0.0, 0.0],
+      [0.1, 0.0],
+      [5.0, 5.0],
+      [5.1, 5.0],
+      [10.0, 10.0]
+    ]
+  },
+  "params": {
+    "algorithm": "dbscan",
+    "eps": 0.2,
+    "min_samples": 2
+  }
+}

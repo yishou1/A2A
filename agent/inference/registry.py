@@ -1,20 +1,85 @@
-"""推理模型单例缓存与权重加载。"""
+"""线程安全的推理模型单例缓存与权重加载。"""
 
 from __future__ import annotations
 
+import threading
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Iterator, TypeVar
 
 import torch
 
+T = TypeVar("T")
+
 _CACHE: dict[str, Any] = {}
+_CACHE_LOCK = threading.RLock()
+_CACHE_GENERATION = 0
+_KEY_LOCKS: dict[str, threading.Lock] = {}
+_KEY_LOCKS_LOCK = threading.Lock()
+_EXECUTION_LOCKS: dict[str, threading.RLock] = {}
+_EXECUTION_LOCKS_LOCK = threading.Lock()
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CHECKPOINT_DIR = PROJECT_ROOT / "models" / "checkpoints"
 
 
 def clear_model_cache() -> None:
     """切换算力档位或权重路径后清空缓存（测试/热切换用）。"""
-    _CACHE.clear()
+    global _CACHE_GENERATION
+    with _CACHE_LOCK:
+        _CACHE_GENERATION += 1
+        _CACHE.clear()
+
+
+def _key_lock(key: str) -> threading.Lock:
+    with _KEY_LOCKS_LOCK:
+        lock = _KEY_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _KEY_LOCKS[key] = lock
+        return lock
+
+
+
+def _get_or_create(key: str, factory: Callable[[], T]) -> T:
+    """同一模型 key 的首次加载 single-flight，不同模型 key 可并行加载。"""
+    with _CACHE_LOCK:
+        if key in _CACHE:
+            return _CACHE[key]
+
+    lock = _key_lock(key)
+    with lock:
+        with _CACHE_LOCK:
+            if key in _CACHE:
+                return _CACHE[key]
+            generation = _CACHE_GENERATION
+        model = factory()
+        with _CACHE_LOCK:
+            # clear_model_cache 在加载期间发生时，不允许旧实例回填到新一代缓存。
+            if _CACHE_GENERATION != generation:
+                return model
+            if key in _CACHE:
+                return _CACHE[key]
+            _CACHE[key] = model
+        return model
+
+
+def _execution_lock(resource: str, config: dict[str, Any]) -> threading.RLock:
+    # 同一类共享模型串行执行，避免第三方模型内部可变 predictor/generation 状态发生竞争；
+    # 不同资源（检测、跟踪、RAG 等）仍可在不同 mission 中并行。
+    key = f"{resource}:{_profile_tag(config)}:{get_device(config)}"
+    with _EXECUTION_LOCKS_LOCK:
+        lock = _EXECUTION_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _EXECUTION_LOCKS[key] = lock
+        return lock
+
+
+@contextmanager
+def inference_guard(resource: str, config: dict[str, Any]) -> Iterator[None]:
+    lock = _execution_lock(resource, config)
+    with lock:
+        yield
 
 
 def _resolve_weights_path(config: dict[str, Any], key: str, default: str) -> str:
@@ -29,20 +94,30 @@ def _resolve_weights_path(config: dict[str, Any], key: str, default: str) -> str
 
 
 def _checkpoint_path(config: dict[str, Any], config_key: str, default_basename: str) -> Path:
-    """从 inference.{config_key} 或 models/checkpoints/ 解析 .pt 路径。"""
+    """从 inference.{config_key} 或 models/checkpoints/ 解析权重路径。"""
     if config.get(config_key):
         return Path(_resolve_weights_path(config, config_key, default_basename))
-    name = default_basename if default_basename.endswith(".pt") else f"{default_basename}.pt"
+    name = default_basename if Path(default_basename).suffix else f"{default_basename}.pt"
     return CHECKPOINT_DIR / name
 
 
-def _load_state_dict(module: torch.nn.Module, path: Path) -> torch.nn.Module:
+def _load_state_dict(
+    module: torch.nn.Module,
+    path: Path,
+    *,
+    strict: bool = False,
+) -> torch.nn.Module:
     if path.is_file():
-        try:
-            state = torch.load(path, map_location="cpu", weights_only=True)
-        except TypeError:
-            state = torch.load(path, map_location="cpu")
-        module.load_state_dict(state, strict=False)
+        if path.suffix == ".safetensors":
+            from safetensors.torch import load_file
+
+            state = load_file(str(path), device="cpu")
+        else:
+            try:
+                state = torch.load(path, map_location="cpu", weights_only=True)
+            except TypeError:
+                state = torch.load(path, map_location="cpu")
+        module.load_state_dict(state, strict=strict)
     return module
 
 
@@ -56,9 +131,8 @@ def _load_state(
     path = (
         _checkpoint_path(config or {}, config_key, default_basename)
         if config_key and config
-        else CHECKPOINT_DIR / (
-            default_basename if default_basename.endswith(".pt") else f"{default_basename}.pt"
-        )
+        else CHECKPOINT_DIR
+        / (default_basename if default_basename.endswith(".pt") else f"{default_basename}.pt")
     )
     return _load_state_dict(module, path)
 
@@ -73,214 +147,211 @@ def get_device(config: dict[str, Any]) -> str:
     return resolve_device(config)
 
 
+def _model_key(prefix: str, config: dict[str, Any], identity: str) -> str:
+    return f"{prefix}:{identity}:{_profile_tag(config)}:{get_device(config)}"
+
+
 def get_detector(config: dict[str, Any]):
     weights = _resolve_weights_path(config, "detection_model", "rtdetr-l.pt")
-    key = f"detector:{weights}:{_profile_tag(config)}"
-    if key in _CACHE:
-        return _CACHE[key]
+    key = _model_key("detector", config, weights)
 
-    from ultralytics import RTDETR
+    def create():
+        from ultralytics import RTDETR
 
-    model = RTDETR(weights)
-    expected = config.get("detection_classes")
-    if expected:
-        names = list((model.names or {}).values())
-        if names != list(expected):
-            import warnings
+        model = RTDETR(weights)
+        expected = config.get("detection_classes")
+        if expected:
+            names = list((model.names or {}).values())
+            if names != list(expected):
+                import warnings
 
-            warnings.warn(
-                f"detector class names {names} != config detection_classes {list(expected)} "
-                f"(weights={weights})",
-                stacklevel=2,
-            )
-    _CACHE[key] = model
-    return model
+                warnings.warn(
+                    f"detector class names {names} != config detection_classes {list(expected)} "
+                    f"(weights={weights})",
+                    stacklevel=2,
+                )
+        return model
+
+    return _get_or_create(key, create)
 
 
 def get_odconv_refiner(config: dict[str, Any]):
     ckpt = str(config.get("odconv_checkpoint", "odconv_refiner.pt"))
-    key = f"odconv:{ckpt}:{_profile_tag(config)}"
-    if key in _CACHE:
-        return _CACHE[key]
+    key = _model_key("odconv", config, ckpt)
 
-    from agent.inference.models.odconv import ODConvRefiner
+    def create():
+        from agent.inference.models.odconv import ODConvRefiner
 
-    device = get_device(config)
-    model = _load_state(ODConvRefiner(), "odconv_refiner.pt", config=config, config_key="odconv_checkpoint")
-    model.eval().to(device)
-    _CACHE[key] = model
-    return model
+        device = get_device(config)
+        model = _load_state(
+            ODConvRefiner(), "odconv_refiner.pt", config=config, config_key="odconv_checkpoint"
+        )
+        return model.eval().to(device)
+
+    return _get_or_create(key, create)
 
 
 def get_edl_head(config: dict[str, Any]):
-    ckpt = str(config.get("edl_checkpoint", "edl_head.pt"))
-    key = f"edl:{ckpt}:{_profile_tag(config)}"
-    if key in _CACHE:
-        return _CACHE[key]
+    ckpt = str(config.get("edl_checkpoint", "edl_head_s.safetensors"))
+    key = _model_key("edl", config, ckpt)
 
-    from agent.inference.models.edl_head import EvidentialHead
+    def create():
+        from agent.inference.models.edl_head import EvidentialHead
 
-    device = get_device(config)
-    model = _load_state(EvidentialHead(), "edl_head.pt", config=config, config_key="edl_checkpoint")
-    model.eval().to(device)
-    _CACHE[key] = model
-    return model
+        device = get_device(config)
+        model = EvidentialHead()
+        path = _checkpoint_path(config, "edl_checkpoint", "edl_head_s.safetensors")
+        if not path.is_file():
+            raise FileNotFoundError(f"trained EDL checkpoint not found: {path}")
+        _load_state_dict(model, path, strict=True)
+        return model.eval().to(device)
+
+    return _get_or_create(key, create)
 
 
 def get_siamese_mask2former(config: dict[str, Any]):
-    model_id = config.get("mask2former_model", "facebook/mask2former-swin-tiny-ade-semantic")
-    key = f"mask2former:{model_id}:{_profile_tag(config)}"
-    if key in _CACHE:
-        return _CACHE[key]
+    model_id = str(config.get("mask2former_model", "facebook/mask2former-swin-tiny-ade-semantic"))
+    key = _model_key("mask2former", config, model_id)
 
-    from agent.inference.models.siamese_mask2former import SiameseMask2Former
+    def create():
+        from agent.inference.models.siamese_mask2former import SiameseMask2Former
 
-    device = get_device(config)
-    model = SiameseMask2Former(model_id).to_device(device)
-    _CACHE[key] = model
-    return model
+        return SiameseMask2Former(model_id).to_device(get_device(config))
+
+    return _get_or_create(key, create)
 
 
 def get_motr_tracker(config: dict[str, Any]):
     ckpt = str(config.get("motr_checkpoint", "motr_tracker.pt"))
-    key = f"motr:{ckpt}:{_profile_tag(config)}"
-    if key in _CACHE:
-        return _CACHE[key]
+    key = _model_key("motr", config, ckpt)
 
-    from agent.inference.models.motr_kalman import MOTRTracker
+    def create():
+        from agent.inference.models.motr_kalman import MOTRTracker
 
-    device = get_device(config)
-    model = _load_state(MOTRTracker(), "motr_tracker.pt", config=config, config_key="motr_checkpoint")
-    model.eval().to(device)
-    _CACHE[key] = model
-    return model
+        device = get_device(config)
+        model = _load_state(
+            MOTRTracker(), "motr_tracker.pt", config=config, config_key="motr_checkpoint"
+        )
+        return model.eval().to(device)
+
+    return _get_or_create(key, create)
 
 
 def get_imagebind(config: dict[str, Any]):
-    key = f"imagebind:{_profile_tag(config)}:{config.get('clip_fallback_model', 'clip')}"
-    if key in _CACHE:
-        return _CACHE[key]
-
-    from agent.inference.models.imagebind_model import ImageBindEmbedder
-
-    device = get_device(config)
     clip_id = str(config.get("clip_fallback_model", "openai/clip-vit-base-patch32"))
-    embedder = ImageBindEmbedder(device, clip_model_id=clip_id)
-    _CACHE[key] = embedder
-    return embedder
+    key = _model_key("imagebind", config, clip_id)
+
+    def create():
+        from agent.inference.models.imagebind_model import ImageBindEmbedder
+
+        return ImageBindEmbedder(get_device(config), clip_model_id=clip_id)
+
+    return _get_or_create(key, create)
 
 
 def get_mamba_fusion(config: dict[str, Any]):
     dim = int(config.get("embed_dim", 1024))
-    ckpt = str(config.get("mamba_checkpoint", "mamba_fusion.pt"))
-    key = f"mamba:{dim}:{ckpt}:{_profile_tag(config)}"
-    if key in _CACHE:
-        return _CACHE[key]
+    ckpt = str(config.get("mamba_checkpoint", "mamba_fusion_s.safetensors"))
+    key = _model_key("mamba", config, f"{dim}:{ckpt}")
 
-    from agent.inference.models.mamba_fusion import MultimodalMambaBlock
+    def create():
+        from agent.inference.models.mamba_fusion import MultimodalMambaBlock
 
-    device = get_device(config)
-    model = MultimodalMambaBlock(max(dim, 8))
-    path = _checkpoint_path(config, "mamba_checkpoint", "mamba_fusion.pt")
-    if path.is_file():
-        try:
-            _load_state_dict(model, path)
-        except RuntimeError:
-            pass
-    model.eval().to(device)
-    _CACHE[key] = model
-    return model
+        device = get_device(config)
+        model = MultimodalMambaBlock(max(dim, 8))
+        path = _checkpoint_path(config, "mamba_checkpoint", "mamba_fusion_s.safetensors")
+        if not path.is_file():
+            raise FileNotFoundError(f"trained multimodal fusion checkpoint not found: {path}")
+        _load_state_dict(model, path, strict=True)
+        return model.eval().to(device)
+
+    return _get_or_create(key, create)
 
 
 def get_supcon_meta(config: dict[str, Any]):
     in_dim = int(config.get("embed_dim", 1024))
-    ckpt = str(config.get("supcon_checkpoint", "supcon_meta.pt"))
-    key = f"supcon:{in_dim}:{ckpt}:{_profile_tag(config)}"
-    if key in _CACHE:
-        return _CACHE[key]
+    ckpt = str(config.get("supcon_checkpoint", "supcon_meta_s.safetensors"))
+    key = _model_key("supcon", config, f"{in_dim}:{ckpt}")
 
-    from agent.inference.models.supcon_meta import SupConMetaNet
+    def create():
+        from agent.inference.models.supcon_meta import SupConMetaNet
 
-    device = get_device(config)
-    model = SupConMetaNet(in_dim=in_dim)
-    path = _checkpoint_path(config, "supcon_checkpoint", "supcon_meta.pt")
-    if path.is_file():
-        try:
-            _load_state_dict(model, path)
-        except RuntimeError:
-            pass
-    model.eval().to(device)
-    _CACHE[key] = model
-    return model
+        device = get_device(config)
+        model = SupConMetaNet(in_dim=in_dim)
+        path = _checkpoint_path(config, "supcon_checkpoint", "supcon_meta_s.safetensors")
+        if not path.is_file():
+            raise FileNotFoundError(f"trained SupCon checkpoint not found: {path}")
+        _load_state_dict(model, path, strict=True)
+        return model.eval().to(device)
+
+    return _get_or_create(key, create)
 
 
 def get_semantic_comm(config: dict[str, Any]):
-    model_id = config.get("semantic_comm_model", "google/flan-t5-small")
-    key = f"semantic_comm:{model_id}:{_profile_tag(config)}"
-    if key in _CACHE:
-        return _CACHE[key]
+    model_id = str(config.get("semantic_comm_model", "google/flan-t5-small"))
+    key = _model_key("semantic_comm", config, model_id)
 
-    from agent.inference.models.semantic_comm_net import KnowledgeSemanticCommNet
+    def create():
+        from agent.inference.models.semantic_comm_net import KnowledgeSemanticCommNet
 
-    device = get_device(config)
-    model = KnowledgeSemanticCommNet(model_id).to_device(device)
-    _CACHE[key] = model
-    return model
+        return KnowledgeSemanticCommNet(model_id).to_device(get_device(config))
+
+    return _get_or_create(key, create)
 
 
 def get_marl_policy(config: dict[str, Any]):
     ckpt = str(config.get("marl_checkpoint", "marl_policy.pt"))
-    key = f"marl:{ckpt}:{_profile_tag(config)}"
-    if key in _CACHE:
-        return _CACHE[key]
+    key = _model_key("marl", config, ckpt)
 
-    from agent.inference.models.marl_policy import MARLPolicyNetwork
+    def create():
+        from agent.inference.models.marl_policy import MARLPolicyNetwork
 
-    device = get_device(config)
-    model = _load_state(MARLPolicyNetwork(), "marl_policy.pt", config=config, config_key="marl_checkpoint")
-    model.eval().to(device)
-    _CACHE[key] = model
-    return model
+        device = get_device(config)
+        model = _load_state(
+            MARLPolicyNetwork(), "marl_policy.pt", config=config, config_key="marl_checkpoint"
+        )
+        return model.eval().to(device)
+
+    return _get_or_create(key, create)
 
 
 def get_marl_ppo_scheduler(config: dict[str, Any]):
-    ckpt = str(config.get("marl_ppo_checkpoint", "marl_ppo_scheduler.pt"))
-    key = f"marl_ppo:{ckpt}:{_profile_tag(config)}"
-    if key in _CACHE:
-        return _CACHE[key]
+    ckpt = str(config.get("marl_ppo_checkpoint", "marl_ppo_scheduler_s.safetensors"))
+    key = _model_key("marl_ppo", config, ckpt)
 
-    from agent.inference.models.marl_ppo_scheduler import MARLPPOSchedulerNet
-    from agent.training.battlefield_scheduling_env import BattlefieldSchedulingEnv
+    def create():
+        from agent.inference.models.marl_ppo_scheduler import MARLPPOSchedulerNet
+        from agent.training.battlefield_scheduling_env import BattlefieldSchedulingEnv
 
-    env = BattlefieldSchedulingEnv()
-    device = get_device(config)
-    model = MARLPPOSchedulerNet(
-        obs_dim=env.obs_dim,
-        n_actions=env.n_actions,
-        n_agents=env.n_agents,
-    )
-    path = _checkpoint_path(config, "marl_ppo_checkpoint", "marl_ppo_scheduler.pt")
-    if path.is_file():
-        _load_state_dict(model, path)
-    model.eval().to(device)
-    _CACHE[key] = model
-    return model
+        env = BattlefieldSchedulingEnv()
+        device = get_device(config)
+        model = MARLPPOSchedulerNet(
+            obs_dim=env.obs_dim,
+            n_actions=env.n_actions,
+            n_agents=env.n_agents,
+        )
+        path = _checkpoint_path(config, "marl_ppo_checkpoint", "marl_ppo_scheduler_s.safetensors")
+        if not path.is_file():
+            raise FileNotFoundError(f"trained MARL-PPO checkpoint not found: {path}")
+        _load_state_dict(model, path, strict=True)
+        return model.eval().to(device)
+
+    return _get_or_create(key, create)
 
 
 def get_page_encoder(config: dict[str, Any]):
-    model_id = config.get("page_index_model", "paraphrase-MiniLM-L6-v2")
-    key = f"page_encoder:{model_id}:{_profile_tag(config)}"
-    if key in _CACHE:
-        return _CACHE[key]
+    model_id = str(config.get("page_index_model", "paraphrase-MiniLM-L6-v2"))
+    key = _model_key("page_encoder", config, model_id)
 
-    from agent.inference.offline import is_offline_mode, resolve_model_ref
-    from sentence_transformers import SentenceTransformer
+    def create():
+        from agent.inference.offline import is_offline_mode, resolve_model_ref
+        from sentence_transformers import SentenceTransformer
 
-    path = resolve_model_ref(model_id)
-    local_only = is_offline_mode() or Path(path).is_dir()
-    try:
-        model = SentenceTransformer(path, local_files_only=local_only)
-    except TypeError:
-        model = SentenceTransformer(path)
-    _CACHE[key] = model
-    return model
+        path = resolve_model_ref(model_id)
+        local_only = is_offline_mode() or Path(path).is_dir()
+        try:
+            return SentenceTransformer(path, local_files_only=local_only)
+        except TypeError:
+            return SentenceTransformer(path)
+
+    return _get_or_create(key, create)

@@ -52,6 +52,13 @@ performance:
   primary_metric: candidate_plan_generation_success
   primary_score: 0.9
 
+model_profile:
+  parameter_count: 33
+  parameter_count_text: "local ONNX components only: 9-parameter logistic scorer plus 24 learnable LSTM scalars; rules and external evidence are excluded"
+  flops: 0
+  flops_text: "not_reported as one value: candidate-plan count, target-history count, rules, and external-evidence branches vary per request; local ONNX arithmetic lower bound is 595 FLOPs for one [1,8] logistic pass plus one [1,12,4] 12-step LSTM pass, excluding nonlinear activations"
+  precision: fp32
+
 safety:
   risk_level: medium
   requires_human_review: true

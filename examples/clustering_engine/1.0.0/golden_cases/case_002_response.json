@@ -1,0 +1,39 @@
+{
+  "ok": true,
+  "request_id": "cluster-dbscan-001",
+  "trace_id": "trace-m01-dbscan",
+  "algorithm_id": "clustering_engine",
+  "version": "1.0.0",
+  "outputs": {
+    "algorithm": "dbscan",
+    "labels": [0, 0, 1, 1, -1],
+    "clusters": [
+      {
+        "cluster_id": 0,
+        "size": 2,
+        "centroid": [0.05, 0.0],
+        "member_indices": [0, 1]
+      },
+      {
+        "cluster_id": 1,
+        "size": 2,
+        "centroid": [5.05, 5.0],
+        "member_indices": [2, 3]
+      }
+    ],
+    "cluster_count": 2,
+    "noise_indices": [4],
+    "inertia": null,
+    "iterations": 1,
+    "converged": true,
+    "point_count": 5,
+    "dimension": 2,
+    "model_runtime": {
+      "backend": "native_python",
+      "used": true,
+      "implementation_version": "1.0.0"
+    }
+  },
+  "usage": {"latency_ms": 0},
+  "error": null
+}

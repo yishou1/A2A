@@ -3,13 +3,23 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .association_rules import choose_primary_rule, discretize_situation, load_or_mine_rules, match_rules
+from .association_rules import (
+    choose_primary_rule,
+    discretize_situation,
+    load_or_mine_rules,
+    match_rules,
+    rule_artifact_identity,
+)
+from .clustering import cluster_points
+from .conditional_tabular_gan import generate_conditional_samples
 from .closed_loop_advisor import advise
 from .execution_planner import run_planner
+from .federated_fedavg import federated_average
 from .mission_feature_adapter import build_features_from_agent_results, build_features_from_sc2le_proxy
 from .mission_feature_schema import DEFAULT_MODEL_METADATA_PATH, DEFAULT_MODEL_PATH
 from .mission_scorer import score_mission
-from .motion_prediction import predict_single_track
+from .motion_prediction import motion_predictor_identity, predict_single_track
+from .intent_gaussian_naive_bayes import predict_intents
 from .track_threat_algorithms import (
     graph_relation_reasoner,
     multimodal_feature_fuser,
@@ -17,6 +27,7 @@ from .track_threat_algorithms import (
     track_state_updater,
     trajectory_predictor,
 )
+from .threat_priority_random_forest import predict_threat_priorities
 from .xbd_damage_classifier import assess_damage, damage_model_loaded
 
 
@@ -49,7 +60,28 @@ def predict_execution_rule_matcher(inputs: dict, params: dict) -> dict:
         "matched_rules": matched,
         "primary_rule": primary,
         "matched_items": sorted(items),
+        "model": rule_artifact_identity(),
     }
+
+
+def predict_clustering_engine(inputs: dict, params: dict) -> dict:
+    return cluster_points(inputs, params)
+
+
+def predict_threat_priority_random_forest(inputs: dict, params: dict) -> dict:
+    return predict_threat_priorities(inputs, params)
+
+
+def predict_intent_gaussian_naive_bayes(inputs: dict, params: dict) -> dict:
+    return predict_intents(inputs, params)
+
+
+def predict_federated_fedavg_aggregator(inputs: dict, params: dict) -> dict:
+    return federated_average(inputs, params)
+
+
+def predict_conditional_tabular_gan(inputs: dict, params: dict) -> dict:
+    return generate_conditional_samples(inputs, params)
 
 
 def predict_trajectory_linear_predictor(inputs: dict, params: dict) -> dict:
@@ -63,6 +95,9 @@ def predict_trajectory_linear_predictor(inputs: dict, params: dict) -> dict:
         "execute_at": result["execute_at"],
         "future_t": result["future_t"],
         "model": result["model"],
+        "fit": result["fit"],
+        "history_points": result["history_points"],
+        "model_identity": motion_predictor_identity(),
         "track_id": result.get("track_id"),
     }
 

@@ -58,10 +58,20 @@ class MARLPPOSchedulerNet(nn.Module):
         obs: np.ndarray,
         *,
         deterministic: bool = False,
+        valid_target_count: int | None = None,
+        action_mask: list[bool] | np.ndarray | None = None,
     ) -> tuple[list[int], float, torch.Tensor]:
         device = next(self.parameters()).device
         x = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
         logits, value = self.forward(x)
+        if valid_target_count is not None:
+            valid_target_count = max(0, min(int(valid_target_count), self.n_actions - 1))
+            logits[:, valid_target_count + 1 :] = torch.finfo(logits.dtype).min
+        if action_mask is not None:
+            allowed = torch.as_tensor(action_mask, dtype=torch.bool, device=device).reshape(1, -1)
+            if allowed.shape[1] != self.n_actions or not bool(allowed.any()):
+                raise ValueError("action_mask must allow at least one scheduler action")
+            logits = logits.masked_fill(~allowed, torch.finfo(logits.dtype).min)
         dist = torch.distributions.Categorical(logits=logits)
         if deterministic:
             action = int(logits.argmax(dim=-1).item())
@@ -80,17 +90,45 @@ class MARLPPOSchedulerNet(nn.Module):
         """推理：为所有传感器与打击资产生成任务分配方案。"""
         env = BattlefieldSchedulingEnv()
         env.reset(situation)
-        n_agents = len(situation.sensors[: env.max_sensors]) + len(
-            situation.strike_assets[:MAX_STRIKE_ASSETS]
-        )
-        actions: list[int] = []
-        for agent_idx in range(n_agents):
+        sensor_count = len(situation.sensors[: env.max_sensors])
+        strike_count = len(situation.strike_assets[:MAX_STRIKE_ASSETS])
+        actions: list[int] = [0] * env.n_agents
+        valid_target_count = len(situation.targets[:MAX_TARGETS])
+        sensor_targets_used: set[int] = set()
+        for agent_idx in range(sensor_count):
             obs = env.build_agent_obs(agent_idx)
-            acts, _, _ = self.act(obs, deterministic=deterministic)
-            actions.append(acts[0])
-        # pad to full agent count
-        while len(actions) < env.n_agents:
-            actions.append(0)
+            sensor = situation.sensors[agent_idx]
+            mask = [index <= valid_target_count and index not in sensor_targets_used for index in range(self.n_actions)]
+            mask[0] = True
+            if not sensor.available:
+                mask = [True] + [False] * (self.n_actions - 1)
+            acts, _, _ = self.act(
+                obs,
+                deterministic=deterministic,
+                valid_target_count=valid_target_count,
+                action_mask=mask,
+            )
+            actions[agent_idx] = acts[0]
+            if acts[0] > 0:
+                sensor_targets_used.add(acts[0])
+        strike_targets_used: set[int] = set()
+        for strike_idx in range(strike_count):
+            agent_idx = env.max_sensors + strike_idx
+            obs = env.build_agent_obs(agent_idx)
+            asset = situation.strike_assets[strike_idx]
+            mask = [index <= valid_target_count and index not in strike_targets_used for index in range(self.n_actions)]
+            mask[0] = True
+            if not asset.available or asset.remaining_ammo <= 0:
+                mask = [True] + [False] * (self.n_actions - 1)
+            acts, _, _ = self.act(
+                obs,
+                deterministic=deterministic,
+                valid_target_count=valid_target_count,
+                action_mask=mask,
+            )
+            actions[agent_idx] = acts[0]
+            if acts[0] > 0:
+                strike_targets_used.add(acts[0])
         _, _, done, info = env.step(actions)
         assert done
 
@@ -135,15 +173,28 @@ class MARLPPOSchedulerNet(nn.Module):
             "covered_targets": info["covered_targets"],
             "reattack_targets": info["reattack_targets"],
             "algorithm": "MARL-PPO",
-            "n_agents": n_agents,
+            "n_agents": sensor_count + strike_count,
         }
 
     def evaluate_actions(
         self,
         obs: torch.Tensor,
         actions: torch.Tensor,
+        valid_target_counts: torch.Tensor | None = None,
+        action_masks: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         logits, values = self.forward(obs)
+        if valid_target_counts is not None:
+            counts = valid_target_counts.to(device=logits.device, dtype=torch.long).clamp(
+                min=0, max=self.n_actions - 1
+            )
+            invalid = torch.arange(self.n_actions, device=logits.device).unsqueeze(0) > counts.unsqueeze(1)
+            logits = logits.masked_fill(invalid, torch.finfo(logits.dtype).min)
+        if action_masks is not None:
+            allowed = action_masks.to(device=logits.device, dtype=torch.bool)
+            if allowed.shape != logits.shape:
+                raise ValueError("action_masks shape must match action logits")
+            logits = logits.masked_fill(~allowed, torch.finfo(logits.dtype).min)
         dist = torch.distributions.Categorical(logits=logits)
         log_probs = dist.log_prob(actions)
         entropy = dist.entropy()

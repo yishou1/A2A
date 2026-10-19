@@ -1,8 +1,8 @@
 # Compliance Risk Scorer ONNX
 
-Native ONNX package for the bootstrap compliance-risk logistic-regression
-model. It scores one precomputed six-feature row. Rule retrieval, authorization
-checks, explanations, and fallback behavior remain in
+Native ONNX package for a reproducibly trained compliance-risk logistic-
+regression reference model. It scores one precomputed six-feature row. Rule
+retrieval, authorization checks, explanations, and fallback behavior remain in
 `compliance_authorization_core`.
 
 Feature order:
@@ -14,5 +14,6 @@ Feature order:
 5. `rag_evidence_count`
 6. `law_of_war_rule_hit`
 
-The model is copied from `models/compliance_authorization_lr.onnx`. Its metadata
-marks it as a bootstrap model rather than a production-data-trained model.
+Rebuild the reference dataset, model, metadata, and holdout metrics with
+`python scripts/train_logistic_onnx_models.py`. The dataset contains synthetic
+reference-policy labels and is not a production compliance benchmark.

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent.inference.registry import get_device, get_mamba_fusion
+from agent.inference.registry import inference_guard, get_device, get_mamba_fusion
 
 
 def fuse_embeddings(
@@ -18,5 +18,6 @@ def fuse_embeddings(
 
     model = get_mamba_fusion(config)
     device = get_device(config)
-    fused = model.fuse(embeddings, tracks, device=device)
+    with inference_guard("mamba", config):
+        fused = model.fuse(embeddings, tracks, device=device)
     return {"fused_embeddings": fused, "sequence_length": max(len(tracks), len(embeddings), 1)}

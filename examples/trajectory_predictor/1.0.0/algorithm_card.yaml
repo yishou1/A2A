@@ -67,8 +67,11 @@ resource_requirements:
   disk_mb: 20
 
 model_profile:
-  parameter_count: 0
-  parameter_count_text: frozen TorchScript bundles, see models/track_threat
+  parameter_count: 206352
+  parameter_count_text: "maximum single-branch count: aircraft=206,352 and ship=205,320 persisted TorchScript parameters; one branch is selected by object type"
+  flops: 935180
+  flops_text: "maximum profiler lower-bound branch FLOPs: ship=935,180 for history=[1,6,9], one edge=[1,8], baseline=[1,2,2]; aircraft=668,936 under its bundle reference input; unsupported types, horizons, or bundle failures use the physics fallback"
+  flops_input_shape: [1, 6, 9]
   model_size_mb: 2
   precision: fp32
 

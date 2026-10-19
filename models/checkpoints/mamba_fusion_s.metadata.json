@@ -1,0 +1,72 @@
+{
+  "architecture": {
+    "embedding_dimension": 256,
+    "expansion_factor": 2,
+    "maximum_reference_modalities": 4,
+    "parameter_count": 412688,
+    "state_dimension": 16
+  },
+  "artifact_path": "models/checkpoints/mamba_fusion_s.safetensors",
+  "artifact_sha256": "250aada18113b9e353a69d725eb5310911f26177e84c47c4f0371c9c6ecb9fcc",
+  "compute_profile": "small",
+  "dataset": {
+    "artifacts": {
+      "inputs": {
+        "path": "data/multimodal_mamba/reference_holdout_inputs.npy",
+        "sha256": "528626ac93a3316c419204ccd801aa5c1021957a41e2f9211a01e100633ef90b"
+      },
+      "masks": {
+        "path": "data/multimodal_mamba/reference_holdout_masks.npy",
+        "sha256": "96336034f4c5cebd3a08cc6eba44be16ab0ff948ac9c88d333d4877b6f028b22"
+      },
+      "targets": {
+        "path": "data/multimodal_mamba/reference_holdout_targets.npy",
+        "sha256": "399db15e882a494427978989225625473ae7dc7138012064d87ba797b2b62f5d"
+      }
+    },
+    "holdout_count": 480,
+    "holdout_seed": 20260827,
+    "limitation": "Synthetic latent vectors only; not a benchmark of raw sensor encoders.",
+    "modalities": [
+      "eo_ir",
+      "sar",
+      "radar",
+      "text_report"
+    ],
+    "samples_per_epoch": 384,
+    "source": "deterministic_synthetic_multimodal_latent_generator",
+    "total_training_scenarios_seen": 61440
+  },
+  "evaluation": {
+    "method": "independent_deterministic_synthetic_holdout",
+    "normalized_mean_baseline": {
+      "mean_cosine_similarity": 0.679153,
+      "p05_cosine_similarity": 0.491344,
+      "rmse": 0.050066
+    },
+    "trained_fusion": {
+      "mean_cosine_similarity": 0.771683,
+      "p05_cosine_similarity": 0.648176,
+      "rmse": 0.042234
+    }
+  },
+  "model_family": "mamba_style_selective_state_space_fusion",
+  "model_id": "multimodal_mamba_fusion",
+  "model_version": "1.0.0",
+  "runtime_versions": {
+    "numpy": "2.2.6",
+    "scikit_learn": "1.7.2",
+    "torch": "2.12.0+cpu"
+  },
+  "training": {
+    "batch_size": 64,
+    "epochs": 160,
+    "learning_rate": 0.0008,
+    "objective": "cosine_reconstruction_plus_MSE",
+    "optimizer": "AdamW",
+    "random_state": 20260826,
+    "weight_decay": 0.0001
+  },
+  "training_script": "scripts/train_multimodal_mamba_fusion.py",
+  "training_script_sha256": "b77f2f6297226189044cd2e3a44d7403bc3e7ab5131611a626c0bdc559a5ebc4"
+}

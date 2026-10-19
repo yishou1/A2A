@@ -5,6 +5,8 @@
 //   3. 并发推理（多线程同时调用 Run）
 //   4. pool_size 被耗尽时 Checkout 超时返回错误（而非死锁）
 //   5. 通过 HTTP Server POST /load 的 pool_size 参数控制池容量
+//   6. /run 真正并发，并验证全局服务锁未重新引入串行瓶颈
+//   7. 在借 runner 与 Unload 并发时安全 drain（无 use-after-free）
 
 #include <atomic>
 #include <chrono>
@@ -392,9 +394,9 @@ void TestPythonRunnerPoolViaRuntimeCache() {
 //   3. POST /unload 清理池
 // -----------------------------------------------------------------------
 void TestPythonRunnerPoolViaHttpServer() {
-    // 中文注释：mock service 加 10ms 延迟，保证并发时有排队效果
+    // 100ms 延迟可区分 pool_size=3 的两批并发（约 200ms）与历史全局锁串行（约 600ms）。
     MockPythonServiceConfig cfg;
-    cfg.predict_delay_ms = 10;
+    cfg.predict_delay_ms = 100;
     MockPythonService mock(cfg);
 
     const fs::path temp_dir = MakeTempDir("http_server");
@@ -446,40 +448,48 @@ void TestPythonRunnerPoolViaHttpServer() {
         };
     };
 
-    // 中文注释：串行执行（HTTP Server 使用全局 mutex 保护 registry，
-    // 每次推理会持锁完成，并发场景等同于串行排队）。
-    // 所有 6 次请求都应该成功。
+    // 多线程同时发起 /run。pool_size=3、单次 predict=100ms，6 个请求应以两批完成，
+    // 而非历史实现中的 6 次全局锁串行。
+    std::vector<std::thread> run_threads;
+    run_threads.reserve(kConcurrency);
+    const auto started_at = std::chrono::steady_clock::now();
     for (int i = 0; i < kConcurrency; ++i) {
-        httplib::Client client("127.0.0.1", server.port());
-        client.set_connection_timeout(std::chrono::seconds(10));
-        client.set_read_timeout(std::chrono::seconds(10));
-        client.set_write_timeout(std::chrono::seconds(10));
-        auto response = client.Post(
-            "/run",
-            algolib::JsonUtils::Dump(make_run_body(i)),
-            "application/json");
-        if (response && response->status == 200) {
-            const auto parsed = nlohmann::json::parse(response->body);
-            if (parsed.value("ok", false)) {
-                success_count.fetch_add(1, std::memory_order_relaxed);
-            } else {
-                std::cerr << "[DEBUG] /run[" << i << "] ok=false body=" << response->body << '\n';
-                error_count.fetch_add(1, std::memory_order_relaxed);
+        run_threads.emplace_back([&, i]() {
+            httplib::Client client("127.0.0.1", server.port());
+            client.set_connection_timeout(std::chrono::seconds(10));
+            client.set_read_timeout(std::chrono::seconds(10));
+            client.set_write_timeout(std::chrono::seconds(10));
+            auto response = client.Post(
+                "/run",
+                algolib::JsonUtils::Dump(make_run_body(i)),
+                "application/json");
+            if (response && response->status == 200) {
+                const auto parsed = nlohmann::json::parse(response->body);
+                if (parsed.value("ok", false)) {
+                    success_count.fetch_add(1, std::memory_order_relaxed);
+                    return;
+                }
             }
-        } else if (response) {
-            std::cerr << "[DEBUG] /run[" << i << "] HTTP " << response->status
-                      << " body=" << response->body << '\n';
             error_count.fetch_add(1, std::memory_order_relaxed);
-        } else {
-            std::cerr << "[DEBUG] /run[" << i << "] no response (timeout/connection refused)\n";
-            error_count.fetch_add(1, std::memory_order_relaxed);
-        }
+        });
     }
+    for (auto& thread : run_threads) {
+        thread.join();
+    }
+    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started_at).count();
 
     Expect(success_count.load() == kConcurrency,
            "All " + std::to_string(kConcurrency) + " concurrent /run should succeed. "
            "success=" + std::to_string(success_count.load()) +
            " error=" + std::to_string(error_count.load()));
+    Expect(elapsed_ms < 450,
+           "Concurrent /run should use the pool instead of serializing all requests; elapsed=" +
+               std::to_string(elapsed_ms) + "ms.");
+    // 注册阶段已经执行一次 golden predict，/load 还会执行一次健康检查；这里验证
+    // 并发 /run 至少全部到达服务端，而不把注册期调用计入固定常量。
+    Expect(mock.predict_call_count() >= kConcurrency + 1,
+           "Concurrent /run requests should all reach the Python service.");
 
     // --- POST /unload ---
     const nlohmann::json unload_body{
@@ -491,6 +501,62 @@ void TestPythonRunnerPoolViaHttpServer() {
     Expect(unload_resp.value("ok", false), "POST /unload should return ok=true.");
     Expect(unload_resp.value("load_status", std::string()) == "unloaded",
            "load_status should be 'unloaded'.");
+}
+
+// -----------------------------------------------------------------------
+// TestPythonRunnerPoolUnloadDuringRun
+// 已借出的 runner 必须在 Unload 后安全完成；新请求应被 draining 拒绝。
+// -----------------------------------------------------------------------
+void TestPythonRunnerPoolUnloadDuringRun() {
+    MockPythonServiceConfig cfg;
+    cfg.predict_delay_ms = 180;
+    MockPythonService mock(cfg);
+    const fs::path temp_dir = MakeTempDir("unload_during_run");
+    const fs::path fixture = PrepareServiceFixture(temp_dir, mock.base_url());
+
+    AlgorithmRegistry registry(temp_dir / "registry.json");
+    Expect(registry.Reload().ok(), "Registry reload should succeed.");
+    Expect(registry.Register(fixture).ok(), "Service fixture should register.");
+    const AlgorithmKey key{"llm_rule_explainer", "1.0.0", BackendType::kPythonHttpService};
+    Expect(registry.Activate(key).ok(), "Service fixture should activate.");
+    auto entry_result = registry.Get(key);
+    Expect(entry_result.ok(), "Registry entry should be found.");
+
+    PythonHttpRunnerPool pool(/*pool_size=*/1, /*checkout_timeout_ms=*/1000);
+    Expect(pool.Load(entry_result.value()).ok(), "Pool Load should succeed.");
+
+    std::atomic<bool> run_ok{false};
+    std::thread run_thread([&]() {
+        algolib::AlgorithmRequest req;
+        req.request_id = "req_drain";
+        req.trace_id = "trace_drain";
+        req.algorithm_id = "llm_rule_explainer";
+        req.version = "1.0.0";
+        req.backend_type = BackendType::kPythonHttpService;
+        req.inputs = {{"rule_text", "in-flight"}};
+        run_ok.store(pool.Run(req).ok, std::memory_order_release);
+    });
+
+    // 首次注册已调用一次 /predict；等待在途请求实际进入第二次 /predict 后再卸载。
+    for (int attempt = 0; attempt < 100 && mock.predict_call_count() < 2; ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    Expect(mock.predict_call_count() >= 2, "In-flight request should reach the Python service.");
+    Expect(pool.Unload().ok(), "Unload should transition the pool to draining.");
+
+    algolib::AlgorithmRequest rejected;
+    rejected.request_id = "req_after_drain";
+    rejected.algorithm_id = "llm_rule_explainer";
+    rejected.version = "1.0.0";
+    rejected.backend_type = BackendType::kPythonHttpService;
+    rejected.inputs = {{"rule_text", "rejected"}};
+    const auto rejected_result = pool.Run(rejected);
+    Expect(!rejected_result.ok, "New run must be rejected after unload starts.");
+
+    run_thread.join();
+    Expect(run_ok.load(std::memory_order_acquire),
+           "In-flight runner lease should remain valid until Run returns.");
+    Expect(pool.idle_count() == 0, "Drained pool should not retain returned runner pointers.");
 }
 
 }  // namespace
@@ -507,6 +573,8 @@ int RunPythonRunnerPoolTests() {
          TestPythonRunnerPoolViaRuntimeCache},
         {"TestPythonRunnerPoolViaHttpServer",
          TestPythonRunnerPoolViaHttpServer},
+        {"TestPythonRunnerPoolUnloadDuringRun",
+         TestPythonRunnerPoolUnloadDuringRun},
     };
 
     int failed = 0;

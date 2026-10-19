@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent.inference.registry import get_device, get_motr_tracker
+from agent.inference.registry import inference_guard, get_device, get_motr_tracker
 from agent.inference.utils import decode_image_from_frame
 
 
@@ -28,15 +28,16 @@ def track_objects(
         if image_rgb is not None:
             image_height, image_width = image_rgb.shape[:2]
 
-    return tracker.track(
-        verified,
-        prior_tracks,
-        image_rgb,
-        device=device,
-        iou_thr=iou_thr,
-        config=config,
-        visual_frame=visual_frame,
-        batch_context=batch_context,
-        image_width=image_width,
-        image_height=image_height,
-    )
+    with inference_guard("motr", config):
+        return tracker.track(
+            verified,
+            prior_tracks,
+            image_rgb,
+            device=device,
+            iou_thr=iou_thr,
+            config=config,
+            visual_frame=visual_frame,
+            batch_context=batch_context,
+            image_width=image_width,
+            image_height=image_height,
+        )

@@ -27,7 +27,9 @@ Status JsonUtils::WriteJsonFile(const std::filesystem::path& file_path,
 nlohmann::json JsonUtils::SummarizeSchema(const nlohmann::json& schema_json) {
     nlohmann::json summary;
     summary["title"] = schema_json.value("title", "");
-    summary["type"] = schema_json.value("type", "");
+    summary["type"] = schema_json.contains("type")
+                          ? schema_json.at("type")
+                          : nlohmann::json("");
     summary["required"] = schema_json.value("required", nlohmann::json::array());
     summary["properties"] = nlohmann::json::array();
 
@@ -37,7 +39,9 @@ nlohmann::json JsonUtils::SummarizeSchema(const nlohmann::json& schema_json) {
             const auto& property_schema = it.value();
             summary["properties"].push_back({
                 {"name", it.key()},
-                {"type", property_schema.value("type", "")},
+                {"type", property_schema.contains("type")
+                             ? property_schema.at("type")
+                             : nlohmann::json("")},
                 {"description", property_schema.value("description", "")},
             });
         }

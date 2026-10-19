@@ -1,13 +1,27 @@
 """Linear regression motion prediction for execution control."""
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 from pathlib import Path
 from typing import Any, Dict, List, Sequence, Tuple
 
 
+DEFAULT_METADATA_RELATIVE_PATH = Path("models/trajectory_linear_predictor.metadata.json")
+
+
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _normalized_text_sha256(path: Path) -> str:
+    text = path.read_text(encoding="utf-8").replace("\r\n", "\n")
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def load_track_fixture(path: Path | None = None) -> dict:
@@ -16,13 +30,17 @@ def load_track_fixture(path: Path | None = None) -> dict:
 
 
 def fit_linear(ts: Sequence[float], values: Sequence[float]) -> Tuple[float, float]:
+    if len(ts) != len(values):
+        raise ValueError("timestamps and values must have the same length")
     if len(ts) < 2:
         value = float(values[0]) if values else 0.0
         return 0.0, value
     mean_t = sum(ts) / len(ts)
     mean_v = sum(values) / len(values)
     numerator = sum((t - mean_t) * (v - mean_v) for t, v in zip(ts, values))
-    denominator = sum((t - mean_t) ** 2 for t in ts) or 1.0
+    denominator = sum((t - mean_t) ** 2 for t in ts)
+    if denominator <= 0.0:
+        raise ValueError("track history must contain at least two distinct timestamps")
     slope = numerator / denominator
     intercept = mean_v - slope * mean_t
     return slope, intercept
@@ -31,6 +49,47 @@ def fit_linear(ts: Sequence[float], values: Sequence[float]) -> Tuple[float, flo
 def predict_linear(ts: Sequence[float], values: Sequence[float], future_t: float) -> float:
     slope, intercept = fit_linear(ts, values)
     return slope * future_t + intercept
+
+
+def _r_squared(ts: Sequence[float], values: Sequence[float], slope: float, intercept: float) -> float:
+    mean_value = sum(values) / len(values)
+    residual = sum((value - (slope * t + intercept)) ** 2 for t, value in zip(ts, values))
+    total = sum((value - mean_value) ** 2 for value in values)
+    return 1.0 if total <= 1e-15 and residual <= 1e-15 else max(0.0, 1.0 - residual / max(total, 1e-15))
+
+
+def validate_motion_predictor_artifact() -> dict:
+    """Validate source and reference-evaluation identities recorded in metadata."""
+    root = _repo_root()
+    metadata_path = root / DEFAULT_METADATA_RELATIVE_PATH
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    implementation_path = root / str(metadata["implementation_path"])
+    evaluation_path = root / str(metadata["evaluation_dataset"]["path"])
+    actual_implementation_hash = _normalized_text_sha256(implementation_path)
+    actual_evaluation_hash = _sha256(evaluation_path)
+    if actual_implementation_hash != metadata.get("implementation_sha256"):
+        raise ValueError("trajectory predictor implementation SHA256 mismatch")
+    if actual_evaluation_hash != metadata.get("evaluation_dataset", {}).get("sha256"):
+        raise ValueError("trajectory predictor evaluation dataset SHA256 mismatch")
+    return metadata
+
+
+def motion_predictor_loaded() -> bool:
+    try:
+        validate_motion_predictor_artifact()
+        return True
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return False
+
+
+def motion_predictor_identity() -> dict:
+    metadata = validate_motion_predictor_artifact()
+    return {
+        "model_id": metadata["model_id"],
+        "model_version": metadata["model_version"],
+        "model_family": metadata["model_family"],
+        "implementation_sha256": metadata["implementation_sha256"],
+    }
 
 
 def build_track_histories(results: dict, fixture: dict | None = None) -> List[dict]:
@@ -44,12 +103,14 @@ def build_track_histories(results: dict, fixture: dict | None = None) -> List[di
             track_id = str(item.get("track_id") or item.get("id") or "")
             points = item.get("history") or item.get("points") or []
             if track_id and isinstance(points, list) and points:
+                weapon_prep_value = item.get("weapon_prep_sec")
+                flight_time_value = item.get("flight_time_sec")
                 tracks.append(
                     {
                         "track_id": track_id,
                         "history": points,
-                        "weapon_prep_sec": float(item.get("weapon_prep_sec") or 2.0),
-                        "flight_time_sec": float(item.get("flight_time_sec") or 4.0),
+                        "weapon_prep_sec": 2.0 if weapon_prep_value is None else float(weapon_prep_value),
+                        "flight_time_sec": 4.0 if flight_time_value is None else float(flight_time_value),
                     }
                 )
     if tracks:
@@ -72,18 +133,33 @@ def predict_single_track(track_dict: dict) -> dict:
             },
         }
 
-    ts = [float(point.get("t") or index * 0.1) for index, point in enumerate(points)]
-    xs = [float(point.get("x") or 0.0) for point in points]
-    ys = [float(point.get("y") or 0.0) for point in points]
+    samples = [
+        (
+            float(point["t"]) if point.get("t") is not None else index * 0.1,
+            float(point["x"]) if point.get("x") is not None else 0.0,
+            float(point["y"]) if point.get("y") is not None else 0.0,
+        )
+        for index, point in enumerate(points)
+    ]
+    if not all(math.isfinite(value) for sample in samples for value in sample):
+        raise ValueError("track history values must be finite")
+    samples.sort(key=lambda sample: sample[0])
+    ts = [sample[0] for sample in samples]
+    xs = [sample[1] for sample in samples]
+    ys = [sample[2] for sample in samples]
     last_t = ts[-1]
-    weapon_prep = float(track_dict.get("weapon_prep_sec") or 2.0)
-    flight_time = float(track_dict.get("flight_time_sec") or 4.0)
+    weapon_prep_value = track_dict.get("weapon_prep_sec")
+    flight_time_value = track_dict.get("flight_time_sec")
+    weapon_prep = 2.0 if weapon_prep_value is None else float(weapon_prep_value)
+    flight_time = 4.0 if flight_time_value is None else float(flight_time_value)
+    if weapon_prep < 0.0 or flight_time < 0.0:
+        raise ValueError("prediction horizon components must be non-negative")
     execute_at = round(last_t + weapon_prep, 3)
     future_t = last_t + weapon_prep + flight_time
-    predicted_x = predict_linear(ts, xs, future_t)
-    predicted_y = predict_linear(ts, ys, future_t)
-    vx, _ = fit_linear(ts, xs)
-    vy, _ = fit_linear(ts, ys)
+    vx, x_intercept = fit_linear(ts, xs)
+    vy, y_intercept = fit_linear(ts, ys)
+    predicted_x = vx * future_t + x_intercept
+    predicted_y = vy * future_t + y_intercept
 
     return {
         "ok": True,
@@ -93,6 +169,18 @@ def predict_single_track(track_dict: dict) -> dict:
         "execute_at": execute_at,
         "future_t": round(future_t, 4),
         "model": "linear_regression",
+        "fit": {
+            "x": {
+                "slope": round(vx, 8),
+                "intercept": round(x_intercept, 8),
+                "r_squared": round(_r_squared(ts, xs, vx, x_intercept), 8),
+            },
+            "y": {
+                "slope": round(vy, 8),
+                "intercept": round(y_intercept, 8),
+                "r_squared": round(_r_squared(ts, ys, vy, y_intercept), 8),
+            },
+        },
         "history_points": len(points),
     }
 

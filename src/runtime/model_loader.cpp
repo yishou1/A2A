@@ -130,8 +130,8 @@ ModelLoadResult ModelLoader::Load(const ModelLoadRequest& request) {
             "Algorithm must be active to load; current status=" + ToString(entry.status) + ".");
     }
 
-    // 3. 检查是否已加载（仅 ONNX 有缓存语义）
-    const bool already = runner_cache_.IsLoaded(entry, request.deploy_id);
+    // 3. 一次读取缓存，避免 IsLoaded/GetCachedRunner 两次加锁之间的状态窗口。
+    auto cached_runner = runner_cache_.GetCachedRunner(entry, request.deploy_id);
 
     ModelLoadResult result;
     result.algorithm_id = request.algorithm_id;
@@ -139,14 +139,13 @@ ModelLoadResult ModelLoader::Load(const ModelLoadRequest& request) {
     result.backend_type = ToString(request.backend_type);
     result.deploy_id    = request.deploy_id;
 
-    if (already) {
+    if (cached_runner) {
         // 中文注释：已在缓存中，无需重新加载；直接做健康检查后返回。
-        auto cached = runner_cache_.GetCachedRunner(entry, request.deploy_id);
         result.ok          = true;
         result.load_status = "already_loaded";
         result.message     = "Runner is already loaded in cache.";
-        if (cached) {
-            const HealthStatus hs = cached->HealthCheck();
+        {
+            const HealthStatus hs = cached_runner->HealthCheck();
             result.health_ok      = hs.ok;
             result.health_status  = hs.status;
             result.health_message = hs.message;
@@ -295,21 +294,21 @@ ModelLoadResult ModelLoader::Unload(const ModelLoadRequest& request) {
     result.backend_type = ToString(request.backend_type);
     result.deploy_id    = request.deploy_id;
 
-    // 中文注释：尝试从缓存中拿到 runner 并调用 Unload()，随后从缓存删除指定 deploy_id 条目。
+    // 先从 Cache 摘除，阻止新请求继续借用该 runner；shared_ptr 保证在途请求仍持有
+    // 顶层对象。PythonHttpRunnerPool::Unload 会进入 draining 并等待租约自然归还。
     auto cached = runner_cache_.GetCachedRunner(entry, request.deploy_id);
-    if (cached) {
-        cached->Unload();  // 忽略 Unload 返回值（资源释放尽力而为）
-    }
-    // 若指定了 deploy_id 则只清除该条目；否则清除所有同名算法缓存（全卸载语义）
     if (!request.deploy_id.empty()) {
         runner_cache_.InvalidateDeployment(key, request.deploy_id);
     } else {
         runner_cache_.Invalidate(key);
     }
+    if (cached) {
+        cached->Unload();
+    }
 
     result.ok          = true;
     result.load_status = "unloaded";
-    result.message     = cached ? "Runner unloaded from cache."
+    result.message     = cached ? "Runner drained and removed from cache."
                                 : "Runner was not in cache; no-op.";
 
     // 部署状态回写

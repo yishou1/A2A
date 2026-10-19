@@ -1,0 +1,15 @@
+{
+  "request_id": "cgan-generate-001",
+  "trace_id": "trace-m08-cgan",
+  "algorithm_id": "conditional_tabular_gan",
+  "version": "1.0.0",
+  "backend_type": "python_http_service",
+  "inputs": {
+    "condition": "hostile",
+    "sample_count": 3
+  },
+  "params": {
+    "seed": 42,
+    "temperature": 1.0
+  }
+}

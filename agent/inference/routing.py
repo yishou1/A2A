@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent.inference.registry import get_marl_policy
+from agent.inference.registry import inference_guard, get_marl_policy
 
 
 def marl_route(
@@ -14,4 +14,5 @@ def marl_route(
     config: dict[str, Any],
 ) -> dict[str, Any]:
     policy = get_marl_policy(config)
-    return policy.route(packet, agents, jamming)
+    with inference_guard("marl_policy", config):
+        return policy.route(packet, agents, jamming)

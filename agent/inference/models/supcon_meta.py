@@ -54,7 +54,7 @@ class SupConMetaNet(nn.Module):
     ) -> list[dict]:
         if not fused:
             return []
-        self.to(device)
+        # 设备迁移仅在 registry 初始化阶段完成；推理时保持共享模型不可变。
         protos = self.meta_prototypes(support_shots or [], device)
         results: list[dict] = []
         for tid, vec in fused.items():

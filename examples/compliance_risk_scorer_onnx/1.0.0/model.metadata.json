@@ -1,9 +1,24 @@
 {
-  "model_source": "a2a_compliance_authorization_bootstrap_lr",
-  "model_type": "logistic_regression",
+  "model_id": "compliance_risk_scorer_onnx",
+  "model_version": "1.0.0",
+  "model_family": "trained_logistic_regression",
   "format": "onnx",
-  "input_name": "features",
-  "output_name": "probability",
+  "artifact_path": "examples/compliance_risk_scorer_onnx/1.0.0/model.onnx",
+  "artifact_sha256": "4fa9ae518745ca10b10e37c83a0392a2456be8c99dd93271b42376882aa29bb8",
+  "training_script": "scripts/train_logistic_onnx_models.py",
+  "training_script_sha256": "dcbc596bc4480c6ee762d7c3e7f958e0b8447dcdd7539895694a75d95127029a",
+  "dataset": {
+    "path": "data/logistic_onnx/compliance_risk_reference.csv",
+    "sha256": "7a201ce18d6a199780bc7707787e71b71e8567a742ed5945352ffb758e23bfdf",
+    "source": "deterministic_repository_reference_policy_generator",
+    "seed": 20260818,
+    "row_count": 1200,
+    "class_counts": {
+      "negative": 476,
+      "positive": 724
+    },
+    "limitation": "Synthetic reference-policy labels only; not an operational decision benchmark."
+  },
   "feature_order": [
     "blocking_violation_count",
     "warning_violation_count",
@@ -12,14 +27,46 @@
     "rag_evidence_count",
     "law_of_war_rule_hit"
   ],
-  "weights": {
-    "blocking_violation_count": 3.0,
-    "warning_violation_count": 0.85,
-    "authorization_status_score": 1.1,
-    "authorization_out_of_scope": 0.9,
-    "rag_evidence_count": 0.35,
-    "law_of_war_rule_hit": 0.8
+  "coefficients": {
+    "blocking_violation_count": 6.93556569,
+    "warning_violation_count": 1.821511564,
+    "authorization_status_score": 2.816654305,
+    "authorization_out_of_scope": 4.134356609,
+    "rag_evidence_count": 0.624377081,
+    "law_of_war_rule_hit": 2.713478266
   },
-  "intercept": -2.2,
-  "training_status": "bootstrap_from_existing_agent_weights"
+  "intercept": -13.525491527,
+  "hyperparameters": {
+    "C": 3.0,
+    "class_weight": "balanced",
+    "max_iter": 2000,
+    "solver": "lbfgs",
+    "random_state": 20260819
+  },
+  "evaluation": {
+    "method": "stratified_holdout",
+    "test_ratio": 0.25,
+    "train_count": 900,
+    "test_count": 300,
+    "accuracy": 0.96,
+    "balanced_accuracy": 0.961094,
+    "f1": 0.96648,
+    "roc_auc": 0.995357,
+    "confusion_matrix": [
+      [
+        115,
+        4
+      ],
+      [
+        8,
+        173
+      ]
+    ],
+    "onnx_sklearn_max_abs_probability_difference": 3.30146e-07
+  },
+  "runtime_versions": {
+    "scikit_learn": "1.7.2",
+    "onnx": "1.21.0",
+    "onnxruntime": "1.23.2"
+  }
 }

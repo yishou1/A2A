@@ -2,6 +2,12 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <vector>
+
+#include <nlohmann/json.hpp>
 
 #include "algolib/core/status.h"
 #include "algolib/runtime/algorithm_request.h"
@@ -18,10 +24,14 @@ public:
                   const AlgorithmResult& result,
                   std::int64_t latency_ms) const;
 
+    Result<std::vector<nlohmann::json>> ReadFunctionExecutions(
+        const std::string& trace_id) const;
+
     const std::filesystem::path& log_path() const;
 
 private:
     std::filesystem::path log_path_;
+    std::shared_ptr<std::mutex> state_;
 };
 
 }  // namespace algolib

@@ -1,0 +1,31 @@
+{
+  "request_id": "fedavg-round-001",
+  "trace_id": "trace-m12-fedavg",
+  "algorithm_id": "federated_fedavg_aggregator",
+  "version": "1.0.0",
+  "backend_type": "python_http_service",
+  "inputs": {
+    "round_id": "round-golden-1",
+    "client_updates": [
+      {
+        "client_id": "client-a",
+        "sample_count": 2,
+        "weights": {
+          "layer": [[1.0, 2.0], [3.0, 4.0]],
+          "bias": [1.0, -1.0]
+        }
+      },
+      {
+        "client_id": "client-b",
+        "sample_count": 1,
+        "weights": {
+          "layer": [[4.0, 5.0], [6.0, 7.0]],
+          "bias": [4.0, 2.0]
+        }
+      }
+    ]
+  },
+  "params": {
+    "minimum_clients": 2
+  }
+}

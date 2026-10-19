@@ -61,15 +61,12 @@ resource_requirements:
   disk_mb: 4096
 
 model_profile:
-  # Mask2Former-Swin-Tiny: Swin-T backbone (28.3M) + pixel decoder + Transformer decoder = ~44M
-  # Siamese wrapper doubles the backbone for pre/post image pair (28.3M * 2 + decoder)
-  parameter_count: 44000000
-  parameter_count_text: 44M (Mask2Former-Swin-Tiny Siamese)
-  flops: 55000000000
-  flops_text: ~55 GFLOPs @ 512×512 per image (single branch, doubled for siamese pair)
-  flops_input_shape: [1, 3, 512, 512]
-  model_size_mb: 168
-  precision: fp32
+  parameter_count: 47439633
+  parameter_count_text: "47,439,633 parameters for the default external facebook/mask2former-swin-tiny-ade-semantic reference architecture (snapshot c8cf1b5e823aee214d937d0d001c1850ba44ef6a); large profile selects Swin-Base with 106,922,191 parameters. External weights are not pinned locally"
+  flops: 79275586796
+  flops_text: "79,275,586,796 architecture-profiler lower-bound FLOPs per Swin-Tiny image at [1,3,384,384], the published processor size; one assess_pair request performs two sequential segmentations, or 158,551,173,592 FLOPs before postprocessing. Swin-Base is 145,185,453,686 FLOPs per image at this reference size"
+  flops_input_shape: [1, 3, 384, 384]
+  precision: fp32_reference_external_weights
 
 safety:
   risk_level: medium

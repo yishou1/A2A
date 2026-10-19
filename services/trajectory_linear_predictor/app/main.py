@@ -9,7 +9,8 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "services"))
 
 from a2a_algorithms_common.http_service import create_algorithm_app
-from a2a_algorithms_common.service_predictors import predict_trajectory_linear_predictor, mission_model_loaded
+from a2a_algorithms_common.motion_prediction import motion_predictor_loaded
+from a2a_algorithms_common.service_predictors import predict_trajectory_linear_predictor
 
 ALGORITHM_ID = "trajectory_linear_predictor"
 VERSION = "1.0.0"
@@ -20,14 +21,12 @@ def _predict(inputs: dict, params: dict) -> dict:
     return predict_trajectory_linear_predictor(inputs, params)
 
 
-_model_loaded = mission_model_loaded if "trajectory_linear_predictor" == "mission_completion_scorer" else (lambda: True)
-
 app = create_algorithm_app(
     ALGORITHM_ID,
     VERSION,
     "forecasting",
     _predict,
-    model_loaded_callable=_model_loaded,
+    model_loaded_callable=motion_predictor_loaded,
 )
 
 if __name__ == "__main__":

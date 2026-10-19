@@ -48,6 +48,13 @@ performance:
   primary_metric: classification_accuracy
   primary_score: 0.5743
 
+model_profile:
+  parameter_count: 0
+  parameter_count_text: "not_applicable: persisted 19-tree regression ensemble; 1,146 split nodes and 1,165 leaves are structural state, not tensor parameters"
+  flops: 0
+  flops_text: "not_applicable: tree traversal is branch dominated; at most 114 comparisons per sample at depth 6"
+  precision: fp64
+
 safety:
   risk_level: medium
   requires_human_review: true

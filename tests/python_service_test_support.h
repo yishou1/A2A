@@ -57,7 +57,9 @@ inline fs::path CreateServiceFixtureWithIdentity(const fs::path& temp_dir,
                                                  const std::string& algorithm_id,
                                                  const std::string& version) {
     const fs::path source_dir =
-        SourceRoot() / "examples" / "python_http_service_llm_explainer" / "1.0.0";
+        fs::exists(SourceRoot() / "examples" / "python_http_service_llm_explainer" / "1.0.0")
+            ? (SourceRoot() / "examples" / "python_http_service_llm_explainer" / "1.0.0")
+            : (SourceRoot() / "examples" / "llm_rule_explainer" / "1.0.0");
     const fs::path target_dir = temp_dir / algorithm_id / version;
     fs::create_directories(target_dir);
     fs::copy(source_dir, target_dir,
@@ -213,6 +215,10 @@ public:
 
     int port() const {
         return port_;
+    }
+
+    int predict_call_count() const {
+        return predict_call_count_.load(std::memory_order_acquire);
     }
 
     // 中文注释：允许测试在注册完成后动态切换 predict 返回码，

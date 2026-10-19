@@ -9,6 +9,7 @@
 #include <nlohmann/json.hpp>
 
 #include "algolib/core/schema_validator.h"
+#include "algolib/io/json_utils.h"
 #include "algolib/registry/algorithm_registry.h"
 
 namespace {
@@ -18,6 +19,7 @@ using algolib::AlgorithmKey;
 using algolib::AlgorithmRegistry;
 using algolib::BackendType;
 using algolib::ErrorCode;
+using algolib::JsonUtils;
 using algolib::SchemaValidator;
 
 // 中文注释：测试保持轻量自校验风格，便于和现有自定义测试入口保持一致。
@@ -89,6 +91,80 @@ void TestSchemaValidatorSupportsNestedObjectsAndArrays() {
     Expect(!invalid_status.ok(), "Invalid nested payload should fail validation.");
     Expect(invalid_status.code() == ErrorCode::kInputSchemaInvalid,
            "Invalid nested payload should map to INPUT_SCHEMA_INVALID.");
+}
+
+void TestSchemaValidatorSupportsNullableUnionTypes() {
+    SchemaValidator validator;
+    const nlohmann::json schema_json = {
+        {"type", "object"},
+        {"required", {"target_id"}},
+        {"properties",
+         {
+             {"target_id", {{"type", {"string", "null"}}}},
+         }},
+    };
+
+    auto schema_status =
+        validator.ValidateSchemaDocument(schema_json, ErrorCode::kOutputSchemaInvalid, "$");
+    Expect(schema_status.ok(), "Nullable union schema should be accepted.");
+
+    auto string_status = validator.ValidateInstance(
+        nlohmann::json{{"target_id", "T-001"}}, schema_json,
+        ErrorCode::kOutputSchemaInvalid, "$.outputs");
+    Expect(string_status.ok(), "String value should match nullable union type.");
+
+    auto null_status = validator.ValidateInstance(
+        nlohmann::json{{"target_id", nullptr}}, schema_json,
+        ErrorCode::kOutputSchemaInvalid, "$.outputs");
+    Expect(null_status.ok(), "Null value should match nullable union type.");
+
+    auto number_status = validator.ValidateInstance(
+        nlohmann::json{{"target_id", 42}}, schema_json,
+        ErrorCode::kOutputSchemaInvalid, "$.outputs");
+    Expect(!number_status.ok(), "Number value should not match nullable union type.");
+}
+
+void TestSchemaValidatorRejectsMalformedUnionTypes() {
+    SchemaValidator validator;
+    const nlohmann::json duplicate_schema = {{"type", {"string", "string"}}};
+    auto duplicate_status = validator.ValidateSchemaDocument(
+        duplicate_schema, ErrorCode::kInputSchemaInvalid, "$");
+    Expect(!duplicate_status.ok(), "Duplicate union types should be rejected.");
+
+    const nlohmann::json non_string_schema = {{"type", {"string", 1}}};
+    auto non_string_status = validator.ValidateSchemaDocument(
+        non_string_schema, ErrorCode::kInputSchemaInvalid, "$");
+    Expect(!non_string_status.ok(), "Non-string union type entries should be rejected.");
+}
+
+void TestSchemaSummaryPreservesUnionTypes() {
+    const nlohmann::json schema_json = {
+        {"type", "object"},
+        {"properties",
+         {
+             {"target_id", {{"type", {"string", "null"}}}},
+         }},
+    };
+    const auto summary = JsonUtils::SummarizeSchema(schema_json);
+    Expect(summary.at("properties").at(0).at("type") ==
+               nlohmann::json({"string", "null"}),
+           "Schema summary should preserve an array-valued union type.");
+}
+
+void TestXbdOutputSchemaAcceptsGoldenOutput() {
+    SchemaValidator validator;
+    const fs::path package_root =
+        SourceRoot() / "examples" / "xbd_damage_assessor" / "1.0.0";
+    auto schema_result = validator.LoadSchema(
+        package_root / "output.schema.json", ErrorCode::kOutputSchemaInvalid);
+    Expect(schema_result.ok(), "xBD output schema should load.");
+    auto response_result = JsonUtils::ReadJsonFile(
+        package_root / "golden_cases" / "case_001_response.json");
+    Expect(response_result.ok(), "xBD golden response should load.");
+    auto output_status = validator.ValidateInstance(
+        response_result.value().at("outputs"), schema_result.value(),
+        ErrorCode::kOutputSchemaInvalid, "$.outputs");
+    Expect(output_status.ok(), "xBD golden output should satisfy nullable output schema.");
 }
 
 void TestRegistryInputAndOutputValidation() {
@@ -187,6 +263,14 @@ int RunSchemaValidatorTests() {
     const std::vector<std::pair<std::string, std::function<void()>>> tests = {
         {"TestSchemaValidatorSupportsNestedObjectsAndArrays",
          TestSchemaValidatorSupportsNestedObjectsAndArrays},
+        {"TestSchemaValidatorSupportsNullableUnionTypes",
+         TestSchemaValidatorSupportsNullableUnionTypes},
+        {"TestSchemaValidatorRejectsMalformedUnionTypes",
+         TestSchemaValidatorRejectsMalformedUnionTypes},
+        {"TestSchemaSummaryPreservesUnionTypes",
+         TestSchemaSummaryPreservesUnionTypes},
+        {"TestXbdOutputSchemaAcceptsGoldenOutput",
+         TestXbdOutputSchemaAcceptsGoldenOutput},
         {"TestRegistryInputAndOutputValidation",
          TestRegistryInputAndOutputValidation},
         {"TestRegisterFailsWhenSchemaDocumentUsesUnsupportedSubset",

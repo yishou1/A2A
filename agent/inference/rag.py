@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from agent.inference.registry import get_page_encoder
+from agent.inference.registry import inference_guard, get_page_encoder
 
 
 def _cosine(a: np.ndarray, b: np.ndarray) -> float:
@@ -85,8 +85,9 @@ def run_synapse_rag(
 
     encoder = get_page_encoder(config)
     doc_texts = [f"{d.get('page', 'doc')}: {d.get('text', '')}" for d in context_docs]
-    q_emb = encoder.encode([query], normalize_embeddings=True)[0]
-    d_emb = encoder.encode(doc_texts, normalize_embeddings=True)
+    with inference_guard("page_encoder", config):
+        q_emb = encoder.encode([query], normalize_embeddings=True)[0]
+        d_emb = encoder.encode(doc_texts, normalize_embeddings=True)
 
     scores = [_cosine(q_emb, d_emb[i]) for i in range(len(doc_texts))]
     ranked = sorted(zip(context_docs, scores), key=lambda x: x[1], reverse=True)[:top_k]

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent.inference.registry import get_marl_ppo_scheduler
+from agent.inference.registry import inference_guard, get_marl_ppo_scheduler
 from agent.training.battlefield_scheduling_env import situation_from_perception
 
 
@@ -17,4 +17,5 @@ def marl_ppo_schedule(
 ) -> dict[str, Any]:
     situation = situation_from_perception(tracks, detections, batch_context, frames)
     policy = get_marl_ppo_scheduler(config)
-    return policy.schedule(situation, deterministic=True)
+    with inference_guard("marl_ppo", config):
+        return policy.schedule(situation, deterministic=True)

@@ -1,0 +1,67 @@
+{
+  "architecture": {
+    "class_count": 2,
+    "class_labels": [
+      "rejected",
+      "verified"
+    ],
+    "hidden_dimension": 32,
+    "input_dimension": 6,
+    "parameter_count": 290
+  },
+  "artifact_path": "models/checkpoints/edl_head_s.safetensors",
+  "artifact_sha256": "a9d6995d55652bfe3b87e16ea54a7322f514a25a9cbf504d30a9819221ca9441",
+  "compute_profile": "small",
+  "dataset": {
+    "class_counts": {
+      "rejected": 565,
+      "verified": 435
+    },
+    "holdout_count": 1000,
+    "holdout_seed": 20260825,
+    "limitation": "Synthetic detection-quality labels only; not an operational detector benchmark.",
+    "path": "data/edl_verifier/reference_holdout.json",
+    "sha256": "20e09377a5f2032f5fb7a2348059e5ee099a2cdece24bd5460d9b2e83aab5ea5",
+    "source": "deterministic_synthetic_detection_quality_generator",
+    "training_count": 4000
+  },
+  "decision_policy": {
+    "human_review_required_for_manual_review_decision": true,
+    "manual_review_margin": 0.08,
+    "maximum_epistemic_uncertainty": 0.45,
+    "verified_probability_threshold": 0.5
+  },
+  "evaluation": {
+    "accuracy": 0.903,
+    "brier_score": 0.066736,
+    "error_mean_epistemic_uncertainty": 0.093815,
+    "expected_calibration_error_10_bin": 0.035839,
+    "log_loss": 0.225159,
+    "macro_f1": 0.90141,
+    "mean_aleatoric_uncertainty": 0.267173,
+    "mean_epistemic_uncertainty": 0.077646,
+    "method": "independent_deterministic_synthetic_holdout",
+    "raw_detector_brier_baseline": 0.10548,
+    "raw_detector_ece_baseline": 0.136591,
+    "selective_accuracy_at_80_percent_coverage": 0.93875
+  },
+  "model_family": "dirichlet_evidential_neural_classifier",
+  "model_id": "edl_evidential_verifier",
+  "model_version": "1.0.0",
+  "runtime_versions": {
+    "numpy": "2.2.6",
+    "scikit_learn": "1.7.2",
+    "torch": "2.12.0+cpu"
+  },
+  "training": {
+    "batch_size": 128,
+    "epochs": 260,
+    "learning_rate": 0.001,
+    "objective": "Dirichlet_expected_cross_entropy_plus_annealed_KL",
+    "optimizer": "AdamW",
+    "random_state": 20260824,
+    "weight_decay": 0.0001
+  },
+  "training_script": "scripts/train_edl_evidential_verifier.py",
+  "training_script_sha256": "9e9424d3d1a70fd00755f3baf984459d24aa2c33bb250ce30cbd7dfe74cbafc4"
+}

@@ -54,6 +54,14 @@ performance:
   primary_metric: damage_accuracy
   primary_score: 0.7938
 
+model_profile:
+  parameter_count: 11984030
+  parameter_count_text: "11,984,030 combined image-mode reference parameters: 807,518 persisted scaler/PCA/logistic-regression inference-state values plus 11,176,512 external torchvision ResNet18 parameters after its classification head is removed. Features-only mode uses the 807,518 local values"
+  flops: 10882976830
+  flops_text: "10,882,976,830 partial arithmetic lower-bound FLOPs for input_mode=images: three sequential headless ResNet18 [1,3,224,224] ROI embeddings at 3,627,122,688 each plus 1,608,766 feature-pipeline FLOPs. Excludes PCA centering, bias, sigmoid, image preprocessing, and external-weight download; features-only mode is 1,608,766 at [1,1567]"
+  flops_input_shape: [1, 3, 224, 224]
+  precision: mixed_fp32_fp64
+
 safety:
   risk_level: medium
   requires_human_review: true

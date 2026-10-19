@@ -9,7 +9,8 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "services"))
 
 from a2a_algorithms_common.http_service import create_algorithm_app
-from a2a_algorithms_common.service_predictors import predict_execution_rule_matcher, mission_model_loaded
+from a2a_algorithms_common.association_rules import rule_artifact_loaded
+from a2a_algorithms_common.service_predictors import predict_execution_rule_matcher
 
 ALGORITHM_ID = "execution_rule_matcher"
 VERSION = "1.0.0"
@@ -20,14 +21,12 @@ def _predict(inputs: dict, params: dict) -> dict:
     return predict_execution_rule_matcher(inputs, params)
 
 
-_model_loaded = mission_model_loaded if "execution_rule_matcher" == "mission_completion_scorer" else (lambda: True)
-
 app = create_algorithm_app(
     ALGORITHM_ID,
     VERSION,
     "decision",
     _predict,
-    model_loaded_callable=_model_loaded,
+    model_loaded_callable=rule_artifact_loaded,
 )
 
 if __name__ == "__main__":

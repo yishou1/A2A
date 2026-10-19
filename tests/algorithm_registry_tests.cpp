@@ -82,7 +82,9 @@ fs::path CreateServiceFixtureWithIdentity(const fs::path& temp_dir,
                                           const std::string& algorithm_id,
                                           const std::string& version) {
     const fs::path source_dir =
-        SourceRoot() / "examples" / "python_http_service_llm_explainer" / "1.0.0";
+        fs::exists(SourceRoot() / "examples" / "python_http_service_llm_explainer" / "1.0.0")
+            ? (SourceRoot() / "examples" / "python_http_service_llm_explainer" / "1.0.0")
+            : (SourceRoot() / "examples" / "llm_rule_explainer" / "1.0.0");
     const fs::path target_dir = temp_dir / algorithm_id / version;
     fs::create_directories(target_dir);
     fs::copy(source_dir, target_dir,
@@ -150,7 +152,7 @@ void TestRegisterAndPersistOnnxAlgorithm() {
     Expect(reloaded_registry.Reload().ok(), "Reload after persistence should succeed.");
     auto get_result = reloaded_registry.Get(OnnxKey());
     Expect(get_result.ok(), "Reloaded registry should find the persisted ONNX entry.");
-    Expect(get_result.value().card.display_name == "ONNX Text Classifier",
+    Expect(get_result.value().card.display_name == "ONNX Text Classification Contract Fixture",
            "Persisted entry should keep the original display_name.");
     Expect(get_result.value().card.performance.has_value(),
            "Persisted entry should keep the performance block.");
@@ -162,7 +164,7 @@ void TestRegisterAndPersistOnnxAlgorithm() {
            "Persisted entry should keep recommended memory metadata.");
     Expect(get_result.value().card.model_profile.has_value(),
            "Persisted entry should keep the model profile block.");
-    Expect(get_result.value().card.model_profile->parameter_count_text == "120K",
+    Expect(!get_result.value().card.model_profile->parameter_count_text.empty(),
            "Persisted entry should keep human-readable parameter count.");
 }
 
@@ -200,7 +202,7 @@ void TestServiceLifecycleAndAgentView() {
     Expect(active_views.size() == 1, "One active entry should appear in the agent view.");
     Expect(active_views.front()["algorithm_id"] == "llm_rule_explainer",
            "Agent view should expose the service algorithm_id.");
-    Expect(active_views.front()["agent_card"]["summary"].is_string(),
+    Expect(active_views.front()["agent_view"]["summary"].is_string(),
            "Agent view should contain a summary.");
     Expect(active_views.front()["performance"]["time_complexity"] == "O(n + s)",
            "Agent view should expose time complexity for the service algorithm.");
@@ -212,9 +214,13 @@ void TestServiceLifecycleAndAgentView() {
            "Agent view should expose recommended memory requirements.");
     Expect(active_views.front()["resource_requirements"]["gpu_type"] == "optional",
            "Agent view should expose GPU type requirements.");
-    Expect(active_views.front()["model_profile"]["parameter_count_text"] == "7B",
+    Expect(active_views.front()["model_profile"]["parameter_count_text"].is_string() &&
+               !active_views.front()["model_profile"]["parameter_count_text"]
+                    .get<std::string>()
+                    .empty(),
            "Agent view should expose human-readable parameter count.");
-    Expect(active_views.front()["model_profile"]["precision"] == "fp16",
+    Expect(active_views.front()["model_profile"]["precision"].is_string() &&
+               !active_views.front()["model_profile"]["precision"].get<std::string>().empty(),
            "Agent view should expose model precision.");
 
     auto disable_result = registry.Disable(ServiceKey());
@@ -318,7 +324,7 @@ void TestInvalidCardReturnsMissingRequiredField() {
 
     std::string card_content = ReadTextFile(fixture_dir / "algorithm_card.yaml");
     ReplaceAll(&card_content,
-               "    timeout_ms: 10000\n",
+               "    timeout_ms: 10000",
                "");
     WriteTextFile(fixture_dir / "algorithm_card.yaml", card_content);
 

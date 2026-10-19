@@ -5,10 +5,42 @@
   "algorithm_id": "graph_relation_reasoner",
   "version": "1.0.0",
   "outputs": {
-    "schema_version": "graph_relation_reasoner/v1",
-    "relations": [],
-    "groups": [],
-    "graph_summary": {}
+    "schema_version": "graph_relation_reasoner/v2",
+    "relations": [
+      {
+        "source_track_id": "trk-air-001",
+        "target_track_id": "trk-air-002",
+        "distance_m": 1462.93,
+        "heading_delta_deg": 2.0,
+        "speed_delta_mps": 2.0,
+        "relation_score": 1.0,
+        "relation_type": "formation_membership"
+      }
+    ],
+    "groups": [
+      {
+        "group_id": "group-001",
+        "group_type": "air_formation",
+        "member_track_ids": ["trk-air-001", "trk-air-002"],
+        "centroid": { "lat": 31.247, "lon": 121.517 },
+        "cohesion_score": 0.82,
+        "evidence": ["成员目标距离、航向和速度相近，构成同一关系连通分量。"]
+      }
+    ],
+    "graph_summary": {
+      "node_count": 2,
+      "edge_count": 1,
+      "group_count": 1,
+      "relation_threshold": 0.5,
+      "message_passing_layers": 2
+    },
+    "model": {
+      "model_id": "graph_relation_reasoner",
+      "model_version": "1.0.0",
+      "model_family": "dense_message_passing_graph_neural_network",
+      "compute_profile": "small",
+      "artifact_sha256": "0569e21a27020df636b51a64bb32c381ffb314c38fb3fdff39ba36c78c8177b9"
+    }
   },
   "usage": { "latency_ms": 1 },
   "error": null

@@ -16,15 +16,29 @@
         },
         "history": {
           "type": "array",
-          "minItems": 2
+          "minItems": 2,
+          "maxItems": 10000,
+          "items": {
+            "type": "object",
+            "required": ["t", "x", "y"],
+            "properties": {
+              "t": {"type": "number"},
+              "x": {"type": "number"},
+              "y": {"type": "number"}
+            },
+            "additionalProperties": false
+          }
         },
         "weapon_prep_sec": {
-          "type": "number"
+          "type": "number",
+          "minimum": 0
         },
         "flight_time_sec": {
-          "type": "number"
+          "type": "number",
+          "minimum": 0
         }
-      }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

@@ -1,36 +1,70 @@
-"""按 work_item / URI 缓存已解码图像，避免同一 URL 在感知/认知中重复 GET。"""
+"""请求隔离的批级图像缓存，避免并发任务互相清空缓存。"""
 
 from __future__ import annotations
 
-from typing import Any
+from contextlib import contextmanager
+from contextvars import ContextVar, Token
+from dataclasses import dataclass, field
+from typing import Any, Iterator, Optional
 
 import numpy as np
 
-_CACHE: dict[str, np.ndarray] = {}
-_ACTIVE_SCOPE: str | None = None
+
+@dataclass
+class BatchImageCache:
+    """单次推理批次的 URI -> RGB 缓存，绝不跨请求共享。"""
+
+    scope: str
+    images: dict[str, np.ndarray] = field(default_factory=dict)
 
 
-def begin_batch_cache(scope: str) -> None:
-    global _ACTIVE_SCOPE
-    _ACTIVE_SCOPE = scope
-    _CACHE.clear()
+_ACTIVE_CACHE: ContextVar[Optional[BatchImageCache]] = ContextVar(
+    "tia_active_image_cache", default=None
+)
 
 
-def end_batch_cache() -> None:
-    global _ACTIVE_SCOPE
-    _ACTIVE_SCOPE = None
-    _CACHE.clear()
+def begin_batch_cache(scope: str) -> Token[Optional[BatchImageCache]]:
+    """为当前上下文创建独立缓存，并返回用于恢复父上下文的 token。"""
+    return _ACTIVE_CACHE.set(BatchImageCache(scope=str(scope)))
 
 
-def cache_get(uri: str) -> np.ndarray | None:
+def end_batch_cache(token: Optional[Token[Optional[BatchImageCache]]] = None) -> None:
+    """结束当前批次缓存；传入 token 时精确恢复嵌套调用的父上下文。"""
+    if token is not None:
+        _ACTIVE_CACHE.reset(token)
+    else:
+        _ACTIVE_CACHE.set(None)
+
+
+@contextmanager
+def batch_cache_scope(scope: str) -> Iterator[BatchImageCache]:
+    token = begin_batch_cache(scope)
+    cache = _ACTIVE_CACHE.get()
+    assert cache is not None
+    try:
+        yield cache
+    finally:
+        end_batch_cache(token)
+
+
+def active_scope() -> Optional[str]:
+    cache = _ACTIVE_CACHE.get()
+    return cache.scope if cache is not None else None
+
+
+def cache_get(uri: str) -> Optional[np.ndarray]:
     if not uri:
         return None
-    return _CACHE.get(uri)
+    cache = _ACTIVE_CACHE.get()
+    return cache.images.get(uri) if cache is not None else None
 
 
 def cache_put(uri: str, rgb: np.ndarray) -> None:
-    if uri and _ACTIVE_SCOPE:
-        _CACHE[uri] = rgb
+    if not uri:
+        return
+    cache = _ACTIVE_CACHE.get()
+    if cache is not None:
+        cache.images[uri] = rgb
 
 
 def prefetch_visual_frames(frames: list[dict[str, Any]]) -> int:

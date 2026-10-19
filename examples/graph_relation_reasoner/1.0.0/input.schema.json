@@ -5,7 +5,7 @@
   "properties": {
     "tracks": {
       "type": "array",
-      "minItems": 1,
+      "minItems": 2,
       "items": {
         "type": "object",
         "required": ["track_id", "lat", "lon", "speed", "heading"],
@@ -15,7 +15,9 @@
           "lat": { "type": "number" },
           "lon": { "type": "number" },
           "speed": { "type": "number" },
-          "heading": { "type": "number" }
+          "heading": { "type": "number" },
+          "alt": { "type": "number" },
+          "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
         },
         "additionalProperties": true
       }

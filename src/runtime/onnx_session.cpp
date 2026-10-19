@@ -215,6 +215,53 @@ json BuildJsonFromFlatValues(const std::vector<ValueType>& flat_values,
     return BuildJsonFromFlatValuesRecursive(flat_values, shape, 0, &flat_index, converter);
 }
 
+Result<json> NormalizeValuesToTensorShape(const TensorBlob& tensor) {
+    const std::size_t expected_count = ComputeElementCount(tensor.shape);
+    switch (tensor.dtype) {
+        case TensorDataType::kFloat32: {
+            std::vector<float> values;
+            auto status = FlattenFloatValues(tensor.values, &values, tensor.name);
+            if (!status.ok()) {
+                return status;
+            }
+            if (values.size() != expected_count) {
+                return Status::Error(ErrorCode::kOnnxInputTensorMismatch,
+                                     "Stub tensor value count does not match shape.");
+            }
+            return BuildJsonFromFlatValues(
+                values, tensor.shape, [](float value) { return json(value); });
+        }
+        case TensorDataType::kInt64: {
+            std::vector<std::int64_t> values;
+            auto status = FlattenInt64Values(tensor.values, &values, tensor.name);
+            if (!status.ok()) {
+                return status;
+            }
+            if (values.size() != expected_count) {
+                return Status::Error(ErrorCode::kOnnxInputTensorMismatch,
+                                     "Stub tensor value count does not match shape.");
+            }
+            return BuildJsonFromFlatValues(
+                values, tensor.shape, [](std::int64_t value) { return json(value); });
+        }
+        case TensorDataType::kString: {
+            std::vector<std::string> values;
+            auto status = FlattenStringValues(tensor.values, &values, tensor.name);
+            if (!status.ok()) {
+                return status;
+            }
+            if (values.size() != expected_count) {
+                return Status::Error(ErrorCode::kOnnxInputTensorMismatch,
+                                     "Stub tensor value count does not match shape.");
+            }
+            return BuildJsonFromFlatValues(
+                values, tensor.shape, [](const std::string& value) { return json(value); });
+        }
+    }
+    return Status::Error(ErrorCode::kOnnxInputTensorMismatch,
+                         "Unsupported stub tensor dtype.");
+}
+
 #if ALGOLIB_WITH_ONNXRUNTIME
 
 Ort::Env& GetOrtEnv() {
@@ -574,7 +621,11 @@ Result<std::vector<TensorBlob>> OnnxSessionWrapper::Run(
 
     output_tensor.dtype = input_tensors.front().dtype;
     output_tensor.shape = input_tensors.front().shape;
-    output_tensor.values = input_tensors.front().values;
+    auto normalized_values = NormalizeValuesToTensorShape(input_tensors.front());
+    if (!normalized_values.ok()) {
+        return normalized_values.status();
+    }
+    output_tensor.values = std::move(normalized_values.value());
     output_tensor.metadata["source_tensor_name"] = input_tensors.front().name;
     return std::vector<TensorBlob>{output_tensor};
 #endif

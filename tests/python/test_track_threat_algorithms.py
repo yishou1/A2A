@@ -25,7 +25,7 @@ TRACK_THREAT_CLASS_MAP = {
     "target_type_classifier": ("M04", "特征编码与分类"),
     "track_state_updater": ("M05", "多目标跟踪与定位"),
     "trajectory_predictor": ("M06", "时间序列预测"),
-    "graph_relation_reasoner": ("M07", "图神经网络"),
+    "graph_relation_reasoner": ("M20", "图神经网络"),
 }
 
 
@@ -71,6 +71,26 @@ def test_trajectory_predictor_returns_predicted_path() -> None:
     assert prediction["fallback_used"] is False
     assert prediction["model_runtime"]["backend"] == "torchscript"
     assert prediction["model_runtime"]["used"] is True
+
+
+def test_trajectory_predictor_zero_fallback_across_all_object_types() -> None:
+    base = _sample_track()
+    ship_track = dict(base, track_id="trk-ship-001", object_type="ship", alt=0.0, speed=12.0)
+    uav_track = dict(base, track_id="trk-uav-001", object_type="uav", alt=1200.0, speed=45.0)
+    unk_track = dict(base, track_id="trk-unk-001", object_type="unknown", alt=500.0, speed=60.0)
+    outputs = predict_trajectory_predictor(
+        {"tracks": [base, ship_track, uav_track, unk_track]},
+        {"horizons_s": [10, 20, 30, 60]},
+    )
+
+    assert len(outputs["predictions"]) == 4
+    for pred in outputs["predictions"]:
+        assert pred["fallback_used"] is False, f"unexpected fallback for {pred['object_type']}: {pred}"
+        assert pred["model_family"] == "st_gnn"
+        assert pred["model_runtime"]["backend"] == "torchscript"
+        assert pred["model_runtime"]["used"] is True
+        assert pred["model_runtime"]["fallback"] is False
+        assert {point["horizon_s"] for point in pred["predicted_path"]} == {10, 20, 30, 60}
 
 
 def test_algorithm_cards_use_track_threat_port_9022() -> None:

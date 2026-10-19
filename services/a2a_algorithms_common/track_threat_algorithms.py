@@ -1,10 +1,15 @@
 """Track-threat algorithm package functions for the A2A algorithm library."""
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Sequence
+
+import numpy as np
 
 try:
     import torch
@@ -14,6 +19,11 @@ except ImportError:  # pragma: no cover
 
 EARTH_RADIUS_M = 6_371_000.0
 OBJECT_TYPES = ("aircraft", "ship", "uav", "unknown")
+GRAPH_RELATION_CHECKPOINT = (
+    Path(__file__).resolve().parents[2]
+    / "models/checkpoints/graph_relation_gnn_s.safetensors"
+)
+GRAPH_RELATION_METADATA = GRAPH_RELATION_CHECKPOINT.with_suffix(".metadata.json")
 
 
 def target_type_classifier(inputs: dict, _params: dict) -> dict:
@@ -56,7 +66,8 @@ def trajectory_predictor(inputs: dict, params: dict) -> dict:
     predictions = []
     for track in tracks:
         object_type = _normalize_object_type(track.get("object_type"))
-        model_status = _model_status_for(object_type, model_summary)
+        effective_type = _effective_bundle_object_type(object_type, track, model_summary)
+        model_status = _model_status_for(effective_type, model_summary)
         baseline_model = "IMM" if object_type in {"aircraft", "uav", "unknown"} else "CV"
         inference = _run_st_gnn_prediction(track, object_type, horizons, model_summary)
         if inference["used"]:
@@ -65,18 +76,21 @@ def trajectory_predictor(inputs: dict, params: dict) -> dict:
             fallback_used = False
             fallback_reason = ""
             latency_ms = inference["latency_ms"]
+            model_version = _model_version_for(effective_type, model_summary)
         else:
             model_family = "physics_baseline"
             predicted_path = [_predict_point(track, horizon) for horizon in horizons]
             fallback_used = True
             fallback_reason = inference["reason"]
             latency_ms = 0.0
+            model_version = "physics_baseline_v1"
+            model_status = "physics_fallback"
         predictions.append(
             {
                 "track_id": str(track.get("track_id") or track.get("detection_id") or "track-unknown"),
                 "object_type": object_type,
                 "model_family": model_family,
-                "model_version": _model_version_for(object_type, model_summary),
+                "model_version": model_version,
                 "model_status": model_status,
                 "baseline_model": baseline_model,
                 "fallback_used": fallback_used,
@@ -167,39 +181,162 @@ def graph_relation_reasoner(inputs: dict, params: dict) -> dict:
     tracks = list(inputs.get("tracks") or [])
     if not tracks:
         raise ValueError("tracks is required")
-    max_distance_m = float(params.get("max_distance_m", 8_000.0))
-    max_heading_delta = float(params.get("max_heading_delta_deg", 25.0))
-    max_speed_delta = float(params.get("max_speed_delta_mps", 80.0))
+    threshold = float(params.get("relation_threshold", 0.5))
+    if threshold <= 0.0 or threshold >= 1.0:
+        raise ValueError("relation_threshold must be between 0 and 1")
+
+    model = _load_graph_relation_model()
+    node_inputs, edge_inputs, node_mask = _graph_relation_tensors(tracks)
+    with torch.inference_mode():
+        probabilities = torch.sigmoid(
+            model(node_inputs, edge_inputs, node_mask)
+        )[0].cpu().numpy()
+
     relations = []
     for i, left in enumerate(tracks):
-        for right in tracks[i + 1 :]:
+        for j, right in enumerate(tracks[i + 1 :], start=i + 1):
+            probability = float(probabilities[i, j])
+            if probability < threshold:
+                continue
             distance = haversine_m(float(left["lat"]), float(left["lon"]), float(right["lat"]), float(right["lon"]))
             heading_delta = heading_difference(float(left.get("heading", 0.0)), float(right.get("heading", 0.0)))
             speed_delta = abs(float(left.get("speed", 0.0) or 0.0) - float(right.get("speed", 0.0) or 0.0))
-            if distance <= max_distance_m and heading_delta <= max_heading_delta and speed_delta <= max_speed_delta:
-                relations.append(
-                    {
-                        "source_track_id": str(left.get("track_id") or left.get("detection_id")),
-                        "target_track_id": str(right.get("track_id") or right.get("detection_id")),
-                        "distance_m": round(distance, 3),
-                        "heading_delta_deg": round(heading_delta, 3),
-                        "speed_delta_mps": round(speed_delta, 3),
-                        "relation_score": round(1.0 - min(distance / max_distance_m, 1.0) * 0.5, 4),
-                    }
-                )
+            relations.append(
+                {
+                    "source_track_id": str(left.get("track_id") or left.get("detection_id")),
+                    "target_track_id": str(right.get("track_id") or right.get("detection_id")),
+                    "distance_m": round(distance, 3),
+                    "heading_delta_deg": round(heading_delta, 3),
+                    "speed_delta_mps": round(speed_delta, 3),
+                    "relation_score": round(probability, 6),
+                    "relation_type": "formation_membership",
+                }
+            )
     groups = _connected_groups(tracks, relations)
+    metadata = _graph_relation_metadata()
     return {
-        "schema_version": "graph_relation_reasoner/v1",
+        "schema_version": "graph_relation_reasoner/v2",
         "relations": relations,
         "groups": groups,
         "graph_summary": {
             "node_count": len(tracks),
             "edge_count": len(relations),
             "group_count": len(groups),
+            "relation_threshold": threshold,
+            "message_passing_layers": metadata["architecture"]["message_passing_layers"],
+        },
+        "model": {
+            "model_id": metadata["model_id"],
+            "model_version": metadata["model_version"],
+            "model_family": metadata["model_family"],
+            "compute_profile": metadata["compute_profile"],
+            "artifact_sha256": metadata["artifact_sha256"],
         },
     }
 
 
+def graph_relation_model_loaded() -> bool:
+    try:
+        metadata = _graph_relation_metadata()
+        return (
+            metadata.get("model_id") == "graph_relation_reasoner"
+            and metadata.get("artifact_sha256") == _sha256(GRAPH_RELATION_CHECKPOINT)
+        )
+    except (OSError, ValueError, KeyError, json.JSONDecodeError):
+        return False
+
+
+@lru_cache(maxsize=1)
+def _graph_relation_metadata() -> dict:
+    if not GRAPH_RELATION_CHECKPOINT.is_file():
+        raise FileNotFoundError(
+            f"trained graph relation checkpoint not found: {GRAPH_RELATION_CHECKPOINT}"
+        )
+    metadata = json.loads(GRAPH_RELATION_METADATA.read_text(encoding="utf-8"))
+    actual_hash = _sha256(GRAPH_RELATION_CHECKPOINT)
+    if metadata.get("artifact_sha256") != actual_hash:
+        raise ValueError("graph relation checkpoint SHA256 does not match metadata")
+    return metadata
+
+
+@lru_cache(maxsize=1)
+def _load_graph_relation_model():
+    if torch is None:
+        raise RuntimeError("PyTorch is required for graph relation inference")
+    from safetensors.torch import load_file
+
+    from agent.inference.models.graph_relation_gnn import DenseGraphRelationGNN
+
+    metadata = _graph_relation_metadata()
+    architecture = metadata["architecture"]
+    model = DenseGraphRelationGNN(
+        node_features=int(architecture["node_feature_count"]),
+        edge_features=int(architecture["edge_feature_count"]),
+        hidden_size=int(architecture["hidden_size"]),
+        message_layers=int(architecture["message_passing_layers"]),
+    )
+    model.load_state_dict(
+        load_file(str(GRAPH_RELATION_CHECKPOINT), device="cpu"), strict=True
+    )
+    return model.eval()
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _graph_relation_tensors(tracks: list[dict]):
+    if torch is None:
+        raise RuntimeError("PyTorch is required for graph relation inference")
+    count = len(tracks)
+    mean_lat = sum(float(track["lat"]) for track in tracks) / count
+    mean_lon = sum(float(track["lon"]) for track in tracks) / count
+    longitude_scale = 111_320.0 * max(math.cos(math.radians(mean_lat)), 0.1)
+    type_codes = {"aircraft": 0.0, "ship": 0.5, "uav": 1.0, "unknown": 0.5}
+    rows: list[list[float]] = []
+    headings: list[float] = []
+    speeds: list[float] = []
+    object_types: list[str] = []
+    for track in tracks:
+        x = (float(track["lon"]) - mean_lon) * longitude_scale / 20_000.0
+        y = (float(track["lat"]) - mean_lat) * 111_320.0 / 20_000.0
+        speed = max(0.0, min(float(track.get("speed", 0.0) or 0.0) / 350.0, 1.2))
+        heading = math.radians(float(track.get("heading", 0.0) or 0.0))
+        altitude = max(0.0, min(float(track.get("alt", 0.0) or 0.0) / 10_000.0, 1.2))
+        confidence = max(0.0, min(float(track.get("confidence", 0.8) or 0.8), 1.0))
+        object_type = _normalize_object_type(track.get("object_type"))
+        type_code = type_codes[object_type]
+        rows.append(
+            [x, y, speed, math.sin(heading), math.cos(heading), altitude, 0.8 * confidence + 0.2 * type_code]
+        )
+        headings.append(heading)
+        speeds.append(speed)
+        object_types.append(object_type)
+
+    edge_rows = np.zeros((count, count, 6), dtype=np.float32)
+    for left in range(count):
+        for right in range(count):
+            dx = rows[right][0] - rows[left][0]
+            dy = rows[right][1] - rows[left][1]
+            heading_delta = abs(
+                (headings[left] - headings[right] + math.pi) % (2.0 * math.pi) - math.pi
+            )
+            edge_rows[left, right] = [
+                dx,
+                dy,
+                math.sqrt(dx * dx + dy * dy),
+                math.cos(heading_delta),
+                abs(speeds[left] - speeds[right]),
+                float(object_types[left] == object_types[right]),
+            ]
+    return (
+        torch.tensor([rows], dtype=torch.float32),
+        torch.from_numpy(edge_rows).unsqueeze(0),
+        torch.ones(1, count, dtype=torch.bool),
+    )
+
+
+@lru_cache(maxsize=1)
 def _model_summary() -> dict:
     root = Path(__file__).resolve().parents[2]
     aircraft_dir = root / "models/track_threat/st_gnn_aircraft_kaggle_v1_candidate"
@@ -212,11 +349,95 @@ def _model_summary() -> dict:
     }
 
 
+def _effective_bundle_object_type(object_type: str, track: dict, summary: dict) -> str:
+    if object_type == "ship" and summary.get("ship_model_available"):
+        return "ship"
+    if object_type == "aircraft" and summary.get("aircraft_model_available"):
+        return "aircraft"
+    alt = float(track.get("alt", 0.0) or 0.0)
+    speed = float(track.get("speed", 0.0) or 0.0)
+    if object_type == "unknown" and alt <= 50.0 and 0.1 <= speed <= 30.0 and summary.get("ship_model_available"):
+        return "ship"
+    if summary.get("aircraft_model_available"):
+        return "aircraft"
+    if summary.get("ship_model_available"):
+        return "ship"
+    return object_type
+
+
+def _interpolate_model_horizon(
+    target_horizon: int,
+    model_horizons: Sequence[int],
+    prediction_row: Any,
+    log_sigma_row: Any,
+    track: dict,
+    sigma_scale: float,
+) -> tuple[float, float, float]:
+    horizon_to_index = {int(h): idx for idx, h in enumerate(model_horizons)}
+    if target_horizon in horizon_to_index:
+        idx = horizon_to_index[target_horizon]
+        east_m = float(prediction_row[idx, 0].item())
+        north_m = float(prediction_row[idx, 1].item())
+        sigma_e = math.exp(float(log_sigma_row[idx, 0].item())) * sigma_scale
+        sigma_n = math.exp(float(log_sigma_row[idx, 1].item())) * sigma_scale
+        return east_m, north_m, math.sqrt(sigma_e * sigma_e + sigma_n * sigma_n)
+
+    sorted_pairs = sorted((int(h), idx) for idx, h in enumerate(model_horizons))
+    first_h, first_idx = sorted_pairs[0]
+    last_h, last_idx = sorted_pairs[-1]
+
+    if target_horizon < first_h:
+        ratio = float(target_horizon) / max(float(first_h), 1.0)
+        base_target = _physics_offset(track, target_horizon)
+        base_first = _physics_offset(track, first_h)
+        res_east = float(prediction_row[first_idx, 0].item()) - base_first[0]
+        res_north = float(prediction_row[first_idx, 1].item()) - base_first[1]
+        east_m = base_target[0] + res_east * ratio
+        north_m = base_target[1] + res_north * ratio
+        sigma_e = math.exp(float(log_sigma_row[first_idx, 0].item())) * sigma_scale * math.sqrt(max(ratio, 0.05))
+        sigma_n = math.exp(float(log_sigma_row[first_idx, 1].item())) * sigma_scale * math.sqrt(max(ratio, 0.05))
+        return east_m, north_m, math.sqrt(sigma_e * sigma_e + sigma_n * sigma_n)
+
+    if target_horizon > last_h:
+        ratio = float(target_horizon) / max(float(last_h), 1.0)
+        base_target = _physics_offset(track, target_horizon)
+        base_last = _physics_offset(track, last_h)
+        res_east = float(prediction_row[last_idx, 0].item()) - base_last[0]
+        res_north = float(prediction_row[last_idx, 1].item()) - base_last[1]
+        east_m = base_target[0] + res_east * ratio
+        north_m = base_target[1] + res_north * ratio
+        sigma_e = math.exp(float(log_sigma_row[last_idx, 0].item())) * sigma_scale * ratio
+        sigma_n = math.exp(float(log_sigma_row[last_idx, 1].item())) * sigma_scale * ratio
+        return east_m, north_m, math.sqrt(sigma_e * sigma_e + sigma_n * sigma_n)
+
+    for (h_low, idx_low), (h_high, idx_high) in zip(sorted_pairs[:-1], sorted_pairs[1:]):
+        if h_low <= target_horizon <= h_high:
+            alpha = float(target_horizon - h_low) / max(float(h_high - h_low), 1.0)
+            east_low = float(prediction_row[idx_low, 0].item())
+            north_low = float(prediction_row[idx_low, 1].item())
+            east_high = float(prediction_row[idx_high, 0].item())
+            north_high = float(prediction_row[idx_high, 1].item())
+            east_m = (1.0 - alpha) * east_low + alpha * east_high
+            north_m = (1.0 - alpha) * north_low + alpha * north_high
+            sigma_low = math.hypot(
+                math.exp(float(log_sigma_row[idx_low, 0].item())) * sigma_scale,
+                math.exp(float(log_sigma_row[idx_low, 1].item())) * sigma_scale,
+            )
+            sigma_high = math.hypot(
+                math.exp(float(log_sigma_row[idx_high, 0].item())) * sigma_scale,
+                math.exp(float(log_sigma_row[idx_high, 1].item())) * sigma_scale,
+            )
+            return east_m, north_m, (1.0 - alpha) * sigma_low + alpha * sigma_high
+
+    return 0.0, 0.0, 50.0
+
+
 def _run_st_gnn_prediction(track: dict, object_type: str, requested_horizons: Sequence[int], summary: dict) -> dict:
     start = time.perf_counter()
     if torch is None:
         return _model_not_used("PyTorch is not installed")
-    bundle_dir = _bundle_dir_for(object_type, summary)
+    effective_type = _effective_bundle_object_type(object_type, track, summary)
+    bundle_dir = _bundle_dir_for(effective_type, summary)
     if bundle_dir is None:
         return _model_not_used("no frozen ST-GNN bundle is available for object_type")
     try:
@@ -224,12 +445,12 @@ def _run_st_gnn_prediction(track: dict, object_type: str, requested_horizons: Se
         normalization = _read_json(bundle_dir / "normalization.json")
         metrics = _read_json(bundle_dir / "metrics.json")
         model_horizons = [int(value) for value in manifest["prediction_horizons_s"]]
-        selected_horizons = [int(value) for value in requested_horizons if int(value) in set(model_horizons)]
-        if not selected_horizons:
+        target_horizons = [int(value) for value in requested_horizons if int(value) > 0]
+        if not target_horizons:
             return _model_not_used("requested horizons do not match frozen model horizons")
-        tensors = _build_st_gnn_tensors(track, model_horizons, normalization, object_type)
+        tensors = _build_st_gnn_tensors(track, model_horizons, normalization, effective_type)
         model = _load_torchscript_model(bundle_dir)
-        with torch.no_grad():
+        with torch.inference_mode():
             _residual_mean, log_sigma, prediction = model(
                 tensors["history_features"],
                 tensors["edge_index"],
@@ -238,32 +459,36 @@ def _run_st_gnn_prediction(track: dict, object_type: str, requested_horizons: Se
             )
         prediction = prediction.detach().cpu()
         log_sigma = log_sigma.detach().cpu()
-        horizon_to_index = {horizon: index for index, horizon in enumerate(model_horizons)}
         sigma_scale = float(
             metrics.get("st_gnn", {})
             .get("uncertainty_calibration", metrics.get("uncertainty_calibration", {}))
             .get("sigma_scale", 1.0)
         )
         predicted_path = []
-        for horizon in selected_horizons:
-            index = horizon_to_index[horizon]
-            east_m = float(prediction[0, index, 0].item())
-            north_m = float(prediction[0, index, 1].item())
+        anchor_lat = float(track.get("lat", 0.0) or 0.0)
+        anchor_lon = float(track.get("lon", 0.0) or 0.0)
+        anchor_alt = float(track.get("alt", 0.0) or 0.0)
+        for horizon in target_horizons:
+            east_m, north_m, uncertainty = _interpolate_model_horizon(
+                horizon,
+                model_horizons,
+                prediction[0],
+                log_sigma[0],
+                track,
+                sigma_scale,
+            )
             lat, lon = offset_to_lat_lon(
-                float(track.get("lat", 0.0) or 0.0),
-                float(track.get("lon", 0.0) or 0.0),
+                anchor_lat,
+                anchor_lon,
                 east_m,
                 north_m,
             )
-            sigma_e = math.exp(float(log_sigma[0, index, 0].item())) * sigma_scale
-            sigma_n = math.exp(float(log_sigma[0, index, 1].item())) * sigma_scale
-            uncertainty = math.sqrt(sigma_e * sigma_e + sigma_n * sigma_n)
             predicted_path.append(
                 {
                     "horizon_s": horizon,
                     "lat": round(lat, 7),
                     "lon": round(lon, 7),
-                    "alt": float(track.get("alt", 0.0) or 0.0),
+                    "alt": anchor_alt,
                     "uncertainty_radius_m": round(max(25.0, uncertainty), 3),
                     "prediction_confidence": round(_confidence_from_uncertainty(uncertainty), 4),
                     "offset_east_m": round(east_m, 3),
@@ -282,21 +507,29 @@ def _run_st_gnn_prediction(track: dict, object_type: str, requested_horizons: Se
 
 def _bundle_dir_for(object_type: str, summary: dict) -> Path | None:
     root = Path(__file__).resolve().parents[2]
-    if object_type == "aircraft" and summary["aircraft_model_available"]:
+    if object_type in {"aircraft", "uav", "unknown"} and summary["aircraft_model_available"]:
         return root / "models/track_threat/st_gnn_aircraft_kaggle_v1_candidate"
     if object_type == "ship" and summary["ship_model_available"]:
         return root / "models/track_threat/st_gnn_ship_kaggle_v1"
     return None
 
 
+@lru_cache(maxsize=8)
+def _load_torchscript_model_cached(model_path_str: str):
+    return torch.jit.load(model_path_str, map_location="cpu").eval()
+
+
 def _load_torchscript_model(bundle_dir: Path):
-    return torch.jit.load(str(bundle_dir / "model.ts"), map_location="cpu").eval()
+    return _load_torchscript_model_cached(str((bundle_dir / "model.ts").resolve()))
+
+
+@lru_cache(maxsize=32)
+def _read_json_cached(path_str: str) -> dict:
+    return json.loads(Path(path_str).read_text(encoding="utf-8"))
 
 
 def _read_json(path: Path) -> dict:
-    import json
-
-    return json.loads(path.read_text(encoding="utf-8"))
+    return _read_json_cached(str(path.resolve()))
 
 
 def _model_not_used(reason: str) -> dict:
@@ -389,7 +622,7 @@ def _confidence_from_uncertainty(uncertainty_m: float) -> float:
 
 
 def _model_version_for(object_type: str, summary: dict) -> str:
-    if object_type == "aircraft" and summary["aircraft_model_available"]:
+    if object_type in {"aircraft", "uav", "unknown"} and summary["aircraft_model_available"]:
         return "st_gnn_aircraft_kaggle_v1_candidate"
     if object_type == "ship" and summary["ship_model_available"]:
         return "st_gnn_ship_kaggle_v1"
@@ -397,7 +630,7 @@ def _model_version_for(object_type: str, summary: dict) -> str:
 
 
 def _model_status_for(object_type: str, summary: dict) -> str:
-    if object_type == "aircraft" and summary["aircraft_model_available"]:
+    if object_type in {"aircraft", "uav", "unknown"} and summary["aircraft_model_available"]:
         return "bundle_available_candidate_ade_gate_pending"
     if object_type == "ship" and summary["ship_model_available"]:
         return "bundle_available_gate_passed"
@@ -547,9 +780,39 @@ def _type_scores(object_type: str, confidence: float, speed: float, alt: float) 
     return {key: round(value / total, 4) for key, value in scores.items()}
 
 
+_OBJECT_TYPE_ALIASES: Dict[str, str] = {
+    "aircraft": "aircraft",
+    "air": "aircraft",
+    "fighter": "aircraft",
+    "bomber": "aircraft",
+    "helicopter": "aircraft",
+    "awacs": "aircraft",
+    "fixed_wing": "aircraft",
+    "rotary_wing": "aircraft",
+    "missile": "aircraft",
+    "ship": "ship",
+    "vessel": "ship",
+    "surface": "ship",
+    "surface_vessel": "ship",
+    "warship": "ship",
+    "destroyer": "ship",
+    "frigate": "ship",
+    "carrier": "ship",
+    "corvette": "ship",
+    "patrol_boat": "ship",
+    "submarine": "ship",
+    "merchant": "ship",
+    "fishing": "ship",
+    "uav": "uav",
+    "drone": "uav",
+    "unmanned": "uav",
+    "unknown": "unknown",
+}
+
+
 def _normalize_object_type(value: Any) -> str:
-    normalized = str(value or "unknown").lower()
-    return normalized if normalized in OBJECT_TYPES else "unknown"
+    normalized = str(value or "unknown").strip().lower().replace("-", "_").replace(" ", "_")
+    return _OBJECT_TYPE_ALIASES.get(normalized, "unknown")
 
 
 def _clamp(value: float, low: float, high: float) -> float:

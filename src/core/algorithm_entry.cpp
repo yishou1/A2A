@@ -186,23 +186,27 @@ nlohmann::json ToAgentViewJson(const AlgorithmEntry& entry) {
         {"output", entry.card.modalities.output},
     };
     agent_view["capabilities"] = entry.card.capabilities;
+    agent_view["operational_functions"] =
+        ToJson(entry.card).value("operational_functions", nlohmann::json::array());
 
     // 中文注释：examples 让 Agent 能通过具体的输入/输出样例判断此算法是否符合当前场景。
     nlohmann::json examples_json = nlohmann::json::array();
-    for (const auto& ex : entry.card.agent_card.examples) {
+    for (const auto& ex : entry.card.agent_view.examples) {
         examples_json.push_back({
             {"input",  ex.input},
             {"output", ex.output},
         });
     }
-    agent_view["agent_card"] = {
-        {"summary",           entry.card.agent_card.summary},
-        {"when_to_use",       entry.card.agent_card.when_to_use},
-        {"when_not_to_use",   entry.card.agent_card.when_not_to_use},
-        {"input_description", entry.card.agent_card.input_description},
-        {"output_description",entry.card.agent_card.output_description},
+    nlohmann::json agent_card_obj = {
+        {"summary",           entry.card.agent_view.summary},
+        {"when_to_use",       entry.card.agent_view.when_to_use},
+        {"when_not_to_use",   entry.card.agent_view.when_not_to_use},
+        {"input_description", entry.card.agent_view.input_description},
+        {"output_description",entry.card.agent_view.output_description},
         {"examples",          std::move(examples_json)},
     };
+    agent_view["agent_view"] = agent_card_obj;
+    agent_view["agent_card"] = std::move(agent_card_obj);
     agent_view["input_schema_summary"] = entry.input_schema_summary;
     agent_view["output_schema_summary"] = entry.output_schema_summary;
     agent_view["constraints"] =

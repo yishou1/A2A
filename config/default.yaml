@@ -19,8 +19,9 @@ inference:
   embed_dim: 1024
   # 门限与跟踪
   confidence_threshold: 0.25
-  edl_min_confidence: 0.35
+  edl_min_confidence: 0.5
   edl_max_epistemic: 0.45
+  edl_review_margin: 0.08
   motr_iou_threshold: 0.3
   mask2former_gain: 4.0
   supcon_temperature: 0.07

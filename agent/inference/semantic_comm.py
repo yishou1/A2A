@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent.inference.registry import get_semantic_comm
+from agent.inference.registry import inference_guard, get_semantic_comm
 
 
 def compress_intelligence(
@@ -13,4 +13,5 @@ def compress_intelligence(
     config: dict[str, Any],
 ) -> dict[str, Any]:
     model = get_semantic_comm(config)
-    return model.compress(perception, cognition)
+    with inference_guard("semantic_comm", config):
+        return model.compress(perception, cognition)

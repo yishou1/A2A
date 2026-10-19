@@ -1,0 +1,176 @@
+{
+  "model_id": "intent_gaussian_naive_bayes",
+  "model_version": "1.0.0",
+  "model_family": "sklearn_gaussian_naive_bayes",
+  "artifact_path": "models/intent_gaussian_naive_bayes.joblib",
+  "artifact_sha256": "29594ff6886d52a13d055dd453aa5cb129e4397babc149b628cf2e2127f00369",
+  "training_script": "scripts/train_intent_gaussian_naive_bayes.py",
+  "training_script_sha256": "707b8b18280c181cec6a7a3813d61f673bedb2c90925845449dea6d84d3dbd77",
+  "dataset": {
+    "path": "data/intent_naive_bayes/reference_observations.csv",
+    "sha256": "15e39fa34279ba29aed8ae8315f8bdd81725941ef592d927e06f5ea027e4788d",
+    "source": "deterministic_class_conditional_reference_generator",
+    "seed": 20260818,
+    "row_count": 540,
+    "class_counts": {
+      "benign": 180,
+      "surveillance": 180,
+      "hostile": 180
+    },
+    "limitation": "Synthetic reference distributions only; domain calibration is required before operational use."
+  },
+  "features": [
+    "radar_activity",
+    "communication_intensity",
+    "movement_consistency",
+    "weapon_signature",
+    "proximity_score"
+  ],
+  "classes": [
+    "benign",
+    "surveillance",
+    "hostile"
+  ],
+  "class_profiles": {
+    "benign": {
+      "means": [
+        0.2,
+        0.3,
+        0.75,
+        0.15,
+        0.25
+      ],
+      "standard_deviations": [
+        0.16,
+        0.18,
+        0.14,
+        0.12,
+        0.17
+      ]
+    },
+    "surveillance": {
+      "means": [
+        0.63,
+        0.55,
+        0.65,
+        0.34,
+        0.55
+      ],
+      "standard_deviations": [
+        0.17,
+        0.18,
+        0.15,
+        0.16,
+        0.18
+      ]
+    },
+    "hostile": {
+      "means": [
+        0.79,
+        0.72,
+        0.45,
+        0.82,
+        0.76
+      ],
+      "standard_deviations": [
+        0.15,
+        0.17,
+        0.18,
+        0.14,
+        0.16
+      ]
+    }
+  },
+  "hyperparameters": {
+    "var_smoothing": 1e-09,
+    "random_state_for_split": 20260819
+  },
+  "learned_parameters": {
+    "class_prior": {
+      "benign": 0.33333333,
+      "hostile": 0.33333333,
+      "surveillance": 0.33333333
+    },
+    "feature_means": {
+      "benign": [
+        0.21794676,
+        0.30395269,
+        0.76632759,
+        0.17063562,
+        0.28962552
+      ],
+      "hostile": [
+        0.79623789,
+        0.71826213,
+        0.45396939,
+        0.80100128,
+        0.74619933
+      ],
+      "surveillance": [
+        0.64930336,
+        0.57372161,
+        0.65527662,
+        0.31586059,
+        0.54381334
+      ]
+    },
+    "feature_variances": {
+      "benign": [
+        0.01920572,
+        0.02937764,
+        0.01721695,
+        0.01297662,
+        0.02645809
+      ],
+      "hostile": [
+        0.01890036,
+        0.02868514,
+        0.0239282,
+        0.01673171,
+        0.02163966
+      ],
+      "surveillance": [
+        0.02834136,
+        0.03193992,
+        0.02102122,
+        0.02081961,
+        0.02639536
+      ]
+    }
+  },
+  "evaluation": {
+    "method": "stratified_holdout",
+    "test_ratio": 0.25,
+    "train_count": 405,
+    "test_count": 135,
+    "accuracy": 0.97037,
+    "macro_f1": 0.97037,
+    "log_loss": 0.106398,
+    "confusion_matrix_labels": [
+      "benign",
+      "surveillance",
+      "hostile"
+    ],
+    "confusion_matrix": [
+      [
+        44,
+        1,
+        0
+      ],
+      [
+        1,
+        43,
+        1
+      ],
+      [
+        0,
+        1,
+        44
+      ]
+    ]
+  },
+  "runtime_versions": {
+    "scikit_learn": "1.7.2",
+    "joblib": "1.5.3"
+  }
+}

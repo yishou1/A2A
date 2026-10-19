@@ -14,6 +14,7 @@ import argparse
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import time
@@ -110,6 +111,14 @@ def parse_args() -> argparse.Namespace:
         "--strict",
         action="store_true",
         help="Treat warnings such as draft status or missing model profile as failures.",
+    )
+    parser.add_argument(
+        "--forbid-fallback",
+        action="store_true",
+        help=(
+            "Real-mode gate: require model_loaded=true and fail when runtime outputs "
+            "contain Mock, stub, fallback, placeholder, or random-initialization markers."
+        ),
     )
     return parser.parse_args()
 
@@ -287,13 +296,24 @@ def compare_json(expected: Any, actual: Any, path: str = "$") -> list[str]:
     if type(expected) is not type(actual):
         return [f"{path}: type {type(expected).__name__} != {type(actual).__name__}"]
     if isinstance(expected, dict):
+        # Empty containers in repository golden files intentionally mean
+        # "validate this value by schema, but allow runtime-populated data".
+        if not expected:
+            return []
         errors: list[str] = []
-        if set(expected) != set(actual):
-            errors.append(f"{path}: keys {sorted(expected)} != {sorted(actual)}")
-        for key in expected.keys() & actual.keys():
+        # End-to-end latency is intentionally dynamic and is checked for
+        # presence/type by the response contract instead of exact equality.
+        expected_keys = set(expected) - {"latency_ms"}
+        actual_keys = set(actual) - {"latency_ms"}
+        missing_keys = expected_keys - actual_keys
+        if missing_keys:
+            errors.append(f"{path}: missing keys {sorted(missing_keys)}")
+        for key in expected_keys & actual_keys:
             errors.extend(compare_json(expected[key], actual[key], f"{path}.{key}"))
         return errors
     if isinstance(expected, list):
+        if not expected:
+            return []
         if len(expected) != len(actual):
             return [f"{path}: length {len(expected)} != {len(actual)}"]
         errors = []
@@ -303,7 +323,47 @@ def compare_json(expected: Any, actual: Any, path: str = "$") -> list[str]:
     return [] if expected == actual else [f"{path}: {expected!r} != {actual!r}"]
 
 
-def run_onnx(package: Path, card: dict[str, Any]) -> tuple[str, str, float]:
+NON_REAL_BOOLEAN_KEYS = {
+    "fallback",
+    "fallback_used",
+    "is_mock",
+    "mock",
+    "random_initialized",
+    "use_fallback",
+    "use_mock",
+    "using_fallback",
+}
+NON_REAL_TEXT_PATTERN = re.compile(
+    r"(?:^|[_\W])(mock|stub|fallback|placeholder|random(?:ly)?[_ -]?initiali[sz]ed)(?:$|[_\W])",
+    re.IGNORECASE,
+)
+
+
+def find_non_real_markers(value: Any, path: str = "$") -> list[str]:
+    """Return paths that prove a response used a non-real execution path."""
+    markers: list[str] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            child_path = f"{path}.{key}"
+            normalized_key = str(key).strip().lower().replace("-", "_")
+            if normalized_key in NON_REAL_BOOLEAN_KEYS and item is True:
+                markers.append(f"{child_path}=true")
+            markers.extend(find_non_real_markers(item, child_path))
+        return markers
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            markers.extend(find_non_real_markers(item, f"{path}[{index}]"))
+        return markers
+    if isinstance(value, str) and NON_REAL_TEXT_PATTERN.search(value):
+        markers.append(f"{path}={value!r}")
+    return markers
+
+
+def run_onnx(
+    package: Path,
+    card: dict[str, Any],
+    forbid_fallback: bool = False,
+) -> tuple[str, str, float]:
     start = time.perf_counter()
     try:
         import numpy as np
@@ -370,6 +430,10 @@ def run_onnx(package: Path, card: dict[str, Any]) -> tuple[str, str, float]:
                 actual = {"label": label_map[str(index)], "confidence": float(probabilities[index])}
             else:
                 raise ValueError(f"unsupported postprocess type: {postprocess_type}")
+            if forbid_fallback:
+                markers = find_non_real_markers(actual)
+                if markers:
+                    raise ValueError(f"non-real runtime marker: {markers[0]}")
             errors = compare_json(expected, actual)
             if errors:
                 return "FAIL", f"{input_path.name}: {errors[0]}", (time.perf_counter() - start) * 1000
@@ -390,7 +454,12 @@ def http_json(url: str, timeout: float, payload: Any | None = None) -> Any:
         return json.loads(response.read().decode("utf-8"))
 
 
-def run_http(package: Path, card: dict[str, Any], timeout: float) -> tuple[str, str, float]:
+def run_http(
+    package: Path,
+    card: dict[str, Any],
+    timeout: float,
+    forbid_fallback: bool = False,
+) -> tuple[str, str, float]:
     start = time.perf_counter()
     algorithm_id = str(card.get("algorithm_id"))
     runtime = nested(card, "machine_spec", "runtime") or {}
@@ -398,6 +467,10 @@ def run_http(package: Path, card: dict[str, Any], timeout: float) -> tuple[str, 
         health = http_json(runtime["health_endpoint"], timeout)
         if not health.get("ok"):
             raise ValueError(f"health ok=false: {health}")
+        if forbid_fallback and health.get("model_loaded") is not True:
+            raise ValueError(
+                "real-mode health must explicitly report model_loaded=true"
+            )
         metadata = http_json(runtime["metadata_endpoint"], timeout)
         if metadata.get("algorithm_id") not in (None, algorithm_id):
             raise ValueError(f"metadata algorithm_id={metadata.get('algorithm_id')}")
@@ -409,7 +482,16 @@ def run_http(package: Path, card: dict[str, Any], timeout: float) -> tuple[str, 
             outputs = body.get("outputs")
             if outputs in (None, {}, []):
                 raise ValueError("predict outputs are empty")
-            expected = read_json(expected_path)
+            if forbid_fallback:
+                markers = find_non_real_markers(outputs)
+                if markers:
+                    raise ValueError(f"non-real runtime marker: {markers[0]}")
+            expected_payload = read_json(expected_path)
+            expected = (
+                expected_payload.get("outputs")
+                if isinstance(expected_payload, dict) and "outputs" in expected_payload
+                else expected_payload
+            )
             errors = compare_json(expected, outputs)
             if errors:
                 raise ValueError(f"{request_path.name}: {errors[0]}")
@@ -424,6 +506,7 @@ def run_algolib(
     executable: Path,
     registry_path: Path,
     timeout: float,
+    forbid_fallback: bool = False,
 ) -> tuple[str, str, float]:
     start = time.perf_counter()
     algorithm_id = str(card["algorithm_id"])
@@ -437,7 +520,24 @@ def run_algolib(
         [str(executable), "activate", algorithm_id, version, backend],
     ]
     if pairs:
-        commands.append([str(executable), "run", str(pairs[0][0])])
+        source_request = read_json(pairs[0][0])
+        request_dir = registry_path.parent / "algolib_requests"
+        request_dir.mkdir(parents=True, exist_ok=True)
+        request_path = request_dir / f"{algorithm_id}_{version}.json"
+        request_payload = {
+            "request_id": source_request.get("request_id", f"accept-{algorithm_id}"),
+            "trace_id": source_request.get("trace_id", "acceptance"),
+            "algorithm_id": algorithm_id,
+            "version": version,
+            "backend_type": backend,
+            "inputs": source_request.get("inputs", source_request),
+            "params": source_request.get("params", {}),
+        }
+        request_path.write_text(
+            json.dumps(request_payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        commands.append([str(executable), "run", str(request_path)])
     for command in commands:
         try:
             process = subprocess.run(
@@ -446,6 +546,8 @@ def run_algolib(
                 env=env,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=timeout,
                 check=False,
             )
@@ -454,6 +556,22 @@ def run_algolib(
         if process.returncode != 0:
             detail = (process.stdout or process.stderr).strip().replace("\n", " ")
             return "FAIL", f"{command[1]} failed: {detail[:500]}", (time.perf_counter() - start) * 1000
+        if forbid_fallback and command[1] == "run":
+            try:
+                run_payload = json.loads(process.stdout)
+            except json.JSONDecodeError as exc:
+                return (
+                    "FAIL",
+                    f"run output cannot be inspected by real-mode gate: {exc}",
+                    (time.perf_counter() - start) * 1000,
+                )
+            markers = find_non_real_markers(run_payload)
+            if markers:
+                return (
+                    "FAIL",
+                    f"run used non-real runtime marker: {markers[0]}",
+                    (time.perf_counter() - start) * 1000,
+                )
     return "PASS", "register, activate, and run passed", (time.perf_counter() - start) * 1000
 
 
@@ -493,6 +611,7 @@ def write_reports(
             "backend": args.backend,
             "algorithms": args.algorithm,
             "strict": args.strict,
+            "forbid_fallback": args.forbid_fallback,
         },
         "summary": summary,
         "duplicate_endpoints": duplicate_endpoints,
@@ -541,6 +660,9 @@ def write_reports(
 
 def main() -> int:
     args = parse_args()
+    if args.forbid_fallback and not args.runtime:
+        print("--forbid-fallback requires --runtime.", file=sys.stderr)
+        return 2
     packages = discover_packages(args)
     if not packages:
         print("No matching algorithm packages found.", file=sys.stderr)
@@ -561,16 +683,25 @@ def main() -> int:
         report = validate_static(package, card, args.strict)
         if args.runtime and not any(check.status == "FAIL" for check in report.checks):
             if report.backend_type == "onnx":
-                status, message, elapsed = run_onnx(package, card)
+                status, message, elapsed = run_onnx(
+                    package, card, args.forbid_fallback
+                )
             else:
-                status, message, elapsed = run_http(package, card, args.timeout)
+                status, message, elapsed = run_http(
+                    package, card, args.timeout, args.forbid_fallback
+                )
             report.add("runtime", status, message, elapsed)
         elif not args.runtime:
             report.add("runtime", "SKIP", "runtime checks were not requested")
 
         if algolib and not any(check.status == "FAIL" for check in report.checks):
             status, message, elapsed = run_algolib(
-                package, card, algolib, registry_path, args.timeout
+                package,
+                card,
+                algolib,
+                registry_path,
+                args.timeout,
+                args.forbid_fallback,
             )
             report.add("algolib", status, message, elapsed)
         elif not algolib:

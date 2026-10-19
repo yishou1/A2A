@@ -47,7 +47,9 @@ int ResolvePort() {
 void PrintUsage() {
     std::cout << "algolib_server [--host <host>] [--port <port>] "
               << "[--registry <registry_json_path>] "
-              << "[--execution-log <audit_jsonl_path>]\n";
+              << "[--execution-log <audit_jsonl_path>] "
+              << "[--function-catalog <catalog_yaml_path>] "
+              << "[--workers <count>] [--max-queued-requests <count>]\n";
 }
 
 void PrintError(const std::string& message) {
@@ -86,6 +88,12 @@ algolib::HttpServerConfig ParseConfigOrThrow(const std::vector<std::string>& arg
             config.registry_path = value;
         } else if (arg == "--execution-log") {
             config.execution_log_path = value;
+        } else if (arg == "--function-catalog") {
+            config.operational_function_catalog_path = value;
+        } else if (arg == "--workers") {
+            config.worker_threads = static_cast<std::size_t>(std::stoul(value));
+        } else if (arg == "--max-queued-requests") {
+            config.max_queued_requests = static_cast<std::size_t>(std::stoul(value));
         } else {
             throw std::runtime_error("Unknown option: " + arg);
         }
@@ -96,6 +104,18 @@ algolib::HttpServerConfig ParseConfigOrThrow(const std::vector<std::string>& arg
     }
     if (config.host.empty()) {
         throw std::runtime_error("Host must be non-empty.");
+    }
+    if (config.worker_threads == 0) {
+        if (const char* env_value = std::getenv("ALGOLIB_SERVER_WORKERS");
+            env_value != nullptr && *env_value != '\0') {
+            config.worker_threads = static_cast<std::size_t>(std::stoul(env_value));
+        }
+    }
+    if (config.max_queued_requests == 0) {
+        if (const char* env_value = std::getenv("ALGOLIB_SERVER_MAX_QUEUED_REQUESTS");
+            env_value != nullptr && *env_value != '\0') {
+            config.max_queued_requests = static_cast<std::size_t>(std::stoul(env_value));
+        }
     }
     return config;
 }

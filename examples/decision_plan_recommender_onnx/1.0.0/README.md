@@ -1,9 +1,9 @@
 # Decision Plan Recommender ONNX
 
-Native ONNX package for the bootstrap candidate-plan logistic-regression model.
-It scores one precomputed eight-feature row and does not generate, rank, or
-validate plans. Those orchestration responsibilities remain in
-`decision_planning_core`.
+Native ONNX package for a reproducibly trained candidate-plan logistic-
+regression reference model. It scores one precomputed eight-feature row and
+does not generate, rank, or validate plans. Those orchestration responsibilities
+remain in `decision_planning_core`.
 
 Feature order:
 
@@ -16,6 +16,7 @@ Feature order:
 7. `priority`
 8. `objective_fit`
 
-The model is copied from `models/decision_planning_lr.onnx`. Its metadata marks
-it as a bootstrap model rather than a production-data-trained model.
+Rebuild the reference dataset, model, metadata, and holdout metrics with
+`python scripts/train_logistic_onnx_models.py`. The dataset contains synthetic
+reference-policy labels and is not a production decision benchmark.
 

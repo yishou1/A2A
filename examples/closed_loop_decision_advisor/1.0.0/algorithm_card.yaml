@@ -48,6 +48,13 @@ performance:
   primary_metric: policy_consistency
   primary_score: 0.9
 
+model_profile:
+  parameter_count: 0
+  parameter_count_text: "not_applicable: deterministic threshold policy with no persisted learned weights"
+  flops: 0
+  flops_text: "not_applicable: branch and input-count dependent policy evaluation"
+  precision: deterministic_rules
+
 safety:
   risk_level: medium
   requires_human_review: true

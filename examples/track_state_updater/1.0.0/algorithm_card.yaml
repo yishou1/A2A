@@ -67,9 +67,11 @@ resource_requirements:
 
 model_profile:
   parameter_count: 0
-  parameter_count_text: nearest-neighbor plus lightweight filter
+  parameter_count_text: "not_applicable: nearest-neighbor association plus deterministic lightweight filtering"
+  flops: 0
+  flops_text: "not_applicable: matching work depends on detections x existing tracks"
   model_size_mb: 0
-  precision: fp32
+  precision: deterministic_rules
 
 safety:
   risk_level: low

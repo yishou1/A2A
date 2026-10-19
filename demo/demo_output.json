@@ -9,12 +9,12 @@
       "request": null,
       "response": {
         "content_type": "application/octet-stream",
-        "expected_size_bytes": 244,
-        "file_size_bytes": 244,
+        "expected_size_bytes": 256,
+        "file_size_bytes": 256,
         "http_status": 200
       },
       "step": "3.1_download_onnx",
-      "timestamp": "2026-08-15T10:43:29Z"
+      "timestamp": "2026-08-23T12:02:14Z"
     },
     {
       "explanation": "[下载配置文件] GET .../files/preprocess.yaml：下载算法包内的预处理配置文件。 文件服务接口不限于二进制模型，YAML/JSON/文本等所有文件均可流式返回。 返回 HTTP 200 和正确的文件内容，验证文件服务对不同文件类型的通用支持。",
@@ -28,7 +28,7 @@
         "http_status": 200
       },
       "step": "3.2_download_yaml",
-      "timestamp": "2026-08-15T10:43:29Z"
+      "timestamp": "2026-08-23T12:02:14Z"
     },
     {
       "explanation": "[路径穿越防护] GET .../files/../../../etc/passwd：尝试通过 ../ 跳出算法包目录并读取系统文件。 服务器计算 canonical 路径，如果解析后路径越出算法包目录就拒绝并返回 HTTP 400。 返回 400 正是预期行为，证明路径安全校验机制有效。 如果返回 200 则表示存在路径穿越漏洞，是严重安全隐患。",
@@ -42,7 +42,7 @@
         "http_status": 400
       },
       "step": "3.3_path_traversal_rejected",
-      "timestamp": "2026-08-15T10:43:29Z"
+      "timestamp": "2026-08-23T12:02:14Z"
     },
     {
       "explanation": "[文件不存在 404] GET .../files/nonexistent.bin：请求一个不存在的文件。 服务器在安全校验通过后，发现文件不存在则返回 HTTP 404。 返回 404 正是预期行为，验证错误处理逻辑正确，不会将 404 误判为 500 或其他语义。",
@@ -56,17 +56,17 @@
         "http_status": 404
       },
       "step": "3.4_file_not_found",
-      "timestamp": "2026-08-15T10:43:29Z"
+      "timestamp": "2026-08-23T12:02:14Z"
     }
   ],
   "meta": {
     "demo": "AlgoLib Four API Demo",
-    "finished_at": "2026-08-15T10:43:29Z",
+    "finished_at": "2026-08-23T12:02:15Z",
     "output_path": "/Users/cmax/Downloads/Algorithmrepo/demo/demo_output.json",
     "overall_failures": 0,
     "overall_passed": true,
     "source_root": "/Users/cmax/Downloads/Algorithmrepo",
-    "started_at": "2026-08-15T10:43:29Z"
+    "started_at": "2026-08-23T12:02:14Z"
   },
   "model_load_api": [
     {
@@ -96,7 +96,7 @@
         "version": "1.0.0"
       },
       "step": "2.1_load_first",
-      "timestamp": "2026-08-15T10:43:29Z"
+      "timestamp": "2026-08-23T12:02:14Z"
     },
     {
       "explanation": "[验证自动回写] GET /algorithms/.../onnx：/load 成功后会自动回写 deploy_status=ready 到注册表。 通过该接口查看 entry.deployments[]，可确认 deploy_id=local/d1 的状态已更新。 agent_view.ready_endpoints 也会同步包含该节点，agent 可直接读取此列表获得可用的就绪端点。",
@@ -107,7 +107,7 @@
       "request": null,
       "response": {
         "agent_view": {
-          "agent_card": {
+          "agent_view": {
             "examples": [
               {
                 "input": {
@@ -121,14 +121,14 @@
             ],
             "input_description": "The request JSON must contain a text field.\n",
             "output_description": "Returns label and confidence fields.\n",
-            "summary": "Classify a short text into a fixed label set and return confidence.\n",
+            "summary": "Exercise the text-tokenization, ONNX Runtime, and classification-postprocess integration contract with a deterministic constant-logit fixture.\n",
             "when_not_to_use": [
-              "Long document reasoning is required",
-              "Natural language explanation is required"
+              "A trained semantic text classifier is required",
+              "Accuracy or production model quality is being evaluated"
             ],
             "when_to_use": [
-              "Input is a short text string",
-              "Output must be a fixed label"
+              "The ONNX text-classification integration path must be tested",
+              "Registry and runtime behavior need a deterministic fixture"
             ]
           },
           "algorithm_id": "onnx_text_classifier",
@@ -153,7 +153,7 @@
               "zone": ""
             }
           ],
-          "display_name": "ONNX Text Classifier",
+          "display_name": "ONNX Text Classification Contract Fixture",
           "input_schema_summary": {
             "properties": [
               {
@@ -177,17 +177,26 @@
             ]
           },
           "model_profile": {
-            "flops": 240000,
+            "flops": 0,
             "flops_input_shape": [
               1,
               256
             ],
-            "flops_text": "240 KFLOPs",
-            "model_size_mb": 1,
-            "parameter_count": 120000,
-            "parameter_count_text": "120K",
+            "flops_text": "constant_output",
+            "model_size_mb": 0,
+            "parameter_count": 0,
+            "parameter_count_text": "constant_logit_contract_fixture",
             "precision": "fp32"
           },
+          "operational_functions": [
+            {
+              "coverage_level": "partial",
+              "function_code": "classify",
+              "function_id": "KC-06",
+              "function_name": "Classify",
+              "role": "supporting"
+            }
+          ],
           "output_schema_summary": {
             "properties": [
               {
@@ -213,8 +222,8 @@
             "latency_ms_p50": 20,
             "latency_ms_p95": 60,
             "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
-            "primary_metric": "accuracy",
-            "primary_score": 0.92,
+            "primary_metric": "golden_contract_correctness",
+            "primary_score": 1.0,
             "space_complexity": "O(n)",
             "time_complexity": "O(n)"
           },
@@ -239,7 +248,7 @@
         },
         "entry": {
           "card": {
-            "agent_card": {
+            "agent_view": {
               "examples": [
                 {
                   "input": {
@@ -253,14 +262,14 @@
               ],
               "input_description": "The request JSON must contain a text field.\n",
               "output_description": "Returns label and confidence fields.\n",
-              "summary": "Classify a short text into a fixed label set and return confidence.\n",
+              "summary": "Exercise the text-tokenization, ONNX Runtime, and classification-postprocess integration contract with a deterministic constant-logit fixture.\n",
               "when_not_to_use": [
-                "Long document reasoning is required",
-                "Natural language explanation is required"
+                "A trained semantic text classifier is required",
+                "Accuracy or production model quality is being evaluated"
               ],
               "when_to_use": [
-                "Input is a short text string",
-                "Output must be a fixed label"
+                "The ONNX text-classification integration path must be tested",
+                "Registry and runtime behavior need a deterministic fixture"
               ]
             },
             "algorithm_id": "onnx_text_classifier",
@@ -275,7 +284,7 @@
               "max_request_bytes": 1048576,
               "streaming_supported": false
             },
-            "display_name": "ONNX Text Classifier",
+            "display_name": "ONNX Text Classification Contract Fixture",
             "machine_spec": {
               "input_schema_ref": "input.schema.json",
               "output_schema_ref": "output.schema.json",
@@ -312,24 +321,33 @@
               ]
             },
             "model_profile": {
-              "flops": 240000,
+              "flops": 0,
               "flops_input_shape": [
                 1,
                 256
               ],
-              "flops_text": "240 KFLOPs",
-              "model_size_mb": 1,
-              "parameter_count": 120000,
-              "parameter_count_text": "120K",
+              "flops_text": "constant_output",
+              "model_size_mb": 0,
+              "parameter_count": 0,
+              "parameter_count_text": "constant_logit_contract_fixture",
               "precision": "fp32"
             },
+            "operational_functions": [
+              {
+                "coverage_level": "partial",
+                "function_code": "classify",
+                "function_id": "KC-06",
+                "function_name": "Classify",
+                "role": "supporting"
+              }
+            ],
             "performance": {
               "complexity_variable": "n = number of input tokens after preprocessing",
               "latency_ms_p50": 20,
               "latency_ms_p95": 60,
               "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
-              "primary_metric": "accuracy",
-              "primary_score": 0.92,
+              "primary_metric": "golden_contract_correctness",
+              "primary_score": 1.0,
               "space_complexity": "O(n)",
               "time_complexity": "O(n)"
             },
@@ -357,13 +375,13 @@
             {
               "deploy_id": "local/d1",
               "deploy_status": "ready",
-              "deployed_at": "2026-08-15T10:43:29Z",
+              "deployed_at": "2026-08-23T12:02:14Z",
               "endpoint": "",
               "health_endpoint": "",
               "local_model_path": "",
               "node_id": "local",
               "status_message": "Model loaded and ready.",
-              "updated_at": "2026-08-15T10:43:29Z",
+              "updated_at": "2026-08-23T12:02:14Z",
               "zone": ""
             }
           ],
@@ -412,7 +430,7 @@
         "ok": true
       },
       "step": "2.2_check_deploy_status",
-      "timestamp": "2026-08-15T10:43:29Z"
+      "timestamp": "2026-08-23T12:02:14Z"
     },
     {
       "explanation": "[执行推理] POST /run：向已加载的 Session 提交输入并返回推理结果。 请求必须指定 request_id+trace_id 以支持追踪和审计。 outputs.label=task 表示文本被分类为任务类型，置信度 confidence=0.96。 usage 字段返回执行提供器、延迟等性能指标，可用于性能监控。",
@@ -435,6 +453,18 @@
         "algorithm_id": "onnx_text_classifier",
         "backend_type": "onnx",
         "error": null,
+        "function_execution": {
+          "coverage_level": "partial",
+          "execution_status": "succeeded",
+          "function_code": "classify",
+          "function_id": "KC-06",
+          "function_name": "Classify",
+          "mapping_source": "algorithm_card_default",
+          "matched": true,
+          "role": "supporting",
+          "step_instance_id": "",
+          "workflow_instance_id": ""
+        },
         "ok": true,
         "outputs": {
           "confidence": 0.96,
@@ -444,13 +474,13 @@
         "trace_id": "demo_trace_001",
         "usage": {
           "execution_provider": "cpu",
-          "latency_ms": 0,
+          "latency_ms": 7,
           "session_backend": "stub"
         },
         "version": "1.0.0"
       },
       "step": "2.3_run_inference",
-      "timestamp": "2026-08-15T10:43:29Z"
+      "timestamp": "2026-08-23T12:02:14Z"
     },
     {
       "explanation": "[缓存命中] POST /load（再次）：Runner 已在内存中，第二次调用返回 load_status=already_loaded。 并不重建 ONNX Session，避免重复加载开销，接口实现了幂等性设计。 这意味着多个调用方可以无顾虑是否已加载而安全重复调用 /load。",
@@ -479,7 +509,7 @@
         "version": "1.0.0"
       },
       "step": "2.4_load_cached",
-      "timestamp": "2026-08-15T10:43:29Z"
+      "timestamp": "2026-08-23T12:02:14Z"
     },
     {
       "explanation": "[健康检查+缓存大小] GET /health：返回服务器状态摘要。 runner_cache_size=1 表示当前缓存中有 1 个已加载的 Runner（ONNX Session）。 缓存采用 LIFO 策略，当超出容量时驱逐最久未使用的条目，防止内存溢出。 该接口可用于运维监控，实时了解内存占用情况。",
@@ -491,12 +521,13 @@
       "response": {
         "execution_log_path": "/Users/cmax/Downloads/Algorithmrepo/demo/shared_audit.jsonl",
         "ok": true,
+        "operational_function_catalog_path": "/Users/cmax/Downloads/Algorithmrepo/config/operational_function_catalog.yaml",
         "registry_path": "/Users/cmax/Downloads/Algorithmrepo/demo/shared_registry.json",
         "runner_cache_size": 1,
         "status": "ready"
       },
       "step": "2.5_health_cache_size",
-      "timestamp": "2026-08-15T10:43:29Z"
+      "timestamp": "2026-08-23T12:02:14Z"
     },
     {
       "explanation": "[卸载模型] POST /unload：从缓存中移除指定 Runner，释放内存。 load_status=unloaded 确认 Session 已销毁并从缓存中移除。 同时自动回写注册表中 deploy_id=local/d1 的 deploy_status 为 unloaded。 卸载后可重新 /load 进行热更新，或切换到新版本模型。",
@@ -520,7 +551,7 @@
         "version": "1.0.0"
       },
       "step": "2.6_unload",
-      "timestamp": "2026-08-15T10:43:29Z"
+      "timestamp": "2026-08-23T12:02:14Z"
     },
     {
       "explanation": "[卸载后重新加载] POST /load（卸载后）：验证卸载后可顷利重新加载。 load_status=loaded 表示 Session 重建成功，服务恢复就绪。 此流程常用于模型热更新（unload 旧版本 → 注册新版本 → load 新版本），实现无中断升级。",
@@ -549,7 +580,7 @@
         "version": "1.0.0"
       },
       "step": "2.7_reload_after_unload",
-      "timestamp": "2026-08-15T10:43:29Z"
+      "timestamp": "2026-08-23T12:02:14Z"
     }
   ],
   "python_pool_api": [
@@ -580,7 +611,7 @@
         "version": "1.0.0"
       },
       "step": "4.1_pool_load",
-      "timestamp": "2026-08-15T10:43:29Z"
+      "timestamp": "2026-08-23T12:02:14Z"
     },
     {
       "explanation": "[并发池健康检查] GET /health：确认并发池 Runner 已进入缓存。 runner_cache_size>=1 表示 Pool Runner 已被注册并激活。 registry_path / execution_log_path 展示此独立 Server 使用的池専用注册表和审计日志路径。",
@@ -592,12 +623,13 @@
       "response": {
         "execution_log_path": "/Users/cmax/Downloads/Algorithmrepo/demo/pool_audit.jsonl",
         "ok": true,
+        "operational_function_catalog_path": "/Users/cmax/Downloads/Algorithmrepo/config/operational_function_catalog.yaml",
         "registry_path": "/Users/cmax/Downloads/Algorithmrepo/demo/pool_registry.json",
         "runner_cache_size": 1,
         "status": "ready"
       },
       "step": "4.2_pool_health",
-      "timestamp": "2026-08-15T10:43:29Z"
+      "timestamp": "2026-08-23T12:02:14Z"
     },
     {
       "explanation": "[串行 6 次推理] 6 次串行 POST /run 验证排队调度。 pool_size=3 但请求总数 6 超过容量，后 3 个请求会排队等待前 3 个释放连接。 所有 6 个请求均返回 success=true，证明排队机制正常工作。 details[] 字段指向每个单次请求的具体响应，可逐项查看推理输出。",
@@ -615,6 +647,18 @@
               "algorithm_id": "llm_rule_explainer",
               "backend_type": "python_http_service",
               "error": null,
+              "function_execution": {
+                "coverage_level": "advisory",
+                "execution_status": "succeeded",
+                "function_code": "verify_rules_of_engagement",
+                "function_id": "KC-21",
+                "function_name": "Verify Rules of Engagement (ROE)",
+                "mapping_source": "algorithm_card_default",
+                "matched": true,
+                "role": "supporting",
+                "step_instance_id": "",
+                "workflow_instance_id": ""
+              },
               "ok": true,
               "outputs": {
                 "confidence": 0.85,
@@ -623,7 +667,7 @@
               "request_id": "demo_pool_req_0",
               "trace_id": "demo_pool_trace_0",
               "usage": {
-                "latency_ms": 16
+                "latency_ms": 29
               },
               "version": "1.0.0"
             }
@@ -636,6 +680,18 @@
               "algorithm_id": "llm_rule_explainer",
               "backend_type": "python_http_service",
               "error": null,
+              "function_execution": {
+                "coverage_level": "advisory",
+                "execution_status": "succeeded",
+                "function_code": "verify_rules_of_engagement",
+                "function_id": "KC-21",
+                "function_name": "Verify Rules of Engagement (ROE)",
+                "mapping_source": "algorithm_card_default",
+                "matched": true,
+                "role": "supporting",
+                "step_instance_id": "",
+                "workflow_instance_id": ""
+              },
               "ok": true,
               "outputs": {
                 "confidence": 0.85,
@@ -644,7 +700,7 @@
               "request_id": "demo_pool_req_1",
               "trace_id": "demo_pool_trace_1",
               "usage": {
-                "latency_ms": 19
+                "latency_ms": 20
               },
               "version": "1.0.0"
             }
@@ -657,6 +713,18 @@
               "algorithm_id": "llm_rule_explainer",
               "backend_type": "python_http_service",
               "error": null,
+              "function_execution": {
+                "coverage_level": "advisory",
+                "execution_status": "succeeded",
+                "function_code": "verify_rules_of_engagement",
+                "function_id": "KC-21",
+                "function_name": "Verify Rules of Engagement (ROE)",
+                "mapping_source": "algorithm_card_default",
+                "matched": true,
+                "role": "supporting",
+                "step_instance_id": "",
+                "workflow_instance_id": ""
+              },
               "ok": true,
               "outputs": {
                 "confidence": 0.85,
@@ -665,7 +733,7 @@
               "request_id": "demo_pool_req_2",
               "trace_id": "demo_pool_trace_2",
               "usage": {
-                "latency_ms": 19
+                "latency_ms": 16
               },
               "version": "1.0.0"
             }
@@ -678,6 +746,18 @@
               "algorithm_id": "llm_rule_explainer",
               "backend_type": "python_http_service",
               "error": null,
+              "function_execution": {
+                "coverage_level": "advisory",
+                "execution_status": "succeeded",
+                "function_code": "verify_rules_of_engagement",
+                "function_id": "KC-21",
+                "function_name": "Verify Rules of Engagement (ROE)",
+                "mapping_source": "algorithm_card_default",
+                "matched": true,
+                "role": "supporting",
+                "step_instance_id": "",
+                "workflow_instance_id": ""
+              },
               "ok": true,
               "outputs": {
                 "confidence": 0.85,
@@ -686,7 +766,7 @@
               "request_id": "demo_pool_req_3",
               "trace_id": "demo_pool_trace_3",
               "usage": {
-                "latency_ms": 16
+                "latency_ms": 19
               },
               "version": "1.0.0"
             }
@@ -699,6 +779,18 @@
               "algorithm_id": "llm_rule_explainer",
               "backend_type": "python_http_service",
               "error": null,
+              "function_execution": {
+                "coverage_level": "advisory",
+                "execution_status": "succeeded",
+                "function_code": "verify_rules_of_engagement",
+                "function_id": "KC-21",
+                "function_name": "Verify Rules of Engagement (ROE)",
+                "mapping_source": "algorithm_card_default",
+                "matched": true,
+                "role": "supporting",
+                "step_instance_id": "",
+                "workflow_instance_id": ""
+              },
               "ok": true,
               "outputs": {
                 "confidence": 0.85,
@@ -720,6 +812,18 @@
               "algorithm_id": "llm_rule_explainer",
               "backend_type": "python_http_service",
               "error": null,
+              "function_execution": {
+                "coverage_level": "advisory",
+                "execution_status": "succeeded",
+                "function_code": "verify_rules_of_engagement",
+                "function_id": "KC-21",
+                "function_name": "Verify Rules of Engagement (ROE)",
+                "mapping_source": "algorithm_card_default",
+                "matched": true,
+                "role": "supporting",
+                "step_instance_id": "",
+                "workflow_instance_id": ""
+              },
               "ok": true,
               "outputs": {
                 "confidence": 0.85,
@@ -742,7 +846,7 @@
         "success_count": 6
       },
       "step": "4.3_pool_run_sequential",
-      "timestamp": "2026-08-15T10:43:29Z"
+      "timestamp": "2026-08-23T12:02:14Z"
     },
     {
       "explanation": "[6 线程并发推理] 6 个 std::thread 同时发起 POST /run，验证并发安全性。 6 线程 > pool_size=3，势必需要排队；所有请求均能在超时内完成，证明并发池无死锁。 success=6/6 证明并发路径线程安全，condition_variable+mutex 正确保护了连接池的状态。",
@@ -758,7 +862,7 @@
         "success_count": 6
       },
       "step": "4.4_pool_run_concurrent",
-      "timestamp": "2026-08-15T10:43:29Z"
+      "timestamp": "2026-08-23T12:02:15Z"
     },
     {
       "explanation": "[并发池卸载] POST /unload：销毁并发池并释放所有连接。 load_status=unloaded 确认并发池已完全清除，runner_cache_size 将恢复为 0。 卸载后 Mock Python 服务将不会再接收到任何新请求，证明池的生命周期管理正确。",
@@ -780,7 +884,7 @@
         "version": "1.0.0"
       },
       "step": "4.5_pool_unload",
-      "timestamp": "2026-08-15T10:43:29Z"
+      "timestamp": "2026-08-23T12:02:15Z"
     }
   ],
   "registry_api": [
@@ -795,7 +899,7 @@
       },
       "response": {
         "agent_view": {
-          "agent_card": {
+          "agent_view": {
             "examples": [
               {
                 "input": {
@@ -809,14 +913,14 @@
             ],
             "input_description": "The request JSON must contain a text field.\n",
             "output_description": "Returns label and confidence fields.\n",
-            "summary": "Classify a short text into a fixed label set and return confidence.\n",
+            "summary": "Exercise the text-tokenization, ONNX Runtime, and classification-postprocess integration contract with a deterministic constant-logit fixture.\n",
             "when_not_to_use": [
-              "Long document reasoning is required",
-              "Natural language explanation is required"
+              "A trained semantic text classifier is required",
+              "Accuracy or production model quality is being evaluated"
             ],
             "when_to_use": [
-              "Input is a short text string",
-              "Output must be a fixed label"
+              "The ONNX text-classification integration path must be tested",
+              "Registry and runtime behavior need a deterministic fixture"
             ]
           },
           "algorithm_id": "onnx_text_classifier",
@@ -832,7 +936,7 @@
             "streaming_supported": false
           },
           "deployments": [],
-          "display_name": "ONNX Text Classifier",
+          "display_name": "ONNX Text Classification Contract Fixture",
           "input_schema_summary": {
             "properties": [
               {
@@ -856,17 +960,26 @@
             ]
           },
           "model_profile": {
-            "flops": 240000,
+            "flops": 0,
             "flops_input_shape": [
               1,
               256
             ],
-            "flops_text": "240 KFLOPs",
-            "model_size_mb": 1,
-            "parameter_count": 120000,
-            "parameter_count_text": "120K",
+            "flops_text": "constant_output",
+            "model_size_mb": 0,
+            "parameter_count": 0,
+            "parameter_count_text": "constant_logit_contract_fixture",
             "precision": "fp32"
           },
+          "operational_functions": [
+            {
+              "coverage_level": "partial",
+              "function_code": "classify",
+              "function_id": "KC-06",
+              "function_name": "Classify",
+              "role": "supporting"
+            }
+          ],
           "output_schema_summary": {
             "properties": [
               {
@@ -892,8 +1005,8 @@
             "latency_ms_p50": 20,
             "latency_ms_p95": 60,
             "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
-            "primary_metric": "accuracy",
-            "primary_score": 0.92,
+            "primary_metric": "golden_contract_correctness",
+            "primary_score": 1.0,
             "space_complexity": "O(n)",
             "time_complexity": "O(n)"
           },
@@ -923,7 +1036,7 @@
         "version": "1.0.0"
       },
       "step": "1.1_register",
-      "timestamp": "2026-08-15T10:43:29Z"
+      "timestamp": "2026-08-23T12:02:14Z"
     },
     {
       "explanation": "[激活] POST .../activate：将算法状态从 validated 推进到 active。 只有 active 状态的算法才能被 /run 接口调用执行推理。 激活是人工把关环节，防止未经审核的算法自动上线。 响应中 status=active 表示激活已生效，可立即接受推理请求。",
@@ -934,7 +1047,7 @@
       "request": null,
       "response": {
         "agent_view": {
-          "agent_card": {
+          "agent_view": {
             "examples": [
               {
                 "input": {
@@ -948,14 +1061,14 @@
             ],
             "input_description": "The request JSON must contain a text field.\n",
             "output_description": "Returns label and confidence fields.\n",
-            "summary": "Classify a short text into a fixed label set and return confidence.\n",
+            "summary": "Exercise the text-tokenization, ONNX Runtime, and classification-postprocess integration contract with a deterministic constant-logit fixture.\n",
             "when_not_to_use": [
-              "Long document reasoning is required",
-              "Natural language explanation is required"
+              "A trained semantic text classifier is required",
+              "Accuracy or production model quality is being evaluated"
             ],
             "when_to_use": [
-              "Input is a short text string",
-              "Output must be a fixed label"
+              "The ONNX text-classification integration path must be tested",
+              "Registry and runtime behavior need a deterministic fixture"
             ]
           },
           "algorithm_id": "onnx_text_classifier",
@@ -971,7 +1084,7 @@
             "streaming_supported": false
           },
           "deployments": [],
-          "display_name": "ONNX Text Classifier",
+          "display_name": "ONNX Text Classification Contract Fixture",
           "input_schema_summary": {
             "properties": [
               {
@@ -995,17 +1108,26 @@
             ]
           },
           "model_profile": {
-            "flops": 240000,
+            "flops": 0,
             "flops_input_shape": [
               1,
               256
             ],
-            "flops_text": "240 KFLOPs",
-            "model_size_mb": 1,
-            "parameter_count": 120000,
-            "parameter_count_text": "120K",
+            "flops_text": "constant_output",
+            "model_size_mb": 0,
+            "parameter_count": 0,
+            "parameter_count_text": "constant_logit_contract_fixture",
             "precision": "fp32"
           },
+          "operational_functions": [
+            {
+              "coverage_level": "partial",
+              "function_code": "classify",
+              "function_id": "KC-06",
+              "function_name": "Classify",
+              "role": "supporting"
+            }
+          ],
           "output_schema_summary": {
             "properties": [
               {
@@ -1031,8 +1153,8 @@
             "latency_ms_p50": 20,
             "latency_ms_p95": 60,
             "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
-            "primary_metric": "accuracy",
-            "primary_score": 0.92,
+            "primary_metric": "golden_contract_correctness",
+            "primary_score": 1.0,
             "space_complexity": "O(n)",
             "time_complexity": "O(n)"
           },
@@ -1062,7 +1184,7 @@
         "version": "1.0.0"
       },
       "step": "1.2_activate",
-      "timestamp": "2026-08-15T10:43:29Z"
+      "timestamp": "2026-08-23T12:02:14Z"
     },
     {
       "explanation": "[按任务族过滤] GET /algorithms?task_family=text_classification： 返回所有任务族为 text_classification 的 active 算法列表。 响应字段 filter 回显所有生效的过滤条件，algorithms[] 包含算法摘要。 count=1 说明当前注册表里只有 onnx_text_classifier 满足条件。",
@@ -1074,7 +1196,7 @@
       "response": {
         "algorithms": [
           {
-            "agent_card": {
+            "agent_view": {
               "examples": [
                 {
                   "input": {
@@ -1088,14 +1210,14 @@
               ],
               "input_description": "The request JSON must contain a text field.\n",
               "output_description": "Returns label and confidence fields.\n",
-              "summary": "Classify a short text into a fixed label set and return confidence.\n",
+              "summary": "Exercise the text-tokenization, ONNX Runtime, and classification-postprocess integration contract with a deterministic constant-logit fixture.\n",
               "when_not_to_use": [
-                "Long document reasoning is required",
-                "Natural language explanation is required"
+                "A trained semantic text classifier is required",
+                "Accuracy or production model quality is being evaluated"
               ],
               "when_to_use": [
-                "Input is a short text string",
-                "Output must be a fixed label"
+                "The ONNX text-classification integration path must be tested",
+                "Registry and runtime behavior need a deterministic fixture"
               ]
             },
             "algorithm_id": "onnx_text_classifier",
@@ -1111,7 +1233,7 @@
               "streaming_supported": false
             },
             "deployments": [],
-            "display_name": "ONNX Text Classifier",
+            "display_name": "ONNX Text Classification Contract Fixture",
             "input_schema_summary": {
               "properties": [
                 {
@@ -1135,17 +1257,26 @@
               ]
             },
             "model_profile": {
-              "flops": 240000,
+              "flops": 0,
               "flops_input_shape": [
                 1,
                 256
               ],
-              "flops_text": "240 KFLOPs",
-              "model_size_mb": 1,
-              "parameter_count": 120000,
-              "parameter_count_text": "120K",
+              "flops_text": "constant_output",
+              "model_size_mb": 0,
+              "parameter_count": 0,
+              "parameter_count_text": "constant_logit_contract_fixture",
               "precision": "fp32"
             },
+            "operational_functions": [
+              {
+                "coverage_level": "partial",
+                "function_code": "classify",
+                "function_id": "KC-06",
+                "function_name": "Classify",
+                "role": "supporting"
+              }
+            ],
             "output_schema_summary": {
               "properties": [
                 {
@@ -1171,8 +1302,8 @@
               "latency_ms_p50": 20,
               "latency_ms_p95": 60,
               "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
-              "primary_metric": "accuracy",
-              "primary_score": 0.92,
+              "primary_metric": "golden_contract_correctness",
+              "primary_score": 1.0,
               "space_complexity": "O(n)",
               "time_complexity": "O(n)"
             },
@@ -1204,7 +1335,7 @@
         "ok": true
       },
       "step": "1.3_query_task_family",
-      "timestamp": "2026-08-15T10:43:29Z"
+      "timestamp": "2026-08-23T12:02:14Z"
     },
     {
       "explanation": "[多维 AND 过滤] GET /algorithms?backend=onnx&capability=confidence_score： 同时指定后端类型 onnx 和能力标签 confidence_score。 多个过滤条件之间是 AND 逻辑，只有同时满足所有条件的算法才会出现在结果中。 此步验证 onnx_text_classifier 同时具备这两个属性。",
@@ -1216,7 +1347,7 @@
       "response": {
         "algorithms": [
           {
-            "agent_card": {
+            "agent_view": {
               "examples": [
                 {
                   "input": {
@@ -1230,14 +1361,14 @@
               ],
               "input_description": "The request JSON must contain a text field.\n",
               "output_description": "Returns label and confidence fields.\n",
-              "summary": "Classify a short text into a fixed label set and return confidence.\n",
+              "summary": "Exercise the text-tokenization, ONNX Runtime, and classification-postprocess integration contract with a deterministic constant-logit fixture.\n",
               "when_not_to_use": [
-                "Long document reasoning is required",
-                "Natural language explanation is required"
+                "A trained semantic text classifier is required",
+                "Accuracy or production model quality is being evaluated"
               ],
               "when_to_use": [
-                "Input is a short text string",
-                "Output must be a fixed label"
+                "The ONNX text-classification integration path must be tested",
+                "Registry and runtime behavior need a deterministic fixture"
               ]
             },
             "algorithm_id": "onnx_text_classifier",
@@ -1253,7 +1384,7 @@
               "streaming_supported": false
             },
             "deployments": [],
-            "display_name": "ONNX Text Classifier",
+            "display_name": "ONNX Text Classification Contract Fixture",
             "input_schema_summary": {
               "properties": [
                 {
@@ -1277,17 +1408,26 @@
               ]
             },
             "model_profile": {
-              "flops": 240000,
+              "flops": 0,
               "flops_input_shape": [
                 1,
                 256
               ],
-              "flops_text": "240 KFLOPs",
-              "model_size_mb": 1,
-              "parameter_count": 120000,
-              "parameter_count_text": "120K",
+              "flops_text": "constant_output",
+              "model_size_mb": 0,
+              "parameter_count": 0,
+              "parameter_count_text": "constant_logit_contract_fixture",
               "precision": "fp32"
             },
+            "operational_functions": [
+              {
+                "coverage_level": "partial",
+                "function_code": "classify",
+                "function_id": "KC-06",
+                "function_name": "Classify",
+                "role": "supporting"
+              }
+            ],
             "output_schema_summary": {
               "properties": [
                 {
@@ -1313,8 +1453,8 @@
               "latency_ms_p50": 20,
               "latency_ms_p95": 60,
               "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
-              "primary_metric": "accuracy",
-              "primary_score": 0.92,
+              "primary_metric": "golden_contract_correctness",
+              "primary_score": 1.0,
               "space_complexity": "O(n)",
               "time_complexity": "O(n)"
             },
@@ -1347,7 +1487,7 @@
         "ok": true
       },
       "step": "1.4_query_multi_filter",
-      "timestamp": "2026-08-15T10:43:29Z"
+      "timestamp": "2026-08-23T12:02:14Z"
     },
     {
       "explanation": "[资源约束过滤] GET /algorithms?max_memory=2048： 只返回最低内存需求 <= 2048 MB 的算法，帮助 agent 在资源受限节点上选择可部署的算法。 onnx_text_classifier 的 min_memory_mb=512，远低于 2048，因此出现在结果中。 类似参数还有 max_vram_mb / max_cpu_cores，可组合使用。",
@@ -1359,7 +1499,7 @@
       "response": {
         "algorithms": [
           {
-            "agent_card": {
+            "agent_view": {
               "examples": [
                 {
                   "input": {
@@ -1373,14 +1513,14 @@
               ],
               "input_description": "The request JSON must contain a text field.\n",
               "output_description": "Returns label and confidence fields.\n",
-              "summary": "Classify a short text into a fixed label set and return confidence.\n",
+              "summary": "Exercise the text-tokenization, ONNX Runtime, and classification-postprocess integration contract with a deterministic constant-logit fixture.\n",
               "when_not_to_use": [
-                "Long document reasoning is required",
-                "Natural language explanation is required"
+                "A trained semantic text classifier is required",
+                "Accuracy or production model quality is being evaluated"
               ],
               "when_to_use": [
-                "Input is a short text string",
-                "Output must be a fixed label"
+                "The ONNX text-classification integration path must be tested",
+                "Registry and runtime behavior need a deterministic fixture"
               ]
             },
             "algorithm_id": "onnx_text_classifier",
@@ -1396,7 +1536,7 @@
               "streaming_supported": false
             },
             "deployments": [],
-            "display_name": "ONNX Text Classifier",
+            "display_name": "ONNX Text Classification Contract Fixture",
             "input_schema_summary": {
               "properties": [
                 {
@@ -1420,17 +1560,26 @@
               ]
             },
             "model_profile": {
-              "flops": 240000,
+              "flops": 0,
               "flops_input_shape": [
                 1,
                 256
               ],
-              "flops_text": "240 KFLOPs",
-              "model_size_mb": 1,
-              "parameter_count": 120000,
-              "parameter_count_text": "120K",
+              "flops_text": "constant_output",
+              "model_size_mb": 0,
+              "parameter_count": 0,
+              "parameter_count_text": "constant_logit_contract_fixture",
               "precision": "fp32"
             },
+            "operational_functions": [
+              {
+                "coverage_level": "partial",
+                "function_code": "classify",
+                "function_id": "KC-06",
+                "function_name": "Classify",
+                "role": "supporting"
+              }
+            ],
             "output_schema_summary": {
               "properties": [
                 {
@@ -1456,8 +1605,8 @@
               "latency_ms_p50": 20,
               "latency_ms_p95": 60,
               "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
-              "primary_metric": "accuracy",
-              "primary_score": 0.92,
+              "primary_metric": "golden_contract_correctness",
+              "primary_score": 1.0,
               "space_complexity": "O(n)",
               "time_complexity": "O(n)"
             },
@@ -1489,7 +1638,7 @@
         "ok": true
       },
       "step": "1.5_query_resource_filter",
-      "timestamp": "2026-08-15T10:43:29Z"
+      "timestamp": "2026-08-23T12:02:14Z"
     },
     {
       "explanation": "[算法详情] GET /algorithms/{id}/{ver}/{backend}：返回两个并列视图。 entry = 原始注册条目（完整 card + deployments 列表）； agent_view = agent 专用精简视图，包含 performance（latency_p50/p95/accuracy）、 capabilities、constraints（max_input_chars/batch_supported）、 input_schema_summary / output_schema_summary、ready_endpoints。 agent 可直接读取 agent_view 决策是否选用该算法及如何构造请求。",
@@ -1500,7 +1649,7 @@
       "request": null,
       "response": {
         "agent_view": {
-          "agent_card": {
+          "agent_view": {
             "examples": [
               {
                 "input": {
@@ -1514,14 +1663,14 @@
             ],
             "input_description": "The request JSON must contain a text field.\n",
             "output_description": "Returns label and confidence fields.\n",
-            "summary": "Classify a short text into a fixed label set and return confidence.\n",
+            "summary": "Exercise the text-tokenization, ONNX Runtime, and classification-postprocess integration contract with a deterministic constant-logit fixture.\n",
             "when_not_to_use": [
-              "Long document reasoning is required",
-              "Natural language explanation is required"
+              "A trained semantic text classifier is required",
+              "Accuracy or production model quality is being evaluated"
             ],
             "when_to_use": [
-              "Input is a short text string",
-              "Output must be a fixed label"
+              "The ONNX text-classification integration path must be tested",
+              "Registry and runtime behavior need a deterministic fixture"
             ]
           },
           "algorithm_id": "onnx_text_classifier",
@@ -1537,7 +1686,7 @@
             "streaming_supported": false
           },
           "deployments": [],
-          "display_name": "ONNX Text Classifier",
+          "display_name": "ONNX Text Classification Contract Fixture",
           "input_schema_summary": {
             "properties": [
               {
@@ -1561,17 +1710,26 @@
             ]
           },
           "model_profile": {
-            "flops": 240000,
+            "flops": 0,
             "flops_input_shape": [
               1,
               256
             ],
-            "flops_text": "240 KFLOPs",
-            "model_size_mb": 1,
-            "parameter_count": 120000,
-            "parameter_count_text": "120K",
+            "flops_text": "constant_output",
+            "model_size_mb": 0,
+            "parameter_count": 0,
+            "parameter_count_text": "constant_logit_contract_fixture",
             "precision": "fp32"
           },
+          "operational_functions": [
+            {
+              "coverage_level": "partial",
+              "function_code": "classify",
+              "function_id": "KC-06",
+              "function_name": "Classify",
+              "role": "supporting"
+            }
+          ],
           "output_schema_summary": {
             "properties": [
               {
@@ -1597,8 +1755,8 @@
             "latency_ms_p50": 20,
             "latency_ms_p95": 60,
             "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
-            "primary_metric": "accuracy",
-            "primary_score": 0.92,
+            "primary_metric": "golden_contract_correctness",
+            "primary_score": 1.0,
             "space_complexity": "O(n)",
             "time_complexity": "O(n)"
           },
@@ -1623,7 +1781,7 @@
         },
         "entry": {
           "card": {
-            "agent_card": {
+            "agent_view": {
               "examples": [
                 {
                   "input": {
@@ -1637,14 +1795,14 @@
               ],
               "input_description": "The request JSON must contain a text field.\n",
               "output_description": "Returns label and confidence fields.\n",
-              "summary": "Classify a short text into a fixed label set and return confidence.\n",
+              "summary": "Exercise the text-tokenization, ONNX Runtime, and classification-postprocess integration contract with a deterministic constant-logit fixture.\n",
               "when_not_to_use": [
-                "Long document reasoning is required",
-                "Natural language explanation is required"
+                "A trained semantic text classifier is required",
+                "Accuracy or production model quality is being evaluated"
               ],
               "when_to_use": [
-                "Input is a short text string",
-                "Output must be a fixed label"
+                "The ONNX text-classification integration path must be tested",
+                "Registry and runtime behavior need a deterministic fixture"
               ]
             },
             "algorithm_id": "onnx_text_classifier",
@@ -1659,7 +1817,7 @@
               "max_request_bytes": 1048576,
               "streaming_supported": false
             },
-            "display_name": "ONNX Text Classifier",
+            "display_name": "ONNX Text Classification Contract Fixture",
             "machine_spec": {
               "input_schema_ref": "input.schema.json",
               "output_schema_ref": "output.schema.json",
@@ -1696,24 +1854,33 @@
               ]
             },
             "model_profile": {
-              "flops": 240000,
+              "flops": 0,
               "flops_input_shape": [
                 1,
                 256
               ],
-              "flops_text": "240 KFLOPs",
-              "model_size_mb": 1,
-              "parameter_count": 120000,
-              "parameter_count_text": "120K",
+              "flops_text": "constant_output",
+              "model_size_mb": 0,
+              "parameter_count": 0,
+              "parameter_count_text": "constant_logit_contract_fixture",
               "precision": "fp32"
             },
+            "operational_functions": [
+              {
+                "coverage_level": "partial",
+                "function_code": "classify",
+                "function_id": "KC-06",
+                "function_name": "Classify",
+                "role": "supporting"
+              }
+            ],
             "performance": {
               "complexity_variable": "n = number of input tokens after preprocessing",
               "latency_ms_p50": 20,
               "latency_ms_p95": 60,
               "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
-              "primary_metric": "accuracy",
-              "primary_score": 0.92,
+              "primary_metric": "golden_contract_correctness",
+              "primary_score": 1.0,
               "space_complexity": "O(n)",
               "time_complexity": "O(n)"
             },
@@ -1783,7 +1950,7 @@
         "ok": true
       },
       "step": "1.6_show_card",
-      "timestamp": "2026-08-15T10:43:29Z"
+      "timestamp": "2026-08-23T12:02:14Z"
     },
     {
       "explanation": "[添加部署记录] POST .../deployments：向注册表写入一条 DeploymentSpec。 字段含义：deploy_id=唯一实例标识；node_id=宿主节点；endpoint=对外服务地址； deploy_status 初始为 unloaded，模型加载完成后自动变为 ready。 服务器自动填充 deployed_at（UTC ISO 8601 时间戳），调用方无需传入。 返回 HTTP 201 表示部署记录首次创建成功。",
@@ -1799,7 +1966,7 @@
       },
       "response": {
         "agent_view": {
-          "agent_card": {
+          "agent_view": {
             "examples": [
               {
                 "input": {
@@ -1813,14 +1980,14 @@
             ],
             "input_description": "The request JSON must contain a text field.\n",
             "output_description": "Returns label and confidence fields.\n",
-            "summary": "Classify a short text into a fixed label set and return confidence.\n",
+            "summary": "Exercise the text-tokenization, ONNX Runtime, and classification-postprocess integration contract with a deterministic constant-logit fixture.\n",
             "when_not_to_use": [
-              "Long document reasoning is required",
-              "Natural language explanation is required"
+              "A trained semantic text classifier is required",
+              "Accuracy or production model quality is being evaluated"
             ],
             "when_to_use": [
-              "Input is a short text string",
-              "Output must be a fixed label"
+              "The ONNX text-classification integration path must be tested",
+              "Registry and runtime behavior need a deterministic fixture"
             ]
           },
           "algorithm_id": "onnx_text_classifier",
@@ -1845,7 +2012,7 @@
               "zone": ""
             }
           ],
-          "display_name": "ONNX Text Classifier",
+          "display_name": "ONNX Text Classification Contract Fixture",
           "input_schema_summary": {
             "properties": [
               {
@@ -1869,17 +2036,26 @@
             ]
           },
           "model_profile": {
-            "flops": 240000,
+            "flops": 0,
             "flops_input_shape": [
               1,
               256
             ],
-            "flops_text": "240 KFLOPs",
-            "model_size_mb": 1,
-            "parameter_count": 120000,
-            "parameter_count_text": "120K",
+            "flops_text": "constant_output",
+            "model_size_mb": 0,
+            "parameter_count": 0,
+            "parameter_count_text": "constant_logit_contract_fixture",
             "precision": "fp32"
           },
+          "operational_functions": [
+            {
+              "coverage_level": "partial",
+              "function_code": "classify",
+              "function_id": "KC-06",
+              "function_name": "Classify",
+              "role": "supporting"
+            }
+          ],
           "output_schema_summary": {
             "properties": [
               {
@@ -1905,8 +2081,8 @@
             "latency_ms_p50": 20,
             "latency_ms_p95": 60,
             "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
-            "primary_metric": "accuracy",
-            "primary_score": 0.92,
+            "primary_metric": "golden_contract_correctness",
+            "primary_score": 1.0,
             "space_complexity": "O(n)",
             "time_complexity": "O(n)"
           },
@@ -1931,7 +2107,7 @@
         },
         "entry": {
           "card": {
-            "agent_card": {
+            "agent_view": {
               "examples": [
                 {
                   "input": {
@@ -1945,14 +2121,14 @@
               ],
               "input_description": "The request JSON must contain a text field.\n",
               "output_description": "Returns label and confidence fields.\n",
-              "summary": "Classify a short text into a fixed label set and return confidence.\n",
+              "summary": "Exercise the text-tokenization, ONNX Runtime, and classification-postprocess integration contract with a deterministic constant-logit fixture.\n",
               "when_not_to_use": [
-                "Long document reasoning is required",
-                "Natural language explanation is required"
+                "A trained semantic text classifier is required",
+                "Accuracy or production model quality is being evaluated"
               ],
               "when_to_use": [
-                "Input is a short text string",
-                "Output must be a fixed label"
+                "The ONNX text-classification integration path must be tested",
+                "Registry and runtime behavior need a deterministic fixture"
               ]
             },
             "algorithm_id": "onnx_text_classifier",
@@ -1967,7 +2143,7 @@
               "max_request_bytes": 1048576,
               "streaming_supported": false
             },
-            "display_name": "ONNX Text Classifier",
+            "display_name": "ONNX Text Classification Contract Fixture",
             "machine_spec": {
               "input_schema_ref": "input.schema.json",
               "output_schema_ref": "output.schema.json",
@@ -2004,24 +2180,33 @@
               ]
             },
             "model_profile": {
-              "flops": 240000,
+              "flops": 0,
               "flops_input_shape": [
                 1,
                 256
               ],
-              "flops_text": "240 KFLOPs",
-              "model_size_mb": 1,
-              "parameter_count": 120000,
-              "parameter_count_text": "120K",
+              "flops_text": "constant_output",
+              "model_size_mb": 0,
+              "parameter_count": 0,
+              "parameter_count_text": "constant_logit_contract_fixture",
               "precision": "fp32"
             },
+            "operational_functions": [
+              {
+                "coverage_level": "partial",
+                "function_code": "classify",
+                "function_id": "KC-06",
+                "function_name": "Classify",
+                "role": "supporting"
+              }
+            ],
             "performance": {
               "complexity_variable": "n = number of input tokens after preprocessing",
               "latency_ms_p50": 20,
               "latency_ms_p95": 60,
               "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
-              "primary_metric": "accuracy",
-              "primary_score": 0.92,
+              "primary_metric": "golden_contract_correctness",
+              "primary_score": 1.0,
               "space_complexity": "O(n)",
               "time_complexity": "O(n)"
             },
@@ -2049,7 +2234,7 @@
             {
               "deploy_id": "demo-node-1",
               "deploy_status": "unloaded",
-              "deployed_at": "2026-08-15T10:43:29Z",
+              "deployed_at": "2026-08-23T12:02:14Z",
               "endpoint": "http://demo-node-1:8088",
               "health_endpoint": "",
               "local_model_path": "",
@@ -2104,7 +2289,7 @@
         "ok": true
       },
       "step": "1.7_add_deployment",
-      "timestamp": "2026-08-15T10:43:29Z"
+      "timestamp": "2026-08-23T12:02:14Z"
     },
     {
       "explanation": "[更新部署状态] PATCH .../deployments/{deploy_id}/status： 修改指定节点的部署状态，可选值：unloaded / loading / ready / error。 /load 接口在模型加载成功后会自动调用此接口将状态设为 ready； 此处手动演示 PATCH，同时附带 status_message 文字说明。 状态变为 ready 后，该节点的 endpoint 会出现在 agent_view.ready_endpoints 中。 服务器自动更新 updated_at 时间戳。",
@@ -2118,7 +2303,7 @@
       },
       "response": {
         "agent_view": {
-          "agent_card": {
+          "agent_view": {
             "examples": [
               {
                 "input": {
@@ -2132,14 +2317,14 @@
             ],
             "input_description": "The request JSON must contain a text field.\n",
             "output_description": "Returns label and confidence fields.\n",
-            "summary": "Classify a short text into a fixed label set and return confidence.\n",
+            "summary": "Exercise the text-tokenization, ONNX Runtime, and classification-postprocess integration contract with a deterministic constant-logit fixture.\n",
             "when_not_to_use": [
-              "Long document reasoning is required",
-              "Natural language explanation is required"
+              "A trained semantic text classifier is required",
+              "Accuracy or production model quality is being evaluated"
             ],
             "when_to_use": [
-              "Input is a short text string",
-              "Output must be a fixed label"
+              "The ONNX text-classification integration path must be tested",
+              "Registry and runtime behavior need a deterministic fixture"
             ]
           },
           "algorithm_id": "onnx_text_classifier",
@@ -2164,7 +2349,7 @@
               "zone": ""
             }
           ],
-          "display_name": "ONNX Text Classifier",
+          "display_name": "ONNX Text Classification Contract Fixture",
           "input_schema_summary": {
             "properties": [
               {
@@ -2188,17 +2373,26 @@
             ]
           },
           "model_profile": {
-            "flops": 240000,
+            "flops": 0,
             "flops_input_shape": [
               1,
               256
             ],
-            "flops_text": "240 KFLOPs",
-            "model_size_mb": 1,
-            "parameter_count": 120000,
-            "parameter_count_text": "120K",
+            "flops_text": "constant_output",
+            "model_size_mb": 0,
+            "parameter_count": 0,
+            "parameter_count_text": "constant_logit_contract_fixture",
             "precision": "fp32"
           },
+          "operational_functions": [
+            {
+              "coverage_level": "partial",
+              "function_code": "classify",
+              "function_id": "KC-06",
+              "function_name": "Classify",
+              "role": "supporting"
+            }
+          ],
           "output_schema_summary": {
             "properties": [
               {
@@ -2224,8 +2418,8 @@
             "latency_ms_p50": 20,
             "latency_ms_p95": 60,
             "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
-            "primary_metric": "accuracy",
-            "primary_score": 0.92,
+            "primary_metric": "golden_contract_correctness",
+            "primary_score": 1.0,
             "space_complexity": "O(n)",
             "time_complexity": "O(n)"
           },
@@ -2257,7 +2451,7 @@
         },
         "entry": {
           "card": {
-            "agent_card": {
+            "agent_view": {
               "examples": [
                 {
                   "input": {
@@ -2271,14 +2465,14 @@
               ],
               "input_description": "The request JSON must contain a text field.\n",
               "output_description": "Returns label and confidence fields.\n",
-              "summary": "Classify a short text into a fixed label set and return confidence.\n",
+              "summary": "Exercise the text-tokenization, ONNX Runtime, and classification-postprocess integration contract with a deterministic constant-logit fixture.\n",
               "when_not_to_use": [
-                "Long document reasoning is required",
-                "Natural language explanation is required"
+                "A trained semantic text classifier is required",
+                "Accuracy or production model quality is being evaluated"
               ],
               "when_to_use": [
-                "Input is a short text string",
-                "Output must be a fixed label"
+                "The ONNX text-classification integration path must be tested",
+                "Registry and runtime behavior need a deterministic fixture"
               ]
             },
             "algorithm_id": "onnx_text_classifier",
@@ -2293,7 +2487,7 @@
               "max_request_bytes": 1048576,
               "streaming_supported": false
             },
-            "display_name": "ONNX Text Classifier",
+            "display_name": "ONNX Text Classification Contract Fixture",
             "machine_spec": {
               "input_schema_ref": "input.schema.json",
               "output_schema_ref": "output.schema.json",
@@ -2330,24 +2524,33 @@
               ]
             },
             "model_profile": {
-              "flops": 240000,
+              "flops": 0,
               "flops_input_shape": [
                 1,
                 256
               ],
-              "flops_text": "240 KFLOPs",
-              "model_size_mb": 1,
-              "parameter_count": 120000,
-              "parameter_count_text": "120K",
+              "flops_text": "constant_output",
+              "model_size_mb": 0,
+              "parameter_count": 0,
+              "parameter_count_text": "constant_logit_contract_fixture",
               "precision": "fp32"
             },
+            "operational_functions": [
+              {
+                "coverage_level": "partial",
+                "function_code": "classify",
+                "function_id": "KC-06",
+                "function_name": "Classify",
+                "role": "supporting"
+              }
+            ],
             "performance": {
               "complexity_variable": "n = number of input tokens after preprocessing",
               "latency_ms_p50": 20,
               "latency_ms_p95": 60,
               "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
-              "primary_metric": "accuracy",
-              "primary_score": 0.92,
+              "primary_metric": "golden_contract_correctness",
+              "primary_score": 1.0,
               "space_complexity": "O(n)",
               "time_complexity": "O(n)"
             },
@@ -2375,13 +2578,13 @@
             {
               "deploy_id": "demo-node-1",
               "deploy_status": "ready",
-              "deployed_at": "2026-08-15T10:43:29Z",
+              "deployed_at": "2026-08-23T12:02:14Z",
               "endpoint": "http://demo-node-1:8088",
               "health_endpoint": "",
               "local_model_path": "",
               "node_id": "demo-node-1",
               "status_message": "demo loaded",
-              "updated_at": "2026-08-15T10:43:29Z",
+              "updated_at": "2026-08-23T12:02:14Z",
               "zone": ""
             }
           ],
@@ -2430,7 +2633,7 @@
         "ok": true
       },
       "step": "1.8_update_deploy_status",
-      "timestamp": "2026-08-15T10:43:29Z"
+      "timestamp": "2026-08-23T12:02:14Z"
     },
     {
       "explanation": "[禁用并删除] POST /disable + DELETE：演示算法完整下线流程。 /disable 将状态从 active 改为 disabled，停止接受新的推理请求； DELETE 将状态标记为 deleted，从所有查询结果中永久隐藏（含 active_only=false）。 物理上条目仍保留在注册表文件中以支持审计追踪，不会真正删除磁盘数据。 验证：GET /algorithms?active_only=false 返回 count=0，删除完全生效。",
@@ -2441,7 +2644,7 @@
       "request": null,
       "response": {
         "agent_view": {
-          "agent_card": {
+          "agent_view": {
             "examples": [
               {
                 "input": {
@@ -2455,14 +2658,14 @@
             ],
             "input_description": "The request JSON must contain a text field.\n",
             "output_description": "Returns label and confidence fields.\n",
-            "summary": "Classify a short text into a fixed label set and return confidence.\n",
+            "summary": "Exercise the text-tokenization, ONNX Runtime, and classification-postprocess integration contract with a deterministic constant-logit fixture.\n",
             "when_not_to_use": [
-              "Long document reasoning is required",
-              "Natural language explanation is required"
+              "A trained semantic text classifier is required",
+              "Accuracy or production model quality is being evaluated"
             ],
             "when_to_use": [
-              "Input is a short text string",
-              "Output must be a fixed label"
+              "The ONNX text-classification integration path must be tested",
+              "Registry and runtime behavior need a deterministic fixture"
             ]
           },
           "algorithm_id": "onnx_text_classifier",
@@ -2487,7 +2690,7 @@
               "zone": ""
             }
           ],
-          "display_name": "ONNX Text Classifier",
+          "display_name": "ONNX Text Classification Contract Fixture",
           "input_schema_summary": {
             "properties": [
               {
@@ -2511,17 +2714,26 @@
             ]
           },
           "model_profile": {
-            "flops": 240000,
+            "flops": 0,
             "flops_input_shape": [
               1,
               256
             ],
-            "flops_text": "240 KFLOPs",
-            "model_size_mb": 1,
-            "parameter_count": 120000,
-            "parameter_count_text": "120K",
+            "flops_text": "constant_output",
+            "model_size_mb": 0,
+            "parameter_count": 0,
+            "parameter_count_text": "constant_logit_contract_fixture",
             "precision": "fp32"
           },
+          "operational_functions": [
+            {
+              "coverage_level": "partial",
+              "function_code": "classify",
+              "function_id": "KC-06",
+              "function_name": "Classify",
+              "role": "supporting"
+            }
+          ],
           "output_schema_summary": {
             "properties": [
               {
@@ -2547,8 +2759,8 @@
             "latency_ms_p50": 20,
             "latency_ms_p95": 60,
             "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
-            "primary_metric": "accuracy",
-            "primary_score": 0.92,
+            "primary_metric": "golden_contract_correctness",
+            "primary_score": 1.0,
             "space_complexity": "O(n)",
             "time_complexity": "O(n)"
           },
@@ -2585,7 +2797,7 @@
         "version": "1.0.0"
       },
       "step": "1.9_disable_delete",
-      "timestamp": "2026-08-15T10:43:29Z"
+      "timestamp": "2026-08-23T12:02:14Z"
     }
   ],
   "summary": {

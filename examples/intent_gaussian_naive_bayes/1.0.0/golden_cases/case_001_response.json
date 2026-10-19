@@ -1,0 +1,51 @@
+{
+  "ok": true,
+  "request_id": "gnb-intent-001",
+  "trace_id": "trace-m07-gnb",
+  "algorithm_id": "intent_gaussian_naive_bayes",
+  "version": "1.0.0",
+  "outputs": {
+    "predictions": [
+      {
+        "observation_id": "OBS-BENIGN",
+        "intent": "benign",
+        "confidence": 0.99999,
+        "posterior_probabilities": {
+          "benign": 0.99999,
+          "surveillance": 0.00001,
+          "hostile": 0.0
+        }
+      },
+      {
+        "observation_id": "OBS-SURVEILLANCE",
+        "intent": "surveillance",
+        "confidence": 0.998571,
+        "posterior_probabilities": {
+          "benign": 0.001403,
+          "surveillance": 0.998571,
+          "hostile": 0.000026
+        }
+      },
+      {
+        "observation_id": "OBS-HOSTILE",
+        "intent": "hostile",
+        "confidence": 0.999999,
+        "posterior_probabilities": {
+          "benign": 0.0,
+          "surveillance": 0.000001,
+          "hostile": 0.999999
+        }
+      }
+    ],
+    "observation_count": 3,
+    "model_version": "1.0.0",
+    "assessment_scope": "synthetic_reference_model",
+    "model_runtime": {
+      "backend": "sklearn_gaussian_naive_bayes",
+      "used": true,
+      "artifact_sha256": "29594ff6886d52a13d055dd453aa5cb129e4397babc149b628cf2e2127f00369"
+    }
+  },
+  "usage": {"latency_ms": 0},
+  "error": null
+}

@@ -2,7 +2,7 @@
   "entries": [
     {
       "card": {
-        "agent_card": {
+        "agent_view": {
           "examples": [
             {
               "input": {
@@ -16,14 +16,14 @@
           ],
           "input_description": "The request JSON must contain a text field.\n",
           "output_description": "Returns label and confidence fields.\n",
-          "summary": "Classify a short text into a fixed label set and return confidence.\n",
+          "summary": "Exercise the text-tokenization, ONNX Runtime, and classification-postprocess integration contract with a deterministic constant-logit fixture.\n",
           "when_not_to_use": [
-            "Long document reasoning is required",
-            "Natural language explanation is required"
+            "A trained semantic text classifier is required",
+            "Accuracy or production model quality is being evaluated"
           ],
           "when_to_use": [
-            "Input is a short text string",
-            "Output must be a fixed label"
+            "The ONNX text-classification integration path must be tested",
+            "Registry and runtime behavior need a deterministic fixture"
           ]
         },
         "algorithm_id": "onnx_text_classifier",
@@ -38,7 +38,7 @@
           "max_request_bytes": 1048576,
           "streaming_supported": false
         },
-        "display_name": "ONNX Text Classifier",
+        "display_name": "ONNX Text Classification Contract Fixture",
         "machine_spec": {
           "input_schema_ref": "input.schema.json",
           "output_schema_ref": "output.schema.json",
@@ -75,24 +75,33 @@
           ]
         },
         "model_profile": {
-          "flops": 240000,
+          "flops": 0,
           "flops_input_shape": [
             1,
             256
           ],
-          "flops_text": "240 KFLOPs",
-          "model_size_mb": 1,
-          "parameter_count": 120000,
-          "parameter_count_text": "120K",
+          "flops_text": "constant_output",
+          "model_size_mb": 0,
+          "parameter_count": 0,
+          "parameter_count_text": "constant_logit_contract_fixture",
           "precision": "fp32"
         },
+        "operational_functions": [
+          {
+            "coverage_level": "partial",
+            "function_code": "classify",
+            "function_id": "KC-06",
+            "function_name": "Classify",
+            "role": "supporting"
+          }
+        ],
         "performance": {
           "complexity_variable": "n = number of input tokens after preprocessing",
           "latency_ms_p50": 20,
           "latency_ms_p95": 60,
           "performance_notes": "End-to-end runtime grows roughly linearly with token count under the current text_tokenization plus classification pipeline.\n",
-          "primary_metric": "accuracy",
-          "primary_score": 0.92,
+          "primary_metric": "golden_contract_correctness",
+          "primary_score": 1.0,
           "space_complexity": "O(n)",
           "time_complexity": "O(n)"
         },
@@ -120,13 +129,13 @@
         {
           "deploy_id": "local/d1",
           "deploy_status": "ready",
-          "deployed_at": "2026-08-15T10:43:29Z",
+          "deployed_at": "2026-08-23T12:02:14Z",
           "endpoint": "",
           "health_endpoint": "",
           "local_model_path": "",
           "node_id": "local",
           "status_message": "Model loaded and ready.",
-          "updated_at": "2026-08-15T10:43:29Z",
+          "updated_at": "2026-08-23T12:02:14Z",
           "zone": ""
         }
       ],

@@ -48,6 +48,13 @@ performance:
   primary_metric: schema_compliance
   primary_score: 1.0
 
+model_profile:
+  parameter_count: 0
+  parameter_count_text: "not_applicable: deterministic schema and feature adapter with no persisted learned weights"
+  flops: 0
+  flops_text: "not_applicable: serialization and feature mapping scale with supplied payload size"
+  precision: deterministic_rules
+
 safety:
   risk_level: low
   requires_human_review: true

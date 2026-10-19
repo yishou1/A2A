@@ -1,0 +1,127 @@
+{
+  "model_id": "execution_rule_matcher",
+  "model_version": "1.0.0",
+  "model_family": "apriori_association_rule_miner",
+  "artifact_path": "data/execution_control/processed/mined_rules.json",
+  "artifact_sha256": "848e226d1cb8d232f859151f564453f0d40548675d8143b17f6bc4ab1c56353a",
+  "rule_count": 28,
+  "implementation_path": "services/a2a_algorithms_common/association_rules.py",
+  "implementation_sha256": "95771981274bbfdaa27bbf3f79b780f9a9d309e95855d385c55c48ac2e9132d9",
+  "training_script": "scripts/train_execution_rule_matcher.py",
+  "training_script_sha256": "41b92b5e301fc20acd132c4a9db12631f58ac558739f59bbfacf1e4837552dc6",
+  "training_dataset": {
+    "path": "data/execution_control/fixtures/rule_training_records.json",
+    "sha256": "fd07563e7217b5d5cba4795c7bd7363abadd0432e9088ff0e1588de8e81427e6",
+    "row_count": 12,
+    "source": "repository_reference_policy_fixtures"
+  },
+  "evaluation_dataset": {
+    "path": "data/execution_control/fixtures/rule_evaluation_records.json",
+    "sha256": "e34ebfa230f5ad59d4aa4bec6599c05c2b5fe9ce3ab6338361a75aa6110b32f5",
+    "row_count": 12,
+    "source": "independent_repository_reference_policy_holdout",
+    "limitation": "Synthetic policy scenarios only; not an operational battlefield benchmark."
+  },
+  "mining_parameters": {
+    "min_support": 0.15,
+    "min_confidence": 0.6,
+    "max_itemset_size": 4
+  },
+  "evaluation": {
+    "method": "independent_reference_policy_holdout",
+    "test_count": 12,
+    "action_accuracy": 1.0,
+    "executor_accuracy": 1.0,
+    "non_default_rule_coverage": 0.833333,
+    "case_results": [
+      {
+        "case_id": "eval-strike-001",
+        "expected_action": "precision_strike",
+        "predicted_action": "precision_strike",
+        "rule_id": "RULE-028",
+        "correct": true
+      },
+      {
+        "case_id": "eval-strike-002",
+        "expected_action": "precision_strike",
+        "predicted_action": "precision_strike",
+        "rule_id": "RULE-023",
+        "correct": true
+      },
+      {
+        "case_id": "eval-strike-003",
+        "expected_action": "area_suppression",
+        "predicted_action": "area_suppression",
+        "rule_id": "RULE-026",
+        "correct": true
+      },
+      {
+        "case_id": "eval-strike-004",
+        "expected_action": "area_suppression",
+        "predicted_action": "area_suppression",
+        "rule_id": "RULE-026",
+        "correct": true
+      },
+      {
+        "case_id": "eval-strike-005",
+        "expected_action": "observe_and_hold",
+        "predicted_action": "observe_and_hold",
+        "rule_id": "RULE-DEFAULT",
+        "correct": true
+      },
+      {
+        "case_id": "eval-strike-006",
+        "expected_action": "observe_and_hold",
+        "predicted_action": "observe_and_hold",
+        "rule_id": "RULE-DEFAULT",
+        "correct": true
+      },
+      {
+        "case_id": "eval-assault-001",
+        "expected_action": "coordinated_assault",
+        "predicted_action": "coordinated_assault",
+        "rule_id": "RULE-027",
+        "correct": true
+      },
+      {
+        "case_id": "eval-assault-002",
+        "expected_action": "coordinated_assault",
+        "predicted_action": "coordinated_assault",
+        "rule_id": "RULE-018",
+        "correct": true
+      },
+      {
+        "case_id": "eval-assault-003",
+        "expected_action": "beachhead_capture",
+        "predicted_action": "beachhead_capture",
+        "rule_id": "RULE-019",
+        "correct": true
+      },
+      {
+        "case_id": "eval-assault-004",
+        "expected_action": "beachhead_capture",
+        "predicted_action": "beachhead_capture",
+        "rule_id": "RULE-019",
+        "correct": true
+      },
+      {
+        "case_id": "eval-assault-005",
+        "expected_action": "hold_and_recon",
+        "predicted_action": "hold_and_recon",
+        "rule_id": "RULE-020",
+        "correct": true
+      },
+      {
+        "case_id": "eval-assault-006",
+        "expected_action": "hold_and_recon",
+        "predicted_action": "hold_and_recon",
+        "rule_id": "RULE-006",
+        "correct": true
+      }
+    ]
+  },
+  "runtime": {
+    "language": "python",
+    "external_ml_dependencies": []
+  }
+}

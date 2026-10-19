@@ -1,0 +1,43 @@
+{
+  "ok": true,
+  "request_id": "fedavg-round-001",
+  "trace_id": "trace-m12-fedavg",
+  "algorithm_id": "federated_fedavg_aggregator",
+  "version": "1.0.0",
+  "outputs": {
+    "round_id": "round-golden-1",
+    "aggregated_weights": {
+      "bias": [2.0, 0.0],
+      "layer": [[2.0, 3.0], [4.0, 5.0]]
+    },
+    "tensor_shapes": {
+      "bias": [2],
+      "layer": [2, 2]
+    },
+    "participants": [
+      {
+        "client_id": "client-a",
+        "sample_count": 2,
+        "aggregation_weight": 0.666666666667,
+        "update_l2_norm": 5.656854249492
+      },
+      {
+        "client_id": "client-b",
+        "sample_count": 1,
+        "aggregation_weight": 0.333333333333,
+        "update_l2_norm": 12.083045973595
+      }
+    ],
+    "participant_count": 2,
+    "total_samples": 3,
+    "aggregation_method": "fedavg_weighted_by_sample_count",
+    "global_weights_sha256": "201a3a724631bccbe88eb774e578a41b01e51154ca679a9218d76c6ff8231261",
+    "model_runtime": {
+      "backend": "native_python_fedavg",
+      "used": true,
+      "implementation_version": "1.0.0"
+    }
+  },
+  "usage": {"latency_ms": 0},
+  "error": null
+}
